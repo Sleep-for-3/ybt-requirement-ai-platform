@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ybt-postgres
+    environment:
+      POSTGRES_USER: ybt
+      POSTGRES_PASSWORD: ybt_password
+      POSTGRES_DB: ybt_requirement_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ybt -d ybt_requirement_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ybt-backend
+    env_file:
+      - ./backend/.env.example
+    environment:
+      DATABASE_URL: postgresql+psycopg://ybt:ybt_password@postgres:5432/ybt_requirement_ai
+      CORS_ORIGINS: http://localhost:3000
+      STORAGE_DIR: /app/storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ybt-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  backend_storage:
+
+# Optional future services:
+# - Milvus: semantic vector database. Knowhere is Milvus' internal vector execution engine;
+#   this platform should integrate through Milvus APIs, not Knowhere directly.
+# - MinIO: object storage for uploaded documents when local container storage is not enough.
