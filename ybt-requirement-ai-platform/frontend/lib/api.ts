@@ -156,6 +156,135 @@ export type NaturalLanguageTaskCreateResponse = {
   available_datasources: string[];
 };
 
+export type BusinessSystem = {
+  id: number;
+  project_id: number;
+  system_code: string;
+  system_name: string;
+  description?: string | null;
+  owner_department?: string | null;
+  enabled: boolean;
+};
+
+export type SourceTable = {
+  id: number;
+  project_id: number;
+  business_system_id: number;
+  table_code: string;
+  table_name: string;
+  table_comment?: string | null;
+  datasource_id?: number | null;
+  schema_name?: string | null;
+  physical_table_name?: string | null;
+  description?: string | null;
+};
+
+export type SourceField = {
+  id: number;
+  project_id: number;
+  source_table_id: number;
+  field_code: string;
+  field_name: string;
+  field_type?: string | null;
+  field_comment?: string | null;
+  physical_column_name?: string | null;
+  description?: string | null;
+};
+
+export type MartTable = {
+  id: number;
+  project_id: number;
+  table_code: string;
+  table_name: string;
+  subject_area?: string | null;
+  table_comment?: string | null;
+  datasource_id?: number | null;
+  schema_name?: string | null;
+  physical_table_name?: string | null;
+  is_existing: boolean;
+  description?: string | null;
+};
+
+export type MartField = {
+  id: number;
+  project_id: number;
+  mart_table_id: number;
+  field_code: string;
+  field_name: string;
+  field_type?: string | null;
+  field_comment?: string | null;
+  physical_column_name?: string | null;
+  is_existing: boolean;
+  description?: string | null;
+};
+
+export type SourceToMartMapping = {
+  id: number;
+  project_id: number;
+  mart_field_id: number;
+  mapping_name?: string | null;
+  mapping_status: string;
+  source_system_summary?: string | null;
+  source_tables_summary?: string | null;
+  source_fields_summary?: string | null;
+  business_rule?: string | null;
+  filter_condition?: string | null;
+  join_condition?: string | null;
+  priority_rule?: string | null;
+  merge_rule?: string | null;
+  code_mapping_rule?: string | null;
+  null_handling_rule?: string | null;
+  exception_rule?: string | null;
+  quality_check_rule?: string | null;
+  open_questions?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+};
+
+export type MartToYbtMapping = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  mart_field_id?: number | null;
+  mapping_name?: string | null;
+  mapping_status: string;
+  mart_table_summary?: string | null;
+  mart_field_summary?: string | null;
+  business_rule?: string | null;
+  filter_condition?: string | null;
+  join_condition?: string | null;
+  code_mapping_rule?: string | null;
+  null_handling_rule?: string | null;
+  reporting_condition?: string | null;
+  validation_rule?: string | null;
+  open_questions?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+};
+
+export type MappingEvidence = {
+  id: number;
+  project_id: number;
+  mapping_type: string;
+  mapping_id: number;
+  evidence_type: string;
+  evidence_id?: number | null;
+  source_name: string;
+  location_text?: string | null;
+  quoted_content?: string | null;
+  evidence_summary?: string | null;
+};
+
+export type MappingDocumentExport = {
+  format: string;
+  scope: string;
+  scope_id: number;
+  file_name: string;
+  content: string;
+};
+
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
   if (!response.ok) {
@@ -182,6 +311,26 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
   if (!response.ok) {
     throw new Error(await response.text());
   }

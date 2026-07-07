@@ -1,25 +1,36 @@
 "use client";
 
-import { Check, Database, FileSpreadsheet, FileUp, Play, Plus, RefreshCw, Search, Upload, Wand2, X } from "lucide-react";
+import { Check, Database, Download, FileSpreadsheet, FileUp, Play, Plus, RefreshCw, Save, Search, Upload, Wand2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Section } from "@/components/Section";
 import {
   FieldDraft,
+  BusinessSystem,
   KnowledgeDocument,
   DataSource,
+  MappingDocumentExport,
+  MappingEvidence,
+  MartField,
+  MartTable,
+  MartToYbtMapping,
   NaturalLanguageTask,
   NaturalLanguageTaskCreateResponse,
   Project,
   SqlFile,
+  SourceField,
+  SourceTable,
+  SourceToMartMapping,
   TargetField,
   TargetTable,
   TemplateApplyResponse,
   TemplateDocument,
   TemplateUploadResponse,
+  apiDelete,
   apiGet,
   apiPatch,
   apiPost,
+  apiPut,
   uploadForm
 } from "@/lib/api";
 
@@ -32,8 +43,21 @@ export default function HomePage() {
   const [templates, setTemplates] = useState<TemplateDocument[]>([]);
   const [datasources, setDatasources] = useState<DataSource[]>([]);
   const [tasks, setTasks] = useState<NaturalLanguageTask[]>([]);
+  const [businessSystems, setBusinessSystems] = useState<BusinessSystem[]>([]);
+  const [sourceTables, setSourceTables] = useState<SourceTable[]>([]);
+  const [sourceFields, setSourceFields] = useState<SourceField[]>([]);
+  const [martTables, setMartTables] = useState<MartTable[]>([]);
+  const [martFields, setMartFields] = useState<MartField[]>([]);
+  const [sourceToMartMappings, setSourceToMartMappings] = useState<SourceToMartMapping[]>([]);
+  const [martToYbtMappings, setMartToYbtMappings] = useState<MartToYbtMapping[]>([]);
+  const [mappingEvidence, setMappingEvidence] = useState<MappingEvidence[]>([]);
+  const [exportResult, setExportResult] = useState<MappingDocumentExport | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<number | null>(null);
+  const [selectedBusinessSystemId, setSelectedBusinessSystemId] = useState<number | null>(null);
+  const [selectedSourceTableId, setSelectedSourceTableId] = useState<number | null>(null);
+  const [selectedMartTableId, setSelectedMartTableId] = useState<number | null>(null);
+  const [selectedMartFieldId, setSelectedMartFieldId] = useState<number | null>(null);
   const [draft, setDraft] = useState<FieldDraft | null>(null);
   const [templateUpload, setTemplateUpload] = useState<TemplateUploadResponse | null>(null);
   const [templateApply, setTemplateApply] = useState<TemplateApplyResponse | null>(null);
@@ -43,8 +67,19 @@ export default function HomePage() {
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
   const selectedField = fields.find((field) => field.id === selectedFieldId) || null;
+  const selectedBusinessSystem = businessSystems.find((system) => system.id === selectedBusinessSystemId) || null;
+  const selectedSourceTable = sourceTables.find((table) => table.id === selectedSourceTableId) || null;
+  const selectedMartTable = martTables.find((table) => table.id === selectedMartTableId) || null;
+  const selectedMartField = martFields.find((field) => field.id === selectedMartFieldId) || null;
 
   const tableOptions = useMemo(() => tables.map((table) => ({ value: table.id, label: `${table.table_code} ${table.table_name}` })), [tables]);
+  const martFieldOptions = useMemo(
+    () => martFields.map((field) => {
+      const table = martTables.find((item) => item.id === field.mart_table_id);
+      return { value: field.id, label: `${table?.table_code || "mart"}.${field.field_code} ${field.field_name}` };
+    }),
+    [martFields, martTables]
+  );
 
   useEffect(() => {
     void refreshProjects();
@@ -60,10 +95,20 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedFieldId) {
       setDraft(null);
+      setMartToYbtMappings([]);
       return;
     }
     void refreshDraft(selectedFieldId);
+    void refreshMartToYbtMappings(selectedFieldId);
   }, [selectedFieldId]);
+
+  useEffect(() => {
+    if (!selectedMartFieldId) {
+      setSourceToMartMappings([]);
+      return;
+    }
+    void refreshSourceToMartMappings(selectedMartFieldId);
+  }, [selectedMartFieldId]);
 
   async function refreshProjects() {
     const data = await apiGet<Project[]>("/projects");
@@ -74,15 +119,20 @@ export default function HomePage() {
   }
 
   async function refreshWorkspace(projectId: number) {
-    const [nextTables, nextFields, nextDocuments, nextSqlFiles, nextTemplates, nextDatasources, nextTasks] = await Promise.all([
+    const [nextTables, nextFields, nextDocuments, nextSqlFiles, nextTemplates, nextDatasources, nextTasks, nextBusinessSystems, nextMartTables] = await Promise.all([
       apiGet<TargetTable[]>(`/target-tables?project_id=${projectId}`),
       apiGet<TargetField[]>(`/fields?project_id=${projectId}`),
       apiGet<KnowledgeDocument[]>(`/documents?project_id=${projectId}`),
       apiGet<SqlFile[]>(`/sql-files?project_id=${projectId}`),
       apiGet<TemplateDocument[]>(`/projects/${projectId}/templates`),
       apiGet<DataSource[]>(`/projects/${projectId}/datasources`),
-      apiGet<NaturalLanguageTask[]>(`/projects/${projectId}/nl-tasks`)
+      apiGet<NaturalLanguageTask[]>(`/projects/${projectId}/nl-tasks`),
+      apiGet<BusinessSystem[]>(`/projects/${projectId}/business-systems`),
+      apiGet<MartTable[]>(`/projects/${projectId}/mart-tables`)
     ]);
+    const nextSourceTables = (await Promise.all(nextBusinessSystems.map((system) => apiGet<SourceTable[]>(`/business-systems/${system.id}/source-tables`)))).flat();
+    const nextSourceFields = (await Promise.all(nextSourceTables.map((table) => apiGet<SourceField[]>(`/source-tables/${table.id}/source-fields`)))).flat();
+    const nextMartFields = (await Promise.all(nextMartTables.map((table) => apiGet<MartField[]>(`/mart-tables/${table.id}/mart-fields`)))).flat();
     setTables(nextTables);
     setFields(nextFields);
     setDocuments(nextDocuments);
@@ -90,6 +140,23 @@ export default function HomePage() {
     setTemplates(nextTemplates);
     setDatasources(nextDatasources);
     setTasks(nextTasks);
+    setBusinessSystems(nextBusinessSystems);
+    setSourceTables(nextSourceTables);
+    setSourceFields(nextSourceFields);
+    setMartTables(nextMartTables);
+    setMartFields(nextMartFields);
+    if (!selectedBusinessSystemId && nextBusinessSystems[0]) {
+      setSelectedBusinessSystemId(nextBusinessSystems[0].id);
+    }
+    if (!selectedSourceTableId && nextSourceTables[0]) {
+      setSelectedSourceTableId(nextSourceTables[0].id);
+    }
+    if (!selectedMartTableId && nextMartTables[0]) {
+      setSelectedMartTableId(nextMartTables[0].id);
+    }
+    if (!selectedMartFieldId && nextMartFields[0]) {
+      setSelectedMartFieldId(nextMartFields[0].id);
+    }
     if (!selectedFieldId && nextFields[0]) {
       setSelectedFieldId(nextFields[0].id);
     }
@@ -98,6 +165,26 @@ export default function HomePage() {
   async function refreshDraft(fieldId: number) {
     const data = await apiGet<FieldDraft | null>(`/fields/${fieldId}/drafts/latest`);
     setDraft(data);
+  }
+
+  async function refreshSourceToMartMappings(martFieldId: number) {
+    const data = await apiGet<SourceToMartMapping[]>(`/mart-fields/${martFieldId}/source-to-mart-mappings`);
+    setSourceToMartMappings(data);
+    await refreshMappingEvidence(data, martToYbtMappings);
+  }
+
+  async function refreshMartToYbtMappings(fieldId: number) {
+    const data = await apiGet<MartToYbtMapping[]>(`/target-fields/${fieldId}/mart-to-ybt-mappings`);
+    setMartToYbtMappings(data);
+    await refreshMappingEvidence(sourceToMartMappings, data);
+  }
+
+  async function refreshMappingEvidence(sourceMappings = sourceToMartMappings, ybtMappings = martToYbtMappings) {
+    const evidenceGroups = await Promise.all([
+      ...sourceMappings.map((mapping) => apiGet<MappingEvidence[]>(`/mappings/source_to_mart/${mapping.id}/evidence`)),
+      ...ybtMappings.map((mapping) => apiGet<MappingEvidence[]>(`/mappings/mart_to_ybt/${mapping.id}/evidence`))
+    ]);
+    setMappingEvidence(evidenceGroups.flat());
   }
 
   async function submitProject(event: FormEvent<HTMLFormElement>) {
@@ -232,7 +319,7 @@ export default function HomePage() {
     if (!selectedProjectId) {
       return;
     }
-    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api"}/datasources/${datasourceId}`, { method: "DELETE" });
+    await apiDelete(`/datasources/${datasourceId}`);
     await refreshWorkspace(selectedProjectId);
   }
 
@@ -257,6 +344,239 @@ export default function HomePage() {
     }
     await apiPost<NaturalLanguageTask>(`/nl-tasks/${taskId}/run`, {});
     await refreshWorkspace(selectedProjectId);
+  }
+
+  async function submitBusinessSystem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const created = await apiPost<BusinessSystem>(`/projects/${selectedProjectId}/business-systems`, {
+      system_code: textValue(form, "system_code"),
+      system_name: textValue(form, "system_name"),
+      owner_department: textValue(form, "owner_department"),
+      description: textValue(form, "description"),
+      enabled: form.get("enabled") === "on"
+    });
+    event.currentTarget.reset();
+    setSelectedBusinessSystemId(created.id);
+    await refreshWorkspace(selectedProjectId);
+  }
+
+  async function submitSourceTable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId || !selectedBusinessSystemId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const created = await apiPost<SourceTable>(`/business-systems/${selectedBusinessSystemId}/source-tables`, {
+      table_code: textValue(form, "table_code"),
+      table_name: textValue(form, "table_name"),
+      table_comment: textValue(form, "table_comment"),
+      datasource_id: numericOrNull(form, "datasource_id"),
+      schema_name: textValue(form, "schema_name"),
+      physical_table_name: textValue(form, "physical_table_name"),
+      description: textValue(form, "description")
+    });
+    event.currentTarget.reset();
+    setSelectedSourceTableId(created.id);
+    await refreshWorkspace(selectedProjectId);
+  }
+
+  async function submitSourceField(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId || !selectedSourceTableId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    await apiPost<SourceField>(`/source-tables/${selectedSourceTableId}/source-fields`, {
+      field_code: textValue(form, "field_code"),
+      field_name: textValue(form, "field_name"),
+      field_type: textValue(form, "field_type"),
+      field_comment: textValue(form, "field_comment"),
+      physical_column_name: textValue(form, "physical_column_name"),
+      description: textValue(form, "description")
+    });
+    event.currentTarget.reset();
+    await refreshWorkspace(selectedProjectId);
+  }
+
+  async function submitMartTable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const created = await apiPost<MartTable>(`/projects/${selectedProjectId}/mart-tables`, {
+      table_code: textValue(form, "table_code"),
+      table_name: textValue(form, "table_name"),
+      subject_area: textValue(form, "subject_area"),
+      table_comment: textValue(form, "table_comment"),
+      datasource_id: numericOrNull(form, "datasource_id"),
+      schema_name: textValue(form, "schema_name"),
+      physical_table_name: textValue(form, "physical_table_name"),
+      is_existing: form.get("is_existing") === "on",
+      description: textValue(form, "description")
+    });
+    event.currentTarget.reset();
+    setSelectedMartTableId(created.id);
+    await refreshWorkspace(selectedProjectId);
+  }
+
+  async function submitMartField(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId || !selectedMartTableId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const created = await apiPost<MartField>(`/mart-tables/${selectedMartTableId}/mart-fields`, {
+      field_code: textValue(form, "field_code"),
+      field_name: textValue(form, "field_name"),
+      field_type: textValue(form, "field_type"),
+      field_comment: textValue(form, "field_comment"),
+      physical_column_name: textValue(form, "physical_column_name"),
+      is_existing: form.get("is_existing") === "on",
+      description: textValue(form, "description")
+    });
+    event.currentTarget.reset();
+    setSelectedMartFieldId(created.id);
+    await refreshWorkspace(selectedProjectId);
+    await refreshSourceToMartMappings(created.id);
+  }
+
+  async function submitSourceToMartMapping(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMartFieldId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    await apiPost<SourceToMartMapping>(`/mart-fields/${selectedMartFieldId}/source-to-mart-mappings`, {
+      mapping_name: textValue(form, "mapping_name"),
+      source_system_summary: textValue(form, "source_system_summary"),
+      source_tables_summary: textValue(form, "source_tables_summary"),
+      source_fields_summary: textValue(form, "source_fields_summary"),
+      business_rule: textValue(form, "business_rule"),
+      filter_condition: textValue(form, "filter_condition")
+    });
+    event.currentTarget.reset();
+    await refreshSourceToMartMappings(selectedMartFieldId);
+  }
+
+  async function submitMartToYbtMapping(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedFieldId) {
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const formMartFieldId = numericOrNull(form, "mart_field_id");
+    const formMartField = martFields.find((field) => field.id === formMartFieldId) || null;
+    const formMartTable = formMartField ? martTables.find((table) => table.id === formMartField.mart_table_id) || null : null;
+    await apiPost<MartToYbtMapping>(`/target-fields/${selectedFieldId}/mart-to-ybt-mappings`, {
+      mart_field_id: formMartFieldId,
+      mapping_name: textValue(form, "mapping_name"),
+      mart_table_summary: formMartTable?.table_code || textValue(form, "mart_table_summary"),
+      mart_field_summary: formMartField?.field_code || textValue(form, "mart_field_summary"),
+      business_rule: textValue(form, "business_rule"),
+      reporting_condition: textValue(form, "reporting_condition")
+    });
+    event.currentTarget.reset();
+    await refreshMartToYbtMappings(selectedFieldId);
+  }
+
+  async function generateSourceToMart(mappingId: number) {
+    if (!selectedMartFieldId) {
+      return;
+    }
+    await apiPost<SourceToMartMapping>(`/source-to-mart-mappings/${mappingId}/generate-draft`, {});
+    await refreshSourceToMartMappings(selectedMartFieldId);
+  }
+
+  async function generateMartToYbt(mappingId: number) {
+    if (!selectedFieldId) {
+      return;
+    }
+    await apiPost<MartToYbtMapping>(`/mart-to-ybt-mappings/${mappingId}/generate-draft`, {});
+    await refreshMartToYbtMappings(selectedFieldId);
+  }
+
+  async function saveSourceToMartFinal(mapping: SourceToMartMapping, content: string) {
+    if (!selectedMartFieldId) {
+      return;
+    }
+    await apiPut<SourceToMartMapping>(`/source-to-mart-mappings/${mapping.id}`, { final_content: content });
+    await refreshSourceToMartMappings(selectedMartFieldId);
+  }
+
+  async function saveMartToYbtFinal(mapping: MartToYbtMapping, content: string) {
+    if (!selectedFieldId) {
+      return;
+    }
+    await apiPut<MartToYbtMapping>(`/mart-to-ybt-mappings/${mapping.id}`, { final_content: content });
+    await refreshMartToYbtMappings(selectedFieldId);
+  }
+
+  async function reviewSourceToMart(mappingId: number, action: "approve" | "reject") {
+    if (!selectedMartFieldId) {
+      return;
+    }
+    await apiPost<SourceToMartMapping>(`/source-to-mart-mappings/${mappingId}/${action}`, { reviewed_by: "当前用户" });
+    await refreshSourceToMartMappings(selectedMartFieldId);
+  }
+
+  async function reviewMartToYbt(mappingId: number, action: "approve" | "reject") {
+    if (!selectedFieldId) {
+      return;
+    }
+    await apiPost<MartToYbtMapping>(`/mart-to-ybt-mappings/${mappingId}/${action}`, { reviewed_by: "当前用户" });
+    await refreshMartToYbtMappings(selectedFieldId);
+  }
+
+  async function saveSourceToMartVersion(mappingId: number) {
+    if (!selectedMartFieldId) {
+      return;
+    }
+    await apiPost(`/source-to-mart-mappings/${mappingId}/save-version`, { change_note: "前端手动保存版本", created_by: "当前用户" });
+    await refreshSourceToMartMappings(selectedMartFieldId);
+  }
+
+  async function saveMartToYbtVersion(mappingId: number) {
+    if (!selectedFieldId) {
+      return;
+    }
+    await apiPost(`/mart-to-ybt-mappings/${mappingId}/save-version`, { change_note: "前端手动保存版本", created_by: "当前用户" });
+    await refreshMartToYbtMappings(selectedFieldId);
+  }
+
+  async function submitManualEvidence(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const [mappingType, mappingIdText] = textValue(form, "mapping_ref").split(":");
+    const mappingId = Number(mappingIdText);
+    if (!mappingType || !mappingId) {
+      return;
+    }
+    await apiPost<MappingEvidence>(`/mappings/${mappingType}/${mappingId}/evidence`, {
+      evidence_type: "manual_note",
+      source_name: textValue(form, "source_name") || "人工备注",
+      location_text: textValue(form, "location_text"),
+      quoted_content: textValue(form, "quoted_content"),
+      evidence_summary: textValue(form, "evidence_summary")
+    });
+    event.currentTarget.reset();
+    await refreshMappingEvidence();
+  }
+
+  async function exportMapping(scope: "project" | "table" | "field") {
+    if (scope === "project" && selectedProjectId) {
+      setExportResult(await apiGet<MappingDocumentExport>(`/projects/${selectedProjectId}/export/mapping-document?format=markdown`));
+    }
+    if (scope === "table" && selectedField) {
+      setExportResult(await apiGet<MappingDocumentExport>(`/target-tables/${selectedField.target_table_id}/export/mapping-document?format=markdown`));
+    }
+    if (scope === "field" && selectedFieldId) {
+      setExportResult(await apiGet<MappingDocumentExport>(`/target-fields/${selectedFieldId}/export/mapping-document?format=markdown`));
+    }
   }
 
   async function generateMapping() {
@@ -508,6 +828,173 @@ export default function HomePage() {
             </Section>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Section title="业务系统来源层">
+              <form className="grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitBusinessSystem}>
+                <input className="control" name="system_code" placeholder="系统代码，例如 ECIF" required />
+                <input className="control" name="system_name" placeholder="系统名称" required />
+                <input className="control" name="owner_department" placeholder="所属部门" />
+                <label className="flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm">
+                  <input defaultChecked name="enabled" type="checkbox" />
+                  启用
+                </label>
+                <textarea className="control min-h-16 md:col-span-2" name="description" placeholder="系统说明" />
+                <button className="button-primary md:col-span-2" disabled={!selectedProjectId} type="submit">
+                  <Plus size={16} />
+                  新增业务系统
+                </button>
+              </form>
+
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {businessSystems.map((system) => (
+                  <button
+                    key={system.id}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${system.id === selectedBusinessSystemId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    onClick={() => setSelectedBusinessSystemId(system.id)}
+                    type="button"
+                  >
+                    <div className="font-medium">{system.system_code}</div>
+                    <div className="text-slate-600">{system.system_name}</div>
+                  </button>
+                ))}
+              </div>
+
+              <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitSourceTable}>
+                <input className="control" name="table_code" placeholder="源表代码，例如 ecif_customer" required />
+                <input className="control" name="table_name" placeholder="源表名称" required />
+                <select className="control" name="datasource_id" defaultValue="">
+                  <option value="">关联数据源，可选</option>
+                  {datasources.map((datasource) => (
+                    <option key={datasource.id} value={datasource.id}>
+                      {datasource.name}
+                    </option>
+                  ))}
+                </select>
+                <input className="control" name="physical_table_name" placeholder="物理表名，可空" />
+                <input className="control" name="schema_name" placeholder="schema，可空" />
+                <input className="control" name="table_comment" placeholder="表说明" />
+                <textarea className="control min-h-16 md:col-span-2" name="description" placeholder="补充说明" />
+                <button className="button-secondary md:col-span-2" disabled={!selectedBusinessSystem} type="submit">
+                  <Plus size={16} />
+                  新增源表
+                </button>
+              </form>
+
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {sourceTables.map((table) => (
+                  <button
+                    key={table.id}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${table.id === selectedSourceTableId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    onClick={() => setSelectedSourceTableId(table.id)}
+                    type="button"
+                  >
+                    <div className="font-medium">{table.table_code}</div>
+                    <div className="text-slate-600">{table.table_name}</div>
+                  </button>
+                ))}
+              </div>
+
+              <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitSourceField}>
+                <input className="control" name="field_code" placeholder="源字段代码，例如 cert_type" required />
+                <input className="control" name="field_name" placeholder="源字段名称" required />
+                <input className="control" name="field_type" placeholder="字段类型" />
+                <input className="control" name="physical_column_name" placeholder="物理字段名，可空" />
+                <textarea className="control min-h-16 md:col-span-2" name="field_comment" placeholder="字段说明" />
+                <button className="button-secondary md:col-span-2" disabled={!selectedSourceTable} type="submit">
+                  <Plus size={16} />
+                  新增源字段
+                </button>
+              </form>
+
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-3">
+                {sourceFields.map((field) => {
+                  const table = sourceTables.find((item) => item.id === field.source_table_id);
+                  return (
+                    <div key={field.id} className="rounded-md border border-line bg-white px-3 py-2 text-sm">
+                      <div className="font-medium">{table?.table_code || "-"} . {field.field_code}</div>
+                      <div className="text-slate-600">{field.field_name}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+
+            <Section title="监管集市层">
+              <form className="grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitMartTable}>
+                <input className="control" name="table_code" placeholder="集市表代码，例如 mart_customer" required />
+                <input className="control" name="table_name" placeholder="集市表名称" required />
+                <input className="control" name="subject_area" placeholder="主题域，例如 客户" />
+                <select className="control" name="datasource_id" defaultValue="">
+                  <option value="">关联集市数据源，可选</option>
+                  {datasources.map((datasource) => (
+                    <option key={datasource.id} value={datasource.id}>
+                      {datasource.name}
+                    </option>
+                  ))}
+                </select>
+                <input className="control" name="physical_table_name" placeholder="物理表名，可空" />
+                <input className="control" name="schema_name" placeholder="schema，可空" />
+                <label className="flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm">
+                  <input name="is_existing" type="checkbox" />
+                  已有表
+                </label>
+                <input className="control" name="table_comment" placeholder="表说明" />
+                <textarea className="control min-h-16 md:col-span-2" name="description" placeholder="设计说明" />
+                <button className="button-primary md:col-span-2" disabled={!selectedProjectId} type="submit">
+                  <Plus size={16} />
+                  新增监管集市表
+                </button>
+              </form>
+
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {martTables.map((table) => (
+                  <button
+                    key={table.id}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${table.id === selectedMartTableId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    onClick={() => setSelectedMartTableId(table.id)}
+                    type="button"
+                  >
+                    <div className="font-medium">{table.table_code}</div>
+                    <div className="text-slate-600">{table.table_name}</div>
+                  </button>
+                ))}
+              </div>
+
+              <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitMartField}>
+                <input className="control" name="field_code" placeholder="集市字段代码，例如 cert_type" required />
+                <input className="control" name="field_name" placeholder="集市字段名称" required />
+                <input className="control" name="field_type" placeholder="字段类型" />
+                <input className="control" name="physical_column_name" placeholder="物理字段名，可空" />
+                <label className="flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm">
+                  <input name="is_existing" type="checkbox" />
+                  已有字段
+                </label>
+                <textarea className="control min-h-16 md:col-span-2" name="field_comment" placeholder="字段说明" />
+                <button className="button-secondary md:col-span-2" disabled={!selectedMartTable} type="submit">
+                  <Plus size={16} />
+                  新增集市字段
+                </button>
+              </form>
+
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-3">
+                {martFields.map((field) => {
+                  const table = martTables.find((item) => item.id === field.mart_table_id);
+                  return (
+                    <button
+                      key={field.id}
+                      className={`rounded-md border px-3 py-2 text-left text-sm ${field.id === selectedMartFieldId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                      onClick={() => setSelectedMartFieldId(field.id)}
+                      type="button"
+                    >
+                      <div className="font-medium">{table?.table_code || "-"} . {field.field_code}</div>
+                      <div className="text-slate-600">{field.field_name}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </Section>
+          </div>
+
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_420px]">
             <Section title="目标字段">
               <form className="grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitField}>
@@ -606,6 +1093,161 @@ export default function HomePage() {
               <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-line bg-white text-sm text-slate-500">暂无字段</div>
             )}
           </Section>
+
+          <Section
+            title="双层口径工作台"
+            right={
+              <div className="flex flex-wrap gap-2">
+                <button className="button-secondary" disabled={!selectedProjectId} onClick={() => exportMapping("project")} type="button">
+                  <Download size={16} />
+                  导出项目
+                </button>
+                <button className="button-secondary" disabled={!selectedField} onClick={() => exportMapping("table")} type="button">
+                  <Download size={16} />
+                  导出表
+                </button>
+                <button className="button-primary" disabled={!selectedField} onClick={() => exportMapping("field")} type="button">
+                  <Download size={16} />
+                  导出字段
+                </button>
+              </div>
+            }
+          >
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-4">
+                <Metric label="一表通字段" value={selectedField ? `${selectedField.field_code} ${selectedField.field_name}` : "-"} />
+                <Metric label="监管集市字段" value={selectedMartField ? `${selectedMartField.field_code} ${selectedMartField.field_name}` : "-"} />
+                <Metric label="业务系统" value={selectedBusinessSystem ? `${selectedBusinessSystem.system_code} ${selectedBusinessSystem.system_name}` : "-"} />
+                <Metric label="证据数量" value={String(mappingEvidence.length)} />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div className="rounded-md border border-line bg-mist p-3">
+                  <h3 className="text-sm font-semibold">业务系统到监管集市口径</h3>
+                  <form className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitSourceToMartMapping}>
+                    <input className="control" name="mapping_name" placeholder="口径名称，例如 ECIF 证件类型入集市" />
+                    <input className="control" name="source_system_summary" placeholder="来源业务系统" />
+                    <input className="control" name="source_tables_summary" placeholder="来源表" />
+                    <input className="control" name="source_fields_summary" placeholder="来源字段" />
+                    <textarea className="control min-h-20 md:col-span-2" name="business_rule" placeholder="业务规则" />
+                    <textarea className="control min-h-16 md:col-span-2" name="filter_condition" placeholder="过滤条件" />
+                    <button className="button-primary md:col-span-2" disabled={!selectedMartField} type="submit">
+                      <Plus size={16} />
+                      新建业务系统到集市口径
+                    </button>
+                  </form>
+                  <div className="mt-4 space-y-3">
+                    {sourceToMartMappings.map((mapping) => (
+                      <SourceToMartCard
+                        key={mapping.id}
+                        mapping={mapping}
+                        onApprove={() => reviewSourceToMart(mapping.id, "approve")}
+                        onGenerate={() => generateSourceToMart(mapping.id)}
+                        onReject={() => reviewSourceToMart(mapping.id, "reject")}
+                        onSave={(content) => saveSourceToMartFinal(mapping, content)}
+                        onVersion={() => saveSourceToMartVersion(mapping.id)}
+                      />
+                    ))}
+                    {!sourceToMartMappings.length ? <EmptyBlock text="选择监管集市字段后，可创建第一层口径。" /> : null}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-line bg-mist p-3">
+                  <h3 className="text-sm font-semibold">监管集市到一表通口径</h3>
+                  <form className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={submitMartToYbtMapping}>
+                    <input className="control" name="mapping_name" placeholder="口径名称，例如 证件类型报送口径" />
+                    <select className="control" name="mart_field_id" defaultValue={selectedMartFieldId || ""}>
+                      <option value="">选择监管集市字段</option>
+                      {martFieldOptions.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input className="control" name="mart_table_summary" placeholder="集市表摘要" />
+                    <input className="control" name="mart_field_summary" placeholder="集市字段摘要" />
+                    <textarea className="control min-h-20 md:col-span-2" name="business_rule" placeholder="取数口径" />
+                    <textarea className="control min-h-16 md:col-span-2" name="reporting_condition" placeholder="报送限制条件" />
+                    <button className="button-primary md:col-span-2" disabled={!selectedField} type="submit">
+                      <Plus size={16} />
+                      新建集市到一表通口径
+                    </button>
+                  </form>
+                  <div className="mt-4 space-y-3">
+                    {martToYbtMappings.map((mapping) => (
+                      <MartToYbtCard
+                        key={mapping.id}
+                        mapping={mapping}
+                        onApprove={() => reviewMartToYbt(mapping.id, "approve")}
+                        onGenerate={() => generateMartToYbt(mapping.id)}
+                        onReject={() => reviewMartToYbt(mapping.id, "reject")}
+                        onSave={(content) => saveMartToYbtFinal(mapping, content)}
+                        onVersion={() => saveMartToYbtVersion(mapping.id)}
+                      />
+                    ))}
+                    {!martToYbtMappings.length ? <EmptyBlock text="选择一表通字段后，可创建第二层口径。" /> : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+                <div className="rounded-md border border-line bg-white p-3">
+                  <h3 className="text-sm font-semibold">绑定人工证据</h3>
+                  <form className="mt-3 space-y-3" onSubmit={submitManualEvidence}>
+                    <select className="control" name="mapping_ref" required>
+                      <option value="">选择口径</option>
+                      {sourceToMartMappings.map((mapping) => (
+                        <option key={`s-${mapping.id}`} value={`source_to_mart:${mapping.id}`}>
+                          source_to_mart / {mapping.mapping_name || mapping.id}
+                        </option>
+                      ))}
+                      {martToYbtMappings.map((mapping) => (
+                        <option key={`m-${mapping.id}`} value={`mart_to_ybt:${mapping.id}`}>
+                          mart_to_ybt / {mapping.mapping_name || mapping.id}
+                        </option>
+                      ))}
+                    </select>
+                    <input className="control" name="source_name" placeholder="证据来源" />
+                    <input className="control" name="location_text" placeholder="位置" />
+                    <textarea className="control min-h-20" name="quoted_content" placeholder="引用内容" />
+                    <textarea className="control min-h-16" name="evidence_summary" placeholder="证据摘要" />
+                    <button className="button-secondary w-full" type="submit">
+                      <Plus size={16} />
+                      添加证据
+                    </button>
+                  </form>
+                </div>
+                <div className="rounded-md border border-line bg-white p-3">
+                  <h3 className="text-sm font-semibold">口径证据</h3>
+                  <div className="mt-3 space-y-2">
+                    {mappingEvidence.map((evidence) => (
+                      <details key={evidence.id} className="rounded-md border border-line bg-mist px-3 py-2 text-sm">
+                        <summary className="cursor-pointer font-medium">
+                          {evidence.mapping_type} / {evidence.evidence_type} / {evidence.source_name}
+                        </summary>
+                        <div className="mt-2 text-slate-600">{evidence.location_text || "-"}</div>
+                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-white p-3 text-xs">{evidence.evidence_summary || evidence.quoted_content || "-"}</pre>
+                      </details>
+                    ))}
+                    {!mappingEvidence.length ? <EmptyBlock text="暂无口径级证据。" /> : null}
+                  </div>
+                </div>
+              </div>
+
+              {exportResult ? (
+                <div className="rounded-md border border-line bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold">导出预览：{exportResult.file_name}</h3>
+                    <a className="button-secondary" download={exportResult.file_name} href={`data:text/markdown;charset=utf-8,${encodeURIComponent(exportResult.content)}`}>
+                      <Download size={16} />
+                      下载 Markdown
+                    </a>
+                  </div>
+                  <pre className="mt-3 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-md bg-mist p-4 text-xs leading-6 text-slate-700">{exportResult.content}</pre>
+                </div>
+              ) : null}
+            </div>
+          </Section>
         </section>
       </div>
     </main>
@@ -664,6 +1306,128 @@ function DraftView({ draft, onReview }: { draft: FieldDraft; onReview: (status: 
       </div>
     </div>
   );
+}
+
+function SourceToMartCard({
+  mapping,
+  onApprove,
+  onGenerate,
+  onReject,
+  onSave,
+  onVersion
+}: {
+  mapping: SourceToMartMapping;
+  onApprove: () => Promise<void>;
+  onGenerate: () => Promise<void>;
+  onReject: () => Promise<void>;
+  onSave: (content: string) => Promise<void>;
+  onVersion: () => Promise<void>;
+}) {
+  const [content, setContent] = useState(mapping.final_content || mapping.ai_generated_content || "");
+  useEffect(() => {
+    setContent(mapping.final_content || mapping.ai_generated_content || "");
+  }, [mapping.ai_generated_content, mapping.final_content]);
+  return (
+    <div className="rounded-md border border-line bg-white p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="font-medium">{mapping.mapping_name || `口径 ${mapping.id}`}</div>
+          <div className="mt-1 text-slate-500">{mapping.source_system_summary || "来源系统待确认"} / {mapping.source_fields_summary || "来源字段待确认"}</div>
+        </div>
+        <Badge label={mapping.mapping_status} tone={mapping.mapping_status === "approved" ? "green" : mapping.mapping_status === "rejected" ? "red" : "gold"} />
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <TextBlock title="业务规则" text={mapping.business_rule || "-"} />
+        <TextBlock title="过滤条件" text={mapping.filter_condition || "-"} />
+      </div>
+      <textarea className="control mt-3 min-h-32" onChange={(event) => setContent(event.target.value)} value={content} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button className="button-secondary" onClick={onGenerate} type="button">
+          <Wand2 size={16} />
+          AI 草稿
+        </button>
+        <button className="button-secondary" onClick={() => onSave(content)} type="button">
+          <Save size={16} />
+          保存
+        </button>
+        <button className="button-secondary" onClick={onVersion} type="button">
+          <Save size={16} />
+          版本
+        </button>
+        <button className="button-secondary" onClick={onApprove} type="button">
+          <Check size={16} />
+          通过
+        </button>
+        <button className="button-danger" onClick={onReject} type="button">
+          <X size={16} />
+          驳回
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MartToYbtCard({
+  mapping,
+  onApprove,
+  onGenerate,
+  onReject,
+  onSave,
+  onVersion
+}: {
+  mapping: MartToYbtMapping;
+  onApprove: () => Promise<void>;
+  onGenerate: () => Promise<void>;
+  onReject: () => Promise<void>;
+  onSave: (content: string) => Promise<void>;
+  onVersion: () => Promise<void>;
+}) {
+  const [content, setContent] = useState(mapping.final_content || mapping.ai_generated_content || "");
+  useEffect(() => {
+    setContent(mapping.final_content || mapping.ai_generated_content || "");
+  }, [mapping.ai_generated_content, mapping.final_content]);
+  return (
+    <div className="rounded-md border border-line bg-white p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="font-medium">{mapping.mapping_name || `口径 ${mapping.id}`}</div>
+          <div className="mt-1 text-slate-500">{mapping.mart_table_summary || "集市表待确认"} / {mapping.mart_field_summary || "集市字段待确认"}</div>
+        </div>
+        <Badge label={mapping.mapping_status} tone={mapping.mapping_status === "approved" ? "green" : mapping.mapping_status === "rejected" ? "red" : "gold"} />
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <TextBlock title="取数口径" text={mapping.business_rule || "-"} />
+        <TextBlock title="报送限制" text={mapping.reporting_condition || "-"} />
+      </div>
+      <textarea className="control mt-3 min-h-32" onChange={(event) => setContent(event.target.value)} value={content} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button className="button-secondary" onClick={onGenerate} type="button">
+          <Wand2 size={16} />
+          AI 草稿
+        </button>
+        <button className="button-secondary" onClick={() => onSave(content)} type="button">
+          <Save size={16} />
+          保存
+        </button>
+        <button className="button-secondary" onClick={onVersion} type="button">
+          <Save size={16} />
+          版本
+        </button>
+        <button className="button-secondary" onClick={onApprove} type="button">
+          <Check size={16} />
+          通过
+        </button>
+        <button className="button-danger" onClick={onReject} type="button">
+          <X size={16} />
+          驳回
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EmptyBlock({ text }: { text: string }) {
+  return <div className="flex min-h-24 items-center justify-center rounded-md border border-dashed border-line bg-white text-sm text-slate-500">{text}</div>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -734,4 +1498,9 @@ function SqlList({ items }: { items: Array<{ name: string; sql: string }> }) {
 function textValue(form: FormData, key: string): string {
   const value = form.get(key);
   return typeof value === "string" ? value.trim() : "";
+}
+
+function numericOrNull(form: FormData, key: string): number | null {
+  const value = textValue(form, key);
+  return value ? Number(value) : null;
 }

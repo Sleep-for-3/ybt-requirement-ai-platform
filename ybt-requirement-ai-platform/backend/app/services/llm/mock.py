@@ -5,6 +5,41 @@ from app.services.llm.base import LLMService
 
 class MockLLMService(LLMService):
     async def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        if "业务系统到监管集市" in system_prompt:
+            return {
+                "source_system_summary": "ECIF 客户信息系统",
+                "source_tables_summary": "ecif_customer 客户基本信息表",
+                "source_fields_summary": "cert_type 客户证件类型",
+                "business_rule": "监管集市字段应优先取 ECIF 客户基本信息表的证件类型，作为客户维度统一证件类型来源。",
+                "filter_condition": "仅纳入客户状态有效、未注销的客户；具体状态码需由业务确认。",
+                "join_condition": "如需与其他系统补充，应以客户编号或统一客户号关联。",
+                "priority_rule": "多来源同时存在时优先采用 ECIF，信贷系统仅作为缺失补充来源。",
+                "merge_rule": "跨系统合并时保留来源系统标识，并记录冲突字段供人工复核。",
+                "code_mapping_rule": "需将源系统证件类型转换为监管集市统一证件类型代码。",
+                "null_handling_rule": "源字段为空时进入待确认清单，不直接默认填充。",
+                "exception_rule": "证件类型不在代码集内时标记为异常数据。",
+                "quality_check_rule": "校验空值率、枚举覆盖率和码值转换完整性。",
+                "open_questions": ["请确认 ECIF 证件类型码值是否已与最新监管代码集对齐。"],
+                "final_content_draft": "业务系统到监管集市：从 ECIF 客户基本信息表 cert_type 获取客户证件类型，按有效客户范围过滤，必要时由信贷系统补充缺失值，并按监管集市统一代码转换。",
+                "confidence_level": "medium",
+                "evidence_summary": "草稿基于源字段、人工备注和已绑定证据生成。",
+            }
+        if "监管集市到一表通" in system_prompt:
+            return {
+                "mart_table_summary": "mart_customer 监管客户集市表",
+                "mart_field_summary": "cert_type 客户证件类型",
+                "business_rule": "一表通字段 CERT_TYPE 应从监管客户集市表 cert_type 取值，并匹配一表通监管定义。",
+                "filter_condition": "仅报送报送日期内有效客户；具体有效口径需人工确认。",
+                "join_condition": "按一表通报送主键与监管客户集市客户编号关联。",
+                "code_mapping_rule": "监管集市证件类型需转换为一表通要求的证件类型代码。",
+                "null_handling_rule": "为空时纳入待确认问题，不生成默认代码。",
+                "reporting_condition": "满足一表通报送范围、机构范围和报送日期要求。",
+                "validation_rule": "校验证件类型非空率、代码值合法性以及与监管定义的一致性。",
+                "open_questions": ["请确认报送日期内有效客户的判定规则。"],
+                "final_content_draft": "监管集市到一表通：从 mart_customer.cert_type 获取客户证件类型，按报送范围过滤后转换为一表通代码，并对空值和非法码值输出校验问题。",
+                "confidence_level": "medium",
+                "evidence_summary": "草稿基于一表通字段定义、监管集市字段和已绑定证据生成。",
+            }
         return {
             "business_to_mart_rule": "建议从客户主数据系统抽取目标字段，按监管集市客户维度统一代码值和空值处理规则。",
             "mart_to_ybt_rule": "监管集市字段直接映射至一表通目标字段；如存在监管代码集，需按最新一表通代码表转换。",

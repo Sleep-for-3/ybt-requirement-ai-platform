@@ -3,7 +3,24 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import coze, datasources, db_profile, documents, nl_tasks, projects, retrieval, sql_files, target_fields, target_tables, templates
+from app.api import (
+    business_systems,
+    coze,
+    datasources,
+    db_profile,
+    documents,
+    mapping_evidence,
+    mapping_export,
+    mapping_rules,
+    mart,
+    nl_tasks,
+    projects,
+    retrieval,
+    sql_files,
+    target_fields,
+    target_tables,
+    templates,
+)
 from app.core.settings import get_settings
 
 settings = get_settings()
@@ -41,3 +58,8 @@ app.include_router(db_profile.router, prefix=settings.api_prefix)
 app.include_router(templates.router, prefix=settings.api_prefix)
 app.include_router(datasources.router, prefix=settings.api_prefix)
 app.include_router(nl_tasks.router, prefix=settings.api_prefix)
+app.include_router(business_systems.router, prefix=settings.api_prefix)
+app.include_router(mart.router, prefix=settings.api_prefix)
+app.include_router(mapping_rules.router, prefix=settings.api_prefix)
+app.include_router(mapping_evidence.router, prefix=settings.api_prefix)
+app.include_router(mapping_export.router, prefix=settings.api_prefix)

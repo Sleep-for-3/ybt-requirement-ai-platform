@@ -387,3 +387,362 @@ class NaturalLanguageTaskRead(OrmModel):
     created_at: datetime
     updated_at: datetime
     created_by: int | None
+
+
+class BusinessSystemCreate(BaseModel):
+    system_code: str
+    system_name: str
+    description: str | None = None
+    owner_department: str | None = None
+    enabled: bool = True
+
+
+class BusinessSystemUpdate(BaseModel):
+    system_code: str | None = None
+    system_name: str | None = None
+    description: str | None = None
+    owner_department: str | None = None
+    enabled: bool | None = None
+
+
+class BusinessSystemRead(OrmModel):
+    id: int
+    project_id: int
+    system_code: str
+    system_name: str
+    description: str | None
+    owner_department: str | None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceTableCreate(BaseModel):
+    table_code: str
+    table_name: str
+    table_comment: str | None = None
+    datasource_id: int | None = None
+    schema_name: str | None = None
+    physical_table_name: str | None = None
+    description: str | None = None
+
+
+class SourceTableUpdate(BaseModel):
+    table_code: str | None = None
+    table_name: str | None = None
+    table_comment: str | None = None
+    datasource_id: int | None = None
+    schema_name: str | None = None
+    physical_table_name: str | None = None
+    description: str | None = None
+
+
+class SourceTableRead(OrmModel):
+    id: int
+    project_id: int
+    business_system_id: int
+    table_code: str
+    table_name: str
+    table_comment: str | None
+    datasource_id: int | None
+    schema_name: str | None
+    physical_table_name: str | None
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceFieldCreate(BaseModel):
+    field_code: str
+    field_name: str
+    field_type: str | None = None
+    field_comment: str | None = None
+    physical_column_name: str | None = None
+    description: str | None = None
+
+
+class SourceFieldUpdate(BaseModel):
+    field_code: str | None = None
+    field_name: str | None = None
+    field_type: str | None = None
+    field_comment: str | None = None
+    physical_column_name: str | None = None
+    description: str | None = None
+
+
+class SourceFieldRead(OrmModel):
+    id: int
+    project_id: int
+    source_table_id: int
+    field_code: str
+    field_name: str
+    field_type: str | None
+    field_comment: str | None
+    physical_column_name: str | None
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MartTableCreate(BaseModel):
+    table_code: str
+    table_name: str
+    subject_area: str | None = None
+    table_comment: str | None = None
+    datasource_id: int | None = None
+    schema_name: str | None = None
+    physical_table_name: str | None = None
+    is_existing: bool = True
+    description: str | None = None
+
+
+class MartTableUpdate(BaseModel):
+    table_code: str | None = None
+    table_name: str | None = None
+    subject_area: str | None = None
+    table_comment: str | None = None
+    datasource_id: int | None = None
+    schema_name: str | None = None
+    physical_table_name: str | None = None
+    is_existing: bool | None = None
+    description: str | None = None
+
+
+class MartTableRead(OrmModel):
+    id: int
+    project_id: int
+    table_code: str
+    table_name: str
+    subject_area: str | None
+    table_comment: str | None
+    datasource_id: int | None
+    schema_name: str | None
+    physical_table_name: str | None
+    is_existing: bool
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MartFieldCreate(BaseModel):
+    field_code: str
+    field_name: str
+    field_type: str | None = None
+    field_comment: str | None = None
+    physical_column_name: str | None = None
+    is_existing: bool = True
+    description: str | None = None
+
+
+class MartFieldUpdate(BaseModel):
+    field_code: str | None = None
+    field_name: str | None = None
+    field_type: str | None = None
+    field_comment: str | None = None
+    physical_column_name: str | None = None
+    is_existing: bool | None = None
+    description: str | None = None
+
+
+class MartFieldRead(OrmModel):
+    id: int
+    project_id: int
+    mart_table_id: int
+    field_code: str
+    field_name: str
+    field_type: str | None
+    field_comment: str | None
+    physical_column_name: str | None
+    is_existing: bool
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceToMartMappingCreate(BaseModel):
+    mapping_name: str | None = None
+    source_system_summary: str | None = None
+    source_tables_summary: str | None = None
+    source_fields_summary: str | None = None
+    business_rule: str | None = None
+    filter_condition: str | None = None
+    join_condition: str | None = None
+    priority_rule: str | None = None
+    merge_rule: str | None = None
+    code_mapping_rule: str | None = None
+    null_handling_rule: str | None = None
+    exception_rule: str | None = None
+    quality_check_rule: str | None = None
+    open_questions: str | None = None
+    final_content: str | None = None
+    confidence_level: str = "medium"
+    created_by: str | None = None
+
+
+class SourceToMartMappingUpdate(BaseModel):
+    mapping_name: str | None = None
+    mapping_status: str | None = None
+    source_system_summary: str | None = None
+    source_tables_summary: str | None = None
+    source_fields_summary: str | None = None
+    business_rule: str | None = None
+    filter_condition: str | None = None
+    join_condition: str | None = None
+    priority_rule: str | None = None
+    merge_rule: str | None = None
+    code_mapping_rule: str | None = None
+    null_handling_rule: str | None = None
+    exception_rule: str | None = None
+    quality_check_rule: str | None = None
+    open_questions: str | None = None
+    ai_generated_content: str | None = None
+    final_content: str | None = None
+    confidence_level: str | None = None
+
+
+class SourceToMartMappingRead(OrmModel):
+    id: int
+    project_id: int
+    mart_field_id: int
+    mapping_name: str | None
+    mapping_status: str
+    source_system_summary: str | None
+    source_tables_summary: str | None
+    source_fields_summary: str | None
+    business_rule: str | None
+    filter_condition: str | None
+    join_condition: str | None
+    priority_rule: str | None
+    merge_rule: str | None
+    code_mapping_rule: str | None
+    null_handling_rule: str | None
+    exception_rule: str | None
+    quality_check_rule: str | None
+    open_questions: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+
+
+class MartToYbtMappingCreate(BaseModel):
+    mart_field_id: int | None = None
+    mapping_name: str | None = None
+    mart_table_summary: str | None = None
+    mart_field_summary: str | None = None
+    business_rule: str | None = None
+    filter_condition: str | None = None
+    join_condition: str | None = None
+    code_mapping_rule: str | None = None
+    null_handling_rule: str | None = None
+    reporting_condition: str | None = None
+    validation_rule: str | None = None
+    open_questions: str | None = None
+    final_content: str | None = None
+    confidence_level: str = "medium"
+    created_by: str | None = None
+
+
+class MartToYbtMappingUpdate(BaseModel):
+    mart_field_id: int | None = None
+    mapping_name: str | None = None
+    mapping_status: str | None = None
+    mart_table_summary: str | None = None
+    mart_field_summary: str | None = None
+    business_rule: str | None = None
+    filter_condition: str | None = None
+    join_condition: str | None = None
+    code_mapping_rule: str | None = None
+    null_handling_rule: str | None = None
+    reporting_condition: str | None = None
+    validation_rule: str | None = None
+    open_questions: str | None = None
+    ai_generated_content: str | None = None
+    final_content: str | None = None
+    confidence_level: str | None = None
+
+
+class MartToYbtMappingRead(OrmModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    mart_field_id: int | None
+    mapping_name: str | None
+    mapping_status: str
+    mart_table_summary: str | None
+    mart_field_summary: str | None
+    business_rule: str | None
+    filter_condition: str | None
+    join_condition: str | None
+    code_mapping_rule: str | None
+    null_handling_rule: str | None
+    reporting_condition: str | None
+    validation_rule: str | None
+    open_questions: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+
+
+class MappingEvidenceCreate(BaseModel):
+    evidence_type: str
+    evidence_id: int | None = None
+    source_name: str
+    location_text: str | None = None
+    quoted_content: str | None = None
+    evidence_summary: str | None = None
+
+
+class MappingEvidenceRead(OrmModel):
+    id: int
+    project_id: int
+    mapping_type: str
+    mapping_id: int
+    evidence_type: str
+    evidence_id: int | None
+    source_name: str
+    location_text: str | None
+    quoted_content: str | None
+    evidence_summary: str | None
+    created_at: datetime
+
+
+class MappingReviewRequest(BaseModel):
+    reviewed_by: str | None = None
+    final_content: str | None = None
+    change_note: str | None = None
+
+
+class MappingVersionCreate(BaseModel):
+    content_snapshot: str | None = None
+    change_note: str | None = None
+    created_by: str | None = None
+
+
+class MappingVersionRead(OrmModel):
+    id: int
+    project_id: int
+    mapping_type: str
+    mapping_id: int
+    version_no: int
+    content_snapshot: str
+    change_note: str | None
+    created_at: datetime
+    created_by: str | None
+
+
+class MappingDocumentExportRead(BaseModel):
+    format: str
+    scope: str
+    scope_id: int
+    file_name: str
+    content: str

@@ -32,6 +32,8 @@ class Project(Base, TimestampMixin):
 
     target_tables: Mapped[list["TargetTable"]] = relationship(back_populates="project")
     target_fields: Mapped[list["TargetField"]] = relationship(back_populates="project")
+    business_systems: Mapped[list["BusinessSystem"]] = relationship(back_populates="project")
+    mart_tables: Mapped[list["MartTable"]] = relationship(back_populates="project")
 
 
 class TargetTable(Base):
@@ -62,6 +64,195 @@ class TargetField(Base, TimestampMixin):
 
     project: Mapped[Project] = relationship(back_populates="target_fields")
     target_table: Mapped[TargetTable] = relationship(back_populates="fields")
+
+
+class BusinessSystem(Base, TimestampMixin):
+    __tablename__ = "business_systems"
+    __table_args__ = (UniqueConstraint("project_id", "system_code", name="uq_business_systems_project_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    system_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    system_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    owner_department: Mapped[str | None] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    project: Mapped[Project] = relationship(back_populates="business_systems")
+    source_tables: Mapped[list["SourceTable"]] = relationship(back_populates="business_system")
+
+
+class SourceTable(Base, TimestampMixin):
+    __tablename__ = "source_tables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    business_system_id: Mapped[int] = mapped_column(ForeignKey("business_systems.id"), index=True)
+    table_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    table_comment: Mapped[str | None] = mapped_column(Text)
+    datasource_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
+    schema_name: Mapped[str | None] = mapped_column(String(255))
+    physical_table_name: Mapped[str | None] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text)
+
+    business_system: Mapped[BusinessSystem] = relationship(back_populates="source_tables")
+    fields: Mapped[list["SourceField"]] = relationship(back_populates="source_table")
+
+
+class SourceField(Base, TimestampMixin):
+    __tablename__ = "source_fields"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    source_table_id: Mapped[int] = mapped_column(ForeignKey("source_tables.id"), index=True)
+    field_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    field_type: Mapped[str | None] = mapped_column(String(100))
+    field_comment: Mapped[str | None] = mapped_column(Text)
+    physical_column_name: Mapped[str | None] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text)
+
+    source_table: Mapped[SourceTable] = relationship(back_populates="fields")
+
+
+class MartTable(Base, TimestampMixin):
+    __tablename__ = "mart_tables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    table_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    subject_area: Mapped[str | None] = mapped_column(String(200))
+    table_comment: Mapped[str | None] = mapped_column(Text)
+    datasource_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
+    schema_name: Mapped[str | None] = mapped_column(String(255))
+    physical_table_name: Mapped[str | None] = mapped_column(String(255))
+    is_existing: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str | None] = mapped_column(Text)
+
+    project: Mapped[Project] = relationship(back_populates="mart_tables")
+    fields: Mapped[list["MartField"]] = relationship(back_populates="mart_table")
+
+
+class MartField(Base, TimestampMixin):
+    __tablename__ = "mart_fields"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    mart_table_id: Mapped[int] = mapped_column(ForeignKey("mart_tables.id"), index=True)
+    field_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    field_type: Mapped[str | None] = mapped_column(String(100))
+    field_comment: Mapped[str | None] = mapped_column(Text)
+    physical_column_name: Mapped[str | None] = mapped_column(String(255))
+    is_existing: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str | None] = mapped_column(Text)
+
+    mart_table: Mapped[MartTable] = relationship(back_populates="fields")
+
+
+class SourceToMartMapping(Base, TimestampMixin):
+    __tablename__ = "source_to_mart_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    mart_field_id: Mapped[int] = mapped_column(ForeignKey("mart_fields.id"), index=True)
+    mapping_name: Mapped[str | None] = mapped_column(String(255))
+    mapping_status: Mapped[str] = mapped_column(String(50), default="draft")
+    source_system_summary: Mapped[str | None] = mapped_column(Text)
+    source_tables_summary: Mapped[str | None] = mapped_column(Text)
+    source_fields_summary: Mapped[str | None] = mapped_column(Text)
+    business_rule: Mapped[str | None] = mapped_column(Text)
+    filter_condition: Mapped[str | None] = mapped_column(Text)
+    join_condition: Mapped[str | None] = mapped_column(Text)
+    priority_rule: Mapped[str | None] = mapped_column(Text)
+    merge_rule: Mapped[str | None] = mapped_column(Text)
+    code_mapping_rule: Mapped[str | None] = mapped_column(Text)
+    null_handling_rule: Mapped[str | None] = mapped_column(Text)
+    exception_rule: Mapped[str | None] = mapped_column(Text)
+    quality_check_rule: Mapped[str | None] = mapped_column(Text)
+    open_questions: Mapped[str | None] = mapped_column(Text)
+    ai_generated_content: Mapped[str | None] = mapped_column(Text)
+    final_content: Mapped[str | None] = mapped_column(Text)
+    confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
+    created_by: Mapped[str | None] = mapped_column(String(100))
+    reviewed_by: Mapped[str | None] = mapped_column(String(100))
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
+class MartToYbtMapping(Base, TimestampMixin):
+    __tablename__ = "mart_to_ybt_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    target_field_id: Mapped[int] = mapped_column(ForeignKey("target_fields.id"), index=True)
+    mart_field_id: Mapped[int | None] = mapped_column(ForeignKey("mart_fields.id"))
+    mapping_name: Mapped[str | None] = mapped_column(String(255))
+    mapping_status: Mapped[str] = mapped_column(String(50), default="draft")
+    mart_table_summary: Mapped[str | None] = mapped_column(Text)
+    mart_field_summary: Mapped[str | None] = mapped_column(Text)
+    business_rule: Mapped[str | None] = mapped_column(Text)
+    filter_condition: Mapped[str | None] = mapped_column(Text)
+    join_condition: Mapped[str | None] = mapped_column(Text)
+    code_mapping_rule: Mapped[str | None] = mapped_column(Text)
+    null_handling_rule: Mapped[str | None] = mapped_column(Text)
+    reporting_condition: Mapped[str | None] = mapped_column(Text)
+    validation_rule: Mapped[str | None] = mapped_column(Text)
+    open_questions: Mapped[str | None] = mapped_column(Text)
+    ai_generated_content: Mapped[str | None] = mapped_column(Text)
+    final_content: Mapped[str | None] = mapped_column(Text)
+    confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
+    created_by: Mapped[str | None] = mapped_column(String(100))
+    reviewed_by: Mapped[str | None] = mapped_column(String(100))
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
+class MappingEvidenceReference(Base):
+    __tablename__ = "mapping_evidence_references"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    mapping_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    mapping_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    evidence_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    evidence_id: Mapped[int | None] = mapped_column(Integer)
+    source_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    location_text: Mapped[str | None] = mapped_column(String(255))
+    quoted_content: Mapped[str | None] = mapped_column(Text)
+    evidence_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @staticmethod
+    def supported_types() -> set[str]:
+        return {
+            "template_parse_result",
+            "document_chunk",
+            "sql_file",
+            "sql_parse_result",
+            "natural_language_task",
+            "sql_execution_log",
+            "db_query_result",
+            "datasource",
+            "source_field",
+            "mart_field",
+            "target_field",
+            "manual_note",
+        }
+
+
+class MappingVersion(Base):
+    __tablename__ = "mapping_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    mapping_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    mapping_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    change_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(100))
 
 
 class KnowledgeDocument(Base):
