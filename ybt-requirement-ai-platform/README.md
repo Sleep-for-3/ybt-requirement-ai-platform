@@ -24,6 +24,8 @@ docker compose up --build
 - 后端健康检查：[http://localhost:8000/api/health](http://localhost:8000/api/health)
 - 后端 OpenAPI：[http://localhost:8000/docs](http://localhost:8000/docs)
 
+如果当前机器没有 Docker CLI，也可以按 `docs/使用与验收说明.md` 使用本机 Python/Node 启动。
+
 ## 环境变量
 
 后端默认使用 mock LLM，便于无密钥演示。配置文件在 `backend/.env.example`。
@@ -115,3 +117,13 @@ Knowhere 是 Milvus 的底层向量执行引擎，业务平台应通过 Milvus A
 - 接入银行内网 vLLM / Ollama / 本地 embedding 模型。
 - 接入 Coze Studio Workflow。
 - 增加数据库 profiling 执行器和脱敏统计报告。
+
+## 验收脚本
+
+启动后端后，可以运行端到端 smoke test：
+
+```bash
+python scripts/smoke_test.py
+```
+
+脚本会创建项目、表、字段，上传 EAST 口径文档和 SQL，执行检索、生成口径、保存证据并审核通过。

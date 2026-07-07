@@ -17,6 +17,7 @@ npm-debug.log*
 .env
 .env.local
 storage/
+*.db
 
 # Docker and OS
 *.pid
