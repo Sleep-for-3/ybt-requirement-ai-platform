@@ -172,9 +172,20 @@ class FieldMappingDraftRead(OrmModel):
     final_content: str | None
     risk_points_json: list[Any]
     questions_for_human_json: list[Any]
+    template_reference_summary: str | None = None
+    db_query_summary: str | None = None
+    data_quality_notes: str | None = None
+    evidence_completeness: str = "medium"
     created_at: datetime
     updated_at: datetime
     evidences: list[EvidenceReferenceRead] = Field(default_factory=list)
+
+
+class GenerateMappingRequest(BaseModel):
+    include_template: bool = True
+    include_documents: bool = True
+    include_sql_parse_results: bool = True
+    include_nl_task_results: bool = True
 
 
 class GenerateMappingResponse(BaseModel):
@@ -207,3 +218,172 @@ class DbProfileTaskRead(OrmModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class TemplatePreviewItem(BaseModel):
+    sheet_name: str
+    table_code: str | None
+    table_name: str | None
+    field_count: int
+
+
+class TemplateUploadResponse(BaseModel):
+    template_id: int
+    file_name: str
+    parse_status: str
+    sheet_count: int
+    table_count: int
+    field_count: int
+    warnings: list[str]
+    preview: list[TemplatePreviewItem]
+
+
+class TemplateDocumentRead(OrmModel):
+    id: int
+    project_id: int
+    file_name: str
+    file_type: str
+    storage_path: str
+    sheet_names_json: list[Any]
+    parse_status: str
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TemplateParseResultRead(OrmModel):
+    id: int
+    template_document_id: int
+    project_id: int
+    sheet_name: str
+    table_code: str | None
+    table_name: str | None
+    field_count: int
+    raw_header_json: list[Any]
+    parsed_rows_json: list[Any]
+    warnings_json: list[Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class TemplateApplyResponse(BaseModel):
+    template_id: int
+    created_tables: int
+    updated_tables: int
+    created_fields: int
+    updated_fields: int
+    skipped_rows: int
+    warnings: list[str]
+
+
+class DataSourceCreate(BaseModel):
+    name: str
+    display_name: str | None = None
+    description: str | None = None
+    db_type: str
+    host: str | None = None
+    port: int | None = None
+    database_name: str | None = None
+    service_name: str | None = None
+    schema_name: str | None = None
+    username: str | None = None
+    password: str | None = None
+    connection_params_json: dict[str, Any] = Field(default_factory=dict)
+    readonly_flag: bool = True
+    enabled: bool = True
+
+
+class DataSourceUpdate(BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    db_type: str | None = None
+    host: str | None = None
+    port: int | None = None
+    database_name: str | None = None
+    service_name: str | None = None
+    schema_name: str | None = None
+    username: str | None = None
+    password: str | None = None
+    connection_params_json: dict[str, Any] | None = None
+    readonly_flag: bool | None = None
+    enabled: bool | None = None
+
+
+class DataSourceRead(OrmModel):
+    id: int
+    project_id: int
+    name: str
+    display_name: str | None
+    description: str | None
+    db_type: str
+    host: str | None
+    port: int | None
+    database_name: str | None
+    service_name: str | None
+    schema_name: str | None
+    username: str | None
+    connection_params_json: dict[str, Any]
+    readonly_flag: bool
+    enabled: bool
+    password_configured: bool
+    last_test_status: str | None
+    last_test_message: str | None
+    last_test_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DataSourceTestResponse(BaseModel):
+    status: str
+    message: str
+
+
+class SafeSqlRequest(BaseModel):
+    sql: str
+    max_rows: int = 100
+
+
+class SafeSqlResponse(BaseModel):
+    status: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    row_count: int = 0
+    execution_time_ms: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    sanitized_sql: str | None = None
+    reject_reason: str | None = None
+    error_message: str | None = None
+
+
+class NaturalLanguageTaskCreate(BaseModel):
+    project_id: int
+    text: str
+
+
+class NaturalLanguageTaskCreateResponse(BaseModel):
+    task_id: int
+    status: str
+    datasource_name: str | None = None
+    intent: str | None = None
+    extracted_table_name: str | None = None
+    extracted_field_name: str | None = None
+    message: str
+    available_datasources: list[str] = Field(default_factory=list)
+
+
+class NaturalLanguageTaskRead(OrmModel):
+    id: int
+    project_id: int
+    raw_text: str
+    datasource_id: int | None
+    datasource_name: str | None
+    intent: str | None
+    status: str
+    extracted_table_name: str | None
+    extracted_field_name: str | None
+    generated_sql_json: list[Any]
+    result_summary_json: dict[str, Any]
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+    created_by: int | None

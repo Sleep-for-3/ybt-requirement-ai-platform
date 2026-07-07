@@ -15,6 +15,10 @@ class MockLLMService(LLMService):
             "sql_reference_summary": "相关 SQL 片段显示客户表与业务合同表通过 customer_id 关联，并包含有效状态过滤条件。",
             "validation_notes": "需人工确认代码值范围、空值处理、以及业务系统和监管集市字段的一致性。",
             "confidence_level": "medium",
+            "template_reference_summary": "一表通模板提供了字段定义、必填属性和监管说明，可作为目标字段口径边界。",
+            "db_query_summary": "数据库探查证据显示可用于校验枚举分布、空值率和 distinct 情况。",
+            "data_quality_notes": "建议结合空值率、枚举覆盖率和代码集一致性进行人工复核。",
+            "evidence_completeness": "medium",
             "risk_points": ["历史口径和监管集市 SQL 可能存在字段命名不一致。"],
             "questions_for_human": ["请确认目标字段是否必须使用一表通最新监管代码集。"],
         }

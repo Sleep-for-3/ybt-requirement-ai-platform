@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.models import FieldMappingDraft, TargetField
-from app.schemas import FieldMappingDraftRead, GenerateMappingResponse, ReviewDraftRequest, TargetFieldCreate, TargetFieldRead
+from app.schemas import FieldMappingDraftRead, GenerateMappingRequest, GenerateMappingResponse, ReviewDraftRequest, TargetFieldCreate, TargetFieldRead
 from app.services.mapping_generator import generate_mapping_draft
 
 router = APIRouter(prefix="/fields", tags=["fields"])
@@ -40,9 +40,9 @@ def get_field(field_id: int, db: Session = Depends(get_db)) -> TargetField:
 
 
 @router.post("/{field_id}/generate-mapping", response_model=GenerateMappingResponse)
-async def generate_mapping(field_id: int, db: Session = Depends(get_db)) -> GenerateMappingResponse:
+async def generate_mapping(field_id: int, payload: GenerateMappingRequest | None = None, db: Session = Depends(get_db)) -> GenerateMappingResponse:
     try:
-        return await generate_mapping_draft(db, field_id=field_id)
+        return await generate_mapping_draft(db, field_id=field_id, options=payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
