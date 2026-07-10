@@ -94,28 +94,34 @@ def test_scenario_mappings_adopt_drafts_quality_checks_and_knowledge_search() ->
         business_with_draft = _put(
             client,
             f"/api/scenario-business-mappings/{business['id']}",
-            {"ai_generated_content": "AI 借记卡业务口径", "final_content": "人工业务口径"},
+            {"final_content": "人工业务口径"},
         )
+        generated_business = _post(client, f"/api/scenario-business-mappings/{business['id']}/generate-draft", {})
         adopted_business = _post(
             client,
             f"/api/scenario-business-mappings/{business['id']}/adopt-ai-draft",
             {},
         )
         assert business_with_draft["final_content"] == "人工业务口径"
-        assert adopted_business["final_content"] == "AI 借记卡业务口径"
+        assert generated_business["final_content"] == "人工业务口径"
+        assert generated_business["ai_generated_content"]
+        assert adopted_business["final_content"] == generated_business["ai_generated_content"]
 
         lineage_with_draft = _put(
             client,
             f"/api/scenario-technical-lineages/{lineage['id']}",
-            {"ai_generated_content": "AI 技术口径", "final_content": "人工技术口径"},
+            {"final_content": "人工技术口径"},
         )
+        generated_lineage = _post(client, f"/api/scenario-technical-lineages/{lineage['id']}/generate-draft", {})
         adopted_lineage = _post(
             client,
             f"/api/scenario-technical-lineages/{lineage['id']}/adopt-ai-draft",
             {},
         )
         assert lineage_with_draft["final_content"] == "人工技术口径"
-        assert adopted_lineage["final_content"] == "AI 技术口径"
+        assert generated_lineage["final_content"] == "人工技术口径"
+        assert generated_lineage["ai_generated_content"]
+        assert adopted_lineage["final_content"] == generated_lineage["ai_generated_content"]
 
         empty_business = _post(
             client,
@@ -153,6 +159,58 @@ def test_scenario_mappings_adopt_drafts_quality_checks_and_knowledge_search() ->
         assert knowledge["knowledge_type"] == "historical_mapping"
         assert search["items"][0]["id"] == knowledge["id"]
         assert search["items"][0]["score"] > 0
+
+
+def test_source_recommendations_are_scored_explained_and_selected_explicitly() -> None:
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "来源推荐项目"})
+        table = _post(client, "/api/target-tables", {
+            "project_id": project["id"], "table_code": "YBT_CARD", "table_name": "银行卡信息"
+        })
+        field = _post(client, "/api/fields", {
+            "project_id": project["id"], "target_table_id": table["id"], "field_code": "CARD_PRODUCT_ID",
+            "field_name": "卡产品编号", "field_definition": "银行卡产品唯一编号"
+        })
+        scenario = _post(client, f"/api/projects/{project['id']}/scenarios", {
+            "scenario_code": "DEBIT_CARD", "scenario_name": "借记卡"
+        })
+        unrelated_system = _post(client, f"/api/projects/{project['id']}/business-systems", {
+            "system_code": "OTHER", "system_name": "无关系统"
+        })
+        unrelated_table = _post(client, f"/api/business-systems/{unrelated_system['id']}/source-tables", {
+            "table_code": "OTHER_TABLE", "table_name": "无关表"
+        })
+        _post(client, f"/api/source-tables/{unrelated_table['id']}/source-fields", {
+            "field_code": "UNRELATED_VALUE", "field_name": "无关字段", "field_comment": "与卡产品无关"
+        })
+        card_system = _post(client, f"/api/projects/{project['id']}/business-systems", {
+            "system_code": "DCPS", "system_name": "借记卡系统"
+        })
+        card_table = _post(client, f"/api/business-systems/{card_system['id']}/source-tables", {
+            "table_code": "CPS_CARDPRODUCT", "table_name": "卡产品表", "schema_name": "ODS"
+        })
+        source = _post(client, f"/api/source-tables/{card_table['id']}/source-fields", {
+            "field_code": "CARD_PRODUCT_ID", "field_name": "卡产品编号", "field_comment": "银行卡产品唯一编号"
+        })
+        _post(client, f"/api/projects/{project['id']}/knowledge/items", {
+            "knowledge_type": "historical_mapping", "target_field_code": "CARD_PRODUCT_ID", "scenario_id": scenario["id"],
+            "business_explanation": "借记卡场景历史来源为 CPS_CARDPRODUCT.CARD_PRODUCT_ID"
+        })
+
+        response = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/recommend-sources", {})
+        top = response["recommendations"][0]
+        assert top["recommended_field_name"] == source["field_code"]
+        assert top["score"] > response["recommendations"][-1]["score"]
+        assert top["recommend_reason"]
+        assert top["evidence_summary"]
+        assert top["selected_flag"] is False
+
+        selected = _post(client, f"/api/source-recommendations/{top['id']}/select", {})
+        assert selected["recommendation"]["selected_flag"] is True
+        assert selected["lineage"]["source_system_name"] == "借记卡系统"
+        assert selected["lineage"]["source_table_english_name"] == "CPS_CARDPRODUCT"
+        assert selected["lineage"]["source_field_english_name"] == "CARD_PRODUCT_ID"
+        assert selected["lineage"]["final_content"] is None
 
 
 @contextmanager

@@ -1043,3 +1043,34 @@ class TraceabilityTemplateApplyResponse(BaseModel):
     created_knowledge_items: int = 0
     skipped_rows: int = 0
     warnings: list[str] = Field(default_factory=list)
+
+
+class CandidateSourceRecommendationRead(OrmModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    scenario_id: int
+    recommended_source_system: str | None
+    recommended_database_name: str | None
+    recommended_schema_name: str | None
+    recommended_table_name: str | None
+    recommended_table_comment: str | None
+    recommended_field_name: str | None
+    recommended_field_comment: str | None
+    recommended_processing_logic: str | None
+    recommend_reason: str
+    evidence_summary: str
+    confidence_level: str
+    score: float
+    selected_flag: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceRecommendationResponse(BaseModel):
+    recommendations: list[CandidateSourceRecommendationRead]
+
+
+class SourceRecommendationSelectionResponse(BaseModel):
+    recommendation: CandidateSourceRecommendationRead
+    lineage: ScenarioTechnicalLineageRead

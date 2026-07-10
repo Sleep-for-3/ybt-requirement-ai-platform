@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import MappingVersion, MartField, MartToYbtMapping, SourceToMartMapping, TargetField
+from app.models import MappingEvidenceReference, MappingVersion, MartField, MartToYbtMapping, SourceToMartMapping, TargetField
 from app.schemas import (
     MappingReviewRequest,
     MappingVersionCreate,
@@ -60,6 +60,7 @@ def update_source_to_mart_mapping(mapping_id: int, payload: SourceToMartMappingU
 @router.delete("/source-to-mart-mappings/{mapping_id}")
 def delete_source_to_mart_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     mapping = _get_source_to_mart_or_404(db, mapping_id)
+    _delete_mapping_dependencies(db, "source_to_mart", mapping_id)
     db.delete(mapping)
     db.commit()
     return {"status": "deleted"}
@@ -71,6 +72,18 @@ async def generate_source_to_mart_mapping_draft(mapping_id: int, db: Session = D
         return await generate_source_to_mart_draft(db, mapping_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/source-to-mart-mappings/{mapping_id}/adopt-ai-draft", response_model=SourceToMartMappingRead)
+def adopt_source_to_mart_draft(mapping_id: int, db: Session = Depends(get_db)) -> SourceToMartMapping:
+    mapping = _get_source_to_mart_or_404(db, mapping_id)
+    if not _has_text(mapping.ai_generated_content):
+        raise HTTPException(status_code=400, detail="AI draft is empty")
+    mapping.final_content = mapping.ai_generated_content
+    mapping.mapping_status = "draft"
+    db.commit()
+    db.refresh(mapping)
+    return mapping
 
 
 @router.post("/source-to-mart-mappings/{mapping_id}/approve", response_model=SourceToMartMappingRead)
@@ -143,6 +156,7 @@ def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate,
 @router.delete("/mart-to-ybt-mappings/{mapping_id}")
 def delete_mart_to_ybt_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    _delete_mapping_dependencies(db, "mart_to_ybt", mapping_id)
     db.delete(mapping)
     db.commit()
     return {"status": "deleted"}
@@ -154,6 +168,18 @@ async def generate_mart_to_ybt_mapping_draft(mapping_id: int, db: Session = Depe
         return await generate_mart_to_ybt_draft(db, mapping_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/mart-to-ybt-mappings/{mapping_id}/adopt-ai-draft", response_model=MartToYbtMappingRead)
+def adopt_mart_to_ybt_draft(mapping_id: int, db: Session = Depends(get_db)) -> MartToYbtMapping:
+    mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    if not _has_text(mapping.ai_generated_content):
+        raise HTTPException(status_code=400, detail="AI draft is empty")
+    mapping.final_content = mapping.ai_generated_content
+    mapping.mapping_status = "draft"
+    db.commit()
+    db.refresh(mapping)
+    return mapping
 
 
 @router.post("/mart-to-ybt-mappings/{mapping_id}/approve", response_model=MartToYbtMappingRead)
@@ -224,6 +250,8 @@ def _validate_status(status: str | None) -> None:
 def _approve_mapping(db: Session, mapping_type: str, mapping: SourceToMartMapping | MartToYbtMapping, payload: MappingReviewRequest) -> None:
     if payload.final_content is not None:
         mapping.final_content = payload.final_content
+    if not _has_text(mapping.final_content):
+        raise HTTPException(status_code=400, detail="final_content is required before approval")
     mapping.mapping_status = "approved"
     mapping.reviewed_by = payload.reviewed_by
     mapping.reviewed_at = datetime.now(UTC)
@@ -272,3 +300,14 @@ def _create_version(
     db.add(version)
     db.flush()
     return version
+
+
+def _delete_mapping_dependencies(db: Session, mapping_type: str, mapping_id: int) -> None:
+    for model in (MappingEvidenceReference, MappingVersion):
+        rows = db.scalars(select(model).where(model.mapping_type == mapping_type, model.mapping_id == mapping_id)).all()
+        for row in rows:
+            db.delete(row)
+
+
+def _has_text(value: str | None) -> bool:
+    return bool(value and value.strip())

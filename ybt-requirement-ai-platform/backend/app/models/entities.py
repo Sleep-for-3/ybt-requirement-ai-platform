@@ -393,6 +393,8 @@ class MappingEvidenceReference(Base):
             "mart_field",
             "target_field",
             "manual_note",
+            "regulatory_knowledge_item",
+            "source_recommendation",
         }
 
 

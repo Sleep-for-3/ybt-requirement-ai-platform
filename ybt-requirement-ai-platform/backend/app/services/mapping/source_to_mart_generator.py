@@ -1,5 +1,3 @@
-import json
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -76,8 +74,7 @@ def _apply_output(mapping: SourceToMartMapping, output: dict) -> None:
     mapping.quality_check_rule = output.get("quality_check_rule") or mapping.quality_check_rule
     mapping.open_questions = _questions_text(output.get("open_questions")) or mapping.open_questions
     mapping.confidence_level = output.get("confidence_level") or mapping.confidence_level
-    mapping.ai_generated_content = json.dumps(output, ensure_ascii=False)
-    mapping.final_content = _business_final_content(mapping, output)
+    mapping.ai_generated_content = _business_final_content(mapping, output)
 
 
 def _business_final_content(mapping: SourceToMartMapping, output: dict) -> str:

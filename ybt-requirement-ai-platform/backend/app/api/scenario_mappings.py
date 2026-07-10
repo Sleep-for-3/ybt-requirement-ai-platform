@@ -16,6 +16,7 @@ from app.schemas import (
     ScenarioTechnicalLineageRead,
     ScenarioTechnicalLineageUpdate,
 )
+from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
 
 router = APIRouter(tags=["scenario mappings"])
 
@@ -73,6 +74,14 @@ def adopt_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> Scen
     db.commit()
     db.refresh(mapping)
     return mapping
+
+
+@router.post("/scenario-business-mappings/{mapping_id}/generate-draft", response_model=ScenarioBusinessMappingRead)
+async def generate_scenario_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
+    try:
+        return await generate_business_draft(db, mapping_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/scenario-business-mappings/{mapping_id}/confirm", response_model=ScenarioBusinessMappingRead)
@@ -153,6 +162,14 @@ def adopt_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> Sce
     db.commit()
     db.refresh(lineage)
     return lineage
+
+
+@router.post("/scenario-technical-lineages/{lineage_id}/generate-draft", response_model=ScenarioTechnicalLineageRead)
+async def generate_scenario_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
+    try:
+        return await generate_technical_draft(db, lineage_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/scenario-technical-lineages/{lineage_id}/confirm", response_model=ScenarioTechnicalLineageRead)

@@ -3,12 +3,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import MappingEvidenceReference, MartToYbtMapping, SourceToMartMapping
+from app.models import MappingEvidenceReference, MartToYbtMapping, ScenarioBusinessMapping, ScenarioTechnicalLineage, SourceToMartMapping
 from app.schemas import MappingEvidenceCreate, MappingEvidenceRead
 
 router = APIRouter(tags=["mapping evidence"])
 
-VALID_MAPPING_TYPES = {"source_to_mart", "mart_to_ybt"}
+VALID_MAPPING_TYPES = {"source_to_mart", "mart_to_ybt", "scenario_business", "scenario_technical"}
 
 
 @router.post("/mappings/{mapping_type}/{mapping_id}/evidence", response_model=MappingEvidenceRead)
@@ -63,8 +63,12 @@ def _mapping_project_id(db: Session, mapping_type: str, mapping_id: int) -> int:
         raise HTTPException(status_code=400, detail="Invalid mapping_type")
     if mapping_type == "source_to_mart":
         mapping = db.get(SourceToMartMapping, mapping_id)
-    else:
+    elif mapping_type == "mart_to_ybt":
         mapping = db.get(MartToYbtMapping, mapping_id)
+    elif mapping_type == "scenario_business":
+        mapping = db.get(ScenarioBusinessMapping, mapping_id)
+    else:
+        mapping = db.get(ScenarioTechnicalLineage, mapping_id)
     if mapping is None:
         raise HTTPException(status_code=404, detail="Mapping not found")
     return mapping.project_id

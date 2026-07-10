@@ -19,6 +19,7 @@ from app.api import (
     retrieval,
     scenarios,
     scenario_mappings,
+    source_recommendations,
     sql_files,
     target_fields,
     target_tables,
@@ -73,3 +74,4 @@ app.include_router(scenario_mappings.router, prefix=settings.api_prefix)
 app.include_router(knowledge_items.router, prefix=settings.api_prefix)
 app.include_router(traceability_templates.router, prefix=settings.api_prefix)
 app.include_router(traceability_export.router, prefix=settings.api_prefix)
+app.include_router(source_recommendations.router, prefix=settings.api_prefix)
