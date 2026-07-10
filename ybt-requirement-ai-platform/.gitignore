@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Env and storage
+.env
+.env.local
+storage/
+*.db
+
+# Docker and OS
+*.pid
+.DS_Store
+Thumbs.db
