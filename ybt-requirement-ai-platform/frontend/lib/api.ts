@@ -25,6 +25,112 @@ export type TargetField = {
   required_flag: boolean;
   field_definition?: string | null;
   regulatory_description?: string | null;
+  data_category?: string | null;
+  data_format?: string | null;
+  regulatory_original_definition?: string | null;
+  regulatory_refined_definition?: string | null;
+  report_name?: string | null;
+  report_field_name?: string | null;
+  east_definition?: string | null;
+  internal_definition?: string | null;
+  remarks?: string | null;
+};
+
+export type ProductScenario = {
+  id: number;
+  project_id: number;
+  scenario_code: string;
+  scenario_name: string;
+  scenario_type?: string | null;
+  description?: string | null;
+  business_owner?: string | null;
+  tech_owner?: string | null;
+  enabled: boolean;
+  sort_order: number;
+};
+
+export type ScenarioBusinessMapping = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  scenario_id: number;
+  business_definition?: string | null;
+  source_system_screenshot_required: boolean;
+  source_system_change_required: boolean;
+  external_data_required: boolean;
+  manual_supplement_required: boolean;
+  business_owner?: string | null;
+  business_confirm_status: string;
+  remarks?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+  open_questions?: string | null;
+};
+
+export type ScenarioTechnicalLineage = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  scenario_id: number;
+  business_mapping_id?: number | null;
+  source_system_name?: string | null;
+  source_database_name?: string | null;
+  source_schema_name?: string | null;
+  source_table_english_name?: string | null;
+  source_table_chinese_name?: string | null;
+  source_field_english_name?: string | null;
+  source_field_chinese_name?: string | null;
+  processing_logic?: string | null;
+  processing_logic_type?: string | null;
+  tech_owner?: string | null;
+  tech_confirm_status: string;
+  remarks?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+  open_questions?: string | null;
+};
+
+export type CandidateSourceRecommendation = {
+  id: number;
+  recommended_source_system?: string | null;
+  recommended_database_name?: string | null;
+  recommended_schema_name?: string | null;
+  recommended_table_name?: string | null;
+  recommended_table_comment?: string | null;
+  recommended_field_name?: string | null;
+  recommended_field_comment?: string | null;
+  recommended_processing_logic?: string | null;
+  recommend_reason: string;
+  evidence_summary: string;
+  confidence_level: string;
+  score: number;
+  selected_flag: boolean;
+};
+
+export type RegulatoryKnowledgeItem = {
+  id: number;
+  knowledge_type: string;
+  target_field_code?: string | null;
+  scenario_id?: number | null;
+  business_explanation?: string | null;
+  source_document_name?: string | null;
+  source_sheet_name?: string | null;
+  source_cell_range?: string | null;
+  score?: number;
+};
+
+export type TraceabilityTemplateDocument = {
+  id: number;
+  project_id: number;
+  file_name: string;
+  parse_status: string;
+  sheet_names_json: string[];
+  detected_scenarios_json: Array<{ scenario_code: string; scenario_name: string }>;
+  parse_summary_json: Record<string, number>;
+  warnings_json: string[];
+  error_message?: string | null;
 };
 
 export type KnowledgeDocument = {
@@ -346,4 +452,14 @@ export async function uploadForm<T>(path: string, formData: FormData): Promise<T
     throw new Error(await response.text());
   }
   return response.json();
+}
+
+export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string }> {
+  const response = await fetch(`${API_BASE}${path}`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  const disposition = response.headers.get("content-disposition") || "";
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : "业务口径及技术溯源表.xlsx" };
 }
