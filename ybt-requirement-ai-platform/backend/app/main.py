@@ -23,6 +23,8 @@ from app.api import (
     target_fields,
     target_tables,
     templates,
+    traceability_templates,
+    traceability_export,
 )
 from app.core.settings import get_settings
 
@@ -69,3 +71,5 @@ app.include_router(mapping_export.router, prefix=settings.api_prefix)
 app.include_router(scenarios.router, prefix=settings.api_prefix)
 app.include_router(scenario_mappings.router, prefix=settings.api_prefix)
 app.include_router(knowledge_items.router, prefix=settings.api_prefix)
+app.include_router(traceability_templates.router, prefix=settings.api_prefix)
+app.include_router(traceability_export.router, prefix=settings.api_prefix)

@@ -982,3 +982,64 @@ class ScoredKnowledgeItem(RegulatoryKnowledgeItemRead):
 
 class KnowledgeSearchResponse(BaseModel):
     items: list[ScoredKnowledgeItem]
+
+
+class TraceabilityTemplateDocumentRead(OrmModel):
+    id: int
+    project_id: int
+    file_name: str
+    storage_path: str
+    parse_status: str
+    sheet_names_json: list[Any]
+    detected_scenarios_json: list[Any]
+    parse_summary_json: dict[str, Any]
+    warnings_json: list[Any]
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TraceabilityTemplateParseResultRead(OrmModel):
+    id: int
+    project_id: int
+    template_document_id: int
+    sheet_name: str
+    header_start_row: int
+    header_end_row: int
+    fixed_columns_json: list[Any]
+    scenario_groups_json: list[Any]
+    parsed_rows_json: list[Any]
+    warnings_json: list[Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class TraceabilityTemplateUploadResponse(BaseModel):
+    template_id: int
+    file_name: str
+    parse_status: str
+    sheet_count: int
+    row_count: int
+    detected_scenarios: list[dict[str, str]]
+    warnings: list[str]
+
+
+class TraceabilityTemplatePreviewResponse(BaseModel):
+    document: TraceabilityTemplateDocumentRead
+    results: list[TraceabilityTemplateParseResultRead]
+
+
+class TraceabilityTemplateApplyResponse(BaseModel):
+    template_id: int
+    created_tables: int = 0
+    created_fields: int = 0
+    updated_fields: int = 0
+    created_scenarios: int = 0
+    updated_scenarios: int = 0
+    created_business_mappings: int = 0
+    updated_business_mappings: int = 0
+    created_technical_lineages: int = 0
+    updated_technical_lineages: int = 0
+    created_knowledge_items: int = 0
+    skipped_rows: int = 0
+    warnings: list[str] = Field(default_factory=list)
