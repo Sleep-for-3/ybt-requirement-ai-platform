@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 
 import httpx
+from docx import Document
 from openpyxl import Workbook, load_workbook
 
 
@@ -27,9 +28,19 @@ def main() -> None:
         temp_path = Path(temp_dir)
         excel_path = temp_path / "一表通模板.xlsx"
         traceability_path = temp_path / "脱敏业务口径及溯源表.xlsx"
+        qa_path = temp_path / "监管答疑.xlsx"
+        historical_path = temp_path / "历史业务口径.xlsx"
+        policy_path = temp_path / "监管制度.docx"
+        pdf_path = temp_path / "监管说明.pdf"
+        sql_path = temp_path / "历史取数逻辑.sql"
         sqlite_path = temp_path / "ecif_query.db"
         _write_template(excel_path)
         _write_traceability_template(traceability_path)
+        _write_qa(qa_path)
+        _write_historical_mapping(historical_path)
+        _write_policy_docx(policy_path)
+        _write_text_pdf(pdf_path)
+        sql_path.write_text("select cert_type from ecif_customer where status = 'A'", encoding="utf-8")
         _write_sqlite_source(sqlite_path)
 
         with excel_path.open("rb") as file:
@@ -54,6 +65,46 @@ def main() -> None:
         fields = client.get(f"{base}/fields", params={"project_id": project_id})
         fields.raise_for_status()
         field = next(item for item in fields.json() if item["field_code"] == "CERT_TYPE")
+
+        knowledge_documents = [
+            _upload_knowledge(client, base, project_id, qa_path, "regulatory_qa", "institution", "示例银行"),
+            _upload_knowledge(client, base, project_id, historical_path, "historical_mapping"),
+            _upload_knowledge(client, base, project_id, policy_path, "regulatory_policy"),
+            _upload_knowledge(client, base, project_id, pdf_path, "regulatory_policy"),
+            _upload_knowledge(client, base, project_id, sql_path, "sql_evidence"),
+        ]
+        knowledge_units = _get_json(client, f"{base}/projects/{project_id}/knowledge/units")
+        qa_unit = next(item for item in knowledge_units if item["knowledge_type"] == "regulatory_qa")
+        if qa_unit.get("source_sheet_name") != "答疑" or not qa_unit.get("source_cell_range"):
+            raise AssertionError("监管答疑未保留 sheet 和单元格引用")
+        pdf_unit = next(item for item in knowledge_units if item["source_file_name"] == "监管说明.pdf")
+        if pdf_unit.get("source_page_no") != 1:
+            raise AssertionError("PDF 知识未保留页码")
+        knowledge_search = _post_json(client, f"{base}/projects/{project_id}/knowledge/hybrid-search", {
+            "query": "借记卡客户证件类型 CERT_TYPE", "target_field_id": field["id"], "top_k": 10,
+        })
+        search_types = {item["knowledge_type"] for item in knowledge_search["items"]}
+        if not {"regulatory_qa", "historical_mapping"}.issubset(search_types):
+            raise AssertionError(f"混合检索未命中监管答疑和历史口径: {search_types}")
+        grounded = _post_json(client, f"{base}/projects/{project_id}/knowledge/ask", {
+            "query": "借记卡客户证件类型取哪个字段", "target_field_id": field["id"], "top_k": 10,
+        })
+        if not grounded["citations"] or grounded["citations"][0]["knowledge_unit_id"] not in {item["id"] for item in knowledge_units}:
+            raise AssertionError("知识问答未返回真实 citation")
+        no_evidence = _post_json(client, f"{base}/projects/{project_id}/knowledge/ask", {
+            "query": "完全未知字段 ZXQ_999", "knowledge_types": ["manual_note"], "top_k": 5,
+        })
+        if no_evidence["citations"] or "待确认" not in no_evidence["answer"]:
+            raise AssertionError("无证据问答未返回待确认")
+        evaluation_case = _post_json(client, f"{base}/projects/{project_id}/evaluations/cases", {
+            "case_name": "借记卡证件类型召回", "query_text": "借记卡客户证件类型 CERT_TYPE",
+            "target_field_id": field["id"], "expected_knowledge_unit_ids_json": [qa_unit["id"]],
+            "expected_table_name": "ecif_customer", "expected_field_name": "cert_type",
+            "expected_answer_keywords_json": ["CERT_TYPE"],
+        })
+        evaluation_run = _post_json(client, f"{base}/projects/{project_id}/evaluations/runs", {"run_name": "Smoke RAG 回归"})
+        if evaluation_run["summary_metrics_json"].get("recall_at_5", 0) <= 0 or evaluation_run["summary_metrics_json"].get("mrr", 0) <= 0:
+            raise AssertionError("RAG 评测 Recall@5 或 MRR 未命中")
 
         datasource = _post_json(
             client,
@@ -123,6 +174,8 @@ def main() -> None:
             {},
         )
         catalog_recommendation = next(item for item in source_recommendations["recommendations"] if item.get("catalog_column_id") == catalog_cert_type["catalog_column_id"])
+        if not catalog_recommendation.get("knowledge_unit_ids_json") or not catalog_recommendation.get("citation_summary_json"):
+            raise AssertionError("目录来源推荐未携带知识引用")
         selected_recommendation = _post_json(
             client,
             f"{base}/source-recommendations/{catalog_recommendation['id']}/select",
@@ -305,6 +358,17 @@ def main() -> None:
             row for row in range(3, exported_sheet.max_row + 1)
             if str(exported_sheet.cell(row, 1).value or "") == "CERT_TYPE"
         )
+        source_profile_binding = _post_json(client, f"{base}/profile-tasks/{column_profile['id']}/bind-evidence", {
+            "mapping_type": "source_to_mart", "mapping_id": source_to_mart["id"],
+        })
+        source_profile_binding_again = _post_json(client, f"{base}/profile-tasks/{column_profile['id']}/bind-evidence", {
+            "mapping_type": "source_to_mart", "mapping_id": source_to_mart["id"],
+        })
+        ybt_profile_binding = _post_json(client, f"{base}/profile-tasks/{column_profile['id']}/bind-evidence", {
+            "mapping_type": "mart_to_ybt", "mapping_id": mart_to_ybt["id"],
+        })
+        if source_profile_binding_again["id"] != source_profile_binding["id"] or ybt_profile_binding["mapping_type"] != "mart_to_ybt":
+            raise AssertionError("探查证据绑定两层口径未保持幂等")
         exported_source_table = exported_sheet.cell(exported_field_row, debit_source_columns["来源表英文名"]).value
         exported_source_field = exported_sheet.cell(exported_field_row, debit_source_columns["来源字段英文名"]).value
         if exported_source_table != "ecif_customer" or exported_source_field != "cert_type":
@@ -327,6 +391,13 @@ def main() -> None:
 
         output = {
             "project_id": project_id,
+            "knowledge_document_ids": [item["id"] for item in knowledge_documents],
+            "knowledge_unit_count": len(knowledge_units),
+            "knowledge_search_types": sorted(search_types),
+            "knowledge_citation_count": len(grounded["citations"]),
+            "evaluation_case_id": evaluation_case["id"],
+            "evaluation_run_id": evaluation_run["id"],
+            "evaluation_metrics": evaluation_run["summary_metrics_json"],
             "template_status": template["parse_status"],
             "template_field_count": template["field_count"],
             "apply_result": apply_result,
@@ -366,7 +437,7 @@ def main() -> None:
             "mart_to_ybt_mapping_status": ybt_approved["mapping_status"],
             "source_draft_confidence": source_draft["confidence_level"],
             "ybt_draft_confidence": ybt_draft["confidence_level"],
-            "mapping_evidence_ids": [source_evidence["id"], ybt_evidence["id"]],
+            "mapping_evidence_ids": [source_evidence["id"], ybt_evidence["id"], source_profile_binding["id"], ybt_profile_binding["id"]],
             "export_markdown_chars": len(markdown),
             "draft_id": draft["id"],
             "evidence_types": evidence_types,
@@ -375,6 +446,84 @@ def main() -> None:
             "evidence_completeness": draft.get("evidence_completeness"),
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+def _upload_knowledge(
+    client: httpx.Client,
+    base: str,
+    project_id: int,
+    path: Path,
+    knowledge_type: str,
+    knowledge_scope: str = "project",
+    institution_name: str = "",
+) -> dict:
+    with path.open("rb") as file:
+        return _post_file(
+            client,
+            f"{base}/projects/{project_id}/knowledge/documents/upload",
+            data={
+                "knowledge_type": knowledge_type,
+                "knowledge_scope": knowledge_scope,
+                "institution_name": institution_name,
+                "confidentiality_level": "internal",
+            },
+            files={"file": (path.name, file, "application/octet-stream")},
+        )
+
+
+def _write_qa(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "答疑"
+    sheet.append(["问题", "监管回复", "表代码", "字段代码", "字段名称", "业务场景"])
+    sheet.append([
+        "借记卡客户证件类型应如何取值",
+        "优先采用 ECIF_CUSTOMER.CERT_TYPE，并按一表通代码集转换。",
+        "YBT_CUSTOMER",
+        "CERT_TYPE",
+        "客户证件类型",
+        "借记卡",
+    ])
+    workbook.save(path)
+
+
+def _write_historical_mapping(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "历史口径"
+    sheet.append(["字段代码", "字段名称", "来源系统", "来源表", "来源字段", "处理逻辑"])
+    sheet.append(["CERT_TYPE", "客户证件类型", "ECIF", "ecif_customer", "cert_type", "有效客户范围内直接取值并转换码值"])
+    workbook.save(path)
+
+
+def _write_policy_docx(path: Path) -> None:
+    document = Document()
+    document.add_heading("客户证件类型监管范围", level=1)
+    document.add_paragraph("借记卡客户证件类型应有真实来源字段和可验证数据质量证据。")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "字段"
+    table.cell(0, 1).text = "CERT_TYPE"
+    document.save(path)
+
+
+def _write_text_pdf(path: Path) -> None:
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length 62 >>\nstream\nBT /F1 12 Tf 72 720 Td (Regulatory CERT_TYPE guidance) Tj ET\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    content = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, value in enumerate(objects, 1):
+        offsets.append(len(content))
+        content += f"{number} 0 obj\n".encode() + value + b"\nendobj\n"
+    xref_offset = len(content)
+    content += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    content += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:])
+    content += f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode()
+    path.write_bytes(content)
 
 
 def _write_template(path: Path) -> None:

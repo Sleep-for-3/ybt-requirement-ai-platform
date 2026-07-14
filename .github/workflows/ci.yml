@@ -15,6 +15,7 @@ jobs:
       DATABASE_URL: sqlite:///./ci_test.db
       STORAGE_DIR: /tmp/ybt-storage
       LLM_PROVIDER: mock
+      EMBEDDING_PROVIDER: mock
       VECTOR_STORE_PROVIDER: mock
       APP_SECRET_KEY: ci-only-test-key
     steps:
