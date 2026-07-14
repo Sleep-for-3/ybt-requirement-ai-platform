@@ -141,7 +141,14 @@ def _score_candidate(target, scenario, source, table, system, knowledge, history
         score += 0.2 * name_similarity
         reasons.append("字段名称匹配")
         evidence.append(f"源字段名称“{source.field_name}”与目标字段“{target.field_name}”相近")
-    target_text = " ".join(filter(None, [target.field_definition, target.regulatory_description, target.east_definition]))
+    target_text = " ".join(filter(None, [
+        target.field_definition,
+        target.regulatory_description,
+        target.regulatory_original_definition,
+        target.regulatory_refined_definition,
+        target.east_definition,
+        target.internal_definition,
+    ]))
     comment_similarity = _similarity(source.field_comment or source.description or "", target_text)
     if comment_similarity >= 0.25:
         score += 0.15 * comment_similarity
@@ -155,14 +162,24 @@ def _score_candidate(target, scenario, source, table, system, knowledge, history
         score += 0.1
         reasons.append("历史场景来源匹配")
         evidence.append(f"{scenario.scenario_name}历史技术溯源包含该系统、表或字段")
-    knowledge_text = " ".join(
-        " ".join(filter(None, [item.business_explanation, item.answer_text, item.regulatory_reply, item.target_field_code]))
-        for item in knowledge
-    ).lower()
-    if any(value and value.lower() in knowledge_text for value in [system.system_name, table.table_code, source.field_code]):
-        score += 0.1
-        reasons.append("历史口径或监管知识匹配")
-        evidence.append("结构化历史知识中出现该来源候选")
+    source_tokens = [system.system_name, table.table_code, source.field_code]
+    matching_knowledge = [item for item in knowledge if _mentions_source(item, source_tokens)]
+    if any(item.knowledge_type == "historical_mapping" for item in matching_knowledge):
+        score += 0.08
+        reasons.append("历史表字段匹配")
+        evidence.append("历史技术溯源知识中出现该来源表或字段")
+    if any(item.scenario_id == scenario.id for item in matching_knowledge):
+        score += 0.07
+        reasons.append("场景匹配")
+        evidence.append(f"{scenario.scenario_name}场景的结构化知识命中该来源候选")
+    if any(item.knowledge_type == "regulatory_qa" for item in matching_knowledge):
+        score += 0.05
+        reasons.append("监管答疑匹配")
+        evidence.append("监管答疑知识中出现该来源候选")
+    if any(item.knowledge_type == "east_mapping" for item in matching_knowledge):
+        score += 0.05
+        reasons.append("EAST 映射匹配")
+        evidence.append("EAST 同源映射知识中出现该来源候选")
     if any(value and value.lower() in sql_context for value in [table.table_code, source.field_code]):
         score += 0.05
         reasons.append("SQL 解析证据匹配")
@@ -180,6 +197,17 @@ def _score_candidate(target, scenario, source, table, system, knowledge, history
 def _sql_context(db: Session, project_id: int) -> str:
     rows = db.scalars(select(SqlParseResult).where(SqlParseResult.project_id == project_id)).all()
     return " ".join(str(value) for row in rows for value in [row.source_tables_json, row.selected_fields_json]).lower()
+
+
+def _mentions_source(item: RegulatoryKnowledgeItem, tokens: list[str | None]) -> bool:
+    text = " ".join(filter(None, [
+        item.question_text,
+        item.answer_text,
+        item.institution_suggestion,
+        item.regulatory_reply,
+        item.business_explanation,
+    ])).lower()
+    return any(token and token.lower() in text for token in tokens)
 
 
 def _norm(value: str | None) -> str:

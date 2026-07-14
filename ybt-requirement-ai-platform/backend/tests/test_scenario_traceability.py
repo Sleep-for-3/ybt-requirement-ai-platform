@@ -136,6 +136,34 @@ def test_scenario_mappings_adopt_drafts_quality_checks_and_knowledge_search() ->
         assert confirmed_business["business_confirm_status"] == "confirmed"
         assert confirmed_lineage["tech_confirm_status"] == "confirmed"
 
+        pending_scenario = _post(
+            client,
+            f"/api/projects/{project['id']}/scenarios",
+            {"scenario_code": "PENDING", "scenario_name": "待确认场景"},
+        )
+        empty_business = _post(
+            client,
+            f"/api/target-fields/{field['id']}/scenarios/{pending_scenario['id']}/business-mapping",
+            {},
+        )
+        empty_lineage = _post(
+            client,
+            f"/api/target-fields/{field['id']}/scenarios/{pending_scenario['id']}/technical-lineage",
+            {},
+        )
+        assert client.post(f"/api/scenario-business-mappings/{empty_business['id']}/confirm", json={}).status_code == 400
+        assert client.post(f"/api/scenario-technical-lineages/{empty_lineage['id']}/confirm", json={}).status_code == 400
+        invalid_business_status = client.put(
+            f"/api/scenario-business-mappings/{empty_business['id']}",
+            json={"business_confirm_status": "approved_without_review"},
+        )
+        invalid_tech_status = client.put(
+            f"/api/scenario-technical-lineages/{empty_lineage['id']}",
+            json={"tech_confirm_status": "approved_without_review"},
+        )
+        assert invalid_business_status.status_code == 400
+        assert invalid_tech_status.status_code == 400
+
         knowledge = _post(
             client,
             f"/api/projects/{project['id']}/knowledge/items",
@@ -202,6 +230,7 @@ def test_source_recommendations_are_scored_explained_and_selected_explicitly() -
         assert top["recommended_field_name"] == source["field_code"]
         assert top["score"] > response["recommendations"][-1]["score"]
         assert top["recommend_reason"]
+        assert "场景匹配" in top["recommend_reason"]
         assert top["evidence_summary"]
         assert top["selected_flag"] is False
 

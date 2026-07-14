@@ -78,6 +78,8 @@ def export_traceability_workbook(db: Session, project_id: int, table_id: int | N
                 column += 1
             for key, _ in TECHNICAL_HEADERS:
                 value = getattr(lineage, key, None) if lineage else None
+                if key == "processing_logic" and lineage and lineage.final_content:
+                    value = lineage.final_content
                 sheet.cell(row_number, column, _display(value))
                 column += 1
     _style_main_sheet(sheet, max(len(fields) + 2, 2))

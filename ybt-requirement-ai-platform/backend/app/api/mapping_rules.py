@@ -252,6 +252,14 @@ def _approve_mapping(db: Session, mapping_type: str, mapping: SourceToMartMappin
         mapping.final_content = payload.final_content
     if not _has_text(mapping.final_content):
         raise HTTPException(status_code=400, detail="final_content is required before approval")
+    evidence_id = db.scalar(
+        select(MappingEvidenceReference.id).where(
+            MappingEvidenceReference.mapping_type == mapping_type,
+            MappingEvidenceReference.mapping_id == mapping.id,
+        ).limit(1)
+    )
+    if evidence_id is None:
+        raise HTTPException(status_code=400, detail="At least one evidence reference is required before approval")
     mapping.mapping_status = "approved"
     mapping.reviewed_by = payload.reviewed_by
     mapping.reviewed_at = datetime.now(UTC)

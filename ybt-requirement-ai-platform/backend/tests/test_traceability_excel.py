@@ -66,6 +66,13 @@ def test_upload_preview_and_apply_create_scenarios_mappings_lineage_and_knowledg
         assert applied["created_technical_lineages"] == 2
         assert applied["created_knowledge_items"] >= 5
 
+        reapplied = _post(client, f"/api/traceability-templates/{uploaded['template_id']}/apply", {})
+        assert reapplied["created_fields"] == 0
+        assert reapplied["created_scenarios"] == 0
+        assert reapplied["created_business_mappings"] == 0
+        assert reapplied["created_technical_lineages"] == 0
+        assert reapplied["created_knowledge_items"] == 0
+
         scenarios = _get(client, f"/api/projects/{project['id']}/scenarios")
         fields = _get(client, f"/api/fields?project_id={project['id']}")
         field_id = fields[0]["id"]
@@ -73,6 +80,8 @@ def test_upload_preview_and_apply_create_scenarios_mappings_lineage_and_knowledg
         lineages = _get(client, f"/api/target-fields/{field_id}/scenario-technical-lineages")
         knowledge = _get(client, f"/api/projects/{project['id']}/knowledge/items?target_field_code=CARD_PRODUCT_ID")
         assert len(scenarios) == 3
+        assert len(businesses) == 2
+        assert len(lineages) == 2
         assert {item["business_definition"] for item in businesses} == {"借记卡产品唯一编号", "信用卡产品编号"}
         assert {item["source_system_name"] for item in lineages} == {"借记卡系统", "信贷系统"}
         assert all(item["source_cell_range"] for item in knowledge)
@@ -88,6 +97,15 @@ def test_export_traceability_workbook_has_fixed_and_merged_scenario_headers() ->
         )
         upload.raise_for_status()
         _post(client, f"/api/traceability-templates/{upload.json()['template_id']}/apply", {})
+
+        field = _get(client, f"/api/fields?project_id={project['id']}")[0]
+        lineages = _get(client, f"/api/target-fields/{field['id']}/scenario-technical-lineages")
+        debit_lineage = next(item for item in lineages if item["source_system_name"] == "借记卡系统")
+        _put(
+            client,
+            f"/api/scenario-technical-lineages/{debit_lineage['id']}",
+            {"final_content": "人工最终技术口径：借记卡产品字段直接取值。"},
+        )
 
         response = client.get(f"/api/projects/{project['id']}/export/traceability-workbook")
         response.raise_for_status()
@@ -105,6 +123,9 @@ def test_export_traceability_workbook_has_fixed_and_merged_scenario_headers() ->
         assert "处理逻辑" in second_headers
         assert "技术口径确认人" in second_headers
         assert sheet.freeze_panes == "L3"
+        assert "人工最终技术口径：借记卡产品字段直接取值。" in [
+            sheet.cell(3, column).value for column in range(1, sheet.max_column + 1)
+        ]
         assert any(cell_range.min_row == 1 and cell_range.max_row == 1 for cell_range in sheet.merged_cells.ranges)
 
 
@@ -194,5 +215,11 @@ def _post(client: TestClient, path: str, payload: dict) -> dict:
 
 def _get(client: TestClient, path: str) -> dict | list[dict]:
     response = client.get(path)
+    response.raise_for_status()
+    return response.json()
+
+
+def _put(client: TestClient, path: str, payload: dict) -> dict:
+    response = client.put(path, json=payload)
     response.raise_for_status()
     return response.json()

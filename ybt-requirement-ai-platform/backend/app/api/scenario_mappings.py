@@ -24,6 +24,7 @@ PROCESSING_LOGIC_TYPES = {
     "direct", "default_value", "code_mapping", "concatenate", "calculate", "conditional",
     "manual_supplement", "external_data", "pending_confirmation",
 }
+CONFIRM_STATUSES = {"draft", "pending", "confirmed", "rejected"}
 
 
 @router.post("/target-fields/{field_id}/scenarios/{scenario_id}/business-mapping", response_model=ScenarioBusinessMappingRead)
@@ -50,7 +51,9 @@ def get_business_mapping(mapping_id: int, db: Session = Depends(get_db)) -> Scen
 @router.put("/scenario-business-mappings/{mapping_id}", response_model=ScenarioBusinessMappingRead)
 def update_business_mapping(mapping_id: int, payload: ScenarioBusinessMappingUpdate, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
-    _apply(mapping, payload.model_dump(exclude_unset=True))
+    updates = payload.model_dump(exclude_unset=True)
+    _validate_confirm_status(updates.get("business_confirm_status"))
+    _apply(mapping, updates)
     db.commit()
     db.refresh(mapping)
     return mapping
@@ -138,7 +141,9 @@ def get_technical_lineage(lineage_id: int, db: Session = Depends(get_db)) -> Sce
 def update_technical_lineage(lineage_id: int, payload: ScenarioTechnicalLineageUpdate, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
     _validate_logic_type(payload.processing_logic_type)
-    _apply(lineage, payload.model_dump(exclude_unset=True))
+    updates = payload.model_dump(exclude_unset=True)
+    _validate_confirm_status(updates.get("tech_confirm_status"))
+    _apply(lineage, updates)
     db.commit()
     db.refresh(lineage)
     return lineage
@@ -237,6 +242,11 @@ def _lineage_or_404(db: Session, lineage_id: int) -> ScenarioTechnicalLineage:
 def _validate_logic_type(value: str | None) -> None:
     if value is not None and value not in PROCESSING_LOGIC_TYPES:
         raise HTTPException(status_code=400, detail="Invalid processing_logic_type")
+
+
+def _validate_confirm_status(value: str | None) -> None:
+    if value is not None and value not in CONFIRM_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid confirmation status")
 
 
 def _apply(model: object, values: dict) -> None:

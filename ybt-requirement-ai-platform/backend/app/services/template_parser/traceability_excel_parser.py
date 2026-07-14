@@ -64,7 +64,20 @@ class TraceabilityExcelParser:
         if path.suffix.lower() != ".xlsx":
             raise ValueError("业务口径及溯源表只支持 .xlsx 文件。")
         workbook = load_workbook(path, data_only=True)
-        results = [self._parse_sheet(sheet) for sheet in workbook.worksheets]
+        results = []
+        for sheet in workbook.worksheets:
+            try:
+                results.append(self._parse_sheet(sheet))
+            except Exception as exc:
+                results.append(TraceabilitySheetResult(
+                    sheet_name=sheet.title,
+                    header_start_row=1,
+                    header_end_row=1,
+                    fixed_columns=[],
+                    scenario_groups=[],
+                    parsed_rows=[],
+                    warnings=[f"Sheet {sheet.title} 解析失败，已跳过：{exc}"],
+                ))
         scenarios: dict[str, dict[str, str]] = {}
         for result in results:
             for group in result.scenario_groups:
