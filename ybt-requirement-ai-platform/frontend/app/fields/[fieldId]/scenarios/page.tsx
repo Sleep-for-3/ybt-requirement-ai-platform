@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import {
-  CandidateSourceRecommendation, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
+  CandidateSourceRecommendation, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
   ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
 } from "@/lib/api";
 
@@ -33,6 +33,9 @@ export default function FieldScenarioPage() {
   const [lineageForm, setLineageForm] = useState<Record<string, string>>(EMPTY_LINEAGE);
   const [knowledge, setKnowledge] = useState<RegulatoryKnowledgeItem[]>([]);
   const [recommendations, setRecommendations] = useState<CandidateSourceRecommendation[]>([]);
+  const [technicalEvidences, setTechnicalEvidences] = useState<MappingEvidence[]>([]);
+  const [evidenceText, setEvidenceText] = useState("");
+  const [showEvidenceForm, setShowEvidenceForm] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -82,6 +85,12 @@ export default function FieldScenarioPage() {
       open_questions: lineage.open_questions || "",
     } : EMPTY_LINEAGE);
     setKnowledge([]); setRecommendations([]); setMessage("");
+    setEvidenceText(""); setShowEvidenceForm(false);
+    if (lineage) {
+      void apiGet<MappingEvidence[]>(`/mappings/scenario_technical/${lineage.id}/evidence`).then(setTechnicalEvidences);
+    } else {
+      setTechnicalEvidences([]);
+    }
   }, [business, lineage, scenarioId]);
 
   async function run(action: () => Promise<unknown>, success: string) {
@@ -118,6 +127,19 @@ export default function FieldScenarioPage() {
     if (!scenarioId) return;
     const result = await apiPost<{ recommendations: CandidateSourceRecommendation[] }>(`/target-fields/${fieldId}/scenarios/${scenarioId}/recommend-sources`, {});
     setRecommendations(result.recommendations); setMessage(`生成 ${result.recommendations.length} 个候选来源`);
+  }
+  async function bindTechnicalEvidence() {
+    if (!lineage || !field || !evidenceText.trim()) return;
+    await run(
+      () => apiPost(`/mappings/scenario_technical/${lineage.id}/evidence`, {
+        evidence_type: "manual_note",
+        source_name: "字段场景工作台人工证据",
+        location_text: `${field.field_code} / ${scenarios.find((item) => item.id === scenarioId)?.scenario_name || "当前场景"}`,
+        quoted_content: evidenceText.trim(),
+        evidence_summary: evidenceText.trim(),
+      }),
+      "技术溯源证据已绑定",
+    );
   }
 
   if (!field) return <main className="p-6 text-sm text-slate-500">加载中...</main>;
@@ -190,8 +212,14 @@ export default function FieldScenarioPage() {
               <button className="button-primary" disabled={busy} onClick={saveLineage}><Save size={16} />保存</button>
               <button className="button-secondary" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/confirm`, {}), "技术口径已确认")}><Check size={16} />技术确认</button>
               <button className="button-danger" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/reject`, {}), "技术口径已驳回")}><X size={16} />驳回</button>
-              <button className="button-secondary" disabled={!lineage} title="证据通过口径证据接口绑定"><Link2 size={16} />绑定证据</button>
+              <button className="button-secondary" disabled={!lineage} onClick={() => setShowEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
             </div>
+            {showEvidenceForm ? <div className="border-t border-line bg-slate-50 p-4">
+              <label className="text-xs text-slate-500" htmlFor="technical-evidence">人工证据说明</label>
+              <textarea className="control mt-1 min-h-20" id="technical-evidence" onChange={(event) => setEvidenceText(event.target.value)} placeholder="填写脱敏的来源依据、访谈结论或待核实说明" value={evidenceText} />
+              <button className="button-primary mt-2" disabled={!evidenceText.trim() || busy} onClick={bindTechnicalEvidence}><Link2 size={16} />确认绑定</button>
+              {technicalEvidences.length ? <div className="mt-3 space-y-2">{technicalEvidences.map((item) => <div className="rounded-md border border-line bg-white p-2 text-xs" key={item.id}><strong>{item.source_name}</strong><p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p></div>)}</div> : null}
+            </div> : null}
           </section>
         </div>
 
