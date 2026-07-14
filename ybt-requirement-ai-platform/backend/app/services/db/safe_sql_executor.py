@@ -1,5 +1,6 @@
 import re
 import time
+from contextlib import contextmanager, suppress
 from typing import Any
 
 import sqlglot
@@ -11,6 +12,7 @@ from app.core.settings import get_settings
 from app.models import DataSource, SqlExecutionLog
 from app.schemas import SafeSqlResponse
 from app.services.datasource_service import build_database_url
+from app.services.metadata.sensitivity import looks_sensitive_value
 
 SENSITIVE_FIELD_NAMES = {
     "name",
@@ -33,6 +35,16 @@ SENSITIVE_FIELD_NAMES = {
     "地址",
 }
 
+SAFE_STATISTIC_COLUMNS = {
+    "total_count",
+    "null_count",
+    "distinct_count",
+    "cnt",
+    "min_length",
+    "max_length",
+    "average_length",
+}
+
 
 class SafeSqlExecutor:
     def __init__(
@@ -48,7 +60,7 @@ class SafeSqlExecutor:
         self.max_limit = max_limit or settings.safe_sql_max_limit
         self.timeout_seconds = timeout_seconds or settings.safe_sql_timeout_seconds
 
-    def validate_and_prepare(self, sql: str, max_rows: int | None = None) -> str:
+    def validate_and_prepare(self, sql: str, max_rows: int | None = None, dialect: str | None = None) -> str:
         normalized = sql.strip().rstrip(";")
         if not normalized:
             raise ValueError("SQL is empty")
@@ -60,7 +72,7 @@ class SafeSqlExecutor:
             raise ValueError("Only SELECT statements are allowed")
         if _has_select_star_projection(tree):
             raise ValueError("SELECT * is not allowed")
-        return self._force_limit(tree.sql(dialect="postgres"), max_rows)
+        return self._force_limit(tree.sql(dialect=_sqlglot_dialect(dialect)), max_rows)
 
     def execute(
         self,
@@ -74,7 +86,7 @@ class SafeSqlExecutor:
     ) -> SafeSqlResponse:
         started = time.perf_counter()
         try:
-            sanitized_sql = self.validate_and_prepare(sql, max_rows=max_rows)
+            sanitized_sql = self.validate_and_prepare(sql, max_rows=max_rows, dialect=datasource.db_type)
         except Exception as exc:
             message = str(exc)
             self._record_log(
@@ -94,8 +106,9 @@ class SafeSqlExecutor:
         try:
             engine = create_engine(build_database_url(datasource), connect_args=_connect_args(datasource))
             with engine.connect() as connection:
-                result = connection.execute(text(sanitized_sql))
-                raw_rows = [dict(row) for row in result.mappings().all()]
+                with _statement_timeout(connection, datasource.db_type, self.timeout_seconds):
+                    result = connection.execute(text(sanitized_sql))
+                    raw_rows = [dict(row) for row in result.mappings().all()]
             engine.dispose()
             columns, rows, warnings = _sanitize_rows(raw_rows)
             response = SafeSqlResponse(
@@ -174,9 +187,17 @@ def _sanitize_rows(raw_rows: list[dict[str, Any]]) -> tuple[list[str], list[dict
     if not raw_rows:
         return [], [], []
     sensitive = {column for column in raw_rows[0] if column.lower() in SENSITIVE_FIELD_NAMES or column in SENSITIVE_FIELD_NAMES}
+    value_sensitive = {
+        column
+        for column in raw_rows[0]
+        if column not in sensitive
+        and column.lower() not in SAFE_STATISTIC_COLUMNS
+        and any(looks_sensitive_value(row.get(column)) for row in raw_rows)
+    }
+    sensitive.update(value_sensitive)
     rows = [{key: value for key, value in row.items() if key not in sensitive} for row in raw_rows]
     columns = list(rows[0].keys()) if rows else []
-    warnings = [f"已移除敏感字段: {', '.join(sorted(sensitive))}"] if sensitive else []
+    warnings = [f"已移除敏感或疑似敏感结果字段: {', '.join(sorted(sensitive))}"] if sensitive else []
     return columns, rows, warnings
 
 
@@ -197,3 +218,38 @@ def _connect_args(datasource: DataSource) -> dict:
 
 def _elapsed_ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
+
+
+def _sqlglot_dialect(db_type: str | None) -> str:
+    if db_type in {"mysql", "mysql_compatible"}:
+        return "mysql"
+    if db_type == "sqlite":
+        return "sqlite"
+    return "postgres"
+
+
+@contextmanager
+def _statement_timeout(connection: Any, db_type: str, timeout_seconds: float):
+    milliseconds = max(1, int(timeout_seconds * 1000))
+    if db_type == "sqlite":
+        driver_connection = connection.connection.driver_connection
+        deadline = time.monotonic() + timeout_seconds
+        driver_connection.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+        try:
+            yield
+        finally:
+            driver_connection.set_progress_handler(None, 0)
+        return
+    if db_type == "postgresql":
+        connection.exec_driver_sql(f"SET LOCAL statement_timeout = {milliseconds}")
+        yield
+        return
+    if db_type in {"mysql", "mysql_compatible"}:
+        connection.exec_driver_sql(f"SET SESSION MAX_EXECUTION_TIME = {milliseconds}")
+        try:
+            yield
+        finally:
+            with suppress(Exception):
+                connection.exec_driver_sql("SET SESSION MAX_EXECUTION_TIME = 0")
+        return
+    yield

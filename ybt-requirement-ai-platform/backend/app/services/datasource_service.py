@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
 from app.core.crypto import decrypt_secret, encrypt_secret
@@ -19,6 +20,7 @@ def validate_datasource_name(name: str) -> None:
 
 def create_datasource(db: Session, project_id: int, payload: DataSourceCreate) -> DataSource:
     validate_datasource_name(payload.name)
+    validate_connection_params(payload.connection_params_json)
     existing = db.scalar(select(DataSource).where(DataSource.project_id == project_id, DataSource.name == payload.name))
     if existing:
         raise ValueError("同一项目下 DataSource.name 不能重复")
@@ -48,6 +50,8 @@ def create_datasource(db: Session, project_id: int, payload: DataSourceCreate) -
 def update_datasource(db: Session, datasource: DataSource, payload: DataSourceUpdate) -> DataSource:
     data = payload.model_dump(exclude_unset=True)
     password = data.pop("password", None)
+    if data.get("connection_params_json") is not None:
+        validate_connection_params(data["connection_params_json"])
     if password:
         datasource.encrypted_password = encrypt_secret(password)
     for key, value in data.items():
@@ -88,7 +92,11 @@ def test_datasource_connection(db: Session, datasource: DataSource) -> tuple[str
 def build_database_url(datasource: DataSource) -> str:
     configured_url = (datasource.connection_params_json or {}).get("sqlalchemy_url")
     if configured_url:
-        return configured_url
+        validate_connection_params(datasource.connection_params_json)
+        url = make_url(str(configured_url))
+        if datasource.username:
+            url = url.set(username=datasource.username, password=decrypt_secret(datasource.encrypted_password))
+        return url.render_as_string(hide_password=False)
     if datasource.db_type == "sqlite":
         database_name = datasource.database_name or ":memory:"
         return "sqlite:///:memory:" if database_name == ":memory:" else f"sqlite:///{database_name}"
@@ -98,17 +106,15 @@ def build_database_url(datasource: DataSource) -> str:
         database = datasource.database_name or ""
         username = datasource.username or ""
         password = decrypt_secret(datasource.encrypted_password) or ""
-        auth = f"{username}:{password}@" if username else ""
-        return f"postgresql+psycopg://{auth}{host}:{port}/{database}"
+        return URL.create("postgresql+psycopg", username=username or None, password=password or None, host=host, port=port, database=database).render_as_string(hide_password=False)
     if datasource.db_type in {"mysql", "mysql_compatible"}:
         host = datasource.host or "localhost"
         port = datasource.port or 3306
         database = datasource.database_name or ""
         username = datasource.username or ""
         password = decrypt_secret(datasource.encrypted_password) or ""
-        auth = f"{username}:{password}@" if username else ""
         driver = (datasource.connection_params_json or {}).get("driver", "pymysql")
-        return f"mysql+{driver}://{auth}{host}:{port}/{database}"
+        return URL.create(f"mysql+{driver}", username=username or None, password=password or None, host=host, port=port, database=database).render_as_string(hide_password=False)
     raise ValueError(f"{datasource.db_type} 数据源测试暂未启用")
 
 
@@ -116,3 +122,35 @@ def _connect_args(datasource: DataSource) -> dict:
     if datasource.db_type == "sqlite":
         return {"check_same_thread": False}
     return {}
+
+
+def validate_connection_params(params: dict | None) -> None:
+    """Keep credentials on encrypted datasource fields, never in plaintext JSON."""
+    params = params or {}
+    configured_url = params.get("sqlalchemy_url")
+    if configured_url:
+        try:
+            url = make_url(str(configured_url))
+        except Exception as exc:
+            raise ValueError("connection_params_json.sqlalchemy_url 格式无效") from exc
+        if url.username or url.password:
+            raise ValueError("SQLAlchemy URL 不得包含用户名或密码等凭据，请使用数据源凭据字段")
+        if _contains_secret_parameter(dict(url.query)):
+            raise ValueError("SQLAlchemy URL 查询参数不得包含密码、令牌或密钥等明文凭据")
+    if _contains_secret_parameter(params):
+        raise ValueError("connection_params_json 不得包含密码、令牌或密钥等明文凭据")
+
+
+def _contains_secret_parameter(value: object) -> bool:
+    secret_fragments = ("password", "passwd", "pwd", "secret", "token", "credential", "api_key", "access_key")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if normalized_key != "sqlalchemy_url" and any(fragment in normalized_key for fragment in secret_fragments):
+                if item not in (None, "", False):
+                    return True
+            if _contains_secret_parameter(item):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_contains_secret_parameter(item) for item in value)
+    return False

@@ -59,7 +59,7 @@ def test_sqlite_metadata_sync_search_pagination_and_import(tmp_path: Path) -> No
 def test_profile_requires_selection_and_protects_sensitive_values(tmp_path:Path)->None:
     source_db=tmp_path/"sensitive.db"
     with sqlite3.connect(source_db) as connection:
-        connection.execute("create table customer (customer_name text)");connection.executemany("insert into customer values (?)",[("张三",),("李四",)])
+        connection.execute("create table customer (customer_name text, label text)");connection.executemany("insert into customer values (?,?)",[("张三","13800138000"),("李四","13900139000")])
     with _client() as client:
         project=_post(client,"/api/projects",{"name":"敏感探查"});ds=_post(client,f"/api/projects/{project['id']}/datasources",{"name":"sensitive_db","db_type":"sqlite","database_name":str(source_db)})
         _post(client,f"/api/datasources/{ds['id']}/metadata-sync",{"sync_mode":"full"});catalog=_post(client,f"/api/projects/{project['id']}/catalog/search",{"query":"customer_name"})["items"][0]
@@ -68,6 +68,20 @@ def test_profile_requires_selection_and_protects_sensitive_values(tmp_path:Path)
         rejected=client.post(f"/api/catalog/columns/{catalog['catalog_column_id']}/profile",json={"target_field_id":field["id"],"scenario_id":scenario["id"],"source_recommendation_id":rec["id"],"metrics":["top_values","min_max","distinct_count"]});assert rejected.status_code==400
         _post(client,f"/api/source-recommendations/{rec['id']}/select",{});profile=_post(client,f"/api/catalog/columns/{catalog['catalog_column_id']}/profile",{"target_field_id":field["id"],"scenario_id":scenario["id"],"source_recommendation_id":rec["id"],"metrics":["top_values","min_max","distinct_count"]})
         assert "top_values" not in profile["profile_result_json"];assert profile["profile_result_json"]["sensitivity_level"]=="sensitive"
+
+        disguised=_post(client,f"/api/projects/{project['id']}/catalog/search",{"query":"label"})["items"][0]
+        disguised_field=_post(client,"/api/fields",{"project_id":project["id"],"target_table_id":table["id"],"field_code":"LABEL","field_name":"状态标签"})
+        disguised_rec=next(item for item in _post(client,f"/api/target-fields/{disguised_field['id']}/scenarios/{scenario['id']}/recommend-sources",{})["recommendations"] if item["catalog_column_id"]==disguised["catalog_column_id"])
+        _post(client,f"/api/source-recommendations/{disguised_rec['id']}/select",{})
+        disguised_profile=_post(client,f"/api/catalog/columns/{disguised['catalog_column_id']}/profile",{"target_field_id":disguised_field["id"],"scenario_id":scenario["id"],"source_recommendation_id":disguised_rec["id"],"metrics":["top_values","min_max","distinct_count"]})
+        result=disguised_profile["profile_result_json"]
+        assert result["sensitivity_level"]=="normal"
+        assert "top_values" not in result
+        assert "min_value" not in result and "max_value" not in result
+        assert "13800138000" not in str(disguised_profile)
+        snapshots=_get(client,f"/api/catalog/columns/{disguised['catalog_column_id']}/profiles")
+        assert snapshots[0]["top_values_json"]==[]
+        assert snapshots[0]["min_value_text"] is None and snapshots[0]["max_value_text"] is None
 
 def test_metadata_excel_preview_and_repeated_apply_are_idempotent()->None:
     workbook=Workbook();sheet=workbook.active;sheet.title="数据字典";sheet.append(["schema","表英文名","表中文名","字段英文名","字段中文名","字段类型","是否可空","主键","字段顺序"]);sheet.append(["ODS","ECIF_CUSTOMER","客户基本信息表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2]);stream=BytesIO();workbook.save(stream)

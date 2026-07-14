@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class OrmModel(BaseModel):
@@ -349,6 +349,11 @@ class DataSourceRead(OrmModel):
     last_test_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("connection_params_json", mode="before")
+    @classmethod
+    def redact_connection_params(cls, value: Any) -> dict[str, Any]:
+        return _redact_connection_params(value if isinstance(value, dict) else {})
 
 
 class DataSourceTestResponse(BaseModel):
@@ -801,6 +806,22 @@ class ProductScenarioRead(OrmModel):
     sort_order: int
     created_at: datetime
     updated_at: datetime
+
+
+def _redact_connection_params(value: dict[str, Any]) -> dict[str, Any]:
+    secret_fragments = ("password", "passwd", "pwd", "secret", "token", "credential", "api_key", "access_key")
+    redacted: dict[str, Any] = {}
+    for key, item in value.items():
+        normalized_key = str(key).lower()
+        if normalized_key == "sqlalchemy_url" or any(fragment in normalized_key for fragment in secret_fragments):
+            continue
+        if isinstance(item, dict):
+            redacted[key] = _redact_connection_params(item)
+        elif isinstance(item, list):
+            redacted[key] = [_redact_connection_params(entry) if isinstance(entry, dict) else entry for entry in item]
+        else:
+            redacted[key] = item
+    return redacted
 
 
 class ScenarioBusinessMappingCreate(BaseModel):
