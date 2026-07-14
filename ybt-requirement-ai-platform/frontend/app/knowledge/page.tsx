@@ -1,0 +1,2 @@
+import Link from "next/link";import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+export default function Page(){return <main><WorkspaceHeader title="企业监管知识库" meta="结构化知识、混合 RAG 与可验证引用"/><div className="mx-auto grid max-w-5xl gap-4 p-6 md:grid-cols-3">{[["文档管理","/knowledge/documents"],["混合检索","/knowledge/search"],["有证据问答","/knowledge/ask"],["模型配置","/model-profiles"],["Prompt 版本","/prompt-versions"],["RAG 评测","/evaluations"]].map(([label,href])=><Link className="panel p-6 font-semibold" href={href} key={href}>{label}</Link>)}</div></main>}
