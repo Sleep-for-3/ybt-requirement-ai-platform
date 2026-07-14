@@ -6,10 +6,10 @@
 
 ```text
 一表通固定字段结构
-→ 设计监管集市字段
-→ 设计业务系统到监管集市取数口径
-→ 设计监管集市到一表通取数口径
-→ 导出正式业务口径需求文档
+→ 按产品/业务场景开展业务调研
+→ 维护场景业务口径和贴源层技术溯源
+→ 设计监管集市及双层取数口径
+→ 导出业务口径及技术溯源 Excel
 ```
 
 SQL 解析、数据源安全查询、自然语言任务和数据库探查结果仍然保留，但定位为“辅助证据”，不是平台主产物。
@@ -39,6 +39,20 @@ docker compose up --build
 后端容器使用 `backend/.env.example`，默认 `LLM_PROVIDER=mock`，无需大模型密钥即可验收。
 
 ## 核心业务概念
+
+### 产品/业务场景
+
+`ProductScenario` 表示借记卡、信用卡、储蓄存款、贷款产品、代销业务、手工补录等场景。同一一表通字段可在多个场景下分别维护口径。
+
+- `ScenarioBusinessMapping`：业务定义、截图/改造/外部数据/手工补录标识、业务确认人、最终口径和待确认问题。
+- `ScenarioTechnicalLineage`：来源系统、库、schema、表字段、处理逻辑类型、技术确认人、最终技术口径和待确认问题。
+- AI 生成只更新 `ai_generated_content` 和结构化草稿字段，绝不自动覆盖 `final_content`；只有显式调用 `adopt-ai-draft` 才会采用草稿。
+
+### 历史 Excel 与结构化知识
+
+`TraceabilityExcelParser` 支持 `.xlsx` 多层表头、合并单元格、横向动态场景、业务-only 与技术-only 分组。上传后先预览，不写正式模型；apply 后 upsert 字段、场景、两类场景口径，并按单元格拆分成 `RegulatoryKnowledgeItem`。
+
+`CandidateSourceRecommendation` 对字段代码、名称、注释、历史场景、结构化知识、SQL 解析证据和人工证据进行可解释评分。推荐结果只有在用户选择后才填充技术溯源，且不会成为最终口径。
 
 ### 一表通目标字段
 
@@ -82,7 +96,18 @@ docker compose up --build
 
 ## 前端工作台
 
-当前前端仍是单页 MVP 工作台，新增区域包括：
+当前前端已拆分路由：
+
+- `/projects`、`/templates`、`/traceability-templates`
+- `/business-systems`、`/mart`、`/fields`
+- `/fields/{fieldId}/scenarios` 字段场景工作台
+- `/export`、`/datasources`、`/tasks`
+- `/legacy` 保留原综合工作台，确保已有功能兼容
+
+字段场景工作台可维护业务口径和技术溯源、检索历史知识、生成候选来源、查看推荐依据、AI 生成/采用草稿、保存、确认和驳回。
+所有拆分页面共用顶部项目选择器，选择结果会跨页面保留；技术溯源区可直接绑定并查看脱敏人工证据。
+
+原综合工作台区域包括：
 
 - 业务系统来源层：维护业务系统、源表、源字段。
 - 监管集市层：维护集市表、集市字段，标记已有或建议新增。
@@ -134,6 +159,7 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 ## 版本和审核
 
 新增 `MappingVersion`。每条双层口径可以手动保存版本；审核通过时也会自动保存版本快照。
+双层口径只有在 `final_content` 非空且至少绑定一条证据后才能审核通过，删除口径时会同步清理证据和版本。
 
 状态支持：
 
@@ -161,6 +187,17 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 - 参考依据
 - 待确认问题
 - 审核状态与版本
+
+## Excel 导出
+
+- `GET /api/projects/{project_id}/export/traceability-workbook`
+- `GET /api/target-tables/{table_id}/export/traceability-workbook`
+
+响应是真正的 `.xlsx` 文件，包含 11 个固定基础列、按场景动态展开的业务口径与技术溯源列、合并分组标题、冻结窗格、自动换行、筛选和审核状态附表。原 Markdown 导出保持兼容。
+
+## GitHub Actions
+
+`.github/workflows/ci.yml` 使用 Python 3.12 和 Node 20，运行后端 pytest/compileall 与前端 `npm ci && npm run build`。CI 默认使用 SQLite 和 Mock LLM，不连接真实数据库，也不需要真实密钥。
 
 ## 主要 API
 
@@ -243,12 +280,12 @@ python -m alembic upgrade head
 python scripts/smoke_test.py
 ```
 
-Smoke test 会验证：创建项目、上传一表通模板、apply 目标表字段、创建 ECIF 源字段、创建监管集市字段、创建两层 mapping、绑定证据、生成 AI 草稿、保存 final_content、审核通过、导出字段级 Markdown，并检查导出章节完整。
+Smoke test 会程序生成脱敏合并表头 Excel，验证上传、预览、apply、三个产品场景、结构化知识、候选来源推荐、AI 不覆盖人工口径、显式采用、业务/技术确认、Excel 导出回读，并继续执行原有数据源安全查询、双层 mapping 和 Markdown 导出流程。
 
-## 当前限制
+## 当前限制与下一阶段
 
-- Word 导出暂未实现，当前支持 Markdown。
-- 前端仍是单页 MVP，后续可拆成 `/business-systems`、`/mart`、`/export` 等页面。
+- Word 导出暂未实现，当前支持真实 Excel 和 Markdown。
 - MockVectorStore 不是持久向量库，后续可接 Milvus。
 - Coze Studio、复杂 Agent、本地大模型部署只保留扩展点。
-- 数据源元数据自动采集尚未实现，源表字段和集市字段当前以人工维护为主。
+- 数据源元数据自动采集尚未实现，下一阶段计划通过只读适配器采集库、schema、表、字段和注释，并继续由 `SafeSqlExecutor` 控制查询。
+- Oracle、DB2、Hive 真实驱动、生产登录和 LDAP 不在本轮范围。

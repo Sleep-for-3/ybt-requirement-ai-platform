@@ -47,6 +47,15 @@ class TargetFieldCreate(BaseModel):
     required_flag: bool = False
     field_definition: str | None = None
     regulatory_description: str | None = None
+    data_category: str | None = None
+    data_format: str | None = None
+    regulatory_original_definition: str | None = None
+    regulatory_refined_definition: str | None = None
+    report_name: str | None = None
+    report_field_name: str | None = None
+    east_definition: str | None = None
+    internal_definition: str | None = None
+    remarks: str | None = None
 
 
 class TargetFieldRead(OrmModel):
@@ -59,6 +68,15 @@ class TargetFieldRead(OrmModel):
     required_flag: bool
     field_definition: str | None
     regulatory_description: str | None
+    data_category: str | None
+    data_format: str | None
+    regulatory_original_definition: str | None
+    regulatory_refined_definition: str | None
+    report_name: str | None
+    report_field_name: str | None
+    east_definition: str | None
+    internal_definition: str | None
+    remarks: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -746,3 +764,313 @@ class MappingDocumentExportRead(BaseModel):
     scope_id: int
     file_name: str
     content: str
+
+
+class ProductScenarioCreate(BaseModel):
+    scenario_code: str
+    scenario_name: str
+    scenario_type: str | None = None
+    description: str | None = None
+    business_owner: str | None = None
+    tech_owner: str | None = None
+    enabled: bool = True
+    sort_order: int = 0
+
+
+class ProductScenarioUpdate(BaseModel):
+    scenario_code: str | None = None
+    scenario_name: str | None = None
+    scenario_type: str | None = None
+    description: str | None = None
+    business_owner: str | None = None
+    tech_owner: str | None = None
+    enabled: bool | None = None
+    sort_order: int | None = None
+
+
+class ProductScenarioRead(OrmModel):
+    id: int
+    project_id: int
+    scenario_code: str
+    scenario_name: str
+    scenario_type: str | None
+    description: str | None
+    business_owner: str | None
+    tech_owner: str | None
+    enabled: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScenarioBusinessMappingCreate(BaseModel):
+    business_definition: str | None = None
+    source_system_screenshot_required: bool = False
+    source_system_change_required: bool = False
+    external_data_required: bool = False
+    manual_supplement_required: bool = False
+    business_owner: str | None = None
+    remarks: str | None = None
+    ai_generated_content: str | None = None
+    final_content: str | None = None
+    confidence_level: str = "medium"
+    open_questions: str | None = None
+    created_by: str | None = None
+
+
+class ScenarioBusinessMappingUpdate(BaseModel):
+    business_definition: str | None = None
+    source_system_screenshot_required: bool | None = None
+    source_system_change_required: bool | None = None
+    external_data_required: bool | None = None
+    manual_supplement_required: bool | None = None
+    business_owner: str | None = None
+    business_confirm_status: str | None = None
+    remarks: str | None = None
+    ai_generated_content: str | None = None
+    final_content: str | None = None
+    confidence_level: str | None = None
+    open_questions: str | None = None
+
+
+class ScenarioBusinessMappingRead(OrmModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    scenario_id: int
+    business_definition: str | None
+    source_system_screenshot_required: bool
+    source_system_change_required: bool
+    external_data_required: bool
+    manual_supplement_required: bool
+    business_owner: str | None
+    business_confirm_status: str
+    business_confirm_at: datetime | None
+    remarks: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    open_questions: str | None
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+
+
+class ScenarioTechnicalLineageCreate(BaseModel):
+    business_mapping_id: int | None = None
+    source_system_name: str | None = None
+    source_database_name: str | None = None
+    source_schema_name: str | None = None
+    source_table_english_name: str | None = None
+    source_table_chinese_name: str | None = None
+    source_field_english_name: str | None = None
+    source_field_chinese_name: str | None = None
+    processing_logic: str | None = None
+    processing_logic_type: str | None = None
+    tech_owner: str | None = None
+    remarks: str | None = None
+    ai_generated_content: str | None = None
+    final_content: str | None = None
+    confidence_level: str = "medium"
+    open_questions: str | None = None
+    created_by: str | None = None
+
+
+class ScenarioTechnicalLineageUpdate(BaseModel):
+    business_mapping_id: int | None = None
+    source_system_name: str | None = None
+    source_database_name: str | None = None
+    source_schema_name: str | None = None
+    source_table_english_name: str | None = None
+    source_table_chinese_name: str | None = None
+    source_field_english_name: str | None = None
+    source_field_chinese_name: str | None = None
+    processing_logic: str | None = None
+    processing_logic_type: str | None = None
+    tech_owner: str | None = None
+    tech_confirm_status: str | None = None
+    remarks: str | None = None
+    ai_generated_content: str | None = None
+    final_content: str | None = None
+    confidence_level: str | None = None
+    open_questions: str | None = None
+
+
+class ScenarioTechnicalLineageRead(OrmModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    scenario_id: int
+    business_mapping_id: int | None
+    source_system_name: str | None
+    source_database_name: str | None
+    source_schema_name: str | None
+    source_table_english_name: str | None
+    source_table_chinese_name: str | None
+    source_field_english_name: str | None
+    source_field_chinese_name: str | None
+    processing_logic: str | None
+    processing_logic_type: str | None
+    tech_owner: str | None
+    tech_confirm_status: str
+    tech_confirm_at: datetime | None
+    remarks: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    open_questions: str | None
+    created_at: datetime
+    updated_at: datetime
+    created_by: str | None
+
+
+class ConfirmMappingRequest(BaseModel):
+    confirmed_by: str | None = None
+
+
+class RegulatoryKnowledgeItemCreate(BaseModel):
+    knowledge_type: str
+    target_table_code: str | None = None
+    target_field_code: str | None = None
+    target_field_name: str | None = None
+    scenario_id: int | None = None
+    question_text: str | None = None
+    answer_text: str | None = None
+    institution_suggestion: str | None = None
+    regulatory_reply: str | None = None
+    business_explanation: str | None = None
+    source_document_name: str | None = None
+    source_sheet_name: str | None = None
+    source_cell_range: str | None = None
+    tags_json: list[Any] = Field(default_factory=list)
+
+
+class RegulatoryKnowledgeItemRead(OrmModel):
+    id: int
+    project_id: int
+    knowledge_type: str
+    target_table_code: str | None
+    target_field_code: str | None
+    target_field_name: str | None
+    scenario_id: int | None
+    question_text: str | None
+    answer_text: str | None
+    institution_suggestion: str | None
+    regulatory_reply: str | None
+    business_explanation: str | None
+    source_document_name: str | None
+    source_sheet_name: str | None
+    source_cell_range: str | None
+    tags_json: list[Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeSearchRequest(BaseModel):
+    target_table_code: str | None = None
+    target_field_code: str | None = None
+    target_field_name: str | None = None
+    scenario_id: int | None = None
+    knowledge_type: str | None = None
+    query: str | None = None
+    top_k: int = Field(default=10, ge=1, le=100)
+
+
+class ScoredKnowledgeItem(RegulatoryKnowledgeItemRead):
+    score: float
+
+
+class KnowledgeSearchResponse(BaseModel):
+    items: list[ScoredKnowledgeItem]
+
+
+class TraceabilityTemplateDocumentRead(OrmModel):
+    id: int
+    project_id: int
+    file_name: str
+    storage_path: str
+    parse_status: str
+    sheet_names_json: list[Any]
+    detected_scenarios_json: list[Any]
+    parse_summary_json: dict[str, Any]
+    warnings_json: list[Any]
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TraceabilityTemplateParseResultRead(OrmModel):
+    id: int
+    project_id: int
+    template_document_id: int
+    sheet_name: str
+    header_start_row: int
+    header_end_row: int
+    fixed_columns_json: list[Any]
+    scenario_groups_json: list[Any]
+    parsed_rows_json: list[Any]
+    warnings_json: list[Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class TraceabilityTemplateUploadResponse(BaseModel):
+    template_id: int
+    file_name: str
+    parse_status: str
+    sheet_count: int
+    row_count: int
+    detected_scenarios: list[dict[str, str]]
+    warnings: list[str]
+
+
+class TraceabilityTemplatePreviewResponse(BaseModel):
+    document: TraceabilityTemplateDocumentRead
+    results: list[TraceabilityTemplateParseResultRead]
+
+
+class TraceabilityTemplateApplyResponse(BaseModel):
+    template_id: int
+    created_tables: int = 0
+    created_fields: int = 0
+    updated_fields: int = 0
+    created_scenarios: int = 0
+    updated_scenarios: int = 0
+    created_business_mappings: int = 0
+    updated_business_mappings: int = 0
+    created_technical_lineages: int = 0
+    updated_technical_lineages: int = 0
+    created_knowledge_items: int = 0
+    skipped_rows: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CandidateSourceRecommendationRead(OrmModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    scenario_id: int
+    recommended_source_system: str | None
+    recommended_database_name: str | None
+    recommended_schema_name: str | None
+    recommended_table_name: str | None
+    recommended_table_comment: str | None
+    recommended_field_name: str | None
+    recommended_field_comment: str | None
+    recommended_processing_logic: str | None
+    recommend_reason: str
+    evidence_summary: str
+    confidence_level: str
+    score: float
+    selected_flag: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceRecommendationResponse(BaseModel):
+    recommendations: list[CandidateSourceRecommendationRead]
+
+
+class SourceRecommendationSelectionResponse(BaseModel):
+    recommendation: CandidateSourceRecommendationRead
+    lineage: ScenarioTechnicalLineageRead

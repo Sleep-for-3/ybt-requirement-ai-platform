@@ -1,5 +1,6 @@
 from app.models.entities import (
     BusinessSystem,
+    CandidateSourceRecommendation,
     DbProfileTask,
     DataSource,
     EvidenceReference,
@@ -14,6 +15,10 @@ from app.models.entities import (
     MartToYbtMapping,
     NaturalLanguageTask,
     Project,
+    ProductScenario,
+    RegulatoryKnowledgeItem,
+    ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
     SqlExecutionLog,
     SqlFile,
     SqlParseResult,
@@ -24,11 +29,14 @@ from app.models.entities import (
     TargetTable,
     TemplateDocument,
     TemplateParseResult,
+    TraceabilityTemplateDocument,
+    TraceabilityTemplateParseResult,
     User,
 )
 
 __all__ = [
     "BusinessSystem",
+    "CandidateSourceRecommendation",
     "DbProfileTask",
     "DataSource",
     "EvidenceReference",
@@ -43,6 +51,10 @@ __all__ = [
     "MartToYbtMapping",
     "NaturalLanguageTask",
     "Project",
+    "ProductScenario",
+    "RegulatoryKnowledgeItem",
+    "ScenarioBusinessMapping",
+    "ScenarioTechnicalLineage",
     "SqlExecutionLog",
     "SqlFile",
     "SqlParseResult",
@@ -53,5 +65,7 @@ __all__ = [
     "TargetTable",
     "TemplateDocument",
     "TemplateParseResult",
+    "TraceabilityTemplateDocument",
+    "TraceabilityTemplateParseResult",
     "User",
 ]

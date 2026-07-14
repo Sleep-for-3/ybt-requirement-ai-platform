@@ -5,6 +5,27 @@ from app.services.llm.base import LLMService
 
 class MockLLMService(LLMService):
     async def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        if "场景业务口径" in system_prompt:
+            return {
+                "business_definition": "按当前产品场景确认一表通字段的实际业务含义和适用范围。",
+                "source_system_screenshot_required": True,
+                "source_system_change_required": False,
+                "external_data_required": False,
+                "manual_supplement_required": False,
+                "remarks": "草稿需由业务部门确认。",
+                "open_questions": ["请确认该场景下的业务边界和口径确认人。"],
+                "confidence_level": "medium",
+                "final_content_draft": "场景业务口径：按产品场景识别字段业务含义、适用范围和例外情况，并由业务部门确认。",
+            }
+        if "场景技术溯源" in system_prompt:
+            return {
+                "processing_logic": "优先按已确认来源字段直接取值，码值和例外处理待技术确认。",
+                "processing_logic_type": "pending_confirmation",
+                "remarks": "草稿不包含可执行 SQL。",
+                "open_questions": ["请确认来源库表字段及处理逻辑。"],
+                "confidence_level": "medium",
+                "final_content_draft": "场景技术溯源：从已确认业务系统、库表和字段获取数据，按约定处理逻辑加工，具体来源待技术部门确认。",
+            }
         if "业务系统到监管集市" in system_prompt:
             return {
                 "source_system_summary": "ECIF 客户信息系统",

@@ -1,10 +1,11 @@
 import json
 import sqlite3
 import tempfile
+from io import BytesIO
 from pathlib import Path
 
 import httpx
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 
 def main() -> None:
@@ -25,8 +26,10 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         excel_path = temp_path / "一表通模板.xlsx"
+        traceability_path = temp_path / "脱敏业务口径及溯源表.xlsx"
         sqlite_path = temp_path / "ecif_query.db"
         _write_template(excel_path)
+        _write_traceability_template(traceability_path)
         _write_sqlite_source(sqlite_path)
 
         with excel_path.open("rb") as file:
@@ -37,6 +40,16 @@ def main() -> None:
                 files={"file": ("一表通模板.xlsx", file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
             )
         apply_result = _post_json(client, f"{base}/templates/{template['template_id']}/apply", {})
+
+        with traceability_path.open("rb") as file:
+            traceability_template = _post_file(
+                client,
+                f"{base}/traceability-templates/upload",
+                data={"project_id": str(project_id)},
+                files={"file": ("脱敏业务口径及溯源表.xlsx", file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        traceability_preview = _get_json(client, f"{base}/traceability-templates/{traceability_template['template_id']}/preview")
+        traceability_apply = _post_json(client, f"{base}/traceability-templates/{traceability_template['template_id']}/apply", {})
 
         fields = client.get(f"{base}/fields", params={"project_id": project_id})
         fields.raise_for_status()
@@ -93,6 +106,45 @@ def main() -> None:
                 "physical_column_name": "cert_type",
             },
         )
+        scenarios = _get_json(client, f"{base}/projects/{project_id}/scenarios")
+        debit_scenario = next(item for item in scenarios if item["scenario_code"] == "DEBIT_CARD")
+        business_mappings = _get_json(client, f"{base}/target-fields/{field['id']}/scenario-business-mappings")
+        scenario_business = next(item for item in business_mappings if item["scenario_id"] == debit_scenario["id"])
+        source_recommendations = _post_json(
+            client,
+            f"{base}/target-fields/{field['id']}/scenarios/{debit_scenario['id']}/recommend-sources",
+            {},
+        )
+        selected_recommendation = _post_json(
+            client,
+            f"{base}/source-recommendations/{source_recommendations['recommendations'][0]['id']}/select",
+            {},
+        )
+        scenario_lineage = selected_recommendation["lineage"]
+
+        manual_business = "人工确认：借记卡场景证件类型按有效借记卡客户业务定义维护。"
+        _put_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}", {"final_content": manual_business})
+        generated_business = _post_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}/generate-draft", {})
+        if generated_business["final_content"] != manual_business:
+            raise AssertionError("AI 场景业务草稿覆盖了人工 final_content")
+        adopted_business = _post_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}/adopt-ai-draft", {})
+        _post_json(client, f"{base}/mappings/scenario_business/{scenario_business['id']}/evidence", {
+            "evidence_type": "manual_note", "source_name": "Smoke 脱敏业务访谈记录",
+            "evidence_summary": "业务部门确认场景业务口径。",
+        })
+        confirmed_business = _post_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}/confirm", {"confirmed_by": "smoke"})
+
+        manual_technical = "人工确认：来源为 ECIF.ecif_customer.cert_type，按借记卡有效客户范围取值。"
+        _put_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}", {"final_content": manual_technical})
+        generated_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/generate-draft", {})
+        if generated_lineage["final_content"] != manual_technical:
+            raise AssertionError("AI 场景技术草稿覆盖了人工 final_content")
+        adopted_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/adopt-ai-draft", {})
+        _post_json(client, f"{base}/mappings/scenario_technical/{scenario_lineage['id']}/evidence", {
+            "evidence_type": "manual_note", "source_name": "Smoke 脱敏技术访谈记录",
+            "evidence_summary": "科技部门确认场景技术溯源。",
+        })
+        confirmed_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/confirm", {"confirmed_by": "smoke"})
         mart_table = _post_json(
             client,
             f"{base}/projects/{project_id}/mart-tables",
@@ -197,6 +249,22 @@ def main() -> None:
         if missing_sections:
             raise AssertionError(f"导出文档缺少章节: {missing_sections}")
 
+        excel_export = client.get(f"{base}/projects/{project_id}/export/traceability-workbook")
+        excel_export.raise_for_status()
+        exported_workbook = load_workbook(BytesIO(excel_export.content), data_only=True)
+        exported_sheet = exported_workbook["业务口径及技术溯源"]
+        export_headers = {
+            str(exported_sheet.cell(row, column).value or "")
+            for row in (1, 2)
+            for column in range(1, exported_sheet.max_column + 1)
+        }
+        required_excel_headers = {
+            "数据项编码", "业务口径-借记卡", "溯源-借记卡", "来源系统", "来源表英文名",
+            "来源字段英文名", "处理逻辑", "技术口径确认人",
+        }
+        if missing := required_excel_headers - export_headers:
+            raise AssertionError(f"导出 Excel 缺少表头: {sorted(missing)}")
+
         legacy_mapping = _post_json(
             client,
             f"{base}/fields/{field['id']}/generate-mapping",
@@ -216,6 +284,17 @@ def main() -> None:
             "template_field_count": template["field_count"],
             "apply_result": apply_result,
             "field_id": field["id"],
+            "traceability_template_status": traceability_template["parse_status"],
+            "traceability_preview_rows": len(traceability_preview["results"][0]["parsed_rows_json"]),
+            "traceability_apply": traceability_apply,
+            "scenario_codes": [item["scenario_code"] for item in scenarios],
+            "recommendation_top_score": source_recommendations["recommendations"][0]["score"],
+            "selected_recommendation_id": selected_recommendation["recommendation"]["id"],
+            "scenario_business_confirm_status": confirmed_business["business_confirm_status"],
+            "scenario_technical_confirm_status": confirmed_lineage["tech_confirm_status"],
+            "adopted_business_chars": len(adopted_business["final_content"]),
+            "adopted_lineage_chars": len(adopted_lineage["final_content"]),
+            "export_excel_bytes": len(excel_export.content),
             "datasource_id": datasource["id"],
             "datasource_test": datasource_test,
             "task_status": task_run["status"],
@@ -255,6 +334,58 @@ def _write_template(path: Path) -> None:
     workbook.save(path)
 
 
+def _write_traceability_template(path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "客户信息场景口径"
+    sheet["A1"] = "脱敏模拟业务口径及技术溯源表"
+    fixed_headers = [
+        "数据项编码", "数据项名称", "数据类别", "数据格式", "字段业务定义（监管原始口径）",
+        "字段业务定义（监管定义细化）", "报表名称", "字段名称", "EAST口径", "字段业务定义（行内）", "备注",
+    ]
+    for column, title in enumerate(fixed_headers, start=1):
+        sheet.cell(2, column, title)
+        sheet.merge_cells(start_row=2, start_column=column, end_row=3, end_column=column)
+    business_headers = ["字段业务定义", "源系统截图", "源系统改造", "外部数据", "手工补录", "业务口径确认人", "备注"]
+    technical_headers = [
+        "来源系统", "来源库", "来源schema", "来源表英文名", "来源表中文名", "来源字段英文名",
+        "来源字段中文名", "处理逻辑", "处理逻辑类型", "技术口径确认人", "备注",
+    ]
+    column = 12
+    for scenario_name, source_system in [("借记卡", "借记卡系统"), ("信用卡", "信用卡系统"), ("贷款产品", "信贷系统")]:
+        column = _write_group(sheet, column, f"业务口径-{scenario_name}", business_headers)
+        column = _write_group(sheet, column, f"溯源-{scenario_name}", technical_headers)
+    rows = [
+        ["CERT_TYPE", "客户证件类型", "基础信息", "VARCHAR(20)", "客户身份证件类型", "按产品场景确认客户证件类型", "客户信息表", "客户证件类型", "EAST_CERT_TYPE", "行内证件类型", "脱敏模拟"],
+        ["CUSTOMER_ID", "客户编号", "基础信息", "VARCHAR(64)", "客户唯一编号", "按产品场景确认客户范围", "客户信息表", "客户编号", "EAST_CUSTOMER_ID", "行内客户编号", "脱敏模拟"],
+    ]
+    for row_number, fixed_values in enumerate(rows, start=4):
+        for fixed_column, value in enumerate(fixed_values, start=1):
+            sheet.cell(row_number, fixed_column, value)
+        group_column = 12
+        for scenario_name, source_system in [("借记卡", "借记卡系统"), ("信用卡", "信用卡系统"), ("贷款产品", "信贷系统")]:
+            field_code = fixed_values[0]
+            _write_values(sheet, row_number, group_column, [f"{scenario_name}{fixed_values[1]}业务口径", "是", "否", "否", "否", f"{scenario_name}业务部门", "待确认"])
+            group_column += len(business_headers)
+            _write_values(sheet, row_number, group_column, [source_system, "DEMO_DB", "ODS", f"{scenario_name}_CUSTOMER", f"{scenario_name}客户表", field_code, fixed_values[1], "源字段直接取值", "direct", "信息科技部", "脱敏模拟"])
+            group_column += len(technical_headers)
+    workbook.save(path)
+
+
+def _write_group(sheet, start_column: int, title: str, headers: list[str]) -> int:
+    end_column = start_column + len(headers) - 1
+    sheet.cell(2, start_column, title)
+    sheet.merge_cells(start_row=2, start_column=start_column, end_row=2, end_column=end_column)
+    for offset, header in enumerate(headers):
+        sheet.cell(3, start_column + offset, header)
+    return end_column + 1
+
+
+def _write_values(sheet, row: int, start_column: int, values: list[str]) -> None:
+    for offset, value in enumerate(values):
+        sheet.cell(row, start_column + offset, value)
+
+
 def _write_sqlite_source(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:
@@ -270,6 +401,12 @@ def _write_sqlite_source(path: Path) -> None:
 
 def _post_json(client: httpx.Client, url: str, payload: dict) -> dict:
     response = client.post(url, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
+def _get_json(client: httpx.Client, url: str) -> dict | list[dict]:
+    response = client.get(url)
     response.raise_for_status()
     return response.json()
 

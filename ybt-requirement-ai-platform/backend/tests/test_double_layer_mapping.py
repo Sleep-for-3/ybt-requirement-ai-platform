@@ -98,6 +98,10 @@ def test_double_layer_mapping_end_to_end_api() -> None:
             },
         )
 
+        empty_approval = client.post(f"/api/source-to-mart-mappings/{source_to_mart['id']}/approve", json={"reviewed_by": "tester"})
+        assert empty_approval.status_code == 400
+        assert "final_content" in empty_approval.json()["detail"]
+
         source_evidence = _post(
             client,
             f"/api/mappings/source_to_mart/{source_to_mart['id']}/evidence",
@@ -123,13 +127,36 @@ def test_double_layer_mapping_end_to_end_api() -> None:
             },
         )
 
+        source_manual = "人工维护的业务系统到监管集市口径"
+        ybt_manual = "人工维护的监管集市到一表通口径"
+        _put(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}", {"final_content": source_manual})
+        _put(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}", {"final_content": ybt_manual})
         source_draft = _post(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}/generate-draft", {})
         ybt_draft = _post(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}/generate-draft", {})
 
-        assert "select " not in source_draft["final_content"].lower()
-        assert "业务系统到监管集市" in source_draft["final_content"]
-        assert "监管集市到一表通" in ybt_draft["final_content"]
+        assert source_draft["final_content"] == source_manual
+        assert ybt_draft["final_content"] == ybt_manual
+        assert "select " not in source_draft["ai_generated_content"].lower()
+        assert "业务系统到监管集市" in source_draft["ai_generated_content"]
+        assert "监管集市到一表通" in ybt_draft["ai_generated_content"]
         assert ybt_draft["mart_field_summary"]
+
+        no_evidence_mapping = _post(
+            client,
+            f"/api/mart-fields/{mart_field['id']}/source-to-mart-mappings",
+            {"final_content": "已有人工最终口径，但尚未绑定证据。"},
+        )
+        no_evidence_approval = client.post(
+            f"/api/source-to-mart-mappings/{no_evidence_mapping['id']}/approve",
+            json={"reviewed_by": "tester"},
+        )
+        assert no_evidence_approval.status_code == 400
+        assert "evidence" in no_evidence_approval.json()["detail"].lower()
+
+        source_adopted = _post(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}/adopt-ai-draft", {})
+        ybt_adopted = _post(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}/adopt-ai-draft", {})
+        assert source_adopted["final_content"] == source_adopted["ai_generated_content"]
+        assert ybt_adopted["final_content"] == ybt_adopted["ai_generated_content"]
 
         source_saved = _put(
             client,

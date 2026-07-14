@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -61,6 +61,15 @@ class TargetField(Base, TimestampMixin):
     required_flag: Mapped[bool] = mapped_column(Boolean, default=False)
     field_definition: Mapped[str | None] = mapped_column(Text)
     regulatory_description: Mapped[str | None] = mapped_column(Text)
+    data_category: Mapped[str | None] = mapped_column(String(100))
+    data_format: Mapped[str | None] = mapped_column(String(100))
+    regulatory_original_definition: Mapped[str | None] = mapped_column(Text)
+    regulatory_refined_definition: Mapped[str | None] = mapped_column(Text)
+    report_name: Mapped[str | None] = mapped_column(String(255))
+    report_field_name: Mapped[str | None] = mapped_column(String(255))
+    east_definition: Mapped[str | None] = mapped_column(Text)
+    internal_definition: Mapped[str | None] = mapped_column(Text)
+    remarks: Mapped[str | None] = mapped_column(Text)
 
     project: Mapped[Project] = relationship(back_populates="target_fields")
     target_table: Mapped[TargetTable] = relationship(back_populates="fields")
@@ -152,6 +161,152 @@ class MartField(Base, TimestampMixin):
     mart_table: Mapped[MartTable] = relationship(back_populates="fields")
 
 
+class ProductScenario(Base, TimestampMixin):
+    __tablename__ = "product_scenarios"
+    __table_args__ = (UniqueConstraint("project_id", "scenario_code", name="uq_product_scenarios_project_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    scenario_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    scenario_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scenario_type: Mapped[str | None] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
+    business_owner: Mapped[str | None] = mapped_column(String(200))
+    tech_owner: Mapped[str | None] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ScenarioBusinessMapping(Base, TimestampMixin):
+    __tablename__ = "scenario_business_mappings"
+    __table_args__ = (
+        UniqueConstraint("project_id", "target_field_id", "scenario_id", name="uq_scenario_business_field_scenario"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    target_field_id: Mapped[int] = mapped_column(ForeignKey("target_fields.id"), index=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("product_scenarios.id"), index=True)
+    business_definition: Mapped[str | None] = mapped_column(Text)
+    source_system_screenshot_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_system_change_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_data_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    manual_supplement_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    business_owner: Mapped[str | None] = mapped_column(String(200))
+    business_confirm_status: Mapped[str] = mapped_column(String(50), default="draft")
+    business_confirm_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    remarks: Mapped[str | None] = mapped_column(Text)
+    ai_generated_content: Mapped[str | None] = mapped_column(Text)
+    final_content: Mapped[str | None] = mapped_column(Text)
+    confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
+    open_questions: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class ScenarioTechnicalLineage(Base, TimestampMixin):
+    __tablename__ = "scenario_technical_lineages"
+    __table_args__ = (
+        UniqueConstraint("project_id", "target_field_id", "scenario_id", name="uq_scenario_lineage_field_scenario"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    target_field_id: Mapped[int] = mapped_column(ForeignKey("target_fields.id"), index=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("product_scenarios.id"), index=True)
+    business_mapping_id: Mapped[int | None] = mapped_column(ForeignKey("scenario_business_mappings.id"))
+    source_system_name: Mapped[str | None] = mapped_column(String(255))
+    source_database_name: Mapped[str | None] = mapped_column(String(255))
+    source_schema_name: Mapped[str | None] = mapped_column(String(255))
+    source_table_english_name: Mapped[str | None] = mapped_column(String(255))
+    source_table_chinese_name: Mapped[str | None] = mapped_column(String(255))
+    source_field_english_name: Mapped[str | None] = mapped_column(String(255))
+    source_field_chinese_name: Mapped[str | None] = mapped_column(String(255))
+    processing_logic: Mapped[str | None] = mapped_column(Text)
+    processing_logic_type: Mapped[str | None] = mapped_column(String(50))
+    tech_owner: Mapped[str | None] = mapped_column(String(200))
+    tech_confirm_status: Mapped[str] = mapped_column(String(50), default="draft")
+    tech_confirm_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    remarks: Mapped[str | None] = mapped_column(Text)
+    ai_generated_content: Mapped[str | None] = mapped_column(Text)
+    final_content: Mapped[str | None] = mapped_column(Text)
+    confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
+    open_questions: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class RegulatoryKnowledgeItem(Base, TimestampMixin):
+    __tablename__ = "regulatory_knowledge_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    knowledge_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    target_table_code: Mapped[str | None] = mapped_column(String(100), index=True)
+    target_field_code: Mapped[str | None] = mapped_column(String(100), index=True)
+    target_field_name: Mapped[str | None] = mapped_column(String(200))
+    scenario_id: Mapped[int | None] = mapped_column(ForeignKey("product_scenarios.id"), index=True)
+    question_text: Mapped[str | None] = mapped_column(Text)
+    answer_text: Mapped[str | None] = mapped_column(Text)
+    institution_suggestion: Mapped[str | None] = mapped_column(Text)
+    regulatory_reply: Mapped[str | None] = mapped_column(Text)
+    business_explanation: Mapped[str | None] = mapped_column(Text)
+    source_document_name: Mapped[str | None] = mapped_column(String(255))
+    source_sheet_name: Mapped[str | None] = mapped_column(String(255))
+    source_cell_range: Mapped[str | None] = mapped_column(String(100))
+    tags_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+
+
+class CandidateSourceRecommendation(Base, TimestampMixin):
+    __tablename__ = "candidate_source_recommendations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    target_field_id: Mapped[int] = mapped_column(ForeignKey("target_fields.id"), index=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("product_scenarios.id"), index=True)
+    recommended_source_system: Mapped[str | None] = mapped_column(String(255))
+    recommended_database_name: Mapped[str | None] = mapped_column(String(255))
+    recommended_schema_name: Mapped[str | None] = mapped_column(String(255))
+    recommended_table_name: Mapped[str | None] = mapped_column(String(255))
+    recommended_table_comment: Mapped[str | None] = mapped_column(Text)
+    recommended_field_name: Mapped[str | None] = mapped_column(String(255))
+    recommended_field_comment: Mapped[str | None] = mapped_column(Text)
+    recommended_processing_logic: Mapped[str | None] = mapped_column(Text)
+    recommend_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    selected_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class TraceabilityTemplateDocument(Base, TimestampMixin):
+    __tablename__ = "traceability_template_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    parse_status: Mapped[str] = mapped_column(String(50), default="pending")
+    sheet_names_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    detected_scenarios_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    parse_summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class TraceabilityTemplateParseResult(Base, TimestampMixin):
+    __tablename__ = "traceability_template_parse_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    template_document_id: Mapped[int] = mapped_column(ForeignKey("traceability_template_documents.id"), index=True)
+    sheet_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    header_start_row: Mapped[int] = mapped_column(Integer, nullable=False)
+    header_end_row: Mapped[int] = mapped_column(Integer, nullable=False)
+    fixed_columns_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    scenario_groups_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    parsed_rows_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+
+
 class SourceToMartMapping(Base, TimestampMixin):
     __tablename__ = "source_to_mart_mappings"
 
@@ -238,6 +393,8 @@ class MappingEvidenceReference(Base):
             "mart_field",
             "target_field",
             "manual_note",
+            "regulatory_knowledge_item",
+            "source_recommendation",
         }
 
 
