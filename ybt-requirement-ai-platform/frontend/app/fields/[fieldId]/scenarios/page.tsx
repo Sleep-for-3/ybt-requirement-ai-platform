@@ -33,6 +33,9 @@ export default function FieldScenarioPage() {
   const [lineageForm, setLineageForm] = useState<Record<string, string>>(EMPTY_LINEAGE);
   const [knowledge, setKnowledge] = useState<RegulatoryKnowledgeItem[]>([]);
   const [recommendations, setRecommendations] = useState<CandidateSourceRecommendation[]>([]);
+  const [businessEvidences, setBusinessEvidences] = useState<MappingEvidence[]>([]);
+  const [businessEvidenceText, setBusinessEvidenceText] = useState("");
+  const [showBusinessEvidenceForm, setShowBusinessEvidenceForm] = useState(false);
   const [technicalEvidences, setTechnicalEvidences] = useState<MappingEvidence[]>([]);
   const [evidenceText, setEvidenceText] = useState("");
   const [showEvidenceForm, setShowEvidenceForm] = useState(false);
@@ -85,7 +88,13 @@ export default function FieldScenarioPage() {
       open_questions: lineage.open_questions || "",
     } : EMPTY_LINEAGE);
     setKnowledge([]); setRecommendations([]); setMessage("");
+    setBusinessEvidenceText(""); setShowBusinessEvidenceForm(false);
     setEvidenceText(""); setShowEvidenceForm(false);
+    if (business) {
+      void apiGet<MappingEvidence[]>(`/mappings/scenario_business/${business.id}/evidence`).then(setBusinessEvidences);
+    } else {
+      setBusinessEvidences([]);
+    }
     if (lineage) {
       void apiGet<MappingEvidence[]>(`/mappings/scenario_technical/${lineage.id}/evidence`).then(setTechnicalEvidences);
     } else {
@@ -141,6 +150,19 @@ export default function FieldScenarioPage() {
       "技术溯源证据已绑定",
     );
   }
+  async function bindBusinessEvidence() {
+    if (!business || !field || !businessEvidenceText.trim()) return;
+    await run(
+      () => apiPost(`/mappings/scenario_business/${business.id}/evidence`, {
+        evidence_type: "manual_note",
+        source_name: "字段场景工作台人工证据",
+        location_text: `${field.field_code} / ${scenarios.find((item) => item.id === scenarioId)?.scenario_name || "当前场景"}`,
+        quoted_content: businessEvidenceText.trim(),
+        evidence_summary: businessEvidenceText.trim(),
+      }),
+      "业务口径证据已绑定",
+    );
+  }
 
   if (!field) return <main className="p-6 text-sm text-slate-500">加载中...</main>;
   return (
@@ -185,7 +207,9 @@ export default function FieldScenarioPage() {
               <button className="button-primary" disabled={busy} onClick={saveBusiness}><Save size={16} />保存</button>
               <button className="button-secondary" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/confirm`, {}), "业务口径已确认")}><Check size={16} />业务确认</button>
               <button className="button-danger" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/reject`, {}), "业务口径已驳回")}><X size={16} />驳回</button>
+              <button className="button-secondary" disabled={!business} onClick={() => setShowBusinessEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
             </div>
+            {showBusinessEvidenceForm ? <div className="border-t border-line bg-slate-50 p-4"><label className="text-xs text-slate-500" htmlFor="business-evidence">人工证据说明</label><textarea className="control mt-1 min-h-20" id="business-evidence" onChange={(event) => setBusinessEvidenceText(event.target.value)} placeholder="填写脱敏的业务访谈结论或监管答疑依据" value={businessEvidenceText} /><button className="button-primary mt-2" disabled={!businessEvidenceText.trim() || busy} onClick={bindBusinessEvidence}><Link2 size={16} />确认绑定</button>{businessEvidences.length ? <div className="mt-3 space-y-2">{businessEvidences.map((item) => <div className="rounded-md border border-line bg-white p-2 text-xs" key={item.id}><strong>{item.source_name}</strong><p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p></div>)}</div> : null}</div> : null}
           </section>
 
           <section className="panel overflow-hidden">
