@@ -19,6 +19,8 @@ from app.models import (
     SqlParseResult,
     TargetField,
 )
+from app.schemas import CatalogSearchRequest
+from app.services.metadata.catalog_service import search_catalog
 
 
 def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int, top_k: int = 20) -> list[CandidateSourceRecommendation]:
@@ -45,12 +47,12 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     )).all())
     history = list(db.scalars(select(ScenarioTechnicalLineage).where(
         ScenarioTechnicalLineage.project_id == target.project_id,
-        ScenarioTechnicalLineage.scenario_id == scenario.id,
+        ScenarioTechnicalLineage.target_field_id == target.id,
     )).all())
     sql_context = _sql_context(db, target.project_id)
     evidence_rows = db.scalars(select(MappingEvidenceReference).where(
         MappingEvidenceReference.project_id == target.project_id,
-        MappingEvidenceReference.evidence_type == "source_field",
+        MappingEvidenceReference.evidence_type.in_(["source_field", "catalog_column"]),
     )).all()
     relevant_mapping_ids = {
         "scenario_business": set(db.scalars(select(ScenarioBusinessMapping.id).where(
@@ -67,7 +69,11 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     }
     bound_source_ids = {
         item.evidence_id for item in evidence_rows
-        if item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
+        if item.evidence_type == "source_field" and item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
+    }
+    bound_catalog_ids = {
+        item.evidence_id for item in evidence_rows
+        if item.evidence_type == "catalog_column" and item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
     }
 
     scored = []
@@ -90,7 +96,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     db.flush()
 
     recommendations = []
-    for score, source, table, system, datasource, reasons, evidence in scored[:top_k]:
+    for score, source, table, system, datasource, reasons, evidence in scored[: max(top_k // 2, 1)]:
         recommendation = CandidateSourceRecommendation(
             project_id=target.project_id, target_field_id=target.id, scenario_id=scenario.id,
             recommended_source_system=system.system_name,
@@ -107,6 +113,35 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
         )
         db.add(recommendation)
         recommendations.append(recommendation)
+    catalog_items = search_catalog(db, target.project_id, CatalogSearchRequest(
+        query=" ".join(filter(None, [target.field_code, target.field_name, target.field_definition, target.regulatory_description])),
+        target_field_id=target.id, scenario_id=scenario.id, top_k=min(max(top_k * 5, 50), 100),
+    ))
+    for item in catalog_items:
+        score,reasons,evidence=_score_catalog_candidate(item,scenario,knowledge,history,sql_context,item["catalog_column_id"] in bound_catalog_ids)
+        item["score"]=score;item["match_reasons"]=reasons;item["catalog_evidence"]=evidence
+    catalog_items.sort(key=lambda item:(item["score"],-item["catalog_column_id"]),reverse=True)
+    existing_catalog_ids = {item.catalog_column_id for item in recommendations if item.catalog_column_id}
+    for item in catalog_items:
+        if item["catalog_column_id"] in existing_catalog_ids or len(recommendations) >= top_k:
+            continue
+        datasource = db.get(DataSource, item["datasource_id"])
+        recommendation = CandidateSourceRecommendation(
+            project_id=target.project_id, target_field_id=target.id, scenario_id=scenario.id,
+            catalog_column_id=item["catalog_column_id"], datasource_id=item["datasource_id"],
+            recommended_source_system=datasource.display_name or datasource.name,
+            recommended_database_name=datasource.database_name,
+            recommended_schema_name=item["schema_name"], recommended_table_name=item["table_name"],
+            recommended_table_comment=item["table_comment"], recommended_field_name=item["column_name"],
+            recommended_field_comment=item["column_comment"], data_type=item["data_type"], nullable=item["nullable"],
+            profile_status="not_profiled", recommended_processing_logic="目录候选字段直接取值，处理逻辑待探查后确认",
+            recommend_reason="；".join(item["match_reasons"] + ["真实数据目录候选"]),
+            evidence_summary="；".join([f"来自命名数据源 {datasource.name} 的目录字段 {item['schema_name']}.{item['table_name']}.{item['column_name']}"]+item["catalog_evidence"]),
+            confidence_level="high" if item["score"] >= .75 else "medium" if item["score"] >= .45 else "low",
+            score=item["score"], selected_flag=False,
+        )
+        db.add(recommendation); recommendations.append(recommendation)
+    recommendations.sort(key=lambda item: item.score or 0, reverse=True)
     db.commit()
     for recommendation in recommendations:
         db.refresh(recommendation)
@@ -127,6 +162,52 @@ def select_recommendation(db: Session, recommendation_id: int) -> tuple[Candidat
             scenario_id=recommendation.scenario_id,
         )
         db.add(lineage)
+        db.flush()
+    if recommendation.catalog_column_id is None:
+        _apply_recommendation(lineage, recommendation)
+    for item in db.scalars(select(CandidateSourceRecommendation).where(
+        CandidateSourceRecommendation.target_field_id == recommendation.target_field_id,
+        CandidateSourceRecommendation.scenario_id == recommendation.scenario_id,
+    )).all():
+        item.selected_flag = item.id == recommendation.id
+    if recommendation.catalog_column_id is not None:
+        exists = db.scalar(select(MappingEvidenceReference.id).where(
+            MappingEvidenceReference.mapping_type == "scenario_technical",
+            MappingEvidenceReference.mapping_id == lineage.id,
+            MappingEvidenceReference.evidence_type == "catalog_column",
+            MappingEvidenceReference.evidence_id == recommendation.catalog_column_id,
+        ))
+        if exists is None:
+            db.add(MappingEvidenceReference(
+                project_id=recommendation.project_id, mapping_type="scenario_technical", mapping_id=lineage.id,
+                evidence_type="catalog_column", evidence_id=recommendation.catalog_column_id,
+                source_name=f"{recommendation.recommended_source_system}.{recommendation.recommended_schema_name}.{recommendation.recommended_table_name}.{recommendation.recommended_field_name}",
+                location_text="metadata catalog", evidence_summary=recommendation.evidence_summary,
+            ))
+    db.commit()
+    db.refresh(recommendation)
+    db.refresh(lineage)
+    return recommendation, lineage
+
+
+def adopt_recommendation(db: Session, recommendation_id: int) -> tuple[CandidateSourceRecommendation, ScenarioTechnicalLineage]:
+    recommendation = db.get(CandidateSourceRecommendation, recommendation_id)
+    if recommendation is None:
+        raise ValueError("Source recommendation not found")
+    if not recommendation.selected_flag:
+        raise ValueError("Source recommendation must be selected before adoption")
+    lineage = db.scalar(select(ScenarioTechnicalLineage).where(
+        ScenarioTechnicalLineage.target_field_id == recommendation.target_field_id,
+        ScenarioTechnicalLineage.scenario_id == recommendation.scenario_id,
+    ))
+    if lineage is None:
+        lineage = ScenarioTechnicalLineage(project_id=recommendation.project_id, target_field_id=recommendation.target_field_id, scenario_id=recommendation.scenario_id)
+        db.add(lineage)
+    _apply_recommendation(lineage, recommendation)
+    db.commit(); db.refresh(recommendation); db.refresh(lineage); return recommendation, lineage
+
+
+def _apply_recommendation(lineage, recommendation):
     lineage.source_system_name = recommendation.recommended_source_system
     lineage.source_database_name = recommendation.recommended_database_name
     lineage.source_schema_name = recommendation.recommended_schema_name
@@ -137,15 +218,6 @@ def select_recommendation(db: Session, recommendation_id: int) -> tuple[Candidat
     lineage.processing_logic = recommendation.recommended_processing_logic
     lineage.processing_logic_type = "direct" if recommendation.recommended_processing_logic == "源字段直接取值" else "pending_confirmation"
     lineage.tech_confirm_status = "draft"
-    for item in db.scalars(select(CandidateSourceRecommendation).where(
-        CandidateSourceRecommendation.target_field_id == recommendation.target_field_id,
-        CandidateSourceRecommendation.scenario_id == recommendation.scenario_id,
-    )).all():
-        item.selected_flag = item.id == recommendation.id
-    db.commit()
-    db.refresh(recommendation)
-    db.refresh(lineage)
-    return recommendation, lineage
 
 
 def _score_candidate(target, scenario, source, table, system, knowledge, history, sql_context: str,
@@ -211,6 +283,30 @@ def _score_candidate(target, scenario, source, table, system, knowledge, history
         reasons.append("弱语义候选")
         evidence.append("仅存在低强度字段语义相似，需人工复核")
     return score, reasons, evidence
+
+
+def _score_catalog_candidate(item, scenario, knowledge, history, sql_context: str, manually_bound: bool):
+    score=float(item["score"]);reasons=list(item["match_reasons"]);evidence=[]
+    tokens=[item["datasource_name"],item["schema_name"],item["table_name"],item["column_name"]]
+    matching_history=[lineage for lineage in history if any(value and value.lower() in " ".join(filter(None,[lineage.source_database_name,lineage.source_schema_name,lineage.source_table_english_name,lineage.source_field_english_name])).lower() for value in tokens[1:])]
+    if matching_history:
+        score+=.12;reasons.append("历史技术溯源匹配");evidence.append("历史场景技术溯源中出现该目录表或字段")
+    if any(lineage.scenario_id==scenario.id for lineage in matching_history):
+        score+=.05;reasons.append("当前场景历史匹配");evidence.append(f"{scenario.scenario_name}场景已使用该目录来源")
+    matching_knowledge=[knowledge_item for knowledge_item in knowledge if _mentions_source(knowledge_item,tokens)]
+    if any(knowledge_item.knowledge_type=="historical_mapping" for knowledge_item in matching_knowledge):
+        score+=.08;reasons.append("历史口径匹配");evidence.append("历史口径知识中出现该目录来源")
+    if any(knowledge_item.knowledge_type=="regulatory_qa" for knowledge_item in matching_knowledge):
+        score+=.05;reasons.append("监管答疑匹配");evidence.append("监管答疑知识中出现该目录来源")
+    if any(knowledge_item.scenario_id==scenario.id for knowledge_item in matching_knowledge):
+        score+=.05;reasons.append("当前场景知识匹配");evidence.append(f"{scenario.scenario_name}场景知识命中该目录来源")
+    if any(value and value.lower() in sql_context for value in [item["table_name"],item["column_name"]]):
+        score+=.05;reasons.append("SQL 解析证据匹配");evidence.append("项目 SQL 解析结果中出现该目录表或字段")
+    if item.get("imported_source_field_id"):
+        score+=.08;reasons.append("已导入来源字段");evidence.append("该目录字段已导入 SourceField")
+    if manually_bound:
+        score+=.1;reasons.append("已绑定人工证据");evidence.append("该目录字段已绑定到当前字段口径证据")
+    return round(min(score,1.0),4),list(dict.fromkeys(reasons)),evidence
 
 
 def _sql_context(db: Session, project_id: int) -> str:

@@ -48,6 +48,11 @@ class NaturalLanguageTaskParser:
             )
 
         datasource = matched[0]
+        if any(keyword in raw_text for keyword in ["查找", "候选字段", "相关字段", "数据目录"]):
+            return ParsedNaturalLanguageTask(
+                status="parsed", message=f"已识别为 {datasource.name} 数据目录搜索任务。",
+                datasource_id=datasource.id, datasource_name=datasource.name, intent="catalog_search",
+            )
         table_name, field_name = _extract_table_and_field(raw_text, datasource.name)
         intent = "db_query_or_profile" if any(keyword.lower() in raw_text.lower() for keyword in INTENT_KEYWORDS) else "unknown"
         if not table_name or not field_name:

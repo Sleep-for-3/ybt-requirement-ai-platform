@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Database, FileOutput, FileSpreadsheet, FolderKanban, Layers3, ListTree, TableProperties, Workflow } from "lucide-react";
+import { Building2, Database, FileOutput, FileSpreadsheet, FolderKanban, Layers3, LibraryBig, ListTree, TableProperties, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/fields", label: "字段场景", icon: ListTree },
   { href: "/export", label: "Excel 导出", icon: FileOutput },
   { href: "/datasources", label: "数据源", icon: Database },
+  { href: "/catalog", label: "数据目录", icon: LibraryBig },
   { href: "/tasks", label: "安全查询", icon: Workflow },
 ];
 

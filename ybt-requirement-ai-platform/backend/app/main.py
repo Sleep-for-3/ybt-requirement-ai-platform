@@ -14,6 +14,10 @@ from app.api import (
     mapping_rules,
     mart,
     knowledge_items,
+    catalog,
+    metadata_sync,
+    metadata_imports,
+    profiling,
     nl_tasks,
     projects,
     retrieval,
@@ -75,3 +79,7 @@ app.include_router(knowledge_items.router, prefix=settings.api_prefix)
 app.include_router(traceability_templates.router, prefix=settings.api_prefix)
 app.include_router(traceability_export.router, prefix=settings.api_prefix)
 app.include_router(source_recommendations.router, prefix=settings.api_prefix)
+app.include_router(metadata_sync.router, prefix=settings.api_prefix)
+app.include_router(catalog.router, prefix=settings.api_prefix)
+app.include_router(metadata_imports.router, prefix=settings.api_prefix)
+app.include_router(profiling.router, prefix=settings.api_prefix)

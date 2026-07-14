@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.schemas import SourceRecommendationResponse, SourceRecommendationSelectionResponse
-from app.services.recommendation import recommend_source_fields, select_recommendation
+from app.services.recommendation import adopt_recommendation, recommend_source_fields, select_recommendation
 
 router = APIRouter(tags=["source recommendations"])
 
@@ -14,6 +14,15 @@ def recommend_sources(field_id: int, scenario_id: int, db: Session = Depends(get
         return SourceRecommendationResponse(recommendations=recommend_source_fields(db, field_id, scenario_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/source-recommendations/{recommendation_id}/adopt", response_model=SourceRecommendationSelectionResponse)
+def adopt_source_recommendation(recommendation_id: int, db: Session = Depends(get_db)) -> SourceRecommendationSelectionResponse:
+    try:
+        recommendation, lineage = adopt_recommendation(db, recommendation_id)
+        return SourceRecommendationSelectionResponse(recommendation=recommendation, lineage=lineage)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/source-recommendations/{recommendation_id}/select", response_model=SourceRecommendationSelectionResponse)

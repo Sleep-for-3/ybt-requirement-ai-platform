@@ -14,6 +14,8 @@
 
 SQL 解析、数据源安全查询、自然语言任务和数据库探查结果仍然保留，但定位为“辅助证据”，不是平台主产物。
 
+本轮新增项目级数仓元数据目录：命名数据源可同步 schema、表、字段、注释和主键；无法直连时可导入 Excel 数据字典。目录候选必须经用户选择后，才允许由固定模板和 `SafeSqlExecutor` 执行字段统计探查，探查快照会进入场景证据链。
+
 ## 技术栈
 
 - 前端：Next.js 14、React 18、TypeScript、Tailwind CSS、lucide-react
@@ -103,6 +105,8 @@ docker compose up --build
 - `/fields/{fieldId}/scenarios` 字段场景工作台
 - `/export`、`/datasources`、`/tasks`
 - `/legacy` 保留原综合工作台，确保已有功能兼容
+- `/catalog` 项目级数据目录，按表懒加载字段、搜索并导入来源层或集市层
+- `/datasources/{datasourceId}/catalog` 数据源元数据同步、数据字典导入和同步状态
 
 字段场景工作台可维护业务口径和技术溯源、检索历史知识、生成候选来源、查看推荐依据、AI 生成/采用草稿、保存、确认和驳回。
 所有拆分页面共用顶部项目选择器，选择结果会跨页面保留；技术溯源区可直接绑定并查看脱敏人工证据。
@@ -155,6 +159,10 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 - `mart_field`
 - `target_field`
 - `manual_note`
+- `catalog_column`
+- `metadata_sync_task`
+- `column_profile`
+- `profile_snapshot`
 
 ## 版本和审核
 
@@ -238,6 +246,18 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 - `GET /api/mappings/{mapping_type}/{mapping_id}/evidence`
 - `DELETE /api/mapping-evidence/{evidence_id}`
 
+元数据目录与安全探查：
+
+- `POST /api/datasources/{datasource_id}/metadata-sync`
+- `POST /api/datasources/{datasource_id}/metadata-import/upload`
+- `GET /api/projects/{project_id}/catalog/tables`
+- `GET /api/catalog/tables/{table_id}/columns`
+- `POST /api/projects/{project_id}/catalog/search`
+- `POST /api/catalog/columns/{column_id}/import-as-source-field`
+- `POST /api/catalog/columns/{column_id}/import-as-mart-field`
+- `POST /api/catalog/columns/{column_id}/profile`
+- `GET /api/catalog/columns/{column_id}/profiles`
+
 原有 API 仍保留：项目、目标表字段、模板上传、文档上传、SQL 上传解析、RAG 检索、数据源、自然语言任务、旧字段草稿生成。
 
 ## 安全约束
@@ -246,9 +266,10 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 - AI 不连接数据库。
 - AI 不自由执行 SQL。
 - 所有业务数据查询必须通过 `SafeSqlExecutor`。
-- `SafeSqlExecutor` 只允许安全 SELECT，禁止 DDL/DML、多语句和 `SELECT *`。
+- `SafeSqlExecutor` 只允许安全 SELECT/只读 WITH，递归禁止 writable CTE、DDL/DML、多语句和 `SELECT *`，并按方言施加 30 秒默认超时。
 - 数据源密码使用 Fernet 加密保存。
-- API 不返回 `password` 或 `encrypted_password`。
+- SQLAlchemy URL 和连接参数不得携带明文凭据；API 不返回 `password`、`encrypted_password` 或连接 URL。
+- 敏感字段不执行 top values 或原值范围探查；结果返回和落库前还会进行疑似手机号、证件号、账号和邮箱二次过滤。
 - 数据库查询结果只作为证据，不作为自动交付 SQL。
 
 ## 验证命令
@@ -280,12 +301,12 @@ python -m alembic upgrade head
 python scripts/smoke_test.py
 ```
 
-Smoke test 会程序生成脱敏合并表头 Excel，验证上传、预览、apply、三个产品场景、结构化知识、候选来源推荐、AI 不覆盖人工口径、显式采用、业务/技术确认、Excel 导出回读，并继续执行原有数据源安全查询、双层 mapping 和 Markdown 导出流程。
+Smoke test 会程序生成脱敏合并表头 Excel 和 SQLite ECIF 表，验证元数据同步、目录搜索/导入、选择后安全探查、敏感保护、探查证据、三个产品场景、AI 不覆盖人工口径、显式采用、业务/技术确认，以及 Excel 来源表字段值回读，并继续执行原有数据源安全查询、双层 mapping 和 Markdown 导出流程。
 
 ## 当前限制与下一阶段
 
 - Word 导出暂未实现，当前支持真实 Excel 和 Markdown。
 - MockVectorStore 不是持久向量库，后续可接 Milvus。
 - Coze Studio、复杂 Agent、本地大模型部署只保留扩展点。
-- 数据源元数据自动采集尚未实现，下一阶段计划通过只读适配器采集库、schema、表、字段和注释，并继续由 `SafeSqlExecutor` 控制查询。
-- Oracle、DB2、Hive 真实驱动、生产登录和 LDAP 不在本轮范围。
+- 元数据同步本轮采用同步执行并保留任务状态，生产环境的大规模目录后续可接队列；PostgreSQL/MySQL-compatible 由 mock 覆盖，真实环境仍需对应只读账号和可选驱动。
+- Oracle、DB2、Hive、GBase、GaussDB、达梦仅提供明确的扩展入口，不强依赖真实驱动；生产登录和 LDAP 不在本轮范围。

@@ -107,7 +107,20 @@ export type CandidateSourceRecommendation = {
   confidence_level: string;
   score: number;
   selected_flag: boolean;
+  catalog_column_id?: number | null;
+  datasource_id?: number | null;
+  data_type?: string | null;
+  nullable?: boolean | null;
+  profile_status?: string | null;
 };
+
+export type CatalogSchema = { id:number; datasource_id:number; schema_name:string; schema_comment?:string|null; enabled:boolean };
+export type CatalogTable = { id:number; datasource_id:number; schema_name:string; table_name:string; table_comment?:string|null; table_type:string; estimated_row_count?:number|null; primary_key_columns_json:string[]; enabled:boolean };
+export type CatalogColumn = { id:number; datasource_id:number; catalog_table_id:number; schema_name:string; table_name:string; column_name:string; column_comment?:string|null; data_type?:string|null; nullable:boolean; ordinal_position:number; is_primary_key:boolean; enabled:boolean };
+export type CatalogSearchItem = { catalog_column_id:number; datasource_id:number; datasource_name:string; schema_name:string; table_name:string; table_comment?:string|null; column_name:string; column_comment?:string|null; data_type?:string|null; nullable:boolean; is_primary_key:boolean; score:number; match_reasons:string[]; imported_source_field_id?:number|null; imported_mart_field_id?:number|null };
+export type MetadataSyncTask = { id:number; datasource_id:number; status:string; sync_mode:string; schema_count:number; table_count:number; column_count:number; warnings_json:string[]; error_message?:string|null };
+export type ColumnProfileTask = { id:number; status:string; catalog_column_id:number; profile_result_json:Record<string,unknown>; generated_sql_json:Array<{metric:string;sql:string}>; error_message?:string|null };
+export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog_column_id:number; profile_date:string; total_count?:number|null; null_rate?:number|null; distinct_count?:number|null; min_value_text?:string|null; max_value_text?:string|null; min_length?:number|null; max_length?:number|null; average_length?:number|null; top_values_json:unknown[]; warnings_json:unknown[] };
 
 export type RegulatoryKnowledgeItem = {
   id: number;

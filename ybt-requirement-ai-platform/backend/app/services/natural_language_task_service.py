@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.models import DataSource, NaturalLanguageTask
 from app.services.db.safe_sql_executor import SafeSqlExecutor
 from app.services.task_parser import NaturalLanguageTaskParser
+from app.schemas import CatalogSearchRequest
+from app.services.metadata.catalog_service import search_catalog
 
 
 def create_natural_language_task(db: Session, project_id: int, raw_text: str, created_by: int | None = None) -> NaturalLanguageTask:
@@ -35,6 +37,15 @@ def run_natural_language_task(db: Session, task_id: int) -> NaturalLanguageTask:
         task.error_message = task.error_message or "任务缺少数据源、表名或字段名，不能执行。"
         db.commit()
         return task
+    if task.intent == "catalog_search":
+        query = _catalog_search_query(task.raw_text, task.datasource_name or "")
+        task.status = "completed"
+        task.generated_sql_json = []
+        task.result_summary_json = {"mode": "catalog_search", "items": search_catalog(
+            db, task.project_id, CatalogSearchRequest(datasource_ids=[task.datasource_id] if task.datasource_id else [], query=query, top_k=20)
+        )}
+        task.error_message = None
+        db.commit(); db.refresh(task); return task
     datasource = db.get(DataSource, task.datasource_id)
     if datasource is None:
         task.status = "failed"
@@ -106,3 +117,10 @@ def _summarize_response(name: str, response: dict) -> dict:
     if name == "enum_distribution":
         return {"rows": rows, "row_count": response.get("row_count", 0)}
     return response
+
+
+def _catalog_search_query(raw_text: str, datasource_name: str) -> str:
+    query = raw_text.replace(datasource_name, "")
+    for phrase in ["帮我查找", "帮我搜索", "候选字段", "相关字段", "数据目录", "相关的", "使用", "请", "查找", "搜索", "与"]:
+        query = query.replace(phrase, " ")
+    return " ".join(query.replace("，", " ").replace(",", " ").split())

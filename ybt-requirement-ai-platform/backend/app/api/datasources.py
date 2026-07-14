@@ -38,7 +38,10 @@ def get_datasource(datasource_id: int, db: Session = Depends(get_db)) -> DataSou
 
 @router.put("/datasources/{datasource_id}", response_model=DataSourceRead)
 def update_datasource_api(datasource_id: int, payload: DataSourceUpdate, db: Session = Depends(get_db)) -> DataSource:
-    return update_datasource(db, _get_datasource_or_404(db, datasource_id), payload)
+    try:
+        return update_datasource(db, _get_datasource_or_404(db, datasource_id), payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/datasources/{datasource_id}")

@@ -68,6 +68,11 @@ def main() -> None:
             },
         )
         datasource_test = _post_json(client, f"{base}/datasources/{datasource['id']}/test", {})
+        metadata_sync = _post_json(client, f"{base}/datasources/{datasource['id']}/metadata-sync", {"sync_mode": "full", "schema_names": [], "include_views": True})
+        catalog_tables = _get_json(client, f"{base}/projects/{project_id}/catalog/tables?datasource_id={datasource['id']}")
+        catalog_search = _post_json(client, f"{base}/projects/{project_id}/catalog/search", {"datasource_ids": [datasource["id"]], "query": "cert_type", "top_k": 20})
+        catalog_cert_type = next(item for item in catalog_search["items"] if item["column_name"] == "cert_type")
+        catalog_source_import = _post_json(client, f"{base}/catalog/columns/{catalog_cert_type['catalog_column_id']}/import-as-source-field", {"system_code": "CATALOG_ECIF", "system_name": "目录导入客户系统"})
 
         task_create = _post_json(
             client,
@@ -110,17 +115,38 @@ def main() -> None:
         debit_scenario = next(item for item in scenarios if item["scenario_code"] == "DEBIT_CARD")
         business_mappings = _get_json(client, f"{base}/target-fields/{field['id']}/scenario-business-mappings")
         scenario_business = next(item for item in business_mappings if item["scenario_id"] == debit_scenario["id"])
+        existing_lineages = _get_json(client, f"{base}/target-fields/{field['id']}/scenario-technical-lineages")
+        existing_scenario_lineage = next(item for item in existing_lineages if item["scenario_id"] == debit_scenario["id"])
         source_recommendations = _post_json(
             client,
             f"{base}/target-fields/{field['id']}/scenarios/{debit_scenario['id']}/recommend-sources",
             {},
         )
+        catalog_recommendation = next(item for item in source_recommendations["recommendations"] if item.get("catalog_column_id") == catalog_cert_type["catalog_column_id"])
         selected_recommendation = _post_json(
             client,
-            f"{base}/source-recommendations/{source_recommendations['recommendations'][0]['id']}/select",
+            f"{base}/source-recommendations/{catalog_recommendation['id']}/select",
             {},
         )
         scenario_lineage = selected_recommendation["lineage"]
+        if scenario_lineage.get("source_field_english_name") != existing_scenario_lineage.get("source_field_english_name"):
+            raise AssertionError("目录候选仅选择时不应自动写入技术来源")
+        column_profile = _post_json(client, f"{base}/catalog/columns/{catalog_cert_type['catalog_column_id']}/profile", {
+            "target_field_id": field["id"], "scenario_id": debit_scenario["id"], "source_recommendation_id": catalog_recommendation["id"],
+            "metrics": ["null_rate", "distinct_count", "top_values", "min_max", "length_distribution"],
+        })
+        if column_profile["profile_result_json"].get("distinct_count") != 2:
+            raise AssertionError("目录字段 distinct 探查结果不正确")
+        selected_recommendation = _post_json(client, f"{base}/source-recommendations/{catalog_recommendation['id']}/adopt", {})
+        scenario_lineage = selected_recommendation["lineage"]
+
+        sensitive_field = _post_json(client, f"{base}/fields", {"project_id": project_id, "target_table_id": field["target_table_id"], "field_code": "CUSTOMER_NAME", "field_name": "客户姓名"})
+        sensitive_recommendations = _post_json(client, f"{base}/target-fields/{sensitive_field['id']}/scenarios/{debit_scenario['id']}/recommend-sources", {})
+        sensitive_catalog = next(item for item in sensitive_recommendations["recommendations"] if item.get("catalog_column_id") and item.get("recommended_field_name") == "customer_name")
+        _post_json(client, f"{base}/source-recommendations/{sensitive_catalog['id']}/select", {})
+        sensitive_profile = _post_json(client, f"{base}/catalog/columns/{sensitive_catalog['catalog_column_id']}/profile", {"target_field_id": sensitive_field["id"], "scenario_id": debit_scenario["id"], "source_recommendation_id": sensitive_catalog["id"], "metrics": ["distinct_count", "top_values", "min_max"]})
+        if sensitive_profile["profile_result_json"].get("top_values"):
+            raise AssertionError("敏感字段不应返回 top values")
 
         manual_business = "人工确认：借记卡场景证件类型按有效借记卡客户业务定义维护。"
         _put_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}", {"final_content": manual_business})
@@ -139,6 +165,8 @@ def main() -> None:
         generated_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/generate-draft", {})
         if generated_lineage["final_content"] != manual_technical:
             raise AssertionError("AI 场景技术草稿覆盖了人工 final_content")
+        if "安全探查摘要" not in generated_lineage["ai_generated_content"]:
+            raise AssertionError("AI 场景技术草稿未引用目录探查摘要")
         adopted_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/adopt-ai-draft", {})
         _post_json(client, f"{base}/mappings/scenario_technical/{scenario_lineage['id']}/evidence", {
             "evidence_type": "manual_note", "source_name": "Smoke 脱敏技术访谈记录",
@@ -264,6 +292,25 @@ def main() -> None:
         }
         if missing := required_excel_headers - export_headers:
             raise AssertionError(f"导出 Excel 缺少表头: {sorted(missing)}")
+        current_group = ""
+        debit_source_columns: dict[str, int] = {}
+        for column in range(1, exported_sheet.max_column + 1):
+            group_value = str(exported_sheet.cell(1, column).value or "")
+            if group_value:
+                current_group = group_value
+            child_header = str(exported_sheet.cell(2, column).value or "")
+            if current_group == "溯源-借记卡" and child_header in {"来源表英文名", "来源字段英文名"}:
+                debit_source_columns[child_header] = column
+        exported_field_row = next(
+            row for row in range(3, exported_sheet.max_row + 1)
+            if str(exported_sheet.cell(row, 1).value or "") == "CERT_TYPE"
+        )
+        exported_source_table = exported_sheet.cell(exported_field_row, debit_source_columns["来源表英文名"]).value
+        exported_source_field = exported_sheet.cell(exported_field_row, debit_source_columns["来源字段英文名"]).value
+        if exported_source_table != "ecif_customer" or exported_source_field != "cert_type":
+            raise AssertionError(
+                f"导出 Excel 未写入已采用目录来源: {exported_source_table}.{exported_source_field}"
+            )
 
         legacy_mapping = _post_json(
             client,
@@ -289,6 +336,12 @@ def main() -> None:
             "traceability_apply": traceability_apply,
             "scenario_codes": [item["scenario_code"] for item in scenarios],
             "recommendation_top_score": source_recommendations["recommendations"][0]["score"],
+            "metadata_sync_status": metadata_sync["status"],
+            "catalog_table_count": catalog_tables["total"],
+            "catalog_source_field_id": catalog_source_import["source_field_id"],
+            "column_profile_status": column_profile["status"],
+            "column_profile_null_rate": column_profile["profile_result_json"].get("null_rate"),
+            "sensitive_profile_top_values": sensitive_profile["profile_result_json"].get("top_values"),
             "selected_recommendation_id": selected_recommendation["recommendation"]["id"],
             "scenario_business_confirm_status": confirmed_business["business_confirm_status"],
             "scenario_technical_confirm_status": confirmed_lineage["tech_confirm_status"],
