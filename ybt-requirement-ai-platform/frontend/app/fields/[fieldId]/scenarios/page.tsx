@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import {
-  CandidateSourceRecommendation, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
+  CandidateSourceRecommendation, ColumnProfileTask, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
   ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
 } from "@/lib/api";
 
@@ -21,6 +21,7 @@ const EMPTY_LINEAGE = {
   processing_logic: "", processing_logic_type: "pending_confirmation", tech_owner: "", remarks: "",
   ai_generated_content: "", final_content: "", confidence_level: "medium", open_questions: "",
 };
+const EMPTY_PROFILE: ColumnProfileTask = { id: 0, status: "", catalog_column_id: 0, profile_result_json: {}, generated_sql_json: [] };
 
 export default function FieldScenarioPage() {
   const fieldId = Number(useParams<{ fieldId: string }>().fieldId);
@@ -33,6 +34,10 @@ export default function FieldScenarioPage() {
   const [lineageForm, setLineageForm] = useState<Record<string, string>>(EMPTY_LINEAGE);
   const [knowledge, setKnowledge] = useState<RegulatoryKnowledgeItem[]>([]);
   const [recommendations, setRecommendations] = useState<CandidateSourceRecommendation[]>([]);
+  const [selectedRecommendationId, setSelectedRecommendationId] = useState<number | null>(null);
+  const [profileTask, setProfileTask] = useState<ColumnProfileTask>(EMPTY_PROFILE);
+  const [datasourceFilter, setDatasourceFilter] = useState("");
+  const [schemaFilter, setSchemaFilter] = useState("");
   const [businessEvidences, setBusinessEvidences] = useState<MappingEvidence[]>([]);
   const [businessEvidenceText, setBusinessEvidenceText] = useState("");
   const [showBusinessEvidenceForm, setShowBusinessEvidenceForm] = useState(false);
@@ -87,7 +92,7 @@ export default function FieldScenarioPage() {
       confidence_level: lineage.confidence_level,
       open_questions: lineage.open_questions || "",
     } : EMPTY_LINEAGE);
-    setKnowledge([]); setRecommendations([]); setMessage("");
+    setKnowledge([]); setRecommendations([]); setSelectedRecommendationId(null); setProfileTask(EMPTY_PROFILE); setMessage("");
     setBusinessEvidenceText(""); setShowBusinessEvidenceForm(false);
     setEvidenceText(""); setShowEvidenceForm(false);
     if (business) {
@@ -136,6 +141,19 @@ export default function FieldScenarioPage() {
     if (!scenarioId) return;
     const result = await apiPost<{ recommendations: CandidateSourceRecommendation[] }>(`/target-fields/${fieldId}/scenarios/${scenarioId}/recommend-sources`, {});
     setRecommendations(result.recommendations); setMessage(`生成 ${result.recommendations.length} 个候选来源`);
+  }
+  async function selectCatalogCandidate(item: CandidateSourceRecommendation) {
+    const result = await apiPost<{ recommendation: CandidateSourceRecommendation }>(`/source-recommendations/${item.id}/select`, {});
+    setSelectedRecommendationId(result.recommendation.id); setMessage("候选已选择，尚未探查或采用");
+    if (!item.catalog_column_id) await reload();
+  }
+  async function profileCatalogCandidate(item: CandidateSourceRecommendation) {
+    if (!field || !scenarioId || !item.catalog_column_id) return;
+    try { const task = await apiPost<ColumnProfileTask>(`/catalog/columns/${item.catalog_column_id}/profile`, { target_field_id: field.id, scenario_id: scenarioId, source_recommendation_id: item.id, metrics: ["null_rate", "distinct_count", "top_values", "min_max", "length_distribution"] }); setProfileTask(task); setMessage(`安全探查 ${task.status}`); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "探查失败"); }
+  }
+  async function adoptCatalogCandidate(item: CandidateSourceRecommendation) {
+    await run(() => apiPost(`/source-recommendations/${item.id}/adopt`, {}), "已采用目录候选作为技术来源");
   }
   async function bindTechnicalEvidence() {
     if (!lineage || !field || !evidenceText.trim()) return;
@@ -201,7 +219,7 @@ export default function FieldScenarioPage() {
             </div>
             <div className="flex flex-wrap gap-2 border-t border-line p-4">
               <button className="button-secondary" onClick={searchKnowledge}><Search size={16} />检索历史知识</button>
-              <button className="button-secondary" onClick={recommend}><DatabaseZap size={16} />推荐来源</button>
+              <button className="button-secondary" onClick={recommend}><DatabaseZap size={16} />从数据目录搜索</button>
               <button className="button-secondary" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/generate-draft`, {}), "AI 业务草稿已生成")}><Sparkles size={16} />AI 草稿</button>
               <button className="button-secondary" disabled={!business?.ai_generated_content || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/adopt-ai-draft`, {}), "已采用 AI 草稿")}><Check size={16} />采用草稿</button>
               <button className="button-primary" disabled={busy} onClick={saveBusiness}><Save size={16} />保存</button>
@@ -248,7 +266,7 @@ export default function FieldScenarioPage() {
         </div>
 
         {(recommendations.length || knowledge.length) ? <section className="mt-5 grid gap-5 xl:grid-cols-2">
-          <div className="panel p-4"><h2 className="text-sm font-semibold">候选来源</h2><div className="mt-3 space-y-2">{recommendations.map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><div className="flex items-center justify-between gap-3"><strong>{item.recommended_source_system} / {item.recommended_table_name}.{item.recommended_field_name}</strong><span>{Math.round(item.score * 100)}%</span></div><p className="mt-2 text-slate-600">{item.recommend_reason}</p><p className="mt-1 text-xs text-slate-500">{item.evidence_summary}</p><button className="button-secondary mt-3" onClick={() => run(() => apiPost(`/source-recommendations/${item.id}/select`, {}), "候选来源已填入技术溯源")}><Check size={16} />选择推荐</button></div>)}</div></div>
+          <div className="panel p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">候选来源</h2><div className="flex gap-2"><select className="control" onChange={e=>setDatasourceFilter(e.target.value)} value={datasourceFilter}><option value="">全部数据源</option>{Array.from(new Set(recommendations.map(item=>item.recommended_source_system||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select><select className="control" onChange={e=>setSchemaFilter(e.target.value)} value={schemaFilter}><option value="">全部 schema</option>{Array.from(new Set(recommendations.map(item=>item.recommended_schema_name||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select></div></div><div className="mt-3 space-y-2">{recommendations.filter(item=>(!datasourceFilter||item.recommended_source_system===datasourceFilter)&&(!schemaFilter||item.recommended_schema_name===schemaFilter)).map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><div className="flex items-center justify-between gap-3"><strong>{item.recommended_source_system} / {item.recommended_schema_name}.{item.recommended_table_name}.{item.recommended_field_name}</strong><span>{Math.round(item.score * 100)}%</span></div><p className="mt-1 text-xs text-slate-500">{item.data_type||"类型待确认"} / {item.nullable===false?"非空":"可空或未知"} / profile: {item.profile_status||"未探查"}</p><p className="mt-2 text-slate-600">{item.recommend_reason}</p><p className="mt-1 text-xs text-slate-500">{item.evidence_summary}</p><div className="mt-3 flex flex-wrap gap-2"><button className="button-secondary" onClick={()=>selectCatalogCandidate(item)}><Check size={16}/>选择候选</button>{item.catalog_column_id?<button className="button-secondary" disabled={selectedRecommendationId!==item.id} onClick={()=>profileCatalogCandidate(item)}><DatabaseZap size={16}/>执行安全探查</button>:null}{item.catalog_column_id?<button className="button-primary" disabled={selectedRecommendationId!==item.id||!profileTask||profileTask.catalog_column_id!==item.catalog_column_id||!profileTask.status.includes("completed")} onClick={()=>adoptCatalogCandidate(item)}><Check size={16}/>采用为技术来源</button>:null}</div>{profileTask?.catalog_column_id===item.catalog_column_id?<pre className="mt-3 overflow-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(profileTask.profile_result_json,null,2)}</pre>:null}</div>)}</div></div>
           <div className="panel p-4"><h2 className="text-sm font-semibold">历史知识</h2><div className="mt-3 space-y-2">{knowledge.map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><strong>{item.knowledge_type}</strong><p className="mt-2 text-slate-600">{item.business_explanation || "-"}</p><p className="mt-1 text-xs text-slate-500">{item.source_document_name} / {item.source_sheet_name} / {item.source_cell_range}</p></div>)}</div></div>
         </section> : null}
       </div>
