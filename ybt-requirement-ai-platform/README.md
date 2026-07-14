@@ -14,6 +14,8 @@
 
 SQL 解析、数据源安全查询、自然语言任务和数据库探查结果仍然保留，但定位为“辅助证据”，不是平台主产物。
 
+本轮新增项目级数仓元数据目录：命名数据源可同步 schema、表、字段、注释和主键；无法直连时可导入 Excel 数据字典。目录候选必须经用户选择后，才允许由固定模板和 `SafeSqlExecutor` 执行字段统计探查，探查快照会进入场景证据链。
+
 ## 技术栈
 
 - 前端：Next.js 14、React 18、TypeScript、Tailwind CSS、lucide-react
@@ -103,6 +105,8 @@ docker compose up --build
 - `/fields/{fieldId}/scenarios` 字段场景工作台
 - `/export`、`/datasources`、`/tasks`
 - `/legacy` 保留原综合工作台，确保已有功能兼容
+- `/catalog` 项目级数据目录，按表懒加载字段、搜索并导入来源层或集市层
+- `/datasources/{datasourceId}/catalog` 数据源元数据同步、数据字典导入和同步状态
 
 字段场景工作台可维护业务口径和技术溯源、检索历史知识、生成候选来源、查看推荐依据、AI 生成/采用草稿、保存、确认和驳回。
 所有拆分页面共用顶部项目选择器，选择结果会跨页面保留；技术溯源区可直接绑定并查看脱敏人工证据。
@@ -287,5 +291,5 @@ Smoke test 会程序生成脱敏合并表头 Excel，验证上传、预览、app
 - Word 导出暂未实现，当前支持真实 Excel 和 Markdown。
 - MockVectorStore 不是持久向量库，后续可接 Milvus。
 - Coze Studio、复杂 Agent、本地大模型部署只保留扩展点。
-- 数据源元数据自动采集尚未实现，下一阶段计划通过只读适配器采集库、schema、表、字段和注释，并继续由 `SafeSqlExecutor` 控制查询。
-- Oracle、DB2、Hive 真实驱动、生产登录和 LDAP 不在本轮范围。
+- 元数据同步本轮采用同步执行并保留任务状态，生产环境的大规模目录后续可接队列；PostgreSQL/MySQL-compatible 由 mock 覆盖，真实环境仍需对应只读账号和可选驱动。
+- Oracle、DB2、Hive、GBase、GaussDB、达梦仅提供明确的扩展入口，不强依赖真实驱动；生产登录和 LDAP 不在本轮范围。
