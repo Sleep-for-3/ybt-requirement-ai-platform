@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import ProductScenario, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
+from app.models import MappingEvidenceReference, ProductScenario, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
 from app.schemas import (
     ConfirmMappingRequest,
     ScenarioBusinessMappingCreate,
@@ -92,6 +92,7 @@ def confirm_business_mapping(mapping_id: int, payload: ConfirmMappingRequest | N
     mapping = _business_or_404(db, mapping_id)
     if not (_has_text(mapping.business_definition) or _has_text(mapping.final_content)):
         raise HTTPException(status_code=400, detail="Business definition or final content is required before confirmation")
+    _require_evidence(db, "scenario_business", mapping.id)
     mapping.business_confirm_status = "confirmed"
     mapping.business_confirm_at = datetime.now(UTC)
     if payload and payload.confirmed_by:
@@ -189,6 +190,7 @@ def confirm_technical_lineage(lineage_id: int, payload: ConfirmMappingRequest | 
         missing.append("final_content_or_processing_logic")
     if missing:
         raise HTTPException(status_code=400, detail=f"Missing fields before confirmation: {', '.join(missing)}")
+    _require_evidence(db, "scenario_technical", lineage.id)
     lineage.tech_confirm_status = "confirmed"
     lineage.tech_confirm_at = datetime.now(UTC)
     if payload and payload.confirmed_by:
@@ -258,6 +260,15 @@ def _apply(model: object, values: dict) -> None:
 
 def _has_text(value: str | None) -> bool:
     return bool(value and value.strip())
+
+
+def _require_evidence(db: Session, mapping_type: str, mapping_id: int) -> None:
+    evidence_id = db.scalar(select(MappingEvidenceReference.id).where(
+        MappingEvidenceReference.mapping_type == mapping_type,
+        MappingEvidenceReference.mapping_id == mapping_id,
+    ).limit(1))
+    if evidence_id is None:
+        raise HTTPException(status_code=400, detail="At least one evidence reference is required before confirmation")
 
 
 def _commit_unique(db: Session, detail: str) -> None:

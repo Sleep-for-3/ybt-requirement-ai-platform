@@ -128,6 +128,10 @@ def main() -> None:
         if generated_business["final_content"] != manual_business:
             raise AssertionError("AI 场景业务草稿覆盖了人工 final_content")
         adopted_business = _post_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}/adopt-ai-draft", {})
+        _post_json(client, f"{base}/mappings/scenario_business/{scenario_business['id']}/evidence", {
+            "evidence_type": "manual_note", "source_name": "Smoke 脱敏业务访谈记录",
+            "evidence_summary": "业务部门确认场景业务口径。",
+        })
         confirmed_business = _post_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}/confirm", {"confirmed_by": "smoke"})
 
         manual_technical = "人工确认：来源为 ECIF.ecif_customer.cert_type，按借记卡有效客户范围取值。"
@@ -136,6 +140,10 @@ def main() -> None:
         if generated_lineage["final_content"] != manual_technical:
             raise AssertionError("AI 场景技术草稿覆盖了人工 final_content")
         adopted_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/adopt-ai-draft", {})
+        _post_json(client, f"{base}/mappings/scenario_technical/{scenario_lineage['id']}/evidence", {
+            "evidence_type": "manual_note", "source_name": "Smoke 脱敏技术访谈记录",
+            "evidence_summary": "科技部门确认场景技术溯源。",
+        })
         confirmed_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/confirm", {"confirmed_by": "smoke"})
         mart_table = _post_json(
             client,

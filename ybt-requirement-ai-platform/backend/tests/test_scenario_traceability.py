@@ -131,6 +131,14 @@ def test_scenario_mappings_adopt_drafts_quality_checks_and_knowledge_search() ->
         )
         assert empty_business["detail"] == "Scenario not found"
 
+        assert client.post(f"/api/scenario-business-mappings/{business['id']}/confirm", json={}).status_code == 400
+        assert client.post(f"/api/scenario-technical-lineages/{lineage['id']}/confirm", json={}).status_code == 400
+        _post(client, f"/api/mappings/scenario_business/{business['id']}/evidence", {
+            "evidence_type": "manual_note", "source_name": "脱敏业务访谈记录", "evidence_summary": "业务部门已确认"
+        })
+        _post(client, f"/api/mappings/scenario_technical/{lineage['id']}/evidence", {
+            "evidence_type": "manual_note", "source_name": "脱敏技术访谈记录", "evidence_summary": "科技部门已确认"
+        })
         confirmed_business = _post(client, f"/api/scenario-business-mappings/{business['id']}/confirm", {"confirmed_by": "tester"})
         confirmed_lineage = _post(client, f"/api/scenario-technical-lineages/{lineage['id']}/confirm", {"confirmed_by": "tester"})
         assert confirmed_business["business_confirm_status"] == "confirmed"
@@ -216,7 +224,7 @@ def test_source_recommendations_are_scored_explained_and_selected_explicitly() -
         unrelated_table = _post(client, f"/api/business-systems/{unrelated_system['id']}/source-tables", {
             "table_code": "OTHER_TABLE", "table_name": "无关表"
         })
-        _post(client, f"/api/source-tables/{unrelated_table['id']}/source-fields", {
+        unrelated_source = _post(client, f"/api/source-tables/{unrelated_table['id']}/source-fields", {
             "field_code": "UNRELATED_VALUE", "field_name": "无关字段", "field_comment": "与卡产品无关"
         })
         card_system = _post(client, f"/api/projects/{project['id']}/business-systems", {
@@ -232,6 +240,19 @@ def test_source_recommendations_are_scored_explained_and_selected_explicitly() -
             "knowledge_type": "historical_mapping", "target_field_code": "CARD_PRODUCT_ID", "scenario_id": scenario["id"],
             "business_explanation": "借记卡场景历史来源为 CPS_CARDPRODUCT.CARD_PRODUCT_ID"
         })
+        other_field = _post(client, "/api/fields", {
+            "project_id": project["id"], "target_table_id": table["id"], "field_code": "OTHER_TARGET",
+            "field_name": "其他目标字段",
+        })
+        other_mapping = _post(
+            client,
+            f"/api/target-fields/{other_field['id']}/scenarios/{scenario['id']}/business-mapping",
+            {"business_definition": "其他字段业务定义"},
+        )
+        _post(client, f"/api/mappings/scenario_business/{other_mapping['id']}/evidence", {
+            "evidence_type": "source_field", "evidence_id": unrelated_source["id"],
+            "source_name": "无关场景绑定", "evidence_summary": "只属于其他目标字段",
+        })
 
         response = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/recommend-sources", {})
         top = response["recommendations"][0]
@@ -241,6 +262,10 @@ def test_source_recommendations_are_scored_explained_and_selected_explicitly() -
         assert "场景匹配" in top["recommend_reason"]
         assert top["evidence_summary"]
         assert top["selected_flag"] is False
+        unrelated_recommendation = next(
+            item for item in response["recommendations"] if item["recommended_field_name"] == unrelated_source["field_code"]
+        )
+        assert "已绑定人工证据" not in unrelated_recommendation["recommend_reason"]
 
         selected = _post(client, f"/api/source-recommendations/{top['id']}/select", {})
         assert selected["recommendation"]["selected_flag"] is True

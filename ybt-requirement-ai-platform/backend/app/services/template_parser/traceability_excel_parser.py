@@ -148,7 +148,7 @@ def _expanded_matrix(sheet) -> list[list[Any]]:
 
 def _find_header_start(matrix: list[list[Any]]) -> int | None:
     aliases = {_normal(alias) for values in FIXED_COLUMNS.values() for alias in values}
-    for number, row in enumerate(matrix[:30], start=1):
+    for number, row in enumerate(matrix, start=1):
         if {_normal(value) for value in row} & aliases or any(_group_title(value) for value in row):
             return number
     return None

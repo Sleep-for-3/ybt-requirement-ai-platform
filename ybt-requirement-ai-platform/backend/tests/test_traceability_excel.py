@@ -36,6 +36,19 @@ def test_parser_recognizes_merged_multilevel_headers_and_partial_scenarios(tmp_p
     assert row["sources"]["fixed.field_code"] == "业务口径!A4"
 
 
+def test_parser_finds_headers_after_row_thirty(tmp_path: Path) -> None:
+    workbook = load_workbook(BytesIO(_workbook_bytes()))
+    workbook.active.insert_rows(1, amount=33)
+    path = tmp_path / "深表头脱敏样例.xlsx"
+    workbook.save(path)
+
+    output = TraceabilityExcelParser().parse(str(path))
+
+    assert output.results[0].header_start_row == 35
+    assert output.results[0].header_end_row == 36
+    assert output.results[0].parsed_rows[0]["fixed"]["field_code"] == "CARD_PRODUCT_ID"
+
+
 def test_upload_preview_and_apply_create_scenarios_mappings_lineage_and_knowledge() -> None:
     with _client() as client:
         project = _post(client, "/api/projects", {"name": "历史口径导入项目"})

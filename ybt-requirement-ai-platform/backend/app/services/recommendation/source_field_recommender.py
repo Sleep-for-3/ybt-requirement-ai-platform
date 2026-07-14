@@ -9,8 +9,10 @@ from app.models import (
     CandidateSourceRecommendation,
     DataSource,
     MappingEvidenceReference,
+    MartToYbtMapping,
     ProductScenario,
     RegulatoryKnowledgeItem,
+    ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
     SourceField,
     SourceTable,
@@ -46,10 +48,27 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
         ScenarioTechnicalLineage.scenario_id == scenario.id,
     )).all())
     sql_context = _sql_context(db, target.project_id)
-    bound_source_ids = set(db.scalars(select(MappingEvidenceReference.evidence_id).where(
+    evidence_rows = db.scalars(select(MappingEvidenceReference).where(
         MappingEvidenceReference.project_id == target.project_id,
         MappingEvidenceReference.evidence_type == "source_field",
-    )).all())
+    )).all()
+    relevant_mapping_ids = {
+        "scenario_business": set(db.scalars(select(ScenarioBusinessMapping.id).where(
+            ScenarioBusinessMapping.target_field_id == target.id,
+            ScenarioBusinessMapping.scenario_id == scenario.id,
+        )).all()),
+        "scenario_technical": set(db.scalars(select(ScenarioTechnicalLineage.id).where(
+            ScenarioTechnicalLineage.target_field_id == target.id,
+            ScenarioTechnicalLineage.scenario_id == scenario.id,
+        )).all()),
+        "mart_to_ybt": set(db.scalars(select(MartToYbtMapping.id).where(
+            MartToYbtMapping.target_field_id == target.id,
+        )).all()),
+    }
+    bound_source_ids = {
+        item.evidence_id for item in evidence_rows
+        if item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
+    }
 
     scored = []
     for source, table, system, datasource in candidates:
