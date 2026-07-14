@@ -21,6 +21,7 @@ from app.services.security import ensure_external_allowed, redact_content
 from app.services.vector import VectorRecord
 from app.services.vector.factory import get_vector_store
 from app.services.vector.milvus import MilvusVectorStore
+from app.services.vector.mock import MockVectorStore
 
 def test_knowledge_versions_hybrid_search_grounded_answer_and_evaluation(tmp_path:Path,monkeypatch):
     monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()
@@ -149,6 +150,48 @@ def test_openai_compatible_embedding_and_milvus_adapter(monkeypatch):
     assert client.deletes[0][1]["filter"] == "project_id == 1"
 
 
+def test_ingestion_and_reindex_never_store_raw_sensitive_content_in_milvus(tmp_path:Path,monkeypatch):
+    class RecordingMilvusClient:
+        def __init__(self):self.upserts=[]
+        def has_collection(self,name):return True
+        def upsert(self,collection_name,data):self.upserts.extend(data)
+        def delete(self,collection_name,**kwargs):return None
+    client=RecordingMilvusClient();store=MilvusVectorStore(client=client)
+    monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_embedding_service.cache_clear();get_vector_store.cache_clear()
+    monkeypatch.setattr("app.services.knowledge_ingestion.ingestion_service.get_vector_store",lambda:store)
+    monkeypatch.setattr("app.api.knowledge_rag.get_vector_store",lambda:store)
+    raw="restricted-original-phrase 客户手机号 13800138000 证件号 110101199001011234 账号 6222020202020202 password=plain-secret"
+    with _client() as api:
+        project=_post(api,"/api/projects",{"name":"向量正文安全"})
+        document=_upload(api,project["id"],"受限知识.txt",raw.encode(),"manual_note",confidentiality="restricted")
+        _assert_milvus_payload_redacted(client.upserts,raw)
+        client.upserts.clear()
+        _post(api,f"/api/knowledge/documents/{document['id']}/reindex?project_id={project['id']}",{})
+        _assert_milvus_payload_redacted(client.upserts,raw)
+
+
+def test_hybrid_retriever_revalidates_database_scope_and_enabled_for_stale_vectors(tmp_path:Path,monkeypatch):
+    class StaleVectorStore(MockVectorStore):
+        def delete(self,ids=None,filters=None):return None
+    store=StaleVectorStore();monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_embedding_service.cache_clear();get_vector_store.cache_clear()
+    monkeypatch.setattr("app.services.knowledge_ingestion.ingestion_service.get_vector_store",lambda:store)
+    monkeypatch.setattr("app.api.knowledge_rag.get_vector_store",lambda:store)
+    monkeypatch.setattr("app.services.retrieval.hybrid_retriever.get_vector_store",lambda:store)
+    with _client() as api:
+        owner=_post(api,"/api/projects",{"name":"甲行向量项目","bank_name":"甲银行"});other=_post(api,"/api/projects",{"name":"乙行向量项目","bank_name":"乙银行"})
+        document=_upload(api,owner["id"],"银行知识.txt",b"STALE_VECTOR_SECRET","manual_note","institution","甲银行")
+        unit=_get(api,f"/api/projects/{owner['id']}/knowledge/units?document_id={document['id']}")[0]
+        vector=get_embedding_service().embed_query("STALE_VECTOR_SECRET")
+        metadata={"project_id":owner["id"],"knowledge_scope":"institution","institution_name":"乙银行","knowledge_type":"manual_note","knowledge_unit_id":unit["id"]}
+        store.upsert([VectorRecord(f"knowledge-unit-{unit['id']}",vector,"",metadata)])
+        cross_bank=_post(api,f"/api/projects/{other['id']}/knowledge/hybrid-search",{"query":"STALE_VECTOR_SECRET","top_k":5})
+        assert cross_bank["items"]==[]
+        metadata["institution_name"]="甲银行";store.upsert([VectorRecord(f"knowledge-unit-{unit['id']}",vector,"",metadata)])
+        response=api.delete(f"/api/knowledge/documents/{document['id']}?project_id={owner['id']}");assert response.status_code==200,response.text
+        disabled=_post(api,f"/api/projects/{owner['id']}/knowledge/hybrid-search",{"query":"STALE_VECTOR_SECRET","top_k":5})
+        assert disabled["items"]==[]
+
+
 def test_model_profile_rejects_nested_credentials(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path))
     with _client() as client:
@@ -198,8 +241,14 @@ def test_prompt_version_external_policy_and_model_call_audit(db_session):
 
 def _qa_excel(answer):
     workbook=Workbook();sheet=workbook.active;sheet.title="答疑";sheet.append(["问题","监管回复","表代码","字段代码","字段名称","备注"]);sheet.append(["客户证件类型如何取值",answer,"YBT_CUSTOMER","CERT_TYPE","客户证件类型","脱敏模拟"]);stream=BytesIO();workbook.save(stream);return stream.getvalue()
-def _upload(client,project_id,name,content,kind,scope="project",institution=None):
-    response=client.post(f"/api/projects/{project_id}/knowledge/documents/upload",data={"knowledge_type":kind,"knowledge_scope":scope,"institution_name":institution or "","confidentiality_level":"internal"},files={"file":(name,content,"application/octet-stream")});assert response.status_code==200,response.text;return response.json()
+def _upload(client,project_id,name,content,kind,scope="project",institution=None,confidentiality="internal"):
+    response=client.post(f"/api/projects/{project_id}/knowledge/documents/upload",data={"knowledge_type":kind,"knowledge_scope":scope,"institution_name":institution or "","confidentiality_level":confidentiality},files={"file":(name,content,"application/octet-stream")});assert response.status_code==200,response.text;return response.json()
+
+def _assert_milvus_payload_redacted(rows,raw):
+    payload=str(rows)
+    for forbidden in [raw,"restricted-original-phrase","13800138000","110101199001011234","6222020202020202","plain-secret"]:assert forbidden not in payload
+    allowed={"id","vector","knowledge_unit_id","project_id","knowledge_scope","institution_name","knowledge_type","target_field_code","scenario_id","confidentiality_level","document_version_id","content_hash"}
+    assert rows and all(set(row)<=allowed and "content" not in row for row in rows)
 def _post(client,path,payload):
     response=client.post(path,json=payload);assert response.status_code==200,response.text;return response.json()
 def _get(client,path):

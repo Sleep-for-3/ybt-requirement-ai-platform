@@ -12,7 +12,8 @@ from app.services.rag import grounded_answer
 from app.services.retrieval import HybridRetriever
 from app.services.retrieval.keyword_index import index_knowledge_unit
 from app.services.security import ensure_external_allowed,redact_content
-from app.services.vector import VectorRecord,get_vector_store
+from app.services.vector import get_vector_store
+from app.services.vector.knowledge_record import build_knowledge_vector_record
 
 router=APIRouter(tags=["knowledge rag"])
 KNOWLEDGE_TYPES={"regulatory_qa","regulatory_policy","field_explanation","historical_mapping","historical_traceability","east_mapping","business_research","technical_research","data_dictionary","code_mapping","manual_note","sql_evidence"}
@@ -49,7 +50,7 @@ def reindex(document_id:int,project_id:int,db:Session=Depends(get_db)):
         for unit in units:ensure_external_allowed(unit.confidentiality_level,local_only)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
     vectors=embedding.embed_texts([unit.content if local_only else redact_content(unit.content) for unit in units]);records=[]
-    for unit,vector in zip(units,vectors,strict=True):index_knowledge_unit(db,unit,replace=True);records.append(VectorRecord(f"knowledge-unit-{unit.id}",vector,unit.content,{"project_id":unit.project_id,"knowledge_scope":unit.knowledge_scope,"institution_name":unit.institution_name,"knowledge_type":unit.knowledge_type,"target_field_code":unit.target_field_code,"scenario_id":unit.scenario_id,"confidentiality_level":unit.confidentiality_level,"document_version_id":unit.document_version_id,"knowledge_unit_id":unit.id,"content_hash":unit.content_hash}))
+    for unit,vector in zip(units,vectors,strict=True):index_knowledge_unit(db,unit,replace=True);records.append(build_knowledge_vector_record(unit,vector))
     get_vector_store().upsert(records);document.document_status="indexed";db.commit();return _document(document)
 @router.delete("/knowledge/documents/{document_id}")
 def delete_document(document_id:int,project_id:int,db:Session=Depends(get_db)):

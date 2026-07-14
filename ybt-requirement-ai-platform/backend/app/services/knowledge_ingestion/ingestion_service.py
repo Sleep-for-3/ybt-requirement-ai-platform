@@ -7,7 +7,8 @@ from app.core.settings import get_settings
 from app.models import (BusinessSystem,CatalogColumn,CatalogTable,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeEntityLink,KnowledgeIngestionTask,KnowledgeUnit,MartField,MartTable,ProductScenario,SourceField,SourceTable,TargetField,TargetTable)
 from app.services.embeddings import get_embedding_service
 from app.services.security import ensure_external_allowed,redact_content
-from app.services.vector import VectorRecord,get_vector_store
+from app.services.vector import get_vector_store
+from app.services.vector.knowledge_record import build_knowledge_vector_record
 from app.services.retrieval.keyword_index import index_knowledge_unit
 from .normalizer import normalize_content
 from .parsers import parse_document
@@ -34,7 +35,7 @@ async def ingest_knowledge_document(db,project_id,upload,knowledge_type,knowledg
     embedding=get_embedding_service();ensure_external_allowed(confidentiality_level,getattr(embedding,"local_only",False));texts=[redact_content(unit.content) if not getattr(embedding,"local_only",False) else unit.content for unit in units];vectors=embedding.embed_texts(texts) if texts else []
     records=[]
     for unit,vector in zip(units,vectors,strict=True):
-        record_id=f"knowledge-unit-{unit.id}";records.append(VectorRecord(record_id,vector,unit.content,{"project_id":project_id,"knowledge_scope":knowledge_scope,"institution_name":institution_name,"knowledge_type":knowledge_type,"target_field_code":unit.target_field_code,"scenario_id":unit.scenario_id,"confidentiality_level":confidentiality_level,"document_version_id":version.id,"knowledge_unit_id":unit.id,"content_hash":unit.content_hash}));db.add(EmbeddingRecord(project_id=project_id,knowledge_unit_id=unit.id,embedding_provider=get_settings().embedding_provider,embedding_model=get_settings().embedding_model,vector_store_provider=get_settings().vector_store_provider,vector_record_id=record_id,embedding_dimension=len(vector),content_hash=unit.content_hash,status="indexed"))
+        record=build_knowledge_vector_record(unit,vector);records.append(record);db.add(EmbeddingRecord(project_id=project_id,knowledge_unit_id=unit.id,embedding_provider=get_settings().embedding_provider,embedding_model=get_settings().embedding_model,vector_store_provider=get_settings().vector_store_provider,vector_record_id=record.id,embedding_dimension=len(vector),content_hash=unit.content_hash,status="indexed"))
     get_vector_store().upsert(records);version.parse_status="indexed";document.document_status="indexed" if not warnings else "partially_indexed";document.parse_status=version.parse_status;document.parse_summary_json={"unit_count":len(units),"version_no":version.version_no};document.warnings_json=warnings;task.status=document.document_status;task.unit_count=len(units);task.indexed_count=len(records);task.warnings_json=warnings;task.finished_at=datetime.now(UTC);db.commit();db.refresh(document);return document
 
 def _link_entities(db,unit):

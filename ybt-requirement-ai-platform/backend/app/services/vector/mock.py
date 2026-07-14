@@ -10,7 +10,7 @@ class MockVectorStore(VectorStore):
 
     def upsert(self, records: list[VectorRecord]) -> None:
         for record in records:
-            self._records[record.id] = record
+            self._records[record.id] = VectorRecord(record.id,record.embedding,"",dict(record.metadata))
 
     def search(
         self,
@@ -27,7 +27,7 @@ class MockVectorStore(VectorStore):
                 VectorSearchResult(
                     id=record.id,
                     score=_cosine_similarity(query_embedding, record.embedding),
-                    content=record.content,
+                    content="",
                     metadata=record.metadata,
                 )
             )

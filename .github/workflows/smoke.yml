@@ -1,0 +1,58 @@
+name: Full Smoke Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: sqlite:///./smoke_ci.db
+      STORAGE_DIR: /tmp/ybt-smoke-storage
+      LLM_PROVIDER: mock
+      EMBEDDING_PROVIDER: mock
+      VECTOR_STORE_PROVIDER: mock
+      APP_SECRET_KEY: smoke-ci-only-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ybt-requirement-ai-platform/backend/requirements.txt
+      - name: Install backend dependencies
+        working-directory: ybt-requirement-ai-platform/backend
+        run: python -m pip install -r requirements.txt
+      - name: Prepare database
+        working-directory: ybt-requirement-ai-platform/backend
+        run: |
+          rm -f smoke_ci.db
+          python -m alembic upgrade head
+      - name: Start backend
+        working-directory: ybt-requirement-ai-platform/backend
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/ybt-smoke-backend.log 2>&1 &
+          echo $! > /tmp/ybt-smoke-backend.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/ybt-smoke-backend.log
+          exit 1
+      - name: Run full smoke test
+        working-directory: ybt-requirement-ai-platform
+        run: python scripts/smoke_test.py
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f /tmp/ybt-smoke-backend.pid ]; then
+            kill "$(cat /tmp/ybt-smoke-backend.pid)" || true
+          fi
+      - name: Upload backend log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-backend-log
+          path: /tmp/ybt-smoke-backend.log

@@ -33,7 +33,7 @@ class HybridRetriever:
         unit_by_id={unit.id:unit for unit in candidates};ids=set(keyword)|set(vector);items=[]
         for unit_id in ids:
             unit=unit_by_id.get(unit_id) or self.db.get(KnowledgeUnit,unit_id)
-            if not unit or not _visible(unit,project_id,project.bank_name):continue
+            if not unit or not _visible(unit,project_id,project.bank_name,knowledge_types,scenario_id):continue
             ks=keyword.get(unit_id,0);vs=vector.get(unit_id,0);reasons=[]
             if target and unit.target_field_code and unit.target_field_code.lower()==target.field_code.lower():reasons.append("字段代码匹配")
             if scenario_id and unit.scenario_id==scenario_id:reasons.append("场景匹配")
@@ -47,4 +47,9 @@ def _keyword_score(unit,tokens,target,scenario):
     if target and unit.target_field_code and unit.target_field_code.lower()==target.field_code.lower():score+=.25
     if scenario and unit.scenario_id==scenario:score+=.1
     return min(score,1)
-def _visible(unit,project_id,institution):return unit.knowledge_scope=="global" or (unit.project_id==project_id and unit.knowledge_scope=="project") or (unit.knowledge_scope=="institution" and unit.institution_name==institution)
+def _visible(unit,project_id,institution,knowledge_types=None,scenario_id=None):
+    if not unit.enabled:return False
+    scope_visible=unit.knowledge_scope=="global" or (unit.project_id==project_id and unit.knowledge_scope=="project") or (unit.knowledge_scope=="institution" and bool(institution) and unit.institution_name==institution)
+    if not scope_visible:return False
+    if knowledge_types and unit.knowledge_type not in knowledge_types:return False
+    return not scenario_id or unit.scenario_id in {None,scenario_id}
