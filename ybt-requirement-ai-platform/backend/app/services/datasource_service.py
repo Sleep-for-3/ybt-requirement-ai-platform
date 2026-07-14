@@ -9,7 +9,7 @@ from app.models import DataSource
 from app.schemas import DataSourceCreate, DataSourceUpdate
 
 DATASOURCE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
-SUPPORTED_TEST_TYPES = {"sqlite", "postgresql"}
+SUPPORTED_TEST_TYPES = {"sqlite", "postgresql", "mysql", "mysql_compatible"}
 
 
 def validate_datasource_name(name: str) -> None:
@@ -86,6 +86,9 @@ def test_datasource_connection(db: Session, datasource: DataSource) -> tuple[str
 
 
 def build_database_url(datasource: DataSource) -> str:
+    configured_url = (datasource.connection_params_json or {}).get("sqlalchemy_url")
+    if configured_url:
+        return configured_url
     if datasource.db_type == "sqlite":
         database_name = datasource.database_name or ":memory:"
         return "sqlite:///:memory:" if database_name == ":memory:" else f"sqlite:///{database_name}"
@@ -97,6 +100,15 @@ def build_database_url(datasource: DataSource) -> str:
         password = decrypt_secret(datasource.encrypted_password) or ""
         auth = f"{username}:{password}@" if username else ""
         return f"postgresql+psycopg://{auth}{host}:{port}/{database}"
+    if datasource.db_type in {"mysql", "mysql_compatible"}:
+        host = datasource.host or "localhost"
+        port = datasource.port or 3306
+        database = datasource.database_name or ""
+        username = datasource.username or ""
+        password = decrypt_secret(datasource.encrypted_password) or ""
+        auth = f"{username}:{password}@" if username else ""
+        driver = (datasource.connection_params_json or {}).get("driver", "pymysql")
+        return f"mysql+{driver}://{auth}{host}:{port}/{database}"
     raise ValueError(f"{datasource.db_type} 数据源测试暂未启用")
 
 

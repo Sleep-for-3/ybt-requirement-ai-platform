@@ -23,8 +23,10 @@ def create_task(payload: NaturalLanguageTaskCreate, db: Session = Depends(get_db
         intent=task.intent,
         extracted_table_name=task.extracted_table_name,
         extracted_field_name=task.extracted_field_name,
-        message=task.error_message
-        or f"已识别数据源 {task.datasource_name}，表 {task.extracted_table_name}，字段 {task.extracted_field_name}。",
+        message=task.error_message or (
+            f"已识别为 {task.datasource_name} 数据目录搜索任务。" if task.intent == "catalog_search"
+            else f"已识别数据源 {task.datasource_name}，表 {task.extracted_table_name}，字段 {task.extracted_field_name}。"
+        ),
         available_datasources=available,
     )
 

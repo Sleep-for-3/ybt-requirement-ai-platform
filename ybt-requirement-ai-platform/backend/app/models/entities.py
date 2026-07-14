@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -275,6 +275,11 @@ class CandidateSourceRecommendation(Base, TimestampMixin):
     confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
     score: Mapped[float] = mapped_column(Float, default=0.0)
     selected_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    catalog_column_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_columns.id"), index=True)
+    datasource_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    data_type: Mapped[str | None] = mapped_column(String(255))
+    nullable: Mapped[bool | None] = mapped_column(Boolean)
+    profile_status: Mapped[str | None] = mapped_column(String(50))
 
 
 class TraceabilityTemplateDocument(Base, TimestampMixin):
@@ -395,6 +400,10 @@ class MappingEvidenceReference(Base):
             "manual_note",
             "regulatory_knowledge_item",
             "source_recommendation",
+            "catalog_column",
+            "metadata_sync_task",
+            "column_profile",
+            "profile_snapshot",
         }
 
 
@@ -609,6 +618,7 @@ class SqlExecutionLog(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("natural_language_tasks.id"))
+    profile_task_id: Mapped[int | None] = mapped_column(ForeignKey("column_profile_tasks.id"), index=True)
     sql_text: Mapped[str] = mapped_column(Text, nullable=False)
     sanitized_sql_text: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -650,3 +660,147 @@ class DbProfileTask(Base, TimestampMixin):
     field_name: Mapped[str | None] = mapped_column(String(200))
     profile_result_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class MetadataSyncTask(Base, TimestampMixin):
+    __tablename__ = "metadata_sync_tasks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    sync_mode: Mapped[str] = mapped_column(String(50), default="full")
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    schema_count: Mapped[int] = mapped_column(Integer, default=0)
+    table_count: Mapped[int] = mapped_column(Integer, default=0)
+    column_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    created_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class CatalogSchema(Base, TimestampMixin):
+    __tablename__ = "catalog_schemas"
+    __table_args__ = (UniqueConstraint("datasource_id", "schema_name", name="uq_catalog_schema_datasource_name"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    schema_name: Mapped[str] = mapped_column(String(255), index=True)
+    schema_comment: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
+class CatalogTable(Base, TimestampMixin):
+    __tablename__ = "catalog_tables"
+    __table_args__ = (UniqueConstraint("datasource_id", "schema_name", "table_name", name="uq_catalog_table_datasource_schema_name"), Index("ix_catalog_tables_project_schema_table", "project_id", "schema_name", "table_name"))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    catalog_schema_id: Mapped[int] = mapped_column(ForeignKey("catalog_schemas.id"), index=True)
+    schema_name: Mapped[str] = mapped_column(String(255), index=True)
+    table_name: Mapped[str] = mapped_column(String(255), index=True)
+    table_comment: Mapped[str | None] = mapped_column(Text)
+    table_type: Mapped[str] = mapped_column(String(50), default="unknown")
+    estimated_row_count: Mapped[int | None] = mapped_column(Integer)
+    primary_key_columns_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    metadata_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+
+
+class CatalogColumn(Base, TimestampMixin):
+    __tablename__ = "catalog_columns"
+    __table_args__ = (UniqueConstraint("catalog_table_id", "column_name", name="uq_catalog_column_table_name"), Index("ix_catalog_columns_project_lookup", "project_id", "schema_name", "table_name", "column_name"))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    catalog_table_id: Mapped[int] = mapped_column(ForeignKey("catalog_tables.id"), index=True)
+    schema_name: Mapped[str] = mapped_column(String(255), index=True)
+    table_name: Mapped[str] = mapped_column(String(255), index=True)
+    column_name: Mapped[str] = mapped_column(String(255), index=True)
+    column_comment: Mapped[str | None] = mapped_column(Text)
+    data_type: Mapped[str | None] = mapped_column(String(255))
+    database_native_type: Mapped[str | None] = mapped_column(String(255))
+    nullable: Mapped[bool] = mapped_column(Boolean, default=True)
+    ordinal_position: Mapped[int] = mapped_column(Integer, default=0)
+    is_primary_key: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_value: Mapped[str | None] = mapped_column(Text)
+    character_max_length: Mapped[int | None] = mapped_column(Integer)
+    numeric_precision: Mapped[int | None] = mapped_column(Integer)
+    numeric_scale: Mapped[int | None] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    metadata_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+
+
+class MetadataImportDocument(Base, TimestampMixin):
+    __tablename__ = "metadata_import_documents"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(500))
+    parse_status: Mapped[str] = mapped_column(String(50), default="pending")
+    parse_summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    parsed_rows_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class ColumnProfileTask(Base, TimestampMixin):
+    __tablename__ = "column_profile_tasks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    catalog_column_id: Mapped[int] = mapped_column(ForeignKey("catalog_columns.id"), index=True)
+    target_field_id: Mapped[int | None] = mapped_column(ForeignKey("target_fields.id"), index=True)
+    scenario_id: Mapped[int | None] = mapped_column(ForeignKey("product_scenarios.id"), index=True)
+    source_recommendation_id: Mapped[int | None] = mapped_column(ForeignKey("candidate_source_recommendations.id"), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    requested_metrics_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    generated_sql_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    profile_result_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class ColumnProfileSnapshot(Base):
+    __tablename__ = "column_profile_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    profile_task_id: Mapped[int] = mapped_column(ForeignKey("column_profile_tasks.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    catalog_column_id: Mapped[int] = mapped_column(ForeignKey("catalog_columns.id"), index=True)
+    profile_date: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    total_count: Mapped[int | None] = mapped_column(Integer)
+    null_count: Mapped[int | None] = mapped_column(Integer)
+    null_rate: Mapped[float | None] = mapped_column(Float)
+    distinct_count: Mapped[int | None] = mapped_column(Integer)
+    min_value_text: Mapped[str | None] = mapped_column(Text)
+    max_value_text: Mapped[str | None] = mapped_column(Text)
+    min_length: Mapped[int | None] = mapped_column(Integer)
+    max_length: Mapped[int | None] = mapped_column(Integer)
+    average_length: Mapped[float | None] = mapped_column(Float)
+    top_values_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CatalogImportBinding(Base):
+    __tablename__ = "catalog_import_bindings"
+    __table_args__ = (UniqueConstraint("catalog_column_id", "binding_type", name="uq_catalog_binding_column_type"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    catalog_table_id: Mapped[int] = mapped_column(ForeignKey("catalog_tables.id"), index=True)
+    catalog_column_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_columns.id"), index=True)
+    binding_type: Mapped[str] = mapped_column(String(50), index=True)
+    business_system_id: Mapped[int | None] = mapped_column(ForeignKey("business_systems.id"))
+    source_table_id: Mapped[int | None] = mapped_column(ForeignKey("source_tables.id"))
+    source_field_id: Mapped[int | None] = mapped_column(ForeignKey("source_fields.id"))
+    mart_table_id: Mapped[int | None] = mapped_column(ForeignKey("mart_tables.id"))
+    mart_field_id: Mapped[int | None] = mapped_column(ForeignKey("mart_fields.id"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(100))

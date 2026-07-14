@@ -69,6 +69,7 @@ class SafeSqlExecutor:
         project_id: int,
         max_rows: int | None = None,
         task_id: int | None = None,
+        profile_task_id: int | None = None,
         created_by: int | None = None,
     ) -> SafeSqlResponse:
         started = time.perf_counter()
@@ -80,6 +81,7 @@ class SafeSqlExecutor:
                 project_id=project_id,
                 datasource_id=datasource.id,
                 task_id=task_id,
+                profile_task_id=profile_task_id,
                 sql_text=sql,
                 sanitized_sql_text=None,
                 status="rejected",
@@ -109,6 +111,7 @@ class SafeSqlExecutor:
                 project_id=project_id,
                 datasource_id=datasource.id,
                 task_id=task_id,
+                profile_task_id=profile_task_id,
                 sql_text=sql,
                 sanitized_sql_text=sanitized_sql,
                 status="success",
@@ -125,6 +128,7 @@ class SafeSqlExecutor:
                 project_id=project_id,
                 datasource_id=datasource.id,
                 task_id=task_id,
+                profile_task_id=profile_task_id,
                 sql_text=sql,
                 sanitized_sql_text=sanitized_sql,
                 status="failed",

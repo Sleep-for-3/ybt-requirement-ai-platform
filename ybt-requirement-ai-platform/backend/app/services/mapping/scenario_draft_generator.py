@@ -1,6 +1,7 @@
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ProductScenario, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
+from app.models import MappingEvidenceReference, ProductScenario, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
 from app.services.llm import get_llm_service
 
 BUSINESS_PROMPT = """你是银行一表通业务需求分析专家。请生成场景业务口径草稿，输出 JSON：
@@ -42,7 +43,12 @@ async def generate_technical_draft(db: Session, lineage_id: int) -> ScenarioTech
         raise ValueError("Scenario technical lineage not found")
     field = db.get(TargetField, lineage.target_field_id)
     scenario = db.get(ProductScenario, lineage.scenario_id)
-    output = await get_llm_service().chat_json(TECHNICAL_PROMPT, _context(field, scenario, lineage))
+    evidence = list(db.scalars(select(MappingEvidenceReference).where(
+        MappingEvidenceReference.mapping_type == "scenario_technical",
+        MappingEvidenceReference.mapping_id == lineage.id,
+    ).order_by(MappingEvidenceReference.id)).all())
+    evidence_text = "\n".join(item.evidence_summary or item.quoted_content or item.source_name for item in evidence)
+    output = await get_llm_service().chat_json(TECHNICAL_PROMPT, _context(field, scenario, lineage, evidence_text))
     for key in [
         "source_system_name", "source_database_name", "source_schema_name", "source_table_english_name",
         "source_table_chinese_name", "source_field_english_name", "source_field_chinese_name",
@@ -53,17 +59,20 @@ async def generate_technical_draft(db: Session, lineage_id: int) -> ScenarioTech
     lineage.open_questions = _text(output.get("open_questions")) or lineage.open_questions
     lineage.confidence_level = output.get("confidence_level") or lineage.confidence_level
     lineage.ai_generated_content = output.get("final_content_draft") or _technical_content(lineage, scenario)
+    if evidence_text:
+        lineage.ai_generated_content = f"{lineage.ai_generated_content}\n\n目录字段与安全探查摘要：\n{evidence_text}"
     db.commit()
     db.refresh(lineage)
     return lineage
 
 
-def _context(field, scenario, model) -> str:
+def _context(field, scenario, model, evidence_text: str | None = None) -> str:
     return (
         f"目标字段：{field.field_code if field else '-'} / {field.field_name if field else '-'}\n"
         f"字段定义：{field.field_definition if field else '-'}\n"
         f"产品场景：{scenario.scenario_name if scenario else '-'}\n"
-        f"当前人工信息：{model.__dict__}"
+        f"当前人工信息：{model.__dict__}\n"
+        f"已绑定目录字段与探查证据（优先引用）：{evidence_text or '无'}"
     )
 
 

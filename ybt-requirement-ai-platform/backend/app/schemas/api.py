@@ -1063,6 +1063,11 @@ class CandidateSourceRecommendationRead(OrmModel):
     confidence_level: str
     score: float
     selected_flag: bool
+    catalog_column_id: int | None
+    datasource_id: int | None
+    data_type: str | None
+    nullable: bool | None
+    profile_status: str | None
     created_at: datetime
     updated_at: datetime
 
