@@ -4,16 +4,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from urllib.parse import parse_qs,urlsplit
 from app.core.database import get_db
-from app.models import (AIUserFeedback,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelProfile,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
+from app.models import (AIUserFeedback,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelProfile,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
 from app.services.embeddings import get_embedding_service
 from app.services.evaluation import run_evaluation
 from app.services.knowledge_ingestion import ingest_knowledge_document
 from app.services.rag import grounded_answer
 from app.services.retrieval import HybridRetriever
+from app.services.retrieval.keyword_index import index_knowledge_unit
 from app.services.security import ensure_external_allowed,redact_content
 from app.services.vector import VectorRecord,get_vector_store
 
 router=APIRouter(tags=["knowledge rag"])
+KNOWLEDGE_TYPES={"regulatory_qa","regulatory_policy","field_explanation","historical_mapping","historical_traceability","east_mapping","business_research","technical_research","data_dictionary","code_mapping","manual_note","sql_evidence"}
+KNOWLEDGE_SCOPES={"global","project","institution"}
+CONFIDENTIALITY_LEVELS={"public","internal","confidential","restricted"}
 class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_id:int|None=None;knowledge_types:list[str]=Field(default_factory=list);top_k:int=Field(20,ge=1,le=50)
 class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None
 class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";query_text:str;target_field_id:int|None=None;scenario_id:int|None=None;expected_knowledge_unit_ids_json:list[int]=Field(default_factory=list);expected_source_system:str|None=None;expected_table_name:str|None=None;expected_field_name:str|None=None;expected_answer_keywords_json:list[str]=Field(default_factory=list);enabled:bool=True
@@ -22,31 +26,34 @@ class ModelProfileCreate(BaseModel):profile_name:str;provider_type:str="mock";ba
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
 async def upload(project_id:int,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
-    if knowledge_scope not in {"global","project","institution"}:raise HTTPException(400,"Invalid knowledge scope")
+    if knowledge_type not in KNOWLEDGE_TYPES:raise HTTPException(400,"Invalid knowledge type")
+    if knowledge_scope not in KNOWLEDGE_SCOPES:raise HTTPException(400,"Invalid knowledge scope")
+    if confidentiality_level not in CONFIDENTIALITY_LEVELS:raise HTTPException(400,"Invalid confidentiality level")
+    if knowledge_scope=="institution" and not institution_name:raise HTTPException(400,"Institution scope requires institution_name")
     try:return _document(await ingest_knowledge_document(db,project_id,file,knowledge_type,knowledge_scope,institution_name,confidentiality_level,change_note=change_note))
     except (ValueError,RuntimeError) as exc:raise HTTPException(400,str(exc)) from exc
 @router.get("/projects/{project_id}/knowledge/documents")
 def documents(project_id:int,db:Session=Depends(get_db)):return [_document(item) for item in db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.project_id==project_id).order_by(KnowledgeDocument.id.desc())).all()]
 @router.get("/knowledge/documents/{document_id}")
-def document(document_id:int,db:Session=Depends(get_db)):
-    item=db.get(KnowledgeDocument,document_id)
-    if not item:raise HTTPException(404,"Knowledge document not found")
+def document(document_id:int,project_id:int,db:Session=Depends(get_db)):
+    item=_visible_document_or_404(db,document_id,project_id)
     return _document(item)
 @router.get("/knowledge/documents/{document_id}/versions")
-def versions(document_id:int,db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id==document_id).order_by(KnowledgeDocumentVersion.version_no.desc())).all()]
+def versions(document_id:int,project_id:int,db:Session=Depends(get_db)):_visible_document_or_404(db,document_id,project_id);return [_row(item) for item in db.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id==document_id).order_by(KnowledgeDocumentVersion.version_no.desc())).all()]
 @router.post("/knowledge/documents/{document_id}/reindex")
-def reindex(document_id:int,db:Session=Depends(get_db)):
-    document=db.get(KnowledgeDocument,document_id)
-    if not document:raise HTTPException(404,"Knowledge document not found")
+def reindex(document_id:int,project_id:int,db:Session=Depends(get_db)):
+    document=_visible_document_or_404(db,document_id,project_id,require_owner=True)
+    if document.document_status=="archived":raise HTTPException(400,"Archived knowledge document cannot be reindexed")
     units=list(db.scalars(select(KnowledgeUnit).where(KnowledgeUnit.document_id==document_id,KnowledgeUnit.enabled.is_(True))).all());embedding=get_embedding_service();local_only=getattr(embedding,"local_only",False)
-    for unit in units:ensure_external_allowed(unit.confidentiality_level,local_only)
+    try:
+        for unit in units:ensure_external_allowed(unit.confidentiality_level,local_only)
+    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
     vectors=embedding.embed_texts([unit.content if local_only else redact_content(unit.content) for unit in units]);records=[]
-    for unit,vector in zip(units,vectors,strict=True):records.append(VectorRecord(f"knowledge-unit-{unit.id}",vector,unit.content,{"project_id":unit.project_id,"knowledge_scope":unit.knowledge_scope,"institution_name":unit.institution_name,"knowledge_type":unit.knowledge_type,"target_field_code":unit.target_field_code,"scenario_id":unit.scenario_id,"confidentiality_level":unit.confidentiality_level,"document_version_id":unit.document_version_id,"knowledge_unit_id":unit.id,"content_hash":unit.content_hash}))
+    for unit,vector in zip(units,vectors,strict=True):index_knowledge_unit(db,unit,replace=True);records.append(VectorRecord(f"knowledge-unit-{unit.id}",vector,unit.content,{"project_id":unit.project_id,"knowledge_scope":unit.knowledge_scope,"institution_name":unit.institution_name,"knowledge_type":unit.knowledge_type,"target_field_code":unit.target_field_code,"scenario_id":unit.scenario_id,"confidentiality_level":unit.confidentiality_level,"document_version_id":unit.document_version_id,"knowledge_unit_id":unit.id,"content_hash":unit.content_hash}))
     get_vector_store().upsert(records);document.document_status="indexed";db.commit();return _document(document)
 @router.delete("/knowledge/documents/{document_id}")
-def delete_document(document_id:int,db:Session=Depends(get_db)):
-    document=db.get(KnowledgeDocument,document_id)
-    if not document:raise HTTPException(404,"Knowledge document not found")
+def delete_document(document_id:int,project_id:int,db:Session=Depends(get_db)):
+    document=_visible_document_or_404(db,document_id,project_id,require_owner=True)
     units=list(db.scalars(select(KnowledgeUnit).where(KnowledgeUnit.document_id==document_id,KnowledgeUnit.enabled.is_(True))).all());document.document_status="archived"
     for unit in units:unit.enabled=False
     get_vector_store().delete(ids=[f"knowledge-unit-{unit.id}" for unit in units]);db.commit();return {"status":"archived"}
@@ -57,23 +64,25 @@ def units(project_id:int,document_id:int|None=None,include_disabled:bool=False,d
     if not include_disabled:q=q.where(KnowledgeUnit.enabled.is_(True))
     return [_unit(item) for item in db.scalars(q.order_by(KnowledgeUnit.id.desc()).limit(500)).all()]
 @router.get("/knowledge/units/{unit_id}")
-def unit(unit_id:int,db:Session=Depends(get_db)):
+def unit(unit_id:int,project_id:int,db:Session=Depends(get_db)):
     item=db.get(KnowledgeUnit,unit_id)
-    if not item:raise HTTPException(404,"Knowledge unit not found")
+    if not item or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"Knowledge unit not found")
     return _unit(item)
 @router.post("/projects/{project_id}/knowledge/hybrid-search")
 def hybrid_search(project_id:int,payload:SearchRequest,db:Session=Depends(get_db)):
     log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k);return {"retrieval_log_id":log.id,"items":items}
 @router.post("/projects/{project_id}/knowledge/ask")
-def ask(project_id:int,payload:SearchRequest,db:Session=Depends(get_db)):return grounded_answer(db,project_id,payload.query,target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,knowledge_types=payload.knowledge_types,top_k=payload.top_k)
+async def ask(project_id:int,payload:SearchRequest,db:Session=Depends(get_db)):
+    try:return await grounded_answer(db,project_id,payload.query,target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,knowledge_types=payload.knowledge_types,top_k=payload.top_k)
+    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 @router.post("/projects/{project_id}/evaluations/cases")
 def create_case(project_id:int,payload:EvaluationCaseCreate,db:Session=Depends(get_db)):
     item=RagEvaluationCase(project_id=project_id,**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
 @router.get("/projects/{project_id}/evaluations/cases")
 def cases(project_id:int,db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(RagEvaluationCase).where(RagEvaluationCase.project_id==project_id)).all()]
 @router.post("/projects/{project_id}/evaluations/runs")
-def create_run(project_id:int,payload:EvaluationRunCreate,db:Session=Depends(get_db)):
-    run=RagEvaluationRun(project_id=project_id,status="pending",**payload.model_dump());db.add(run);db.commit();db.refresh(run);return _row(run_evaluation(db,run))
+async def create_run(project_id:int,payload:EvaluationRunCreate,db:Session=Depends(get_db)):
+    run=RagEvaluationRun(project_id=project_id,status="pending",**payload.model_dump());db.add(run);db.commit();db.refresh(run);return _row(await run_evaluation(db,run))
 @router.get("/evaluation-runs/{run_id}")
 def evaluation_run(run_id:int,db:Session=Depends(get_db)):
     item=db.get(RagEvaluationRun,run_id)
@@ -96,6 +105,16 @@ def prompt_versions(db:Session=Depends(get_db)):return [_row(item) for item in d
 def _row(item):return {key:value for key,value in item.__dict__.items() if not key.startswith("_")}
 def _document(item):return _row(item)
 def _unit(item):return _row(item)
+
+def _visible_document_or_404(db,document_id,project_id,require_owner=False):
+    item=db.get(KnowledgeDocument,document_id)
+    if not item or (require_owner and item.project_id!=project_id) or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"Knowledge document not found")
+    return item
+
+def _scope_visible(db,scope,owner_project_id,institution_name,request_project_id):
+    project=db.get(Project,request_project_id)
+    if project is None:return False
+    return scope=="global" or (scope=="project" and owner_project_id==request_project_id) or (scope=="institution" and bool(institution_name) and institution_name==project.bank_name)
 
 def _contains_credentials(value):
     fragments=("key","token","password","secret","credential","authorization")

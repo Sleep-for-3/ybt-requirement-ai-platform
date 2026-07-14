@@ -29,14 +29,17 @@ def test_knowledge_versions_hybrid_search_grounded_answer_and_evaluation(tmp_pat
         payload=_qa_excel("监管答疑：客户证件类型应来自 ECIF_CUSTOMER.CERT_TYPE")
         document=_upload(client,project["id"],"监管答疑.xlsx",payload,"regulatory_qa","institution","甲银行")
         repeated=_upload(client,project["id"],"监管答疑.xlsx",payload,"regulatory_qa","institution","甲银行")
-        assert repeated["id"]==document["id"];assert len(_get(client,f"/api/knowledge/documents/{document['id']}/versions"))==1
+        assert repeated["id"]==document["id"];assert len(_get(client,f"/api/knowledge/documents/{document['id']}/versions?project_id={project['id']}"))==1
         units=_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}");assert len(units)==1;unit=units[0];assert unit["unit_type"]=="qa";assert unit["source_sheet_name"]=="答疑";assert unit["source_cell_range"]=="A2:F2"
         search=_post(client,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"客户证件类型 CERT_TYPE","knowledge_types":["regulatory_qa"],"top_k":5});assert search["items"][0]["knowledge_unit_id"]==unit["id"];assert search["items"][0]["source_cell_range"]=="A2:F2"
         answer=_post(client,f"/api/projects/{project['id']}/knowledge/ask",{"query":"客户证件类型取哪个字段","top_k":5});assert answer["citations"][0]["knowledge_unit_id"]==unit["id"]
-        case=_post(client,f"/api/projects/{project['id']}/evaluations/cases",{"case_name":"证件类型召回","query_text":"客户证件类型 CERT_TYPE","expected_knowledge_unit_ids_json":[unit["id"]],"expected_answer_keywords_json":["CERT_TYPE"]});run=_post(client,f"/api/projects/{project['id']}/evaluations/runs",{"run_name":"回归"});assert run["summary_metrics_json"]["recall_at_5"]==1;assert run["summary_metrics_json"]["mrr"]==1
+        case=_post(client,f"/api/projects/{project['id']}/evaluations/cases",{"case_name":"证件类型召回","query_text":"客户证件类型 CERT_TYPE","expected_knowledge_unit_ids_json":[unit["id"]],"expected_source_system":"ECIF","expected_table_name":"ECIF_CUSTOMER","expected_field_name":"CERT_TYPE","expected_answer_keywords_json":["CERT_TYPE"]});run=_post(client,f"/api/projects/{project['id']}/evaluations/runs",{"run_name":"回归"});metrics=run["summary_metrics_json"];assert metrics["recall_at_5"]==1;assert metrics["recall_at_10"]==1;assert metrics["mrr"]==1;assert metrics["source_hit_rate"]==1;assert metrics["table_hit_rate"]==1;assert metrics["field_hit_rate"]==1;assert metrics["citation_coverage"]==1;assert metrics["keyword_coverage"]==1
         feedback=_post(client,f"/api/projects/{project['id']}/feedback",{"feedback_type":"retrieval","target_type":"knowledge_unit","target_id":unit["id"],"rating":"correct","comment":"引用准确"});assert feedback["rating"]=="correct"
-        changed=_upload(client,project["id"],"监管答疑.xlsx",_qa_excel("更新答疑：优先取 ECIF_CUSTOMER.CERT_TYPE"),"regulatory_qa","institution","甲银行");assert changed["id"]==document["id"];assert len(_get(client,f"/api/knowledge/documents/{document['id']}/versions"))==2;assert len(_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}"))==1
+        changed=_upload(client,project["id"],"监管答疑.xlsx",_qa_excel("更新答疑：优先取 ECIF_CUSTOMER.CERT_TYPE"),"regulatory_qa","institution","甲银行");assert changed["id"]==document["id"];assert len(_get(client,f"/api/knowledge/documents/{document['id']}/versions?project_id={project['id']}"))==2;assert len(_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}"))==1
         other=_post(client,"/api/projects",{"name":"隔离项目","bank_name":"乙银行"});isolated=_post(client,f"/api/projects/{other['id']}/knowledge/hybrid-search",{"query":"CERT_TYPE","top_k":5});assert isolated["items"]==[]
+        assert client.get(f"/api/knowledge/documents/{document['id']}?project_id={other['id']}").status_code==404
+        assert client.get(f"/api/knowledge/units/{unit['id']}?project_id={other['id']}").status_code==404
+        assert client.delete(f"/api/knowledge/documents/{document['id']}?project_id={other['id']}").status_code==404
 
 def test_docx_pdf_text_markdown_and_sql_ingestion_preserve_locations(tmp_path:Path,monkeypatch):
     monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()
@@ -156,6 +159,25 @@ def test_model_profile_rejects_nested_credentials(tmp_path: Path, monkeypatch):
         })
         assert response.status_code == 400
         assert "credentials" in response.text
+
+
+def test_excel_merged_cells_scenario_links_and_persistent_keyword_index(tmp_path:Path,monkeypatch):
+    monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()
+    with _client() as client:
+        project=_post(client,"/api/projects",{"name":"场景知识索引"})
+        table=_post(client,"/api/target-tables",{"project_id":project["id"],"table_code":"YBT_CUSTOMER","table_name":"客户"})
+        _post(client,"/api/fields",{"project_id":project["id"],"target_table_id":table["id"],"field_code":"CERT_TYPE","field_name":"客户证件类型"})
+        debit=_post(client,f"/api/projects/{project['id']}/scenarios",{"scenario_code":"DEBIT","scenario_name":"借记卡"})
+        credit=_post(client,f"/api/projects/{project['id']}/scenarios",{"scenario_code":"CREDIT","scenario_name":"信用卡"})
+        workbook=Workbook();sheet=workbook.active;sheet.title="历史场景";sheet.append(["业务场景","字段代码","字段名称","来源表","来源字段","备注"]);sheet.append(["借记卡","CERT_TYPE","客户证件类型","ecif_customer","cert_type","合并备注"]);sheet.append(["信用卡","CERT_TYPE","客户证件类型","ecif_customer","cert_type",None]);sheet.merge_cells("F2:F3");stream=BytesIO();workbook.save(stream)
+        document=_upload(client,project["id"],"历史场景.xlsx",stream.getvalue(),"historical_mapping")
+        units=_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}")
+        assert {item["scenario_id"] for item in units}=={debit["id"],credit["id"]}
+        assert all("合并备注" in item["content"] for item in units)
+        paragraphs=[f"普通历史知识段落 {index}" for index in range(550)]+["持久关键词索引唯一标记 UNIQUE_LAST_550"]
+        _upload(client,project["id"],"大量知识.txt","\n\n".join(paragraphs).encode(),"manual_note")
+        result=_post(client,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"UNIQUE_LAST_550","top_k":5})
+        assert result["items"] and "UNIQUE_LAST_550" in result["items"][0]["content"]
 
 
 def test_prompt_version_external_policy_and_model_call_audit(db_session):
