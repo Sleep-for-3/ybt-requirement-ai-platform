@@ -2,18 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import MappingEvidenceReference, ProductScenario, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
-from app.services.llm import get_llm_service
-
-BUSINESS_PROMPT = """你是银行一表通业务需求分析专家。请生成场景业务口径草稿，输出 JSON：
-business_definition, source_system_screenshot_required, source_system_change_required, external_data_required,
-manual_supplement_required, business_owner, remarks, open_questions, confidence_level, final_content_draft。
-只描述业务含义和待确认事项，不输出 SQL。"""
-
-TECHNICAL_PROMPT = """你是银行一表通技术溯源需求分析专家。请生成场景技术溯源草稿，输出 JSON：
-source_system_name, source_database_name, source_schema_name, source_table_english_name,
-source_table_chinese_name, source_field_english_name, source_field_chinese_name, processing_logic,
-processing_logic_type, tech_owner, remarks, open_questions, confidence_level, final_content_draft。
-只描述来源和处理规则，不输出可执行 SQL。"""
+from app.services.llm.prompt_runtime import get_prompt_runtime,get_runtime_llm_service,prepare_model_input,record_model_call
+from app.services.retrieval import HybridRetriever
 
 
 async def generate_business_draft(db: Session, mapping_id: int) -> ScenarioBusinessMapping:
@@ -22,7 +12,7 @@ async def generate_business_draft(db: Session, mapping_id: int) -> ScenarioBusin
         raise ValueError("Scenario business mapping not found")
     field = db.get(TargetField, mapping.target_field_id)
     scenario = db.get(ProductScenario, mapping.scenario_id)
-    output = await get_llm_service().chat_json(BUSINESS_PROMPT, _context(field, scenario, mapping))
+    runtime=get_prompt_runtime(db,"scenario_business_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,field.field_name if field else "",mapping.target_field_id,mapping.scenario_id,None,10);context=_context(field,scenario,mapping,"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge));model_input=prepare_model_input(runtime,context,[item["confidentiality_level"] for item in knowledge]);output = await get_runtime_llm_service(runtime).chat_json(runtime.system_prompt, model_input);record_model_call(db,mapping.project_id,runtime,model_input,output,retrieval_log_id=retrieval_log.id)
     for key in [
         "business_definition", "source_system_screenshot_required", "source_system_change_required",
         "external_data_required", "manual_supplement_required", "business_owner", "remarks",
@@ -48,7 +38,7 @@ async def generate_technical_draft(db: Session, lineage_id: int) -> ScenarioTech
         MappingEvidenceReference.mapping_id == lineage.id,
     ).order_by(MappingEvidenceReference.id)).all())
     evidence_text = "\n".join(item.evidence_summary or item.quoted_content or item.source_name for item in evidence)
-    output = await get_llm_service().chat_json(TECHNICAL_PROMPT, _context(field, scenario, lineage, evidence_text))
+    runtime=get_prompt_runtime(db,"scenario_technical_lineage");retrieval_log,knowledge=HybridRetriever(db).search(lineage.project_id,field.field_name if field else "",lineage.target_field_id,lineage.scenario_id,None,10);knowledge_text="\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);context=_context(field,scenario,lineage,"\n".join(filter(None,[evidence_text,knowledge_text])));model_input=prepare_model_input(runtime,context,[item["confidentiality_level"] for item in knowledge]);output = await get_runtime_llm_service(runtime).chat_json(runtime.system_prompt, model_input);record_model_call(db,lineage.project_id,runtime,model_input,output,retrieval_log_id=retrieval_log.id)
     for key in [
         "source_system_name", "source_database_name", "source_schema_name", "source_table_english_name",
         "source_table_chinese_name", "source_field_english_name", "source_field_chinese_name",

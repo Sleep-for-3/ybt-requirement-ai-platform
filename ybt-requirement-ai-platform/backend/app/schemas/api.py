@@ -445,6 +445,7 @@ class SourceTableCreate(BaseModel):
     table_name: str
     table_comment: str | None = None
     datasource_id: int | None = None
+    database_name: str | None = None
     schema_name: str | None = None
     physical_table_name: str | None = None
     description: str | None = None
@@ -455,6 +456,7 @@ class SourceTableUpdate(BaseModel):
     table_name: str | None = None
     table_comment: str | None = None
     datasource_id: int | None = None
+    database_name: str | None = None
     schema_name: str | None = None
     physical_table_name: str | None = None
     description: str | None = None
@@ -468,6 +470,7 @@ class SourceTableRead(OrmModel):
     table_name: str
     table_comment: str | None
     datasource_id: int | None
+    database_name: str | None
     schema_name: str | None
     physical_table_name: str | None
     description: str | None
@@ -513,6 +516,7 @@ class MartTableCreate(BaseModel):
     subject_area: str | None = None
     table_comment: str | None = None
     datasource_id: int | None = None
+    database_name: str | None = None
     schema_name: str | None = None
     physical_table_name: str | None = None
     is_existing: bool = True
@@ -525,6 +529,7 @@ class MartTableUpdate(BaseModel):
     subject_area: str | None = None
     table_comment: str | None = None
     datasource_id: int | None = None
+    database_name: str | None = None
     schema_name: str | None = None
     physical_table_name: str | None = None
     is_existing: bool | None = None
@@ -1089,6 +1094,10 @@ class CandidateSourceRecommendationRead(OrmModel):
     data_type: str | None
     nullable: bool | None
     profile_status: str | None
+    retrieval_log_id: int | None
+    knowledge_unit_ids_json: list[Any]
+    citation_summary_json: list[Any]
+    recommendation_basis: str | None
     created_at: datetime
     updated_at: datetime
 

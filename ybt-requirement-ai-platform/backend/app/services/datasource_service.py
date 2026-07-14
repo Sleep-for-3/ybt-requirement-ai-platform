@@ -13,6 +13,13 @@ DATASOURCE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 SUPPORTED_TEST_TYPES = {"sqlite", "postgresql", "mysql", "mysql_compatible"}
 
 
+def ensure_readonly_datasource(datasource: DataSource) -> None:
+    if not datasource.enabled:
+        raise ValueError("数据源已禁用，不能执行连接、同步、查询或探查")
+    if not datasource.readonly_flag:
+        raise ValueError("数据源未标记为只读，拒绝执行连接、同步、查询或探查")
+
+
 def validate_datasource_name(name: str) -> None:
     if not DATASOURCE_NAME_PATTERN.match(name):
         raise ValueError("DataSource.name 只能包含小写字母、数字、下划线，必须以字母开头，长度 3 到 64")
@@ -69,6 +76,7 @@ def delete_datasource(db: Session, datasource: DataSource) -> None:
 
 
 def test_datasource_connection(db: Session, datasource: DataSource) -> tuple[str, str]:
+    ensure_readonly_datasource(datasource)
     if datasource.db_type not in SUPPORTED_TEST_TYPES:
         status, message = "unsupported", f"{datasource.db_type} 数据源测试暂未启用"
     else:

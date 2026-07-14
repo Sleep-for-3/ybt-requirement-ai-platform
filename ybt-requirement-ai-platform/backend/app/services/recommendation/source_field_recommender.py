@@ -5,8 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AIUserFeedback,
     BusinessSystem,
     CandidateSourceRecommendation,
+    ColumnProfileSnapshot,
     DataSource,
     MappingEvidenceReference,
     MartToYbtMapping,
@@ -21,6 +23,7 @@ from app.models import (
 )
 from app.schemas import CatalogSearchRequest
 from app.services.metadata.catalog_service import search_catalog
+from app.services.retrieval import HybridRetriever
 
 
 def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int, top_k: int = 20) -> list[CandidateSourceRecommendation]:
@@ -50,6 +53,8 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
         ScenarioTechnicalLineage.target_field_id == target.id,
     )).all())
     sql_context = _sql_context(db, target.project_id)
+    rag_log,rag_items=HybridRetriever(db).search(target.project_id," ".join(filter(None,[target.field_code,target.field_name,target.field_definition,scenario.scenario_name])),target.id,scenario.id,None,30)
+    rag_unit_ids=[item["knowledge_unit_id"] for item in rag_items];rag_citations=[{"knowledge_unit_id":item["knowledge_unit_id"],"source_file_name":item["source_file_name"],"source_sheet_name":item["source_sheet_name"],"source_cell_range":item["source_cell_range"]} for item in rag_items]
     evidence_rows = db.scalars(select(MappingEvidenceReference).where(
         MappingEvidenceReference.project_id == target.project_id,
         MappingEvidenceReference.evidence_type.in_(["source_field", "catalog_column"]),
@@ -110,6 +115,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
             recommend_reason="；".join(reasons), evidence_summary="；".join(evidence),
             confidence_level="high" if score >= 0.75 else "medium" if score >= 0.45 else "low",
             score=round(min(score, 1.0), 4), selected_flag=False,
+            retrieval_log_id=rag_log.id,knowledge_unit_ids_json=rag_unit_ids,citation_summary_json=rag_citations,recommendation_basis="historical_explicit" if "历史" in "".join(reasons) else "semantic_candidate",
         )
         db.add(recommendation)
         recommendations.append(recommendation)
@@ -119,6 +125,12 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     ))
     for item in catalog_items:
         score,reasons,evidence=_score_catalog_candidate(item,scenario,knowledge,history,sql_context,item["catalog_column_id"] in bound_catalog_ids)
+        matching_rag=[entry for entry in rag_items if any(value and value.lower() in entry["content"].lower() for value in [item["table_name"],item["column_name"]])]
+        if matching_rag:score=min(1,score+.12);reasons.append("混合知识检索命中");evidence.append(f"{len(matching_rag)} 条知识单元引用该表字段")
+        profile=db.scalar(select(ColumnProfileSnapshot).where(ColumnProfileSnapshot.catalog_column_id==item["catalog_column_id"]).order_by(ColumnProfileSnapshot.id.desc()))
+        if profile and profile.total_count is not None:score=min(1,score+.05);reasons.append("数据探查支持");evidence.append(f"探查 total={profile.total_count}, null_rate={profile.null_rate}, distinct={profile.distinct_count}")
+        positive=db.scalar(select(AIUserFeedback.id).where(AIUserFeedback.project_id==target.project_id,AIUserFeedback.feedback_type=="source_recommendation",AIUserFeedback.rating=="correct",AIUserFeedback.correct_table_name==item["table_name"],AIUserFeedback.correct_field_name==item["column_name"]))
+        if positive:score=min(1,score+.08);reasons.append("历史正向反馈")
         item["score"]=score;item["match_reasons"]=reasons;item["catalog_evidence"]=evidence
     catalog_items.sort(key=lambda item:(item["score"],-item["catalog_column_id"]),reverse=True)
     existing_catalog_ids = {item.catalog_column_id for item in recommendations if item.catalog_column_id}
@@ -139,6 +151,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
             evidence_summary="；".join([f"来自命名数据源 {datasource.name} 的目录字段 {item['schema_name']}.{item['table_name']}.{item['column_name']}"]+item["catalog_evidence"]),
             confidence_level="high" if item["score"] >= .75 else "medium" if item["score"] >= .45 else "low",
             score=item["score"], selected_flag=False,
+            retrieval_log_id=rag_log.id,knowledge_unit_ids_json=[entry["knowledge_unit_id"] for entry in matching_rag] if (matching_rag:=[entry for entry in rag_items if any(value and value.lower() in entry["content"].lower() for value in [item["table_name"],item["column_name"]])]) else rag_unit_ids[:5],citation_summary_json=[citation for citation in rag_citations if citation["knowledge_unit_id"] in ([entry["knowledge_unit_id"] for entry in matching_rag] if matching_rag else rag_unit_ids[:5])],recommendation_basis="profile_supported" if "数据探查支持" in item["match_reasons"] else "regulatory_advice" if "监管答疑匹配" in item["match_reasons"] else "semantic_candidate",
         )
         db.add(recommendation); recommendations.append(recommendation)
     recommendations.sort(key=lambda item: item.score or 0, reverse=True)

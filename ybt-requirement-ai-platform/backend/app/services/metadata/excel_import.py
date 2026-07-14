@@ -8,7 +8,7 @@ from app.core.settings import get_settings
 from app.models import CatalogColumn, CatalogSchema, CatalogTable, MetadataImportDocument
 from app.services.metadata.hashing import metadata_hash
 
-ALIASES={"system_name":{"系统名称","系统名"},"datasource_name":{"数据源名称","数据源名"},"schema_name":{"schema","库名","数据库名"},"table_name":{"表英文名","表名","table_name"},"table_comment":{"表中文名","表注释","表说明"},"column_name":{"字段英文名","字段名","column_name"},"column_comment":{"字段中文名","字段注释","字段说明"},"data_type":{"字段类型","数据类型","data_type"},"nullable":{"是否可空","可空"},"is_primary_key":{"主键","是否主键"},"ordinal_position":{"字段顺序","字段序号"}}
+ALIASES={"system_name":{"系统名称","系统名"},"datasource_name":{"数据源名称","数据源名"},"database_name":{"数据库名","库名","database","database_name"},"schema_name":{"schema","模式名","schema_name"},"table_name":{"表英文名","表名","table_name"},"table_comment":{"表中文名","表注释","表说明"},"column_name":{"字段英文名","字段名","column_name"},"column_comment":{"字段中文名","字段注释","字段说明"},"data_type":{"字段类型","数据类型","data_type"},"nullable":{"是否可空","可空"},"is_primary_key":{"主键","是否主键"},"ordinal_position":{"字段顺序","字段序号"}}
 
 async def ingest_metadata_excel(db,datasource,upload):
     if Path(upload.filename or "").suffix.lower() != ".xlsx": raise ValueError("元数据字典只支持 .xlsx")
@@ -39,10 +39,12 @@ def apply_metadata_excel(db,document):
         schema=db.scalar(select(CatalogSchema).where(CatalogSchema.datasource_id==document.datasource_id,CatalogSchema.schema_name==schema_name))
         if schema is None:schema=CatalogSchema(project_id=document.project_id,datasource_id=document.datasource_id,schema_name=schema_name);db.add(schema);db.flush();schemas+=1
         table=db.scalar(select(CatalogTable).where(CatalogTable.datasource_id==document.datasource_id,CatalogTable.schema_name==schema_name,CatalogTable.table_name==table_name))
-        if table is None:table=CatalogTable(project_id=document.project_id,datasource_id=document.datasource_id,catalog_schema_id=schema.id,schema_name=schema_name,table_name=table_name);db.add(table);db.flush();tables+=1
+        if table is None:table=CatalogTable(project_id=document.project_id,datasource_id=document.datasource_id,catalog_schema_id=schema.id,database_name=row.get("database_name"),schema_name=schema_name,table_name=table_name);db.add(table);db.flush();tables+=1
+        table.database_name=row.get("database_name") or table.database_name
         table.table_comment=row.get("table_comment");table.enabled=True;table.last_synced_at=now;table.metadata_hash=metadata_hash({"schema":schema_name,"table":table_name,"comment":table.table_comment})
         column=db.scalar(select(CatalogColumn).where(CatalogColumn.catalog_table_id==table.id,CatalogColumn.column_name==column_name))
-        if column is None:column=CatalogColumn(project_id=document.project_id,datasource_id=document.datasource_id,catalog_table_id=table.id,schema_name=schema_name,table_name=table_name,column_name=column_name);db.add(column);columns+=1
+        if column is None:column=CatalogColumn(project_id=document.project_id,datasource_id=document.datasource_id,catalog_table_id=table.id,database_name=table.database_name,schema_name=schema_name,table_name=table_name,column_name=column_name);db.add(column);columns+=1
+        column.database_name=table.database_name
         column.column_comment=row.get("column_comment");column.data_type=str(row.get("data_type") or "") or None;column.database_native_type=column.data_type;column.nullable=_bool(row.get("nullable"),True);column.is_primary_key=_bool(row.get("is_primary_key"),False);column.ordinal_position=int(row.get("ordinal_position") or 0);column.enabled=True;column.last_synced_at=now;column.metadata_hash=metadata_hash(row)
     db.commit();return {"document_id":document.id,"schemas":schemas,"tables":tables,"columns":columns,"warnings":document.warnings_json or []}
 

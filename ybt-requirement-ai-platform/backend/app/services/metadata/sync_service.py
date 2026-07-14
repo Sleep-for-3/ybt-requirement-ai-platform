@@ -4,10 +4,12 @@ from sqlalchemy.orm import Session
 from app.models import CatalogColumn, CatalogSchema, CatalogTable, DataSource, MetadataSyncTask
 from app.services.metadata.factory import create_metadata_adapter
 from app.services.metadata.hashing import metadata_hash
+from app.services.datasource_service import ensure_readonly_datasource
 
 VALID_MODES = {"full", "incremental", "selected_schemas"}
 
 def synchronize_metadata(db: Session, datasource: DataSource, sync_mode="full", schema_names=None, include_views=True, created_by=None):
+    ensure_readonly_datasource(datasource)
     if sync_mode not in VALID_MODES: raise ValueError("Invalid sync_mode")
     task = MetadataSyncTask(project_id=datasource.project_id, datasource_id=datasource.id, sync_mode=sync_mode, status="pending", created_by=created_by)
     db.add(task); db.commit(); db.refresh(task)
@@ -50,7 +52,8 @@ def _upsert_table(db, ds, schema, item, now):
     digest = metadata_hash(item)
     model = db.scalar(select(CatalogTable).where(CatalogTable.datasource_id == ds.id, CatalogTable.schema_name == item.schema_name, CatalogTable.table_name == item.table_name))
     if model is None:
-        model = CatalogTable(project_id=ds.project_id, datasource_id=ds.id, catalog_schema_id=schema.id, schema_name=item.schema_name, table_name=item.table_name); db.add(model)
+        model = CatalogTable(project_id=ds.project_id, datasource_id=ds.id, catalog_schema_id=schema.id, database_name=ds.database_name, schema_name=item.schema_name, table_name=item.table_name); db.add(model)
+    model.database_name=ds.database_name
     changed = model.metadata_hash != digest
     if changed:
         model.table_comment=item.table_comment; model.table_type=item.table_type; model.estimated_row_count=item.estimated_row_count; model.primary_key_columns_json=item.primary_key_columns; model.metadata_hash=digest
@@ -61,7 +64,8 @@ def _upsert_column(db, ds, table, item, now):
     digest = metadata_hash(item)
     model = db.scalar(select(CatalogColumn).where(CatalogColumn.catalog_table_id == table.id, CatalogColumn.column_name == item.column_name))
     if model is None:
-        model = CatalogColumn(project_id=ds.project_id, datasource_id=ds.id, catalog_table_id=table.id, schema_name=item.schema_name, table_name=item.table_name, column_name=item.column_name); db.add(model)
+        model = CatalogColumn(project_id=ds.project_id, datasource_id=ds.id, catalog_table_id=table.id, database_name=ds.database_name, schema_name=item.schema_name, table_name=item.table_name, column_name=item.column_name); db.add(model)
+    model.database_name=ds.database_name
     changed = model.metadata_hash != digest
     if changed:
         for key in ["column_comment","data_type","database_native_type","nullable","ordinal_position","is_primary_key","default_value","character_max_length","numeric_precision","numeric_scale"]: setattr(model, key, getattr(item, key))

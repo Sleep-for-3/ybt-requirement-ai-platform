@@ -33,6 +33,10 @@ class MockVectorStore(VectorStore):
             )
         return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
 
+    def delete(self,ids=None,filters=None):
+        ids=set(ids or []);filters=filters or {}
+        self._records={key:value for key,value in self._records.items() if key not in ids and not(filters and _matches_filters(value.metadata,filters))}
+
 
 def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
     for key, expected in filters.items():
