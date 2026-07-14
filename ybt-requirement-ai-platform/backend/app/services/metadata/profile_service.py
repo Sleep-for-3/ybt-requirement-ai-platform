@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.models import (CandidateSourceRecommendation,CatalogColumn,CatalogTable,ColumnProfileSnapshot,ColumnProfileTask,DataSource,MappingEvidenceReference,ScenarioBusinessMapping,ScenarioTechnicalLineage,SqlExecutionLog)
+from app.models import (CandidateSourceRecommendation,CatalogColumn,CatalogTable,ColumnProfileSnapshot,ColumnProfileTask,DataSource,MappingEvidenceReference,MartToYbtMapping,ScenarioBusinessMapping,ScenarioTechnicalLineage,SourceToMartMapping,SqlExecutionLog)
 from app.services.db.safe_sql_executor import SafeSqlExecutor
+from app.services.db.dialect import qualify_table, quote_identifier
 from app.services.metadata.sensitivity import classify_column_sensitivity, sanitize_profile_result
+from app.services.datasource_service import ensure_readonly_datasource
 
 VALID_METRICS={"null_rate","distinct_count","top_values","min_max","length_distribution"}
 
@@ -12,12 +14,13 @@ def run_column_profile(db:Session,column:CatalogColumn,request,created_by=None):
     if recommendation is None or not recommendation.selected_flag:raise ValueError("Source recommendation must be selected before profiling")
     if recommendation.catalog_column_id!=column.id:raise ValueError("Selected recommendation does not reference this catalog column")
     if recommendation.target_field_id!=request.target_field_id or recommendation.scenario_id!=request.scenario_id:raise ValueError("Selected recommendation belongs to another field or scenario")
+    datasource=db.get(DataSource,column.datasource_id);ensure_readonly_datasource(datasource)
     metrics=list(dict.fromkeys(request.metrics));invalid=set(metrics)-VALID_METRICS
     if invalid:raise ValueError(f"Unsupported profile metrics: {', '.join(sorted(invalid))}")
     task=ColumnProfileTask(project_id=column.project_id,datasource_id=column.datasource_id,catalog_column_id=column.id,target_field_id=request.target_field_id,scenario_id=request.scenario_id,source_recommendation_id=recommendation.id,status="validated",requested_metrics_json=metrics,created_by=created_by)
     db.add(task);db.commit();db.refresh(task);task.status="running";task.started_at=datetime.now(UTC);db.commit()
-    table=db.get(CatalogTable,column.catalog_table_id);datasource=db.get(DataSource,column.datasource_id);executor=SafeSqlExecutor(db=db,timeout_seconds=30)
-    table_sql=_qualified(table.schema_name,table.table_name,datasource.db_type);column_sql=_quote(column.column_name,datasource.db_type);generated=[];result={};warnings=[];sensitivity=classify_column_sensitivity(column.column_name,column.column_comment)
+    table=db.get(CatalogTable,column.catalog_table_id);executor=SafeSqlExecutor(db=db,timeout_seconds=30)
+    table_sql=qualify_table(table.schema_name,table.table_name,datasource.db_type);column_sql=quote_identifier(column.column_name,datasource.db_type);generated=[];result={};warnings=[];sensitivity=classify_column_sensitivity(column.column_name,column.column_comment)
     try:
         queries=[]
         if "null_rate" in metrics:queries.append(("null_rate",f"select count(1) as total_count, sum(case when {column_sql} is null then 1 else 0 end) as null_count from {table_sql}"))
@@ -54,6 +57,17 @@ def _attach_evidence(db,task,snapshot,column,table,datasource,result,warnings):
         exists=db.scalar(select(MappingEvidenceReference.id).where(MappingEvidenceReference.mapping_type==mapping_type,MappingEvidenceReference.mapping_id==mapping_id,MappingEvidenceReference.evidence_type=="column_profile",MappingEvidenceReference.evidence_id==task.id))
         if not exists:db.add(MappingEvidenceReference(project_id=task.project_id,mapping_type=mapping_type,mapping_id=mapping_id,evidence_type="column_profile",evidence_id=task.id,source_name=f"{datasource.name}.{column.schema_name}.{column.table_name}.{column.column_name}",location_text=f"profile_snapshot:{snapshot.id}",evidence_summary=summary))
 
-def _quote(value,dialect):return f'"{value.replace(chr(34),chr(34)*2)}"'
-def _qualified(schema,table,dialect):return f"{_quote(schema,dialect)}.{_quote(table,dialect)}" if schema and not(dialect=="sqlite" and schema=="main") else _quote(table,dialect)
+def bind_profile_evidence(db:Session,task_id:int,mapping_type:str,mapping_id:int):
+    models={"source_to_mart":SourceToMartMapping,"mart_to_ybt":MartToYbtMapping}
+    if mapping_type not in models:raise ValueError("Profile evidence can only bind to source_to_mart or mart_to_ybt")
+    task=db.get(ColumnProfileTask,task_id);mapping=db.get(models[mapping_type],mapping_id)
+    if task is None or task.status not in {"completed","partially_completed"}:raise ValueError("Completed profile task not found")
+    if mapping is None or mapping.project_id!=task.project_id:raise ValueError("Mapping not found in profile project")
+    existing=db.scalar(select(MappingEvidenceReference).where(MappingEvidenceReference.mapping_type==mapping_type,MappingEvidenceReference.mapping_id==mapping_id,MappingEvidenceReference.evidence_type=="column_profile",MappingEvidenceReference.evidence_id==task.id))
+    if existing:return existing
+    column=db.get(CatalogColumn,task.catalog_column_id);datasource=db.get(DataSource,task.datasource_id)
+    result=task.profile_result_json or {};summary=f"{datasource.name} {column.schema_name}.{column.table_name}.{column.column_name}; total={result.get('total_count')}; null_rate={result.get('null_rate')}; distinct={result.get('distinct_count')}"
+    evidence=MappingEvidenceReference(project_id=task.project_id,mapping_type=mapping_type,mapping_id=mapping_id,evidence_type="column_profile",evidence_id=task.id,source_name=f"{datasource.name}.{column.schema_name}.{column.table_name}.{column.column_name}",location_text=f"profile_task:{task.id}",evidence_summary=summary)
+    db.add(evidence);db.commit();db.refresh(evidence);return evidence
+
 def _safe_text(value,sensitivity):return None if value is None or sensitivity=="highly_sensitive" else str(value)[:500]

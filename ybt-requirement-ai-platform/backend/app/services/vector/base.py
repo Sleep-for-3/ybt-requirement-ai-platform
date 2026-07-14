@@ -32,3 +32,7 @@ class VectorStore(ABC):
         filters: dict[str, Any] | None = None,
     ) -> list[VectorSearchResult]:
         """Search records by vector similarity."""
+
+    @abstractmethod
+    def delete(self, ids: list[str] | None = None, filters: dict[str, Any] | None = None) -> None:
+        """Delete records by id or metadata filters."""

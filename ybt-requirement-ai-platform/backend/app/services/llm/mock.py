@@ -61,6 +61,14 @@ class MockLLMService(LLMService):
                 "confidence_level": "medium",
                 "evidence_summary": "草稿基于一表通字段定义、监管集市字段和已绑定证据生成。",
             }
+        if "监管字段解释" in system_prompt:
+            return {
+                "answer": "现有证据表明 CERT_TYPE 表示客户证件类型；具体来源字段和场景适用范围仍需人工确认。",
+                "confidence_level": "medium",
+                "supported_claims": ["CERT_TYPE 表示客户证件类型。"],
+                "unsupported_claims": [],
+                "open_questions": ["请确认当前场景采用的真实来源表字段。"],
+            }
         return {
             "business_to_mart_rule": "建议从客户主数据系统抽取目标字段，按监管集市客户维度统一代码值和空值处理规则。",
             "mart_to_ybt_rule": "监管集市字段直接映射至一表通目标字段；如存在监管代码集，需按最新一表通代码表转换。",

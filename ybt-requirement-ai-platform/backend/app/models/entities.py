@@ -101,6 +101,7 @@ class SourceTable(Base, TimestampMixin):
     table_name: Mapped[str] = mapped_column(String(200), nullable=False)
     table_comment: Mapped[str | None] = mapped_column(Text)
     datasource_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
+    database_name: Mapped[str | None] = mapped_column(String(255))
     schema_name: Mapped[str | None] = mapped_column(String(255))
     physical_table_name: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
@@ -135,6 +136,7 @@ class MartTable(Base, TimestampMixin):
     subject_area: Mapped[str | None] = mapped_column(String(200))
     table_comment: Mapped[str | None] = mapped_column(Text)
     datasource_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
+    database_name: Mapped[str | None] = mapped_column(String(255))
     schema_name: Mapped[str | None] = mapped_column(String(255))
     physical_table_name: Mapped[str | None] = mapped_column(String(255))
     is_existing: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -280,6 +282,10 @@ class CandidateSourceRecommendation(Base, TimestampMixin):
     data_type: Mapped[str | None] = mapped_column(String(255))
     nullable: Mapped[bool | None] = mapped_column(Boolean)
     profile_status: Mapped[str | None] = mapped_column(String(50))
+    retrieval_log_id: Mapped[int | None] = mapped_column(ForeignKey("retrieval_logs.id"), index=True)
+    knowledge_unit_ids_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    citation_summary_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    recommendation_basis: Mapped[str | None] = mapped_column(String(100))
 
 
 class TraceabilityTemplateDocument(Base, TimestampMixin):
@@ -430,7 +436,20 @@ class KnowledgeDocument(Base):
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)
     source_type: Mapped[str] = mapped_column(String(100), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    knowledge_type: Mapped[str] = mapped_column(String(50), default="manual_note", index=True)
+    knowledge_scope: Mapped[str] = mapped_column(String(50), default="project", index=True)
+    institution_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    document_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    confidentiality_level: Mapped[str] = mapped_column(String(50), default="internal")
+    file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    current_version_no: Mapped[int] = mapped_column(Integer, default=1)
+    parse_status: Mapped[str] = mapped_column(String(50), default="pending")
+    parse_summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(),onupdate=func.now())
 
     chunks: Mapped[list["KnowledgeChunk"]] = relationship(back_populates="document")
 
@@ -448,6 +467,52 @@ class KnowledgeChunk(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
+
+
+class KnowledgeDocumentVersion(Base):
+    __tablename__="knowledge_document_versions";__table_args__=(UniqueConstraint("document_id","version_no",name="uq_knowledge_document_version"),)
+    id:Mapped[int]=mapped_column(Integer,primary_key=True,index=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);document_id:Mapped[int]=mapped_column(ForeignKey("knowledge_documents.id"),index=True);version_no:Mapped[int]=mapped_column(Integer);file_name:Mapped[str]=mapped_column(String(255));storage_path:Mapped[str]=mapped_column(String(500));file_hash:Mapped[str]=mapped_column(String(64),index=True);change_note:Mapped[str|None]=mapped_column(Text);parse_status:Mapped[str]=mapped_column(String(50),default="pending");created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+
+class KnowledgeUnit(Base,TimestampMixin):
+    __tablename__="knowledge_units";__table_args__=(Index("ix_knowledge_units_retrieval","project_id","knowledge_scope","institution_name","knowledge_type","target_field_code","scenario_id","enabled"),)
+    id:Mapped[int]=mapped_column(Integer,primary_key=True,index=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);document_id:Mapped[int]=mapped_column(ForeignKey("knowledge_documents.id"),index=True);document_version_id:Mapped[int]=mapped_column(ForeignKey("knowledge_document_versions.id"),index=True);knowledge_type:Mapped[str]=mapped_column(String(50),index=True);knowledge_scope:Mapped[str]=mapped_column(String(50),index=True);institution_name:Mapped[str|None]=mapped_column(String(255),index=True);unit_type:Mapped[str]=mapped_column(String(50));title:Mapped[str|None]=mapped_column(String(500));content:Mapped[str]=mapped_column(Text);normalized_content:Mapped[str]=mapped_column(Text);source_file_name:Mapped[str]=mapped_column(String(255));source_sheet_name:Mapped[str|None]=mapped_column(String(255));source_page_no:Mapped[int|None]=mapped_column(Integer);source_heading:Mapped[str|None]=mapped_column(String(500));source_cell_range:Mapped[str|None]=mapped_column(String(100));target_table_code:Mapped[str|None]=mapped_column(String(100));target_field_code:Mapped[str|None]=mapped_column(String(100),index=True);target_field_name:Mapped[str|None]=mapped_column(String(255));scenario_id:Mapped[int|None]=mapped_column(ForeignKey("product_scenarios.id"),index=True);business_system_id:Mapped[int|None]=mapped_column(ForeignKey("business_systems.id"));source_table_name:Mapped[str|None]=mapped_column(String(255));source_field_name:Mapped[str|None]=mapped_column(String(255));mart_table_name:Mapped[str|None]=mapped_column(String(255));mart_field_name:Mapped[str|None]=mapped_column(String(255));tags_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);metadata_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);confidentiality_level:Mapped[str]=mapped_column(String(50),default="internal");enabled:Mapped[bool]=mapped_column(Boolean,default=True,index=True);content_hash:Mapped[str]=mapped_column(String(64),index=True)
+
+class KnowledgeKeywordIndex(Base):
+    __tablename__="knowledge_keyword_indexes";__table_args__=(UniqueConstraint("knowledge_unit_id","token",name="uq_knowledge_keyword_unit_token"),Index("ix_knowledge_keyword_project_token","project_id","token"))
+    id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);token:Mapped[str]=mapped_column(String(255),index=True);weight:Mapped[float]=mapped_column(Float,default=1.0);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now())
+
+class KnowledgeEntityLink(Base):
+    __tablename__="knowledge_entity_links";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);entity_type:Mapped[str]=mapped_column(String(50),index=True);entity_id:Mapped[int|None]=mapped_column(Integer);entity_code:Mapped[str|None]=mapped_column(String(255));entity_name:Mapped[str|None]=mapped_column(String(255));relation_type:Mapped[str]=mapped_column(String(50));confidence:Mapped[float]=mapped_column(Float,default=1.0);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now())
+
+class KnowledgeIngestionTask(Base):
+    __tablename__="knowledge_ingestion_tasks";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);document_id:Mapped[int]=mapped_column(ForeignKey("knowledge_documents.id"),index=True);document_version_id:Mapped[int]=mapped_column(ForeignKey("knowledge_document_versions.id"));status:Mapped[str]=mapped_column(String(50),index=True);parser_name:Mapped[str]=mapped_column(String(100));started_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));finished_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));unit_count:Mapped[int]=mapped_column(Integer,default=0);indexed_count:Mapped[int]=mapped_column(Integer,default=0);failed_count:Mapped[int]=mapped_column(Integer,default=0);warnings_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);error_message:Mapped[str|None]=mapped_column(Text);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+
+class EmbeddingRecord(Base,TimestampMixin):
+    __tablename__="embedding_records";__table_args__=(UniqueConstraint("knowledge_unit_id","embedding_provider","embedding_model",name="uq_embedding_unit_provider_model"),);id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);embedding_provider:Mapped[str]=mapped_column(String(50));embedding_model:Mapped[str]=mapped_column(String(255));vector_store_provider:Mapped[str]=mapped_column(String(50));vector_record_id:Mapped[str]=mapped_column(String(255));embedding_dimension:Mapped[int]=mapped_column(Integer);content_hash:Mapped[str]=mapped_column(String(64));status:Mapped[str]=mapped_column(String(50))
+
+class RetrievalLog(Base):
+    __tablename__="retrieval_logs";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);query_text:Mapped[str]=mapped_column(Text);query_type:Mapped[str]=mapped_column(String(50));target_field_id:Mapped[int|None]=mapped_column(ForeignKey("target_fields.id"));scenario_id:Mapped[int|None]=mapped_column(ForeignKey("product_scenarios.id"));filters_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);retrieval_strategy:Mapped[str]=mapped_column(String(50));keyword_result_count:Mapped[int]=mapped_column(Integer,default=0);vector_result_count:Mapped[int]=mapped_column(Integer,default=0);final_result_count:Mapped[int]=mapped_column(Integer,default=0);result_ids_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);latency_ms:Mapped[int]=mapped_column(Integer,default=0);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+
+class ModelProfile(Base,TimestampMixin):
+    __tablename__="model_profiles";id:Mapped[int]=mapped_column(Integer,primary_key=True);profile_name:Mapped[str]=mapped_column(String(255),unique=True);provider_type:Mapped[str]=mapped_column(String(50));base_url:Mapped[str|None]=mapped_column(String(500));model_name:Mapped[str|None]=mapped_column(String(255));embedding_model_name:Mapped[str|None]=mapped_column(String(255));enabled:Mapped[bool]=mapped_column(Boolean,default=True);local_only:Mapped[bool]=mapped_column(Boolean,default=False);supports_structured_output:Mapped[bool]=mapped_column(Boolean,default=True);max_context_tokens:Mapped[int]=mapped_column(Integer,default=8192);temperature:Mapped[float]=mapped_column(Float,default=.2);config_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict)
+
+class PromptTemplateVersion(Base):
+    __tablename__="prompt_template_versions";__table_args__=(UniqueConstraint("prompt_key","version_no",name="uq_prompt_key_version"),);id:Mapped[int]=mapped_column(Integer,primary_key=True);prompt_key:Mapped[str]=mapped_column(String(100),index=True);version_no:Mapped[int]=mapped_column(Integer);system_prompt:Mapped[str]=mapped_column(Text);user_prompt_template:Mapped[str]=mapped_column(Text);output_schema_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);enabled:Mapped[bool]=mapped_column(Boolean,default=True);change_note:Mapped[str|None]=mapped_column(Text);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+
+class RagEvaluationCase(Base,TimestampMixin):
+    __tablename__="rag_evaluation_cases";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);case_name:Mapped[str]=mapped_column(String(255));case_type:Mapped[str]=mapped_column(String(50));query_text:Mapped[str]=mapped_column(Text);target_field_id:Mapped[int|None]=mapped_column(ForeignKey("target_fields.id"));scenario_id:Mapped[int|None]=mapped_column(ForeignKey("product_scenarios.id"));expected_knowledge_unit_ids_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);expected_source_system:Mapped[str|None]=mapped_column(String(255));expected_table_name:Mapped[str|None]=mapped_column(String(255));expected_field_name:Mapped[str|None]=mapped_column(String(255));expected_answer_keywords_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);enabled:Mapped[bool]=mapped_column(Boolean,default=True)
+
+class RagEvaluationRun(Base):
+    __tablename__="rag_evaluation_runs";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);run_name:Mapped[str]=mapped_column(String(255));model_profile_id:Mapped[int|None]=mapped_column(ForeignKey("model_profiles.id"));retrieval_config_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);status:Mapped[str]=mapped_column(String(50));started_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));finished_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));summary_metrics_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+
+class RagEvaluationResult(Base):
+    __tablename__="rag_evaluation_results";id:Mapped[int]=mapped_column(Integer,primary_key=True);evaluation_run_id:Mapped[int]=mapped_column(ForeignKey("rag_evaluation_runs.id"),index=True);evaluation_case_id:Mapped[int]=mapped_column(ForeignKey("rag_evaluation_cases.id"),index=True);retrieved_unit_ids_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);generated_answer:Mapped[str|None]=mapped_column(Text);citations_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);recall_at_k:Mapped[float]=mapped_column(Float,default=0);reciprocal_rank:Mapped[float]=mapped_column(Float,default=0);source_hit:Mapped[bool]=mapped_column(Boolean,default=False);citation_coverage:Mapped[float]=mapped_column(Float,default=0);groundedness_score:Mapped[float]=mapped_column(Float,default=0);keyword_coverage:Mapped[float]=mapped_column(Float,default=0);latency_ms:Mapped[int]=mapped_column(Integer,default=0);error_message:Mapped[str|None]=mapped_column(Text);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now())
+
+class AIUserFeedback(Base):
+    __tablename__="ai_user_feedback";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);feedback_type:Mapped[str]=mapped_column(String(50));target_type:Mapped[str]=mapped_column(String(50));target_id:Mapped[int]=mapped_column(Integer);rating:Mapped[str]=mapped_column(String(50));correct_source_system:Mapped[str|None]=mapped_column(String(255));correct_table_name:Mapped[str|None]=mapped_column(String(255));correct_field_name:Mapped[str|None]=mapped_column(String(255));comment:Mapped[str|None]=mapped_column(Text);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+
+class ModelCallLog(Base):
+    __tablename__="model_call_logs";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);model_profile_id:Mapped[int|None]=mapped_column(ForeignKey("model_profiles.id"));retrieval_log_id:Mapped[int|None]=mapped_column(ForeignKey("retrieval_logs.id"),index=True);prompt_key:Mapped[str]=mapped_column(String(100));prompt_version:Mapped[int]=mapped_column(Integer);request_hash:Mapped[str]=mapped_column(String(64));input_summary:Mapped[str|None]=mapped_column(Text);output_summary:Mapped[str|None]=mapped_column(Text);status:Mapped[str]=mapped_column(String(50));latency_ms:Mapped[int]=mapped_column(Integer);token_usage_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);confidentiality_level:Mapped[str]=mapped_column(String(50));created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
 
 
 class SqlFile(Base):
@@ -698,6 +763,7 @@ class CatalogTable(Base, TimestampMixin):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
     catalog_schema_id: Mapped[int] = mapped_column(ForeignKey("catalog_schemas.id"), index=True)
+    database_name: Mapped[str | None] = mapped_column(String(255), index=True)
     schema_name: Mapped[str] = mapped_column(String(255), index=True)
     table_name: Mapped[str] = mapped_column(String(255), index=True)
     table_comment: Mapped[str | None] = mapped_column(Text)
@@ -716,6 +782,7 @@ class CatalogColumn(Base, TimestampMixin):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
     catalog_table_id: Mapped[int] = mapped_column(ForeignKey("catalog_tables.id"), index=True)
+    database_name: Mapped[str | None] = mapped_column(String(255), index=True)
     schema_name: Mapped[str] = mapped_column(String(255), index=True)
     table_name: Mapped[str] = mapped_column(String(255), index=True)
     column_name: Mapped[str] = mapped_column(String(255), index=True)

@@ -112,6 +112,10 @@ export type CandidateSourceRecommendation = {
   data_type?: string | null;
   nullable?: boolean | null;
   profile_status?: string | null;
+  retrieval_log_id?: number | null;
+  knowledge_unit_ids_json?: number[];
+  citation_summary_json?: Array<{ knowledge_unit_id:number; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null }>;
+  recommendation_basis?: string | null;
 };
 
 export type CatalogSchema = { id:number; datasource_id:number; schema_name:string; schema_comment?:string|null; enabled:boolean };
@@ -121,6 +125,9 @@ export type CatalogSearchItem = { catalog_column_id:number; datasource_id:number
 export type MetadataSyncTask = { id:number; datasource_id:number; status:string; sync_mode:string; schema_count:number; table_count:number; column_count:number; warnings_json:string[]; error_message?:string|null };
 export type ColumnProfileTask = { id:number; status:string; catalog_column_id:number; profile_result_json:Record<string,unknown>; generated_sql_json:Array<{metric:string;sql:string}>; error_message?:string|null };
 export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog_column_id:number; profile_date:string; total_count?:number|null; null_rate?:number|null; distinct_count?:number|null; min_value_text?:string|null; max_value_text?:string|null; min_length?:number|null; max_length?:number|null; average_length?:number|null; top_values_json:unknown[]; warnings_json:unknown[] };
+export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; parse_summary_json:Record<string,unknown>; warnings_json:string[] };
+export type KnowledgeUnit = { id:number; document_id:number; knowledge_type:string; unit_type:string; title?:string|null; content:string; source_file_name:string; source_sheet_name?:string|null; source_page_no?:number|null; source_heading?:string|null; source_cell_range?:string|null; target_field_code?:string|null; enabled:boolean };
+export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[] };
 
 export type RegulatoryKnowledgeItem = {
   id: number;

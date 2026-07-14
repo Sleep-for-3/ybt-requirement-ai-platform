@@ -2,14 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import MappingEvidenceReference, MartField, MartTable, SourceField, SourceTable, SourceToMartMapping
-from app.services.llm import get_llm_service
-
-
-SYSTEM_PROMPT = """你是银行监管报送需求分析专家。请生成“业务系统到监管集市”的业务口径草稿。
-输出 JSON，字段包括 source_system_summary, source_tables_summary, source_fields_summary,
-business_rule, filter_condition, join_condition, priority_rule, merge_rule, code_mapping_rule,
-null_handling_rule, exception_rule, quality_check_rule, open_questions, final_content_draft,
-confidence_level, evidence_summary。输出必须是业务规则描述，不要输出开发 SQL。"""
+from app.services.llm.prompt_runtime import get_prompt_runtime,get_runtime_llm_service,prepare_model_input,record_model_call
+from app.services.retrieval import HybridRetriever
 
 
 async def generate_source_to_mart_draft(db: Session, mapping_id: int) -> SourceToMartMapping:
@@ -52,7 +46,7 @@ async def generate_source_to_mart_draft(db: Session, mapping_id: int) -> SourceT
 证据:
 {_evidence_text(evidence_rows)}
 """
-    output = await get_llm_service().chat_json(SYSTEM_PROMPT, user_prompt)
+    runtime=get_prompt_runtime(db,"source_to_mart_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,f"{mart_field.field_name if mart_field else ''} {mapping.source_fields_summary or ''}",None,None,None,10);user_prompt+=f"\n混合知识证据:\n"+"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);model_input=prepare_model_input(runtime,user_prompt,[item["confidentiality_level"] for item in knowledge]);output = await get_runtime_llm_service(runtime).chat_json(runtime.system_prompt, model_input);record_model_call(db,mapping.project_id,runtime,model_input,output,retrieval_log_id=retrieval_log.id)
     _apply_output(mapping, output)
     db.commit()
     db.refresh(mapping)

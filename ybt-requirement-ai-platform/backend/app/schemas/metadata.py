@@ -19,12 +19,12 @@ class CatalogSchemaRead(OrmMetadataModel):
     id: int; project_id: int; datasource_id: int; schema_name: str; schema_comment: str | None; enabled: bool; last_synced_at: datetime | None
 
 class CatalogTableRead(OrmMetadataModel):
-    id: int; project_id: int; datasource_id: int; catalog_schema_id: int; schema_name: str; table_name: str
+    id: int; project_id: int; datasource_id: int; catalog_schema_id: int; database_name: str | None; schema_name: str; table_name: str
     table_comment: str | None; table_type: str; estimated_row_count: int | None; primary_key_columns_json: list[Any]
     enabled: bool; last_synced_at: datetime | None; metadata_hash: str | None
 
 class CatalogColumnRead(OrmMetadataModel):
-    id: int; project_id: int; datasource_id: int; catalog_table_id: int; schema_name: str; table_name: str
+    id: int; project_id: int; datasource_id: int; catalog_table_id: int; database_name: str | None; schema_name: str; table_name: str
     column_name: str; column_comment: str | None; data_type: str | None; database_native_type: str | None
     nullable: bool; ordinal_position: int; is_primary_key: bool; default_value: str | None
     character_max_length: int | None; numeric_precision: int | None; numeric_scale: int | None
@@ -36,7 +36,7 @@ class CatalogSearchRequest(BaseModel):
     top_k: int = Field(default=50, ge=1, le=100)
 
 class CatalogSearchItem(BaseModel):
-    catalog_column_id: int; datasource_id: int; datasource_name: str; schema_name: str; table_name: str
+    catalog_column_id: int; datasource_id: int; datasource_name: str; database_name: str | None; schema_name: str; table_name: str
     table_comment: str | None; column_name: str; column_comment: str | None; data_type: str | None
     nullable: bool; is_primary_key: bool; score: float; match_reasons: list[str]
     imported_source_field_id: int | None = None; imported_mart_field_id: int | None = None
@@ -80,3 +80,6 @@ class ColumnProfileSnapshotRead(OrmMetadataModel):
     total_count: int | None; null_count: int | None; null_rate: float | None; distinct_count: int | None
     min_value_text: str | None; max_value_text: str | None; min_length: int | None; max_length: int | None
     average_length: float | None; top_values_json: list[Any]; warnings_json: list[Any]
+
+class ProfileEvidenceBindRequest(BaseModel):
+    mapping_type: str; mapping_id: int

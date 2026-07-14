@@ -10,7 +10,7 @@ class MockVectorStore(VectorStore):
 
     def upsert(self, records: list[VectorRecord]) -> None:
         for record in records:
-            self._records[record.id] = record
+            self._records[record.id] = VectorRecord(record.id,record.embedding,"",dict(record.metadata))
 
     def search(
         self,
@@ -27,11 +27,15 @@ class MockVectorStore(VectorStore):
                 VectorSearchResult(
                     id=record.id,
                     score=_cosine_similarity(query_embedding, record.embedding),
-                    content=record.content,
+                    content="",
                     metadata=record.metadata,
                 )
             )
         return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+
+    def delete(self,ids=None,filters=None):
+        ids=set(ids or []);filters=filters or {}
+        self._records={key:value for key,value in self._records.items() if key not in ids and not(filters and _matches_filters(value.metadata,filters))}
 
 
 def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:

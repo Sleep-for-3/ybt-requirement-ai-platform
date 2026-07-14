@@ -52,8 +52,11 @@ def delete_datasource_api(datasource_id: int, db: Session = Depends(get_db)) -> 
 
 @router.post("/datasources/{datasource_id}/test", response_model=DataSourceTestResponse)
 def test_datasource_api(datasource_id: int, db: Session = Depends(get_db)) -> DataSourceTestResponse:
-    status, message = test_datasource_connection(db, _get_datasource_or_404(db, datasource_id))
-    return DataSourceTestResponse(status=status, message=message)
+    try:
+        status, message = test_datasource_connection(db, _get_datasource_or_404(db, datasource_id))
+        return DataSourceTestResponse(status=status, message=message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/datasources/{datasource_id}/execute-safe-query", response_model=SafeSqlResponse)

@@ -18,8 +18,14 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
+    embedding_provider: str = "mock"
+    embedding_base_url: str = "https://api.openai.com/v1"
+    embedding_api_key_env_name: str = "EMBEDDING_API_KEY"
+    llm_api_key_env_name: str = "OPENAI_API_KEY"
 
     vector_store_provider: str = "mock"
+    milvus_uri: str = "http://localhost:19530"
+    milvus_token: str = ""
 
     safe_sql_default_limit: int = 100
     safe_sql_max_limit: int = 1000

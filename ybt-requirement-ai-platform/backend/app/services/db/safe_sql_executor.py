@@ -11,7 +11,7 @@ from sqlglot import exp
 from app.core.settings import get_settings
 from app.models import DataSource, SqlExecutionLog
 from app.schemas import SafeSqlResponse
-from app.services.datasource_service import build_database_url
+from app.services.datasource_service import build_database_url, ensure_readonly_datasource
 from app.services.metadata.sensitivity import looks_sensitive_value
 
 SENSITIVE_FIELD_NAMES = {
@@ -103,6 +103,11 @@ class SafeSqlExecutor:
         created_by: int | None = None,
     ) -> SafeSqlResponse:
         started = time.perf_counter()
+        try:
+            ensure_readonly_datasource(datasource)
+        except ValueError as exc:
+            self._record_log(project_id=project_id,datasource_id=datasource.id,task_id=task_id,profile_task_id=profile_task_id,sql_text=sql,sanitized_sql_text=None,status="rejected",reject_reason=str(exc),execution_time_ms=_elapsed_ms(started),created_by=created_by)
+            return SafeSqlResponse(status="rejected",reject_reason=str(exc),execution_time_ms=_elapsed_ms(started))
         try:
             sanitized_sql = self.validate_and_prepare(sql, max_rows=max_rows, dialect=datasource.db_type)
         except Exception as exc:

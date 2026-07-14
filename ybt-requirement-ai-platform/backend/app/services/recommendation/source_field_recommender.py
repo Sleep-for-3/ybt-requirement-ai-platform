@@ -5,8 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AIUserFeedback,
     BusinessSystem,
     CandidateSourceRecommendation,
+    ColumnProfileSnapshot,
     DataSource,
     MappingEvidenceReference,
     MartToYbtMapping,
@@ -21,6 +23,7 @@ from app.models import (
 )
 from app.schemas import CatalogSearchRequest
 from app.services.metadata.catalog_service import search_catalog
+from app.services.retrieval import HybridRetriever
 
 
 def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int, top_k: int = 20) -> list[CandidateSourceRecommendation]:
@@ -50,6 +53,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
         ScenarioTechnicalLineage.target_field_id == target.id,
     )).all())
     sql_context = _sql_context(db, target.project_id)
+    rag_log,rag_items=HybridRetriever(db).search(target.project_id," ".join(filter(None,[target.field_code,target.field_name,target.field_definition,scenario.scenario_name])),target.id,scenario.id,None,30)
     evidence_rows = db.scalars(select(MappingEvidenceReference).where(
         MappingEvidenceReference.project_id == target.project_id,
         MappingEvidenceReference.evidence_type.in_(["source_field", "catalog_column"]),
@@ -97,6 +101,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
 
     recommendations = []
     for score, source, table, system, datasource, reasons, evidence in scored[: max(top_k // 2, 1)]:
+        citation_ids,citations=_candidate_citations(rag_items,[system.system_name,table.physical_table_name or table.table_code,source.physical_column_name or source.field_code])
         recommendation = CandidateSourceRecommendation(
             project_id=target.project_id, target_field_id=target.id, scenario_id=scenario.id,
             recommended_source_system=system.system_name,
@@ -110,6 +115,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
             recommend_reason="；".join(reasons), evidence_summary="；".join(evidence),
             confidence_level="high" if score >= 0.75 else "medium" if score >= 0.45 else "low",
             score=round(min(score, 1.0), 4), selected_flag=False,
+            retrieval_log_id=rag_log.id,knowledge_unit_ids_json=citation_ids,citation_summary_json=citations,recommendation_basis="historical_explicit" if "历史" in "".join(reasons) else "semantic_candidate",
         )
         db.add(recommendation)
         recommendations.append(recommendation)
@@ -119,13 +125,20 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     ))
     for item in catalog_items:
         score,reasons,evidence=_score_catalog_candidate(item,scenario,knowledge,history,sql_context,item["catalog_column_id"] in bound_catalog_ids)
-        item["score"]=score;item["match_reasons"]=reasons;item["catalog_evidence"]=evidence
+        matching_rag=[entry for entry in rag_items if any(value and value.lower() in entry["content"].lower() for value in [item["table_name"],item["column_name"]])]
+        if matching_rag:score=min(1,score+.12);reasons.append("混合知识检索命中");evidence.append(f"{len(matching_rag)} 条知识单元引用该表字段")
+        profile=db.scalar(select(ColumnProfileSnapshot).where(ColumnProfileSnapshot.catalog_column_id==item["catalog_column_id"]).order_by(ColumnProfileSnapshot.id.desc()))
+        if profile and profile.total_count is not None:score=min(1,score+.05);reasons.append("数据探查支持");evidence.append(f"探查 total={profile.total_count}, null_rate={profile.null_rate}, distinct={profile.distinct_count}")
+        positive=db.scalar(select(AIUserFeedback.id).where(AIUserFeedback.project_id==target.project_id,AIUserFeedback.feedback_type=="source_recommendation",AIUserFeedback.rating=="correct",AIUserFeedback.correct_table_name==item["table_name"],AIUserFeedback.correct_field_name==item["column_name"]))
+        if positive:score=min(1,score+.08);reasons.append("历史正向反馈")
+        item["score"]=score;item["match_reasons"]=reasons;item["catalog_evidence"]=evidence;item["matching_rag"]=matching_rag
     catalog_items.sort(key=lambda item:(item["score"],-item["catalog_column_id"]),reverse=True)
     existing_catalog_ids = {item.catalog_column_id for item in recommendations if item.catalog_column_id}
     for item in catalog_items:
         if item["catalog_column_id"] in existing_catalog_ids or len(recommendations) >= top_k:
             continue
         datasource = db.get(DataSource, item["datasource_id"])
+        citation_ids,citations=_candidate_citations(rag_items,[item["datasource_name"],item["schema_name"],item["table_name"],item["column_name"]])
         recommendation = CandidateSourceRecommendation(
             project_id=target.project_id, target_field_id=target.id, scenario_id=scenario.id,
             catalog_column_id=item["catalog_column_id"], datasource_id=item["datasource_id"],
@@ -139,6 +152,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
             evidence_summary="；".join([f"来自命名数据源 {datasource.name} 的目录字段 {item['schema_name']}.{item['table_name']}.{item['column_name']}"]+item["catalog_evidence"]),
             confidence_level="high" if item["score"] >= .75 else "medium" if item["score"] >= .45 else "low",
             score=item["score"], selected_flag=False,
+            retrieval_log_id=rag_log.id,knowledge_unit_ids_json=citation_ids,citation_summary_json=citations,recommendation_basis="profile_supported" if "数据探查支持" in item["match_reasons"] else "regulatory_advice" if "监管答疑匹配" in item["match_reasons"] else "semantic_candidate",
         )
         db.add(recommendation); recommendations.append(recommendation)
     recommendations.sort(key=lambda item: item.score or 0, reverse=True)
@@ -337,3 +351,10 @@ def _similarity(left: str, right: str) -> float:
         return SequenceMatcher(None, left_norm, right_norm).ratio()
     left_chars, right_chars = set(left), set(right)
     return len(left_chars & right_chars) / max(len(left_chars | right_chars), 1)
+
+
+def _candidate_citations(rag_items,source_tokens):
+    matching=[item for item in rag_items if any(token and token.lower() in item["content"].lower() for token in source_tokens)]
+    selected=matching or rag_items[:3]
+    supports_source=bool(matching)
+    return [item["knowledge_unit_id"] for item in selected],[{"knowledge_unit_id":item["knowledge_unit_id"],"source_file_name":item["source_file_name"],"source_sheet_name":item["source_sheet_name"],"source_cell_range":item["source_cell_range"],"citation_role":"candidate_source" if supports_source else "target_semantics_only","supports_candidate_source":supports_source} for item in selected]
