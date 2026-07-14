@@ -4,6 +4,8 @@ import { Building2, Database, FileOutput, FileSpreadsheet, FolderKanban, Layers3
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { ProjectProvider, ProjectSelector } from "@/components/ProjectContext";
+
 const NAV = [
   { href: "/projects", label: "项目", icon: FolderKanban },
   { href: "/templates", label: "一表通模板", icon: FileSpreadsheet },
@@ -17,6 +19,10 @@ const NAV = [
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return <ProjectProvider><ShellContent>{children}</ShellContent></ProjectProvider>;
+}
+
+function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   return (
     <div className="min-h-screen bg-mist">
@@ -39,6 +45,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
+          <ProjectSelector className="w-48 shrink-0" />
           <Link className="button-secondary shrink-0" href="/legacy">综合工作台</Link>
         </div>
       </header>

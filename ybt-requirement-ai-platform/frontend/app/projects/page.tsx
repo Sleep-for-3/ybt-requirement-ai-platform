@@ -2,20 +2,15 @@
 
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 
+import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { Project, apiGet, apiPost } from "@/lib/api";
+import { apiPost } from "@/lib/api";
 
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const { projects, refreshProjects, selectProject } = useProjectWorkspace();
   const [message, setMessage] = useState("");
-
-  async function reload() {
-    setProjects(await apiGet<Project[]>("/projects"));
-  }
-
-  useEffect(() => { void reload(); }, []);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -24,7 +19,7 @@ export default function ProjectsPage() {
       await apiPost("/projects", { name: form.get("name"), bank_name: form.get("bank_name"), description: form.get("description") });
       event.currentTarget.reset();
       setMessage("项目已创建");
-      await reload();
+      await refreshProjects();
     } catch (error) { setMessage(error instanceof Error ? error.message : "创建失败"); }
   }
 
@@ -50,7 +45,7 @@ export default function ProjectsPage() {
             <div className="grid grid-cols-[1fr_180px_120px] items-center border-b border-line px-4 py-3 text-sm last:border-0" key={project.id}>
               <div><div className="font-medium">{project.name}</div><div className="mt-1 text-xs text-slate-500">{project.description || "-"}</div></div>
               <span>{project.bank_name || "-"}</span>
-              <Link className="button-secondary" href={`/fields?projectId=${project.id}`}>进入字段</Link>
+              <Link className="button-secondary" href={`/fields?projectId=${project.id}`} onClick={() => selectProject(project.id)}>进入字段</Link>
             </div>
           ))}
         </section>

@@ -3,17 +3,16 @@
 import { Check, Eye, FileUp } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
+import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { Project, TraceabilityTemplateDocument, apiGet, apiPost, uploadForm } from "@/lib/api";
+import { TraceabilityTemplateDocument, apiGet, apiPost, uploadForm } from "@/lib/api";
 
 export default function TraceabilityTemplatesPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<number | null>(null);
+  const { projectId } = useProjectWorkspace();
   const [documents, setDocuments] = useState<TraceabilityTemplateDocument[]>([]);
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
   const [message, setMessage] = useState("");
 
-  useEffect(() => { void apiGet<Project[]>("/projects").then((items) => { setProjects(items); setProjectId(items[0]?.id || null); }); }, []);
   useEffect(() => { if (projectId) void apiGet<TraceabilityTemplateDocument[]>(`/projects/${projectId}/traceability-templates`).then(setDocuments); }, [projectId]);
 
   async function upload(event: FormEvent<HTMLFormElement>) {
@@ -35,7 +34,7 @@ export default function TraceabilityTemplatesPage() {
   }
   return (
     <main>
-      <WorkspaceHeader title="历史业务口径及溯源表" meta="多层表头、合并单元格、动态场景" actions={<select className="control w-64" value={projectId || ""} onChange={(e) => setProjectId(Number(e.target.value))}><option value="">选择项目</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>} />
+      <WorkspaceHeader title="历史业务口径及溯源表" meta="多层表头、合并单元格、动态场景" />
       <div className="mx-auto grid max-w-[1500px] gap-5 p-4 lg:grid-cols-[360px_1fr] lg:p-6">
         <form className="panel h-fit p-4" onSubmit={upload}>
           <label className="block text-sm font-medium" htmlFor="traceability-file">业务口径及溯源 Excel</label>

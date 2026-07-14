@@ -4,22 +4,15 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { ProductScenario, Project, TargetField, apiGet } from "@/lib/api";
+import { ProductScenario, TargetField, apiGet } from "@/lib/api";
 
 export default function FieldsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<number | null>(null);
+  const { projectId } = useProjectWorkspace();
   const [fields, setFields] = useState<TargetField[]>([]);
   const [scenarios, setScenarios] = useState<ProductScenario[]>([]);
 
-  useEffect(() => {
-    const requestedId = Number(new URLSearchParams(window.location.search).get("projectId")) || null;
-    void apiGet<Project[]>("/projects").then((items) => {
-      setProjects(items);
-      setProjectId(requestedId && items.some((item) => item.id === requestedId) ? requestedId : items[0]?.id || null);
-    });
-  }, []);
   useEffect(() => {
     if (!projectId) return;
     void Promise.all([
@@ -30,11 +23,7 @@ export default function FieldsPage() {
 
   return (
     <main>
-      <WorkspaceHeader title="字段场景" meta={`${fields.length} 个字段 / ${scenarios.length} 个产品场景`} actions={
-        <select className="control w-64" onChange={(event) => setProjectId(Number(event.target.value))} value={projectId || ""}>
-          <option value="">选择项目</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-      } />
+      <WorkspaceHeader title="字段场景" meta={`${fields.length} 个字段 / ${scenarios.length} 个产品场景`} />
       <div className="mx-auto max-w-[1500px] p-4 lg:p-6">
         <div className="panel overflow-hidden">
           <div className="grid grid-cols-[180px_1fr_150px_100px] border-b border-line bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500">
