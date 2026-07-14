@@ -162,6 +162,7 @@ def select_recommendation(db: Session, recommendation_id: int) -> tuple[Candidat
             scenario_id=recommendation.scenario_id,
         )
         db.add(lineage)
+        db.flush()
     if recommendation.catalog_column_id is None:
         _apply_recommendation(lineage, recommendation)
     for item in db.scalars(select(CandidateSourceRecommendation).where(

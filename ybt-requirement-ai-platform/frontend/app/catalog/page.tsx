@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DatabaseZap, Download, Search } from "lucide-react";
+import { Clock3, DatabaseZap, Download, Search } from "lucide-react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { CatalogColumn, CatalogSchema, CatalogSearchItem, CatalogTable, DataSource, apiGet, apiPost } from "@/lib/api";
+import { CatalogColumn, CatalogSchema, CatalogSearchItem, CatalogTable, ColumnProfileSnapshot, DataSource, apiGet, apiPost } from "@/lib/api";
 
 const TABLE_PAGE_SIZE = 50;
 const COLUMN_PAGE_SIZE = 100;
@@ -25,6 +25,7 @@ export default function CatalogPage() {
   const [schemaName, setSchemaName] = useState("");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CatalogSearchItem[]>([]);
+  const [profileHistory, setProfileHistory] = useState<{ columnId: number; items: ColumnProfileSnapshot[] } | null>(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -64,6 +65,11 @@ export default function CatalogPage() {
     if (results.length) await search();
   }
 
+  async function showProfileHistory(columnId: number) {
+    const items = await apiGet<ColumnProfileSnapshot[]>(`/catalog/columns/${columnId}/profiles`);
+    setProfileHistory({ columnId, items });
+  }
+
   const displayedColumns: CatalogSearchItem[] = results.length ? results : columns.map((column) => ({
     catalog_column_id: column.id, datasource_id: column.datasource_id, datasource_name: "", schema_name: column.schema_name,
     table_name: column.table_name, column_name: column.column_name, column_comment: column.column_comment,
@@ -82,7 +88,7 @@ export default function CatalogPage() {
       <div className="grid gap-5 xl:grid-cols-[220px_380px_1fr]">
         <section className="panel p-3"><h2 className="font-semibold">Schema 树</h2><button className={`mt-2 block text-sm ${!schemaName ? "font-semibold" : ""}`} onClick={() => { setSchemaName(""); setTablePage(1); }}>全部 schema</button>{schemas.map((schema) => <button className={`mt-2 block text-left text-sm ${schemaName === schema.schema_name ? "font-semibold" : ""}`} key={schema.id} onClick={() => { setSchemaName(schema.schema_name); setTablePage(1); }}>{schema.schema_name}</button>)}</section>
         <section className="panel overflow-hidden"><div className="border-b p-3 font-semibold">表列表</div>{tables.map((table) => <button className={`block w-full border-b p-3 text-left text-sm ${selectedTable === table.id ? "bg-slate-100" : ""}`} key={table.id} onClick={() => openTable(table.id)}><strong>{table.schema_name}.{table.table_name}</strong><div className="text-xs text-slate-500">{table.table_comment || table.table_type}</div></button>)}<Pagination page={tablePage} pageSize={TABLE_PAGE_SIZE} total={tableTotal} onPage={(page) => setTablePage(page)} /></section>
-        <section className="panel overflow-hidden"><div className="border-b p-3 font-semibold">字段（按表懒加载）</div>{displayedColumns.map((column) => <div className="border-b p-3 text-sm" key={column.catalog_column_id}><div className="flex items-start justify-between gap-3"><div><strong>{column.table_name}.{column.column_name}</strong><div className="mt-1 text-slate-500">{column.column_comment || "无注释"} / {column.data_type || "类型未知"} / {column.nullable ? "可空" : "非空"}{column.is_primary_key ? " / 主键" : ""}</div>{column.match_reasons.length ? <div className="mt-1 text-xs text-slate-500">评分 {Math.round(column.score * 100)}% · {column.match_reasons.join("、")}</div> : null}</div><div className="flex gap-2"><button className="button-secondary" onClick={() => importColumn(column.catalog_column_id, "source")}><Download size={14} />来源层</button><button className="button-secondary" onClick={() => importColumn(column.catalog_column_id, "mart")}><DatabaseZap size={14} />集市层</button></div></div></div>)}{selectedTable && !results.length ? <Pagination page={columnPage} pageSize={COLUMN_PAGE_SIZE} total={columnTotal} onPage={(page) => openTable(selectedTable, page)} /> : null}</section>
+        <section className="panel overflow-hidden"><div className="border-b p-3 font-semibold">字段（按表懒加载）</div>{displayedColumns.map((column) => <div className="border-b p-3 text-sm" key={column.catalog_column_id}><div className="flex items-start justify-between gap-3"><div><strong>{column.table_name}.{column.column_name}</strong><div className="mt-1 text-slate-500">{column.column_comment || "无注释"} / {column.data_type || "类型未知"} / {column.nullable ? "可空" : "非空"}{column.is_primary_key ? " / 主键" : ""}</div>{column.match_reasons.length ? <div className="mt-1 text-xs text-slate-500">评分 {Math.round(column.score * 100)}% · {column.match_reasons.join("、")}</div> : null}</div><div className="flex flex-wrap gap-2"><button className="button-secondary" onClick={() => showProfileHistory(column.catalog_column_id)}><Clock3 size={14} />探查历史</button><button className="button-secondary" onClick={() => importColumn(column.catalog_column_id, "source")}><Download size={14} />来源层</button><button className="button-secondary" onClick={() => importColumn(column.catalog_column_id, "mart")}><DatabaseZap size={14} />集市层</button></div></div>{profileHistory?.columnId === column.catalog_column_id ? <ProfileHistory items={profileHistory.items} /> : null}</div>)}{selectedTable && !results.length ? <Pagination page={columnPage} pageSize={COLUMN_PAGE_SIZE} total={columnTotal} onPage={(page) => openTable(selectedTable, page)} /> : null}</section>
       </div>
     </div>
   </main>;
@@ -91,4 +97,9 @@ export default function CatalogPage() {
 function Pagination({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   return <div className="flex items-center justify-between p-3 text-xs text-slate-500"><button className="button-secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>上一页</button><span>{page} / {pages}（{total}）</span><button className="button-secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>下一页</button></div>;
+}
+
+function ProfileHistory({ items }: { items: ColumnProfileSnapshot[] }) {
+  if (!items.length) return <p className="mt-3 rounded bg-slate-50 p-2 text-xs text-slate-500">暂无探查历史</p>;
+  return <div className="mt-3 space-y-2 rounded bg-slate-50 p-2 text-xs">{items.map((item) => <div key={item.id}><strong>{new Date(item.profile_date).toLocaleString()}</strong> · total {item.total_count ?? "-"} · null rate {item.null_rate ?? "-"} · distinct {item.distinct_count ?? "-"}</div>)}</div>;
 }

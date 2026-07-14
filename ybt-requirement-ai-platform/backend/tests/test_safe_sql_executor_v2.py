@@ -29,6 +29,21 @@ def test_safe_sql_executor_rejects_select_star(db_session):
     assert "SELECT *" in result.reject_reason
 
 
+def test_safe_sql_executor_rejects_writable_cte(db_session):
+    project, datasource = _make_datasource(db_session, ":memory:")
+    executor = SafeSqlExecutor(db_session)
+
+    result = executor.execute(
+        datasource=datasource,
+        sql="with deleted as (delete from ecif_customer returning cert_type) select cert_type from deleted",
+        project_id=project.id,
+    )
+
+    assert result.status == "rejected"
+    assert "DDL/DML" in result.reject_reason
+    assert db_session.query(SqlExecutionLog).one().status == "rejected"
+
+
 def test_safe_sql_executor_forces_limit_and_removes_sensitive_columns(db_session, tmp_path: Path):
     db_file = tmp_path / "source.db"
     engine = create_engine(f"sqlite:///{db_file}")

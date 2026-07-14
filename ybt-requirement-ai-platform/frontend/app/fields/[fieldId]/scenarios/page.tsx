@@ -1,12 +1,12 @@
 "use client";
 
-import { Check, DatabaseZap, Link2, Save, Search, Sparkles, X } from "lucide-react";
+import { Check, Clock3, DatabaseZap, Link2, Save, Search, Sparkles, X } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import {
-  CandidateSourceRecommendation, ColumnProfileTask, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
+  CandidateSourceRecommendation, ColumnProfileSnapshot, ColumnProfileTask, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
   ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
 } from "@/lib/api";
 
@@ -36,6 +36,7 @@ export default function FieldScenarioPage() {
   const [recommendations, setRecommendations] = useState<CandidateSourceRecommendation[]>([]);
   const [selectedRecommendationId, setSelectedRecommendationId] = useState<number | null>(null);
   const [profileTask, setProfileTask] = useState<ColumnProfileTask>(EMPTY_PROFILE);
+  const [profileHistory, setProfileHistory] = useState<{ columnId: number; items: ColumnProfileSnapshot[] } | null>(null);
   const [datasourceFilter, setDatasourceFilter] = useState("");
   const [schemaFilter, setSchemaFilter] = useState("");
   const [businessEvidences, setBusinessEvidences] = useState<MappingEvidence[]>([]);
@@ -92,7 +93,7 @@ export default function FieldScenarioPage() {
       confidence_level: lineage.confidence_level,
       open_questions: lineage.open_questions || "",
     } : EMPTY_LINEAGE);
-    setKnowledge([]); setRecommendations([]); setSelectedRecommendationId(null); setProfileTask(EMPTY_PROFILE); setMessage("");
+    setKnowledge([]); setRecommendations([]); setSelectedRecommendationId(null); setProfileTask(EMPTY_PROFILE); setProfileHistory(null); setMessage("");
     setBusinessEvidenceText(""); setShowBusinessEvidenceForm(false);
     setEvidenceText(""); setShowEvidenceForm(false);
     if (business) {
@@ -154,6 +155,11 @@ export default function FieldScenarioPage() {
   }
   async function adoptCatalogCandidate(item: CandidateSourceRecommendation) {
     await run(() => apiPost(`/source-recommendations/${item.id}/adopt`, {}), "已采用目录候选作为技术来源");
+  }
+  async function showProfileHistory(item: CandidateSourceRecommendation) {
+    if (!item.catalog_column_id) return;
+    const items = await apiGet<ColumnProfileSnapshot[]>(`/catalog/columns/${item.catalog_column_id}/profiles`);
+    setProfileHistory({ columnId: item.catalog_column_id, items });
   }
   async function bindTechnicalEvidence() {
     if (!lineage || !field || !evidenceText.trim()) return;
@@ -266,7 +272,7 @@ export default function FieldScenarioPage() {
         </div>
 
         {(recommendations.length || knowledge.length) ? <section className="mt-5 grid gap-5 xl:grid-cols-2">
-          <div className="panel p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">候选来源</h2><div className="flex gap-2"><select className="control" onChange={e=>setDatasourceFilter(e.target.value)} value={datasourceFilter}><option value="">全部数据源</option>{Array.from(new Set(recommendations.map(item=>item.recommended_source_system||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select><select className="control" onChange={e=>setSchemaFilter(e.target.value)} value={schemaFilter}><option value="">全部 schema</option>{Array.from(new Set(recommendations.map(item=>item.recommended_schema_name||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select></div></div><div className="mt-3 space-y-2">{recommendations.filter(item=>(!datasourceFilter||item.recommended_source_system===datasourceFilter)&&(!schemaFilter||item.recommended_schema_name===schemaFilter)).map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><div className="flex items-center justify-between gap-3"><strong>{item.recommended_source_system} / {item.recommended_schema_name}.{item.recommended_table_name}.{item.recommended_field_name}</strong><span>{Math.round(item.score * 100)}%</span></div><p className="mt-1 text-xs text-slate-500">{item.data_type||"类型待确认"} / {item.nullable===false?"非空":"可空或未知"} / profile: {item.profile_status||"未探查"}</p><p className="mt-2 text-slate-600">{item.recommend_reason}</p><p className="mt-1 text-xs text-slate-500">{item.evidence_summary}</p><div className="mt-3 flex flex-wrap gap-2"><button className="button-secondary" onClick={()=>selectCatalogCandidate(item)}><Check size={16}/>选择候选</button>{item.catalog_column_id?<button className="button-secondary" disabled={selectedRecommendationId!==item.id} onClick={()=>profileCatalogCandidate(item)}><DatabaseZap size={16}/>执行安全探查</button>:null}{item.catalog_column_id?<button className="button-primary" disabled={selectedRecommendationId!==item.id||!profileTask||profileTask.catalog_column_id!==item.catalog_column_id||!profileTask.status.includes("completed")} onClick={()=>adoptCatalogCandidate(item)}><Check size={16}/>采用为技术来源</button>:null}</div>{profileTask?.catalog_column_id===item.catalog_column_id?<pre className="mt-3 overflow-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(profileTask.profile_result_json,null,2)}</pre>:null}</div>)}</div></div>
+          <div className="panel p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">候选来源</h2><div className="flex gap-2"><select className="control" onChange={e=>setDatasourceFilter(e.target.value)} value={datasourceFilter}><option value="">全部数据源</option>{Array.from(new Set(recommendations.map(item=>item.recommended_source_system||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select><select className="control" onChange={e=>setSchemaFilter(e.target.value)} value={schemaFilter}><option value="">全部 schema</option>{Array.from(new Set(recommendations.map(item=>item.recommended_schema_name||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select></div></div><div className="mt-3 space-y-2">{recommendations.filter(item=>(!datasourceFilter||item.recommended_source_system===datasourceFilter)&&(!schemaFilter||item.recommended_schema_name===schemaFilter)).map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><div className="flex items-center justify-between gap-3"><strong>{item.recommended_source_system} / {item.recommended_schema_name}.{item.recommended_table_name}.{item.recommended_field_name}</strong><span>{Math.round(item.score * 100)}%</span></div><p className="mt-1 text-xs text-slate-500">{item.data_type||"类型待确认"} / {item.nullable===false?"非空":"可空或未知"} / profile: {item.profile_status||"未探查"}</p><p className="mt-2 text-slate-600">{item.recommend_reason}</p><p className="mt-1 text-xs text-slate-500">{item.evidence_summary}</p><div className="mt-3 flex flex-wrap gap-2"><button className="button-secondary" onClick={()=>selectCatalogCandidate(item)}><Check size={16}/>选择候选</button>{item.catalog_column_id?<button className="button-secondary" onClick={()=>showProfileHistory(item)}><Clock3 size={16}/>探查历史</button>:null}{item.catalog_column_id?<button className="button-secondary" disabled={selectedRecommendationId!==item.id} onClick={()=>profileCatalogCandidate(item)}><DatabaseZap size={16}/>执行安全探查</button>:null}{item.catalog_column_id?<button className="button-primary" disabled={selectedRecommendationId!==item.id||!profileTask||profileTask.catalog_column_id!==item.catalog_column_id||!profileTask.status.includes("completed")} onClick={()=>adoptCatalogCandidate(item)}><Check size={16}/>采用为技术来源</button>:null}</div>{profileTask?.catalog_column_id===item.catalog_column_id?<pre className="mt-3 overflow-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(profileTask.profile_result_json,null,2)}</pre>:null}{profileHistory && profileHistory.columnId===item.catalog_column_id?<CandidateProfileHistory items={profileHistory.items}/>:null}</div>)}</div></div>
           <div className="panel p-4"><h2 className="text-sm font-semibold">历史知识</h2><div className="mt-3 space-y-2">{knowledge.map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><strong>{item.knowledge_type}</strong><p className="mt-2 text-slate-600">{item.business_explanation || "-"}</p><p className="mt-1 text-xs text-slate-500">{item.source_document_name} / {item.source_sheet_name} / {item.source_cell_range}</p></div>)}</div></div>
         </section> : null}
       </div>
@@ -278,3 +284,4 @@ function Meta({ label, value }: { label: string; value?: string | null }) { retu
 function PanelTitle({ title, status }: { title: string; status: string }) { return <div className="flex items-center justify-between border-b border-line px-4 py-3"><h2 className="font-semibold">{title}</h2><span className="rounded-md border border-line bg-slate-50 px-2 py-1 text-xs">{status}</span></div>; }
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? "md:col-span-2" : ""}><span className="mb-1 block text-xs text-slate-500">{label}</span>{children}</label>; }
 function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <Field label={label}><input className="control" onChange={(event) => onChange(event.target.value)} value={value} /></Field>; }
+function CandidateProfileHistory({ items }: { items: ColumnProfileSnapshot[] }) { return <div className="mt-3 rounded bg-slate-50 p-2 text-xs">{items.length ? items.map((snapshot) => <div key={snapshot.id}>{new Date(snapshot.profile_date).toLocaleString()} · total {snapshot.total_count ?? "-"} · null rate {snapshot.null_rate ?? "-"} · distinct {snapshot.distinct_count ?? "-"}</div>) : "暂无探查历史"}</div>; }

@@ -45,6 +45,22 @@ SAFE_STATISTIC_COLUMNS = {
     "average_length",
 }
 
+FORBIDDEN_SQL_NODES = (
+    exp.Delete,
+    exp.Insert,
+    exp.Update,
+    exp.Merge,
+    exp.Create,
+    exp.Drop,
+    exp.Alter,
+    exp.Command,
+    exp.Copy,
+    exp.TruncateTable,
+    exp.Into,
+    exp.Grant,
+    exp.Revoke,
+)
+
 
 class SafeSqlExecutor:
     def __init__(
@@ -70,6 +86,8 @@ class SafeSqlExecutor:
         tree = expressions[0]
         if tree is None or not self._is_select_statement(tree):
             raise ValueError("Only SELECT statements are allowed")
+        if any(isinstance(node, FORBIDDEN_SQL_NODES) for node in tree.walk()):
+            raise ValueError("DDL/DML statements are not allowed, including writable CTEs")
         if _has_select_star_projection(tree):
             raise ValueError("SELECT * is not allowed")
         return self._force_limit(tree.sql(dialect=_sqlglot_dialect(dialect)), max_rows)

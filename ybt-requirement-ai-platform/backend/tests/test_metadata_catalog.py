@@ -92,12 +92,13 @@ def test_profile_requires_selection_and_protects_sensitive_values(tmp_path:Path)
         assert snapshots[0]["min_value_text"] is None and snapshots[0]["max_value_text"] is None
 
 def test_metadata_excel_preview_and_repeated_apply_are_idempotent()->None:
-    workbook=Workbook();sheet=workbook.active;sheet.title="数据字典";sheet.append(["schema","表英文名","表中文名","字段英文名","字段中文名","字段类型","是否可空","主键","字段顺序"]);sheet.append(["ODS","ECIF_CUSTOMER","客户基本信息表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2]);sheet.append(["DWD","ECIF_CUSTOMER","客户主题表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2]);stream=BytesIO();workbook.save(stream)
+    workbook=Workbook();sheet=workbook.active;sheet.title="数据字典";sheet.append(["schema","表英文名","表中文名","字段英文名","字段中文名","字段类型","是否可空","主键","字段顺序","系统名称","数据源名称"]);sheet.append(["ODS","ECIF_CUSTOMER","客户基本信息表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2,"ECIF","excel_catalog"]);sheet.append(["DWD","ECIF_CUSTOMER","客户主题表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2,"ECIF","excel_catalog"]);stream=BytesIO();workbook.save(stream)
     with _client() as client:
         project=_post(client,"/api/projects",{"name":"Excel 元数据"});ds=_post(client,f"/api/projects/{project['id']}/datasources",{"name":"excel_catalog","db_type":"sqlite","database_name":":memory:"})
-        response=client.post(f"/api/datasources/{ds['id']}/metadata-import/upload",files={"file":("脱敏数据字典.xlsx",stream.getvalue(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")});assert response.status_code==200,response.text;document=response.json();assert document["parse_summary_json"]["row_count"]==2;assert document["parsed_rows_json"][0]["source_cells"]["column_name"].endswith("D2")
+        response=client.post(f"/api/datasources/{ds['id']}/metadata-import/upload",files={"file":("脱敏数据字典.xlsx",stream.getvalue(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")});assert response.status_code==200,response.text;document=response.json();assert document["parse_summary_json"]["row_count"]==2;assert document["parsed_rows_json"][0]["source_cells"]["column_name"].endswith("D2");assert document["parsed_rows_json"][0]["system_name"]=="ECIF";assert document["parsed_rows_json"][0]["datasource_name"]=="excel_catalog"
         first=_post(client,f"/api/metadata-imports/{document['id']}/apply",{});second=_post(client,f"/api/metadata-imports/{document['id']}/apply",{});assert first["columns"]==2;assert second["columns"]==0
         tables=_get(client,f"/api/projects/{project['id']}/catalog/tables");assert tables["total"]==2
+        nl=_post(client,"/api/nl-tasks",{"project_id":project["id"],"text":"使用 excel_catalog 帮我查找与客户证件类型相关的候选字段"});nl_result=_post(client,f"/api/nl-tasks/{nl['task_id']}/run",{});assert nl_result["generated_sql_json"]==[];assert nl_result["result_summary_json"]["items"]
         candidates=_post(client,f"/api/projects/{project['id']}/catalog/search",{"query":"CERT_TYPE"})["items"]
         source_imports=[_post(client,f"/api/catalog/columns/{item['catalog_column_id']}/import-as-source-field",{"system_code":"ECIF","system_name":"客户信息系统"}) for item in candidates]
         mart_imports=[_post(client,f"/api/catalog/columns/{item['catalog_column_id']}/import-as-mart-field",{}) for item in candidates]
@@ -141,7 +142,7 @@ def test_full_sync_preserves_a_failed_tables_existing_columns(db_session,monkeyp
 
 @contextmanager
 def _client()->Iterator[TestClient]:
-    engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool);Base.metadata.create_all(engine);factory=sessionmaker(bind=engine)
+    engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool);Base.metadata.create_all(engine);factory=sessionmaker(bind=engine,autoflush=False)
     def override()->Iterator[Session]:
         session=factory()
         try:yield session

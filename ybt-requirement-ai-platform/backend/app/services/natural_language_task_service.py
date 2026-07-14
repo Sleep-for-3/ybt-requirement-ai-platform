@@ -38,7 +38,7 @@ def run_natural_language_task(db: Session, task_id: int) -> NaturalLanguageTask:
         db.commit()
         return task
     if task.intent == "catalog_search":
-        query = task.raw_text.replace(task.datasource_name or "", "").replace("使用", "").replace("帮我查找", "").replace("候选字段", "")
+        query = _catalog_search_query(task.raw_text, task.datasource_name or "")
         task.status = "completed"
         task.generated_sql_json = []
         task.result_summary_json = {"mode": "catalog_search", "items": search_catalog(
@@ -117,3 +117,10 @@ def _summarize_response(name: str, response: dict) -> dict:
     if name == "enum_distribution":
         return {"rows": rows, "row_count": response.get("row_count", 0)}
     return response
+
+
+def _catalog_search_query(raw_text: str, datasource_name: str) -> str:
+    query = raw_text.replace(datasource_name, "")
+    for phrase in ["帮我查找", "帮我搜索", "候选字段", "相关字段", "数据目录", "相关的", "使用", "请", "查找", "搜索", "与"]:
+        query = query.replace(phrase, " ")
+    return " ".join(query.replace("，", " ").replace(",", " ").split())

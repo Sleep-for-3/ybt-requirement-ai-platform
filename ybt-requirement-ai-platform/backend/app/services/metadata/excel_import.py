@@ -8,7 +8,7 @@ from app.core.settings import get_settings
 from app.models import CatalogColumn, CatalogSchema, CatalogTable, MetadataImportDocument
 from app.services.metadata.hashing import metadata_hash
 
-ALIASES={"schema_name":{"schema","库名","数据库名"},"table_name":{"表英文名","表名","table_name"},"table_comment":{"表中文名","表注释","表说明"},"column_name":{"字段英文名","字段名","column_name"},"column_comment":{"字段中文名","字段注释","字段说明"},"data_type":{"字段类型","数据类型","data_type"},"nullable":{"是否可空","可空"},"is_primary_key":{"主键","是否主键"},"ordinal_position":{"字段顺序","字段序号"}}
+ALIASES={"system_name":{"系统名称","系统名"},"datasource_name":{"数据源名称","数据源名"},"schema_name":{"schema","库名","数据库名"},"table_name":{"表英文名","表名","table_name"},"table_comment":{"表中文名","表注释","表说明"},"column_name":{"字段英文名","字段名","column_name"},"column_comment":{"字段中文名","字段注释","字段说明"},"data_type":{"字段类型","数据类型","data_type"},"nullable":{"是否可空","可空"},"is_primary_key":{"主键","是否主键"},"ordinal_position":{"字段顺序","字段序号"}}
 
 async def ingest_metadata_excel(db,datasource,upload):
     if Path(upload.filename or "").suffix.lower() != ".xlsx": raise ValueError("元数据字典只支持 .xlsx")

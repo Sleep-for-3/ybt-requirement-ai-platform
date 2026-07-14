@@ -292,6 +292,25 @@ def main() -> None:
         }
         if missing := required_excel_headers - export_headers:
             raise AssertionError(f"导出 Excel 缺少表头: {sorted(missing)}")
+        current_group = ""
+        debit_source_columns: dict[str, int] = {}
+        for column in range(1, exported_sheet.max_column + 1):
+            group_value = str(exported_sheet.cell(1, column).value or "")
+            if group_value:
+                current_group = group_value
+            child_header = str(exported_sheet.cell(2, column).value or "")
+            if current_group == "溯源-借记卡" and child_header in {"来源表英文名", "来源字段英文名"}:
+                debit_source_columns[child_header] = column
+        exported_field_row = next(
+            row for row in range(3, exported_sheet.max_row + 1)
+            if str(exported_sheet.cell(row, 1).value or "") == "CERT_TYPE"
+        )
+        exported_source_table = exported_sheet.cell(exported_field_row, debit_source_columns["来源表英文名"]).value
+        exported_source_field = exported_sheet.cell(exported_field_row, debit_source_columns["来源字段英文名"]).value
+        if exported_source_table != "ecif_customer" or exported_source_field != "cert_type":
+            raise AssertionError(
+                f"导出 Excel 未写入已采用目录来源: {exported_source_table}.{exported_source_field}"
+            )
 
         legacy_mapping = _post_json(
             client,
