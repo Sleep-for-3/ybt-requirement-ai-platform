@@ -47,12 +47,12 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     )).all())
     history = list(db.scalars(select(ScenarioTechnicalLineage).where(
         ScenarioTechnicalLineage.project_id == target.project_id,
-        ScenarioTechnicalLineage.scenario_id == scenario.id,
+        ScenarioTechnicalLineage.target_field_id == target.id,
     )).all())
     sql_context = _sql_context(db, target.project_id)
     evidence_rows = db.scalars(select(MappingEvidenceReference).where(
         MappingEvidenceReference.project_id == target.project_id,
-        MappingEvidenceReference.evidence_type == "source_field",
+        MappingEvidenceReference.evidence_type.in_(["source_field", "catalog_column"]),
     )).all()
     relevant_mapping_ids = {
         "scenario_business": set(db.scalars(select(ScenarioBusinessMapping.id).where(
@@ -69,7 +69,11 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
     }
     bound_source_ids = {
         item.evidence_id for item in evidence_rows
-        if item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
+        if item.evidence_type == "source_field" and item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
+    }
+    bound_catalog_ids = {
+        item.evidence_id for item in evidence_rows
+        if item.evidence_type == "catalog_column" and item.evidence_id is not None and item.mapping_id in relevant_mapping_ids.get(item.mapping_type, set())
     }
 
     scored = []
@@ -111,8 +115,12 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
         recommendations.append(recommendation)
     catalog_items = search_catalog(db, target.project_id, CatalogSearchRequest(
         query=" ".join(filter(None, [target.field_code, target.field_name, target.field_definition, target.regulatory_description])),
-        target_field_id=target.id, scenario_id=scenario.id, top_k=top_k,
+        target_field_id=target.id, scenario_id=scenario.id, top_k=min(max(top_k * 5, 50), 100),
     ))
+    for item in catalog_items:
+        score,reasons,evidence=_score_catalog_candidate(item,scenario,knowledge,history,sql_context,item["catalog_column_id"] in bound_catalog_ids)
+        item["score"]=score;item["match_reasons"]=reasons;item["catalog_evidence"]=evidence
+    catalog_items.sort(key=lambda item:(item["score"],-item["catalog_column_id"]),reverse=True)
     existing_catalog_ids = {item.catalog_column_id for item in recommendations if item.catalog_column_id}
     for item in catalog_items:
         if item["catalog_column_id"] in existing_catalog_ids or len(recommendations) >= top_k:
@@ -128,7 +136,7 @@ def recommend_source_fields(db: Session, target_field_id: int, scenario_id: int,
             recommended_field_comment=item["column_comment"], data_type=item["data_type"], nullable=item["nullable"],
             profile_status="not_profiled", recommended_processing_logic="目录候选字段直接取值，处理逻辑待探查后确认",
             recommend_reason="；".join(item["match_reasons"] + ["真实数据目录候选"]),
-            evidence_summary=f"来自命名数据源 {datasource.name} 的目录字段 {item['schema_name']}.{item['table_name']}.{item['column_name']}",
+            evidence_summary="；".join([f"来自命名数据源 {datasource.name} 的目录字段 {item['schema_name']}.{item['table_name']}.{item['column_name']}"]+item["catalog_evidence"]),
             confidence_level="high" if item["score"] >= .75 else "medium" if item["score"] >= .45 else "low",
             score=item["score"], selected_flag=False,
         )
@@ -274,6 +282,30 @@ def _score_candidate(target, scenario, source, table, system, knowledge, history
         reasons.append("弱语义候选")
         evidence.append("仅存在低强度字段语义相似，需人工复核")
     return score, reasons, evidence
+
+
+def _score_catalog_candidate(item, scenario, knowledge, history, sql_context: str, manually_bound: bool):
+    score=float(item["score"]);reasons=list(item["match_reasons"]);evidence=[]
+    tokens=[item["datasource_name"],item["schema_name"],item["table_name"],item["column_name"]]
+    matching_history=[lineage for lineage in history if any(value and value.lower() in " ".join(filter(None,[lineage.source_database_name,lineage.source_schema_name,lineage.source_table_english_name,lineage.source_field_english_name])).lower() for value in tokens[1:])]
+    if matching_history:
+        score+=.12;reasons.append("历史技术溯源匹配");evidence.append("历史场景技术溯源中出现该目录表或字段")
+    if any(lineage.scenario_id==scenario.id for lineage in matching_history):
+        score+=.05;reasons.append("当前场景历史匹配");evidence.append(f"{scenario.scenario_name}场景已使用该目录来源")
+    matching_knowledge=[knowledge_item for knowledge_item in knowledge if _mentions_source(knowledge_item,tokens)]
+    if any(knowledge_item.knowledge_type=="historical_mapping" for knowledge_item in matching_knowledge):
+        score+=.08;reasons.append("历史口径匹配");evidence.append("历史口径知识中出现该目录来源")
+    if any(knowledge_item.knowledge_type=="regulatory_qa" for knowledge_item in matching_knowledge):
+        score+=.05;reasons.append("监管答疑匹配");evidence.append("监管答疑知识中出现该目录来源")
+    if any(knowledge_item.scenario_id==scenario.id for knowledge_item in matching_knowledge):
+        score+=.05;reasons.append("当前场景知识匹配");evidence.append(f"{scenario.scenario_name}场景知识命中该目录来源")
+    if any(value and value.lower() in sql_context for value in [item["table_name"],item["column_name"]]):
+        score+=.05;reasons.append("SQL 解析证据匹配");evidence.append("项目 SQL 解析结果中出现该目录表或字段")
+    if item.get("imported_source_field_id"):
+        score+=.08;reasons.append("已导入来源字段");evidence.append("该目录字段已导入 SourceField")
+    if manually_bound:
+        score+=.1;reasons.append("已绑定人工证据");evidence.append("该目录字段已绑定到当前字段口径证据")
+    return round(min(score,1.0),4),list(dict.fromkeys(reasons)),evidence
 
 
 def _sql_context(db: Session, project_id: int) -> str:

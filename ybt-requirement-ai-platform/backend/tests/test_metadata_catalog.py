@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import DataSource
+from app.models import CatalogColumn, DataSource, Project
+from app.services.metadata.base import ColumnMetadata, SchemaMetadata, TableMetadata
+from app.services.metadata.sync_service import synchronize_metadata
+import app.services.metadata.sync_service as sync_service
 from app.services.metadata.mysql_compatible_adapter import MySQLCompatibleMetadataAdapter
 from app.services.metadata.postgresql_adapter import PostgreSQLMetadataAdapter
 import app.services.metadata.generic_adapter as generic_adapter
@@ -55,6 +58,11 @@ def test_sqlite_metadata_sync_search_pagination_and_import(tmp_path: Path) -> No
         evidence=_get(client,f"/api/mappings/scenario_technical/{selected['lineage']['id']}/evidence"); assert any(item["evidence_type"]=="column_profile" for item in evidence)
         draft=_post(client,f"/api/scenario-technical-lineages/{selected['lineage']['id']}/generate-draft",{});assert "安全探查摘要" in draft["ai_generated_content"];assert "distinct=2" in draft["ai_generated_content"]
         adopted=_post(client,f"/api/source-recommendations/{catalog_rec['id']}/adopt",{});assert adopted["lineage"]["source_field_english_name"]=="cert_type"
+        next_scenario=_post(client,f"/api/projects/{project['id']}/scenarios",{"scenario_code":"CREDIT_CARD","scenario_name":"信用卡"})
+        next_recommendations=_post(client,f"/api/target-fields/{target['id']}/scenarios/{next_scenario['id']}/recommend-sources",{})["recommendations"]
+        next_catalog=next(item for item in next_recommendations if item["catalog_column_id"]==candidate["catalog_column_id"])
+        assert "历史技术溯源匹配" in next_catalog["recommend_reason"]
+        assert "已导入来源字段" in next_catalog["recommend_reason"]
 
 def test_profile_requires_selection_and_protects_sensitive_values(tmp_path:Path)->None:
     source_db=tmp_path/"sensitive.db"
@@ -84,12 +92,17 @@ def test_profile_requires_selection_and_protects_sensitive_values(tmp_path:Path)
         assert snapshots[0]["min_value_text"] is None and snapshots[0]["max_value_text"] is None
 
 def test_metadata_excel_preview_and_repeated_apply_are_idempotent()->None:
-    workbook=Workbook();sheet=workbook.active;sheet.title="数据字典";sheet.append(["schema","表英文名","表中文名","字段英文名","字段中文名","字段类型","是否可空","主键","字段顺序"]);sheet.append(["ODS","ECIF_CUSTOMER","客户基本信息表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2]);stream=BytesIO();workbook.save(stream)
+    workbook=Workbook();sheet=workbook.active;sheet.title="数据字典";sheet.append(["schema","表英文名","表中文名","字段英文名","字段中文名","字段类型","是否可空","主键","字段顺序"]);sheet.append(["ODS","ECIF_CUSTOMER","客户基本信息表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2]);sheet.append(["DWD","ECIF_CUSTOMER","客户主题表","CERT_TYPE","客户证件类型","VARCHAR(20)","是","否",2]);stream=BytesIO();workbook.save(stream)
     with _client() as client:
         project=_post(client,"/api/projects",{"name":"Excel 元数据"});ds=_post(client,f"/api/projects/{project['id']}/datasources",{"name":"excel_catalog","db_type":"sqlite","database_name":":memory:"})
-        response=client.post(f"/api/datasources/{ds['id']}/metadata-import/upload",files={"file":("脱敏数据字典.xlsx",stream.getvalue(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")});assert response.status_code==200,response.text;document=response.json();assert document["parse_summary_json"]["row_count"]==1;assert document["parsed_rows_json"][0]["source_cells"]["column_name"].endswith("D2")
-        first=_post(client,f"/api/metadata-imports/{document['id']}/apply",{});second=_post(client,f"/api/metadata-imports/{document['id']}/apply",{});assert first["columns"]==1;assert second["columns"]==0
-        tables=_get(client,f"/api/projects/{project['id']}/catalog/tables");assert tables["total"]==1
+        response=client.post(f"/api/datasources/{ds['id']}/metadata-import/upload",files={"file":("脱敏数据字典.xlsx",stream.getvalue(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")});assert response.status_code==200,response.text;document=response.json();assert document["parse_summary_json"]["row_count"]==2;assert document["parsed_rows_json"][0]["source_cells"]["column_name"].endswith("D2")
+        first=_post(client,f"/api/metadata-imports/{document['id']}/apply",{});second=_post(client,f"/api/metadata-imports/{document['id']}/apply",{});assert first["columns"]==2;assert second["columns"]==0
+        tables=_get(client,f"/api/projects/{project['id']}/catalog/tables");assert tables["total"]==2
+        candidates=_post(client,f"/api/projects/{project['id']}/catalog/search",{"query":"CERT_TYPE"})["items"]
+        source_imports=[_post(client,f"/api/catalog/columns/{item['catalog_column_id']}/import-as-source-field",{"system_code":"ECIF","system_name":"客户信息系统"}) for item in candidates]
+        mart_imports=[_post(client,f"/api/catalog/columns/{item['catalog_column_id']}/import-as-mart-field",{}) for item in candidates]
+        assert len({item["source_table_id"] for item in source_imports})==2
+        assert len({item["mart_table_id"] for item in mart_imports})==2
 
 def test_postgresql_and_mysql_adapters_exclude_system_schemas(monkeypatch)->None:
     class Inspector:
@@ -106,6 +119,25 @@ def test_postgresql_and_mysql_adapters_exclude_system_schemas(monkeypatch)->None
     assert [item.schema_name for item in mysql.list_schemas()]==["public","pg_catalog"]
     assert pg.list_tables(["public"])[0].primary_key_columns==["id"]
     assert mysql.list_columns("public","customer")[0].column_comment=="主键"
+
+def test_full_sync_preserves_a_failed_tables_existing_columns(db_session,monkeypatch)->None:
+    project=Project(name="失败隔离同步");db_session.add(project);db_session.flush();datasource=DataSource(project_id=project.id,name="sync_isolation",db_type="sqlite",database_name=":memory:");db_session.add(datasource);db_session.commit()
+    class Adapter:
+        fail=False
+        def list_schemas(self):return [SchemaMetadata("main")]
+        def list_tables(self,schema_names=None,include_views=True):return [TableMetadata("main","healthy"),TableMetadata("main","fragile")]
+        def list_columns(self,schema_name,table_name):
+            if table_name=="fragile" and self.fail:raise RuntimeError("catalog permission denied")
+            names=["kept"] if table_name=="fragile" else (["current"] if self.fail else ["current","removed"])
+            return [ColumnMetadata("main",table_name,name,data_type="TEXT",ordinal_position=index) for index,name in enumerate(names,start=1)]
+    adapter=Adapter();monkeypatch.setattr(sync_service,"create_metadata_adapter",lambda datasource:adapter)
+    assert synchronize_metadata(db_session,datasource).status=="completed"
+    adapter.fail=True;task=synchronize_metadata(db_session,datasource)
+    assert task.status=="partially_completed";assert "fragile" in str(task.warnings_json)
+    columns={f"{item.table_name}.{item.column_name}":item.enabled for item in db_session.query(CatalogColumn).all()}
+    assert columns["healthy.current"] is True
+    assert columns["healthy.removed"] is False
+    assert columns["fragile.kept"] is True
 
 @contextmanager
 def _client()->Iterator[TestClient]:

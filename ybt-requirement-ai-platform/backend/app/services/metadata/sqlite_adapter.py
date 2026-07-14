@@ -6,9 +6,14 @@ from app.services.metadata.base import ColumnMetadata, ConnectionTestResult, Sch
 class SQLiteMetadataAdapter:
     def __init__(self, datasource: DataSource):
         self.datasource = datasource
+        self._engine_value = None
 
     def _engine(self):
-        return create_engine(build_database_url(self.datasource), connect_args={"check_same_thread": False})
+        if self._engine_value is None:self._engine_value=create_engine(build_database_url(self.datasource), connect_args={"check_same_thread": False})
+        return self._engine_value
+
+    def close(self):
+        if self._engine_value is not None:self._engine_value.dispose();self._engine_value=None
 
     def test_connection(self) -> ConnectionTestResult:
         try:

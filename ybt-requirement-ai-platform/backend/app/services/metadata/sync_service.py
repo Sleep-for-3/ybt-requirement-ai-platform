@@ -9,32 +9,36 @@ VALID_MODES = {"full", "incremental", "selected_schemas"}
 
 def synchronize_metadata(db: Session, datasource: DataSource, sync_mode="full", schema_names=None, include_views=True, created_by=None):
     if sync_mode not in VALID_MODES: raise ValueError("Invalid sync_mode")
-    task = MetadataSyncTask(project_id=datasource.project_id, datasource_id=datasource.id, sync_mode=sync_mode, status="running", started_at=datetime.now(UTC), created_by=created_by)
+    task = MetadataSyncTask(project_id=datasource.project_id, datasource_id=datasource.id, sync_mode=sync_mode, status="pending", created_by=created_by)
     db.add(task); db.commit(); db.refresh(task)
+    task.status="running";task.started_at=datetime.now(UTC);db.commit()
     warnings = []; adapter = create_metadata_adapter(datasource)
     try:
         schemas = adapter.list_schemas()
         if schema_names: schemas = [item for item in schemas if item.schema_name in schema_names]
-        seen_tables, seen_columns = set(), set()
+        seen_tables, seen_columns = set(), set();failed_schemas=set();failed_tables=set()
         for schema_meta in schemas:
             schema = _upsert_schema(db, datasource, schema_meta, datetime.now(UTC))
             try: tables = adapter.list_tables([schema.schema_name], include_views=include_views)
             except Exception as exc:
-                warnings.append(f"schema {schema.schema_name} 同步失败: {exc}"); continue
+                failed_schemas.add(schema.schema_name);warnings.append(f"schema {schema.schema_name} 同步失败: {exc}"); continue
             for table_meta in tables:
                 try:
-                    table = _upsert_table(db, datasource, schema, table_meta, datetime.now(UTC)); seen_tables.add(table.id)
+                    table = _upsert_table(db, datasource, schema, table_meta, datetime.now(UTC))
                     columns = adapter.list_columns(table.schema_name, table.table_name)
                     for column_meta in columns:
                         column = _upsert_column(db, datasource, table, column_meta, datetime.now(UTC)); seen_columns.add(column.id)
-                    db.commit()
+                    db.commit();seen_tables.add(table.id)
                 except Exception as exc:
-                    db.rollback(); warnings.append(f"{table_meta.schema_name}.{table_meta.table_name} 同步失败: {exc}")
-        if sync_mode == "full": _disable_missing(db, datasource.id, seen_tables, seen_columns)
+                    db.rollback();failed_tables.add((table_meta.schema_name,table_meta.table_name));warnings.append(f"{table_meta.schema_name}.{table_meta.table_name} 同步失败: {exc}")
+        if sync_mode == "full": _disable_missing(db, datasource.id, seen_tables, seen_columns, failed_schemas, failed_tables)
         task.schema_count = len(schemas); task.table_count = len(seen_tables); task.column_count = len(seen_columns)
         task.status = "partially_completed" if warnings else "completed"; task.warnings_json = warnings
     except Exception as exc:
         db.rollback(); task = db.get(MetadataSyncTask, task.id); task.status = "failed"; task.error_message = str(exc)
+    finally:
+        close=getattr(adapter,"close",None)
+        if close:close()
     task.finished_at = datetime.now(UTC); db.commit(); db.refresh(task); return task
 
 def _upsert_schema(db, ds, item, now):
@@ -65,8 +69,10 @@ def _upsert_column(db, ds, table, item, now):
     if changed or not model.enabled: model.last_synced_at=now
     model.enabled=True; db.flush(); return model
 
-def _disable_missing(db, datasource_id, seen_tables, seen_columns):
+def _disable_missing(db, datasource_id, seen_tables, seen_columns, failed_schemas, failed_tables):
     for item in db.scalars(select(CatalogTable).where(CatalogTable.datasource_id == datasource_id)).all():
-        if item.id not in seen_tables: item.enabled=False
+        if item.schema_name in failed_schemas or (item.schema_name,item.table_name) in failed_tables:continue
+        if item.id not in seen_tables:item.enabled=False
     for item in db.scalars(select(CatalogColumn).where(CatalogColumn.datasource_id == datasource_id)).all():
-        if item.id not in seen_columns: item.enabled=False
+        if item.schema_name in failed_schemas or (item.schema_name,item.table_name) in failed_tables:continue
+        if item.id not in seen_columns:item.enabled=False

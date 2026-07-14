@@ -64,7 +64,7 @@ def source_table(table_id:int,payload:CatalogImportRequest|None=None,db:Session=
 def mart_table(table_id:int,db:Session=Depends(get_db)):
     table=db.get(CatalogTable,table_id)
     if table is None:raise HTTPException(404,"Catalog table not found")
-    mart=db.scalar(select(MartTable).where(MartTable.project_id==table.project_id,MartTable.table_code==table.table_name))
+    mart=db.scalar(select(MartTable).where(MartTable.project_id==table.project_id,MartTable.datasource_id==table.datasource_id,MartTable.schema_name==table.schema_name,MartTable.physical_table_name==table.table_name))
     if mart is None:
         mart=MartTable(project_id=table.project_id,table_code=table.table_name,table_name=table.table_comment or table.table_name,table_comment=table.table_comment,datasource_id=table.datasource_id,schema_name=table.schema_name,physical_table_name=table.table_name,is_existing=True);db.add(mart);db.flush()
     item=db.scalar(select(CatalogImportBinding).where(CatalogImportBinding.catalog_table_id==table.id,CatalogImportBinding.catalog_column_id.is_(None),CatalogImportBinding.binding_type=="mart_field"))

@@ -8,13 +8,19 @@ class SqlAlchemyMetadataAdapter:
 
     def __init__(self, datasource: DataSource):
         self.datasource = datasource
+        self._engine_value = None
         params = datasource.connection_params_json or {}
         self.whitelist = set(params.get("schema_whitelist") or [])
         self.blacklist = set(params.get("schema_blacklist") or []) | self.system_schemas
 
     def _engine(self):
-        try: return create_engine(build_database_url(self.datasource), pool_pre_ping=True)
+        try:
+            if self._engine_value is None:self._engine_value=create_engine(build_database_url(self.datasource), pool_pre_ping=True)
+            return self._engine_value
         except (ImportError, ModuleNotFoundError) as exc: raise RuntimeError(f"{self.datasource.db_type} 可选驱动未安装：{exc}") from exc
+
+    def close(self):
+        if self._engine_value is not None:self._engine_value.dispose();self._engine_value=None
 
     def test_connection(self) -> ConnectionTestResult:
         try:
