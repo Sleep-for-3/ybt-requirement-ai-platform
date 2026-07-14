@@ -163,6 +163,14 @@ def test_scenario_mappings_adopt_drafts_quality_checks_and_knowledge_search() ->
         )
         assert invalid_business_status.status_code == 400
         assert invalid_tech_status.status_code == 400
+        assert client.put(
+            f"/api/scenario-business-mappings/{empty_business['id']}",
+            json={"business_confirm_status": "confirmed"},
+        ).status_code == 400
+        assert client.put(
+            f"/api/scenario-technical-lineages/{empty_lineage['id']}",
+            json={"tech_confirm_status": "confirmed"},
+        ).status_code == 400
 
         knowledge = _post(
             client,

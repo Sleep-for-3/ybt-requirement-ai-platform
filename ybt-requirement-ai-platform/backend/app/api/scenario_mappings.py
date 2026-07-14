@@ -247,6 +247,8 @@ def _validate_logic_type(value: str | None) -> None:
 def _validate_confirm_status(value: str | None) -> None:
     if value is not None and value not in CONFIRM_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid confirmation status")
+    if value == "confirmed":
+        raise HTTPException(status_code=400, detail="Use the confirmation endpoint so quality checks cannot be bypassed")
 
 
 def _apply(model: object, values: dict) -> None:
