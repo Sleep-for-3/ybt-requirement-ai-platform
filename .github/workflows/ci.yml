@@ -32,7 +32,18 @@ jobs:
           python -m alembic upgrade head
           python -m alembic downgrade -1
           python -m alembic upgrade head
-      - run: python -m pytest -q
+      - name: Run backend tests
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do
+              echo "::error title=Backend pytest::$line"
+            done < <(tail -n 80 pytest.log)
+          fi
+          exit "$status"
       - run: python -m compileall -q app
 
   frontend:
