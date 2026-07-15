@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     login_lock_seconds: int = 300
     request_rate_limit_per_minute: int = 600
     max_upload_bytes: int = 20 * 1024 * 1024
+    lineage_zip_max_total_bytes: int = 100 * 1024 * 1024
+    lineage_zip_max_file_count: int = 2000
+    lineage_script_max_bytes: int = 10 * 1024 * 1024
+    lineage_repository_max_bytes: int = 500 * 1024 * 1024
+    lineage_repository_max_file_count: int = 10000
     task_queue_provider: str = "inline"
     redis_url: str = "redis://redis:6379/0"
     celery_broker_url: str = "redis://redis:6379/0"

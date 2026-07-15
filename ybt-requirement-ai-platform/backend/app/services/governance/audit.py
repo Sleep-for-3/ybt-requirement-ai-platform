@@ -1,4 +1,5 @@
 from typing import Any
+import re
 
 from sqlalchemy.orm import Session
 
@@ -7,15 +8,25 @@ from app.services.security import redact_content
 
 
 SENSITIVE_KEYS = ("password", "passwd", "pwd", "token", "secret", "api_key", "credential", "connection_string", "sqlalchemy_url", "knowledge_content", "raw_content", "document_content")
+_SAFE_STORAGE_KEY = re.compile(r"projects/\d+/[0-9a-f]{2}/[0-9a-f]{64}(?:\.[A-Za-z0-9]+)?")
+_SAFE_HASH = re.compile(r"[0-9a-f]{32,128}")
 
 
 def redact_summary(value: Any) -> Any:
     if isinstance(value, dict):
-        return {
-            str(key): redact_summary(item)
-            for key, item in value.items()
-            if not any(fragment in str(key).lower() for fragment in SENSITIVE_KEYS)
-        }
+        result = {}
+        for key, item in value.items():
+            key_text = str(key)
+            key_lower = key_text.lower()
+            if any(fragment in key_lower for fragment in SENSITIVE_KEYS):
+                continue
+            if key_lower == "storage_key" and isinstance(item, str) and _SAFE_STORAGE_KEY.fullmatch(item):
+                result[key_text] = item
+            elif key_lower.endswith("_hash") and isinstance(item, str) and _SAFE_HASH.fullmatch(item):
+                result[key_text] = item
+            else:
+                result[key_text] = redact_summary(item)
+        return result
     if isinstance(value, list):
         return [redact_summary(item) for item in value[:100]]
     if isinstance(value, str):

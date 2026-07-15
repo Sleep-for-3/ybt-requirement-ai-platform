@@ -6,6 +6,7 @@ from sqlalchemy import func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    ImpactAnalysis,
     MartToYbtMapping,
     MappingEvidenceReference,
     MappingVersion,
@@ -46,6 +47,11 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
     "project_export_review": ("项目导出审核", [
         {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
     ]),
+    "lineage_change_review": ("血缘变更复核", [
+        {"step_key": "impact_analysis", "task_type": "review", "assignee_role": "technical_analyst"},
+        {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
+        {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
+    ]),
 }
 
 TARGET_MODELS = {
@@ -55,6 +61,7 @@ TARGET_MODELS = {
     "source_to_mart": SourceToMartMapping,
     "mart_to_ybt": MartToYbtMapping,
     "scenario_review_package": ScenarioReviewPackage,
+    "impact_analysis": ImpactAnalysis,
 }
 
 
@@ -75,6 +82,10 @@ def start_workflow(
         raise HTTPException(status_code=400, detail="Workflow has no steps")
     if workflow_key == "scenario_mapping_review" and target_type != "scenario_review_package":
         raise HTTPException(status_code=400, detail="Scenario review workflow requires a scenario_review_package target")
+    if workflow_key == "lineage_change_review" and target_type != "impact_analysis":
+        raise HTTPException(status_code=400, detail="Lineage change workflow requires an impact_analysis target")
+    if workflow_key != "lineage_change_review" and target_type == "impact_analysis":
+        raise HTTPException(status_code=400, detail="Impact analyses require lineage_change_review")
     if workflow_key != "scenario_mapping_review" and target_type == "scenario_review_package":
         raise HTTPException(status_code=400, detail="Scenario review packages require scenario_mapping_review")
     package = validate_review_package(db, project_id, target_id) if target_type == "scenario_review_package" else None
@@ -188,6 +199,10 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
     ))
     task.status = decision
     task.completed_at = datetime.now(UTC)
+    if task.target_type == "impact_analysis" and decision == "rejected":
+        impact = db.get(ImpactAnalysis, task.target_id)
+        if impact is not None:
+            impact.status = "rejected"
     steps = list(_definition(db, instance.workflow_key).steps_json)
     if decision == "approved":
         position = next(index for index, item in enumerate(steps) if item["step_key"] == task.step_key)
@@ -199,6 +214,8 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
                 finalize_review_package(db, package)
             elif instance.workflow_key == "double_layer_mapping_review":
                 _finalize_double_layer_target(db, task.target_type, task.target_id, principal.username)
+            elif instance.workflow_key == "lineage_change_review":
+                _finalize_lineage_impact(db, task.target_id)
         else:
             next_step = steps[position + 1]["step_key"]
             instance.status = "in_progress"
@@ -357,3 +374,23 @@ def _finalize_double_layer_target(db: Session, target_type: str, target_id: int,
         change_note="五阶段治理审核通过自动保存版本",
         created_by=reviewed_by,
     ))
+
+
+def _finalize_lineage_impact(db: Session, impact_id: int) -> None:
+    impact = db.get(ImpactAnalysis, impact_id)
+    if impact is None:
+        raise HTTPException(status_code=404, detail="Impact analysis not found")
+    verified_at = datetime.now(UTC)
+    models = {
+        "scenario_technical": ScenarioTechnicalLineage,
+        "source_to_mart": SourceToMartMapping,
+        "mart_to_ybt": MartToYbtMapping,
+    }
+    for reference in impact.affected_mapping_ids_json:
+        mapping_type, _, raw_id = str(reference).partition(":")
+        model = models.get(mapping_type)
+        mapping = db.get(model, int(raw_id)) if model is not None and raw_id.isdigit() else None
+        if mapping is not None and mapping.project_id == impact.project_id:
+            mapping.lineage_status = "verified"
+            mapping.lineage_last_verified_at = verified_at
+    impact.status = "reviewed"
