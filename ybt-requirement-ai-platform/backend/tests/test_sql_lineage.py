@@ -1,22 +1,24 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+import base64
 from pathlib import Path
 from io import BytesIO
+from types import SimpleNamespace
 from zipfile import ZipFile
 from openpyxl import load_workbook
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
 from app.models import (
-    CatalogColumn, CatalogSchema, CatalogTable, DataSource, Institution, LineageNode,
+    BackgroundJob, CatalogColumn, CatalogSchema, CatalogTable, CodeRepository, DataSource, Institution, LineageEdge, LineageNode,
     MartField, MartTable, MartToYbtMapping, ProductScenario, Project, ReviewTask,
-    ScenarioTechnicalLineage, ScriptFile as ScriptFileModel, ScriptFileVersion,
-    SourceToMartMapping, TargetField, TargetTable, User,
+    ScenarioBusinessMapping, ScenarioTechnicalLineage, ScriptChangeSet, ScriptFile as ScriptFileModel, ScriptFileVersion,
+    SourceToMartMapping, TargetField, TargetTable, TemplateVariable, User,
 )
 from app.services.lineage.resolver import resolve_lineage_node
 from app.services.lineage.impact_analyzer import persist_change_impact
@@ -26,7 +28,10 @@ from app.services.lineage.sql_parser import parse_sql_lineage
 from app.services.lineage.shell_parser import parse_shell_dependencies
 from app.services.lineage.version_diff import compare_shell_versions, compare_sql_versions
 from app.services.lineage.archive_ingestion import read_safe_script_archive
-from app.services.lineage.git_repository import read_git_repository_scripts
+from app.services.lineage.archive_ingestion import ArchivedScript
+from app.services.lineage.git_repository import GitRepositorySnapshot, read_git_repository_scripts
+from app.services.lineage.ingestion import ScriptIngestionService
+from app.services.lineage.exporter import export_lineage_workbook
 from app.services.storage.local import LocalStorageService
 
 
@@ -82,6 +87,48 @@ def test_insert_select_produces_table_and_column_lineage() -> None:
     )
     assert count_edge.source.logical_name == "ODS.ECIF_CUSTOMER.CUSTOMER_ID"
     assert "COUNT" in count_edge.transformation_expression.upper()
+
+
+def test_multi_statement_sql_retains_successful_lineage_when_one_statement_fails() -> None:
+    result = parse_sql_lineage("""
+        insert into MART.T1 (A) select A from ODS.S1;
+        select from where definitely invalid ???;
+        insert into MART.T2 (B) select B from ODS.S2;
+    """, dialect="sqlite")
+
+    assert result.parse_status == "partially_parsed"
+    assert [item.parse_status for item in result.statements] == ["parsed", "failed", "parsed"]
+    assert {edge.target.logical_name for edge in result.edges if edge.target.node_type == "column"} == {
+        "MART.T1.A",
+        "MART.T2.B",
+    }
+    assert all(edge.confidence_level == "low" for edge in result.edges)
+    assert any("Statement 2 parse failed" in warning for warning in result.warnings)
+
+
+def test_script_ingestion_persists_discovered_template_variables(tmp_path: Path, db_session: Session) -> None:
+    institution = Institution(institution_code="template-bank", institution_name="Template Bank")
+    db_session.add(institution)
+    db_session.flush()
+    project = Project(name="template discovery", institution_id=institution.id)
+    db_session.add(project)
+    db_session.flush()
+
+    ScriptIngestionService(db_session, LocalStorageService(tmp_path / "storage")).ingest(
+        project=project,
+        data=b"insert into #{INSTANCE_GB}.TARGET(A) select A from ${SCHEMA}.SOURCE where D=:biz_date",
+        file_name="template.sql",
+        relative_path="template.sql",
+        dialect="sqlite",
+        actor_user_id=None,
+    )
+
+    rows = db_session.query(TemplateVariable).filter(TemplateVariable.project_id == project.id).all()
+    assert {(row.variable_name, row.variable_type, row.confirmed) for row in rows} == {
+        ("INSTANCE_GB", "identifier_or_value", False),
+        ("SCHEMA", "identifier_or_value", False),
+        ("biz_date", "identifier_or_value", False),
+    }
 
 
 def test_manual_sql_upload_is_version_idempotent_and_queryable(tmp_path: Path, monkeypatch) -> None:
@@ -336,10 +383,161 @@ def test_git_reader_does_not_execute_checkout_hooks(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
-def test_lineage_export_is_a_real_workbook_with_required_sheets(tmp_path: Path, monkeypatch) -> None:
+def test_code_repository_rejects_url_credentials_and_unapproved_hosts() -> None:
+    with _client() as client:
+        project = client.post("/api/projects", json={"name": "git security", "institution_id": 1}).json()
+        endpoint = f"/api/projects/{project['id']}/code-repositories"
+        for repository_url in (
+            "https://github.com/example/repo.git?access_token=secret",
+            "https://github.com/example/repo.git#token=secret",
+            "https://user:secret@github.com/example/repo.git",
+            "https://internal.example.invalid/example/repo.git",
+        ):
+            response = client.post(endpoint, json={"repository_name": repository_url, "repository_url": repository_url})
+            assert response.status_code == 400, response.text
+
+
+def test_code_repository_local_path_must_be_inside_an_allowed_root(tmp_path: Path, monkeypatch) -> None:
     import app.api.lineage as lineage_api
 
-    monkeypatch.setattr(lineage_api, "get_storage_service", lambda: LocalStorageService(tmp_path / "storage"))
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    inside = allowed / "repo.git"
+    outside = tmp_path / "outside.git"
+    monkeypatch.setattr(
+        lineage_api,
+        "get_settings",
+        lambda: SimpleNamespace(
+            lineage_git_allowed_host_list=["github.com"],
+            lineage_git_allowed_local_root_list=[str(allowed)],
+        ),
+    )
+    with _client() as client:
+        project = client.post("/api/projects", json={"name": "local git security", "institution_id": 1}).json()
+        endpoint = f"/api/projects/{project['id']}/code-repositories"
+        accepted = client.post(endpoint, json={"repository_name": "inside", "repository_url": str(inside)})
+        rejected = client.post(endpoint, json={"repository_name": "outside", "repository_url": str(outside)})
+
+    assert accepted.status_code == 200, accepted.text
+    assert rejected.status_code == 400, rejected.text
+
+
+def test_git_credential_is_only_in_the_subprocess_environment(monkeypatch) -> None:
+    import app.services.lineage.git_repository as git_repository
+
+    secret = "token-with-sensitive-value"
+    captured: dict = {}
+
+    def fail_clone(arguments, **kwargs):
+        captured["arguments"] = arguments
+        captured["env"] = kwargs["env"]
+        return SimpleNamespace(returncode=128, stdout=b"", stderr=f"remote rejected {secret}".encode())
+
+    monkeypatch.setattr(git_repository.subprocess, "run", fail_clone)
+    try:
+        read_git_repository_scripts("https://github.com/example/private.git", credential=secret)
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("A failed Git clone unexpectedly succeeded")
+
+    assert any(secret.encode() in base64.b64decode(value.split()[-1]) for key, value in captured["env"].items() if key.startswith("GIT_CONFIG_VALUE_"))
+    assert secret not in " ".join(captured["arguments"])
+    assert secret not in message
+    assert "private.git" not in message
+
+
+def test_git_repository_detects_added_renamed_and_deleted_scripts(tmp_path: Path, db_session: Session, monkeypatch) -> None:
+    import app.services.lineage.jobs as lineage_jobs
+
+    institution = Institution(institution_code="git-change-bank", institution_name="Git Change Bank")
+    user = User(username="git-change-owner", status="active")
+    db_session.add_all([institution, user])
+    db_session.flush()
+    project = Project(name="git changes", institution_id=institution.id)
+    db_session.add(project)
+    db_session.flush()
+    repository = CodeRepository(
+        institution_id=institution.id,
+        project_id=project.id,
+        repository_name="local",
+        repository_type="git_repository",
+        repository_url=str(tmp_path),
+        default_branch="main",
+        enabled=True,
+        created_by=user.id,
+    )
+    db_session.add(repository)
+    db_session.flush()
+    storage = LocalStorageService(tmp_path / "storage")
+    content = b"insert into MART.T(A) select A from ODS.S"
+    added = ScriptIngestionService(db_session, storage).ingest(
+        project=project, data=content, file_name="old.sql", relative_path="old.sql",
+        dialect="sqlite", actor_user_id=user.id, code_repository_id=repository.id,
+    )
+    assert added.change_set is not None and added.change_set.change_type == "added"
+
+    renamed_count = lineage_jobs._detect_repository_renames(
+        db_session,
+        repository,
+        (ArchivedScript("renamed.sql", "renamed.sql", content),),
+        user.id,
+    )
+    db_session.flush()
+    assert renamed_count == 1
+    assert added.script_file.relative_path == "renamed.sql"
+    assert db_session.scalar(select(ScriptChangeSet).where(
+        ScriptChangeSet.script_file_id == added.script_file.id,
+        ScriptChangeSet.change_type == "renamed",
+    )) is not None
+
+    job = BackgroundJob(
+        institution_id=institution.id,
+        project_id=project.id,
+        idempotency_key="delete-sync",
+        job_type="script_repository_sync",
+        status="running",
+        progress=1,
+        payload_summary_json={"repository_id": repository.id},
+        result_summary_json={},
+        created_by=user.id,
+    )
+    db_session.add(job)
+    db_session.commit()
+    monkeypatch.setattr(
+        lineage_jobs,
+        "read_git_repository_scripts",
+        lambda *args, **kwargs: GitRepositorySnapshot("a" * 40, ()),
+    )
+    monkeypatch.setattr(
+        lineage_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(
+            lineage_git_allowed_host_list=["github.com"],
+            lineage_git_allowed_local_root_list=[str(tmp_path)],
+            lineage_repository_max_bytes=1024,
+            lineage_repository_max_file_count=100,
+            lineage_script_max_bytes=1024,
+        ),
+    )
+    result = lineage_jobs.script_repository_sync_handler(db_session, job)
+
+    assert result["deleted_count"] == 1
+    assert added.script_file.enabled is False
+    deleted = db_session.scalar(select(ScriptChangeSet).where(
+        ScriptChangeSet.script_file_id == added.script_file.id,
+        ScriptChangeSet.change_type == "deleted",
+    ))
+    assert deleted is not None
+
+
+def test_lineage_export_is_a_real_workbook_with_required_sheets(tmp_path: Path, monkeypatch) -> None:
+    import app.api.lineage as lineage_api
+    import app.services.lineage.jobs as lineage_jobs
+
+    storage = LocalStorageService(tmp_path / "storage")
+    monkeypatch.setattr(lineage_api, "get_storage_service", lambda: storage)
+    monkeypatch.setattr(lineage_jobs, "get_storage_service", lambda: storage)
     with _client() as client:
         project = client.post("/api/projects", json={"name": "export", "institution_id": 1}).json()
         client.post(
@@ -356,6 +554,10 @@ def test_lineage_export_is_a_real_workbook_with_required_sheets(tmp_path: Path, 
         ]
         assert workbook["字段级血缘"].freeze_panes == "A2"
         assert workbook["字段级血缘"].auto_filter.ref
+        queued = client.post(f"/api/projects/{project['id']}/export/lineage-workbook/jobs")
+        assert queued.status_code == 200, queued.text
+        assert queued.json()["status"] == "completed"
+        assert queued.json()["result"]["file_id"]
 
 
 def test_case_coalesce_and_window_expressions_keep_all_source_columns() -> None:
@@ -410,24 +612,36 @@ def test_critical_impact_marks_mappings_stale_without_overwriting_final_content(
     mart = MartField(project_id=project.id, mart_table_id=mart_table.id, field_code="A", field_name="A")
     db_session.add_all([target, mart]); db_session.flush()
     technical = ScenarioTechnicalLineage(project_id=project.id, target_field_id=target.id, scenario_id=scenario.id, final_content="人工技术口径")
+    business = ScenarioBusinessMapping(project_id=project.id, target_field_id=target.id, scenario_id=scenario.id, final_content="人工业务口径")
     source_mapping = SourceToMartMapping(project_id=project.id, mart_field_id=mart.id, final_content="人工入集市口径")
     ybt_mapping = MartToYbtMapping(project_id=project.id, target_field_id=target.id, mart_field_id=mart.id, final_content="人工上报口径")
     script = ScriptFileModel(project_id=project.id, relative_path="load.sql", file_name="load.sql", file_type="sql", current_version_no=2)
-    db_session.add_all([technical, source_mapping, ybt_mapping, script]); db_session.flush()
+    db_session.add_all([business, technical, source_mapping, ybt_mapping, script]); db_session.flush()
     old = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=1, file_hash="a"*64, normalized_hash="b"*64, raw_content_storage_file_id=1, parse_status="parsed", created_by=user.id)
     new = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=2, file_hash="c"*64, normalized_hash="d"*64, raw_content_storage_file_id=2, parse_status="parsed", created_by=user.id)
     db_session.add_all([old, new]); db_session.flush()
-    db_session.add_all([
-        LineageNode(project_id=project.id, node_type="column", logical_name="MART_T.A", table_name="MART_T", column_name="A", mart_field_id=mart.id, script_file_id=script.id, script_file_version_id=old.id, unresolved_flag=False),
-        LineageNode(project_id=project.id, node_type="column", logical_name="YBT_T.A", table_name="YBT_T", column_name="A", target_field_id=target.id, script_file_id=script.id, script_file_version_id=new.id, unresolved_flag=False),
-    ]); db_session.flush()
+    mart_node = LineageNode(project_id=project.id, node_type="column", logical_name="MART_T.A", table_name="MART_T", column_name="A", mart_field_id=mart.id, script_file_id=script.id, script_file_version_id=old.id, unresolved_flag=False)
+    target_node = LineageNode(project_id=project.id, node_type="column", logical_name="YBT_T.A", table_name="YBT_T", column_name="A", target_field_id=target.id, script_file_id=script.id, script_file_version_id=new.id, unresolved_flag=False)
+    db_session.add_all([mart_node, target_node]); db_session.flush()
+    db_session.add(LineageEdge(
+        project_id=project.id, script_file_version_id=new.id,
+        source_node_id=mart_node.id, target_node_id=target_node.id,
+        edge_type="derives_from", confidence_level="high", enabled=True,
+    ))
+    db_session.flush()
 
     diff = compare_sql_versions("insert into MART_T(A,B) select A,B from ODS_S", "insert into MART_T(A) select A from ODS_S", dialect="sqlite")
     _change, impact = persist_change_impact(db_session, script_file=script, from_version=old, to_version=new, diff=diff, created_by=user.id)
 
     assert impact.severity == "critical"
+    assert impact.affected_scenario_mapping_ids_json == [business.id]
+    assert f"scenario_business:{business.id}" in impact.affected_mapping_ids_json
     assert technical.lineage_status == source_mapping.lineage_status == ybt_mapping.lineage_status == "stale"
     assert (technical.final_content, source_mapping.final_content, ybt_mapping.final_content) == ("人工技术口径", "人工入集市口径", "人工上报口径")
+    workbook = load_workbook(BytesIO(export_lineage_workbook(db_session, project.id)))
+    headers = [cell.value for cell in workbook["字段级血缘"][1]]
+    status_column = headers.index("血缘状态") + 1
+    assert workbook["字段级血缘"].cell(2, status_column).value == "stale"
     assert db_session.query(ReviewTask).count() == 3
 
 

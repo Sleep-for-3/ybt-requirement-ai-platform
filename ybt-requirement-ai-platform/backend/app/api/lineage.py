@@ -1,7 +1,6 @@
 import re
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy import select
@@ -15,7 +14,8 @@ from app.services.auth.permission_service import PermissionService
 from app.services.lineage.archive_ingestion import read_safe_script_archive
 from app.services.lineage.ingestion import ScriptIngestionService, ensure_actor_user_id
 from app.services.lineage.exporter import export_lineage_workbook
-from app.services.lineage.jobs import script_archive_ingestion_handler, script_repository_sync_handler
+from app.services.lineage.git_repository import validate_repository_location
+from app.services.lineage.jobs import lineage_export_handler, script_archive_ingestion_handler, script_repository_sync_handler
 from app.services.lineage.resolver import select_resolution_candidate, unbind_lineage_node
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
@@ -28,9 +28,7 @@ router = APIRouter(tags=["lineage"])
 def create_code_repository(project_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     project = PermissionService(db, principal).require_project_permission(project_id, "script.sync")
     repository_url = str(payload.get("repository_url") or "").strip()
-    parsed = urlsplit(repository_url)
-    if parsed.password or (parsed.username and parsed.scheme in {"http", "https"}):
-        raise HTTPException(status_code=400, detail="Credentials must not be embedded in repository_url")
+    _validate_repository_location(repository_url)
     credential_env_name = payload.get("credential_env_name")
     if credential_env_name and not re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", str(credential_env_name)):
         raise HTTPException(status_code=400, detail="credential_env_name must be an environment variable name")
@@ -314,6 +312,23 @@ def export_project_lineage(project_id: int, principal: CurrentPrincipal, db: Ses
     return _workbook_response(export_lineage_workbook(db, project_id), f"project-{project_id}-lineage.xlsx")
 
 
+@router.post("/projects/{project_id}/export/lineage-workbook/jobs")
+def enqueue_project_lineage_export(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    project = PermissionService(db, principal).require_project_permission(project_id, "export")
+    actor_id = ensure_actor_user_id(db, principal.user_id)
+    job = get_task_queue().enqueue(
+        db,
+        job_type="lineage_export",
+        institution_id=project.institution_id,
+        project_id=project.id,
+        created_by=actor_id,
+        idempotency_key=f"project-lineage:{project.id}:{uuid.uuid4().hex}",
+        payload_summary={"file_name": f"project-{project.id}-lineage.xlsx"},
+        handler=lineage_export_handler,
+    )
+    return _job_dict(job, db)
+
+
 @router.get("/target-fields/{field_id}/export/lineage-workbook")
 def export_target_lineage(field_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
     from app.models import TargetField
@@ -354,6 +369,18 @@ def _impact_dict(row: ImpactAnalysis) -> dict:
 
 def _workbook_response(content: bytes, file_name: str) -> Response:
     return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{file_name}"', "Cache-Control": "no-store"})
+
+
+def _validate_repository_location(repository_url: str) -> None:
+    settings = get_settings()
+    try:
+        validate_repository_location(
+            repository_url,
+            allowed_hosts=settings.lineage_git_allowed_host_list,
+            allowed_local_roots=settings.lineage_git_allowed_local_root_list,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _walk_graph(db: Session, project_id: int, seed_ids: list[int], direction: str, depth: int, limit: int) -> dict:

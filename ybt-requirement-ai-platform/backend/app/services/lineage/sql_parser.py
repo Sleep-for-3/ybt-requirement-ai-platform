@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.lineage import lineage as trace_column_lineage
+from sqlglot.tokens import TokenType
 
 from app.services.lineage.preprocessing import preprocess_sql
 
@@ -70,9 +71,8 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
     warnings = list(prepared.warnings)
     statements: list[ParsedStatementSpec] = []
     edges: list[LineageEdgeSpec] = []
-    line_cursor = 1
     try:
-        expressions = sqlglot.parse(prepared.parse_sql, read=dialect or None)
+        chunks = _split_sql_statements(prepared.parse_sql, dialect)
     except (sqlglot.errors.ParseError, ValueError) as exc:
         warning = f"SQL parse failed: {exc}"
         return SqlLineageParseResult(
@@ -81,27 +81,60 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
             nodes=(), edges=(), warnings=tuple(warnings + [warning]),
         )
 
-    for index, expression in enumerate(expressions):
-        if expression is None:
+    for index, (statement_sql, source_line_start, source_line_end) in enumerate(chunks):
+        try:
+            expression = sqlglot.parse_one(statement_sql, read=dialect or None)
+        except (sqlglot.errors.ParseError, ValueError) as exc:
+            warning = f"Statement {index + 1} parse failed: {exc}"
+            warnings.append(warning)
+            statements.append(ParsedStatementSpec(
+                index, "unknown", _hash(statement_sql), statement_sql.strip(), "failed",
+                source_line_start, source_line_end, (warning,),
+            ))
             continue
         normalized = expression.sql(dialect=dialect or None, pretty=False)
-        source_lines = max(1, normalized.count("\n") + 1)
         statement_type = _statement_type(expression)
-        statement = ParsedStatementSpec(index, statement_type, _hash(normalized), normalized, "parsed", line_cursor, line_cursor + source_lines - 1)
+        statement = ParsedStatementSpec(
+            index, statement_type, _hash(statement_sql), normalized, "parsed",
+            source_line_start, source_line_end,
+        )
         statements.append(statement)
         try:
             edges.extend(_statement_edges(expression, index, prepared.original_sql, dialect))
         except Exception as exc:  # isolate one statement; retain successfully parsed siblings
             warning = f"Statement {index + 1} lineage partially parsed: {exc}"
             warnings.append(warning)
-            statements[-1] = ParsedStatementSpec(index, statement_type, _hash(normalized), normalized, "partially_parsed", line_cursor, line_cursor + source_lines - 1, (warning,))
-        line_cursor += source_lines
+            statements[-1] = replace(statement, parse_status="partially_parsed", warnings=(warning,))
 
     parse_status = "parsed"
     if any(item.parse_status != "parsed" for item in statements):
-        parse_status = "partially_parsed" if edges else "failed"
+        parse_status = "partially_parsed" if any(item.parse_status != "failed" for item in statements) else "failed"
+    if parse_status == "partially_parsed":
+        edges = [replace(item, confidence_level="low") for item in edges]
     nodes = _deduplicate_nodes(edge for edge in edges)
     return SqlLineageParseResult(parse_status, tuple(statements), nodes, tuple(_deduplicate_edges(edges)), tuple(dict.fromkeys(warnings)))
+
+
+def _split_sql_statements(sql: str, dialect: str) -> list[tuple[str, int, int]]:
+    """Split on tokenizer-confirmed semicolons so one bad statement stays isolated."""
+
+    tokenizer = sqlglot.Dialect.get_or_raise(dialect).tokenizer() if dialect else sqlglot.Tokenizer()
+    tokens = tokenizer.tokenize(sql)
+    boundaries = [token.end + 1 for token in tokens if token.token_type == TokenType.SEMICOLON]
+    chunks: list[tuple[str, int, int]] = []
+    start = 0
+    for end in [*boundaries, len(sql)]:
+        raw = sql[start:end]
+        if raw.strip().strip(";").strip():
+            first_non_space = start + len(raw) - len(raw.lstrip())
+            last_non_space = start + len(raw.rstrip()) - 1
+            chunks.append((
+                raw,
+                sql.count("\n", 0, first_non_space) + 1,
+                sql.count("\n", 0, max(last_non_space, first_non_space)) + 1,
+            ))
+        start = end
+    return chunks
 
 
 def _statement_edges(statement: exp.Expression, statement_index: int, original_sql: str, dialect: str) -> list[LineageEdgeSpec]:

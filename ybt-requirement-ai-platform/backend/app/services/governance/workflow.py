@@ -17,6 +17,7 @@ from app.models import (
     ScenarioReviewPackage,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
+    ScriptChangeSet,
     SourceToMartMapping,
     WorkflowDefinition,
     WorkflowInstance,
@@ -165,7 +166,16 @@ def claim_task(db: Session, task: ReviewTask, principal: Principal) -> ReviewTas
     return task
 
 
-def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: str, comment: str | None = None, return_to_step: str | None = None) -> ReviewTask:
+def decide_task(
+    db: Session,
+    task: ReviewTask,
+    principal: Principal,
+    decision: str,
+    comment: str | None = None,
+    return_to_step: str | None = None,
+    *,
+    impact_decision: str | None = None,
+) -> ReviewTask:
     instance = _current_instance(db, task)
     _require_current_step(instance, task)
     _require_task_actor(db, task, principal)
@@ -189,6 +199,11 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
     else:
         package = None
         snapshot = _snapshot_target(db, task.project_id, task.target_type, task.target_id)
+    if task.target_type == "impact_analysis":
+        effective_impact_decision = impact_decision or ("confirm_no_impact" if decision == "approved" else None)
+        if effective_impact_decision:
+            snapshot = {**snapshot, "impact_review_decision": effective_impact_decision}
+            _record_impact_review_decision(db, task.target_id, task.step_key, effective_impact_decision, principal.user_id, comment)
     db.add(ReviewDecision(
         review_task_id=task.id,
         decision=decision,
@@ -249,7 +264,7 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
                 target_task = reset_task
         if target_task:
             notify_user(db, target_task.assignee_user_id, "review_rejected", "审核退回", comment or "已退回修改", project_id=task.project_id, resource_type="review_task", resource_id=target_task.id)
-    record_audit(db, action="approve" if decision == "approved" else "reject", resource_type="review_task", resource_id=task.id, actor_user_id=principal.user_id, project_id=task.project_id, after={"decision": decision, "return_to_step": return_to_step, "comment": comment})
+    record_audit(db, action="approve" if decision == "approved" else "reject", resource_type="review_task", resource_id=task.id, actor_user_id=principal.user_id, project_id=task.project_id, after={"decision": decision, "impact_decision": impact_decision, "return_to_step": return_to_step, "comment": comment})
     db.commit()
     db.refresh(task)
     return task
@@ -394,3 +409,42 @@ def _finalize_lineage_impact(db: Session, impact_id: int) -> None:
             mapping.lineage_status = "verified"
             mapping.lineage_last_verified_at = verified_at
     impact.status = "reviewed"
+
+
+def _record_impact_review_decision(
+    db: Session,
+    impact_id: int,
+    step_key: str,
+    action: str,
+    decided_by: int,
+    comment: str | None,
+) -> None:
+    allowed = {
+        "confirm_no_impact",
+        "confirm_after_mapping_update",
+        "require_business_confirmation",
+        "reject_script_version",
+    }
+    if action not in allowed:
+        raise HTTPException(status_code=400, detail="Unsupported lineage impact decision")
+    impact = db.get(ImpactAnalysis, impact_id)
+    if impact is None:
+        raise HTTPException(status_code=404, detail="Impact analysis not found")
+    history = list(impact.summary_json.get("review_decisions", []))
+    history.append({
+        "step_key": step_key,
+        "action": action,
+        "decided_by": decided_by,
+        "comment": comment,
+        "decided_at": datetime.now(UTC).isoformat(),
+    })
+    impact.summary_json = {**impact.summary_json, "review_decisions": history}
+    if action == "require_business_confirmation":
+        impact.status = "business_confirmation_required"
+        question = comment or "需业务确认本次脚本变更影响"
+        impact.open_questions_json = list(dict.fromkeys([*impact.open_questions_json, question]))
+    elif action == "reject_script_version":
+        impact.status = "rejected"
+        change_set = db.get(ScriptChangeSet, impact.change_set_id)
+        if change_set is not None:
+            change_set.status = "rejected"

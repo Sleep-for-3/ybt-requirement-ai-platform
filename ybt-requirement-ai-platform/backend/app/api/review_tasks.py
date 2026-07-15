@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import Notification, ProjectMembership, ReviewDecision, ReviewTask, ScenarioReviewPackage, WorkflowInstance
-from app.schemas.governance import BatchReviewTaskCreate, ScenarioReviewSubmitRequest, TaskAssignRequest, TaskDecisionRequest
+from app.schemas.governance import BatchReviewTaskCreate, ImpactTaskDecisionRequest, ScenarioReviewSubmitRequest, TaskAssignRequest, TaskDecisionRequest
 from app.services.auth.dependencies import RealPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.workflow import assign_task, claim_task, decide_task, start_workflow
@@ -162,6 +162,27 @@ def reject(task_id: int, payload: TaskDecisionRequest, principal: RealPrincipal,
 @router.post("/review-tasks/{task_id}/return")
 def return_task(task_id: int, payload: TaskDecisionRequest, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
     return _task_dict(decide_task(db, _task_or_404(db, task_id), principal, "returned", payload.comment, payload.return_to_step))
+
+
+@router.post("/review-tasks/{task_id}/impact-decision")
+def decide_lineage_impact(task_id: int, payload: ImpactTaskDecisionRequest, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
+    task = _task_or_404(db, task_id)
+    if task.target_type != "impact_analysis":
+        raise HTTPException(status_code=400, detail="Impact decisions require an impact_analysis review task")
+    if payload.action in {"require_business_confirmation", "reject_script_version"} and not (payload.comment or "").strip():
+        raise HTTPException(status_code=400, detail="This impact decision requires a comment")
+    decision = "approved"
+    return_to_step = None
+    if payload.action == "require_business_confirmation":
+        decision = "returned"
+        return_to_step = "impact_analysis"
+    elif payload.action == "reject_script_version":
+        decision = "rejected"
+        return_to_step = "impact_analysis"
+    return _task_dict(decide_task(
+        db, task, principal, decision, payload.comment, return_to_step,
+        impact_decision=payload.action,
+    ))
 
 
 @router.get("/workflows/{instance_id}")

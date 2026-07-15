@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     ImpactAnalysis, LineageEdge, LineageNode, MappingEvidenceReference, MartToYbtMapping, ScenarioTechnicalLineage,
-    ProjectMembership, ScriptChangeItem, ScriptChangeSet, ScriptFile, ScriptFileVersion, SourceToMartMapping,
+    ProjectMembership, ScenarioBusinessMapping, ScriptChangeItem, ScriptChangeSet, ScriptFile, ScriptFileVersion,
+    SourceToMartMapping,
 )
 from app.services.lineage.version_diff import VersionDiffResult
 
@@ -16,17 +17,18 @@ def persist_change_impact(
     db: Session,
     *,
     script_file: ScriptFile,
-    from_version: ScriptFileVersion,
-    to_version: ScriptFileVersion,
+    from_version: ScriptFileVersion | None,
+    to_version: ScriptFileVersion | None,
     diff: VersionDiffResult,
     created_by: int | None,
+    change_type: str = "modified",
 ) -> tuple[ScriptChangeSet, ImpactAnalysis]:
     change_set = ScriptChangeSet(
         project_id=script_file.project_id,
         script_file_id=script_file.id,
-        from_version_id=from_version.id,
-        to_version_id=to_version.id,
-        change_type="modified",
+        from_version_id=from_version.id if from_version else None,
+        to_version_id=to_version.id if to_version else None,
+        change_type=change_type,
         status="completed",
         summary_json=diff.summary,
         created_by=created_by,
@@ -41,13 +43,18 @@ def persist_change_impact(
             new_value_json=item.new_value,
             severity=item.severity,
         ))
-    nodes = list(db.scalars(select(LineageNode).where(LineageNode.script_file_version_id.in_([from_version.id, to_version.id]))).all())
+    version_ids = [item.id for item in (from_version, to_version) if item is not None]
+    nodes = list(db.scalars(select(LineageNode).where(LineageNode.script_file_version_id.in_(version_ids))).all()) if version_ids else []
     target_ids = sorted({item.target_field_id for item in nodes if item.target_field_id})
     mart_ids = sorted({item.mart_field_id for item in nodes if item.mart_field_id})
-    edge_ids = list(db.scalars(select(LineageEdge.id).where(LineageEdge.script_file_version_id.in_([from_version.id, to_version.id]))).all())
+    edge_ids = list(db.scalars(select(LineageEdge.id).where(LineageEdge.script_file_version_id.in_(version_ids))).all()) if version_ids else []
     scenario_rows = list(db.scalars(select(ScenarioTechnicalLineage).where(
         ScenarioTechnicalLineage.project_id == script_file.project_id,
         ScenarioTechnicalLineage.target_field_id.in_(target_ids),
+    )).all()) if target_ids else []
+    business_rows = list(db.scalars(select(ScenarioBusinessMapping).where(
+        ScenarioBusinessMapping.project_id == script_file.project_id,
+        ScenarioBusinessMapping.target_field_id.in_(target_ids),
     )).all()) if target_ids else []
     source_rows = list(db.scalars(select(SourceToMartMapping).where(
         SourceToMartMapping.project_id == script_file.project_id,
@@ -57,7 +64,8 @@ def persist_change_impact(
         MartToYbtMapping.project_id == script_file.project_id,
         or_(MartToYbtMapping.target_field_id.in_(target_ids), MartToYbtMapping.mart_field_id.in_(mart_ids)),
     )).all()) if target_ids or mart_ids else []
-    mapping_refs = [f"scenario_technical:{item.id}" for item in scenario_rows]
+    mapping_refs = [f"scenario_business:{item.id}" for item in business_rows]
+    mapping_refs += [f"scenario_technical:{item.id}" for item in scenario_rows]
     mapping_refs += [f"source_to_mart:{item.id}" for item in source_rows]
     mapping_refs += [f"mart_to_ybt:{item.id}" for item in ybt_rows]
     impact = ImpactAnalysis(
@@ -69,9 +77,15 @@ def persist_change_impact(
         affected_target_field_ids_json=target_ids,
         affected_mart_field_ids_json=mart_ids,
         affected_mapping_ids_json=mapping_refs,
-        affected_scenario_mapping_ids_json=[item.id for item in scenario_rows],
+        affected_scenario_mapping_ids_json=[item.id for item in business_rows],
         affected_lineage_edge_ids_json=edge_ids,
-        summary_json={**diff.summary, "script_file_id": script_file.id, "from_version_no": from_version.version_no, "to_version_no": to_version.version_no},
+        summary_json={
+            **diff.summary,
+            "script_file_id": script_file.id,
+            "from_version_no": from_version.version_no if from_version else None,
+            "to_version_no": to_version.version_no if to_version else None,
+            "change_type": change_type,
+        },
         open_questions_json=[] if not diff.semantic_changed else ["请技术审核人员确认脚本变化是否要求更新人工口径"],
         completed_at=datetime.now(UTC),
     )
@@ -94,7 +108,7 @@ def persist_change_impact(
                 db.add(MappingEvidenceReference(
                     project_id=script_file.project_id, mapping_type=mapping_type, mapping_id=mapping_id,
                     evidence_type=evidence_type, evidence_id=evidence_id, source_name=source_name,
-                    location_text=f"{script_file.relative_path} v{to_version.version_no}", quoted_content=None,
+                    location_text=f"{script_file.relative_path} v{(to_version or from_version).version_no if (to_version or from_version) else '-'}", quoted_content=None,
                     evidence_summary=f"{diff.severity}：{'、'.join(sorted({item.change_category for item in diff.items}))}",
                 ))
     status = "stale" if diff.severity == "critical" else "needs_review" if diff.severity in {"high", "medium"} else None

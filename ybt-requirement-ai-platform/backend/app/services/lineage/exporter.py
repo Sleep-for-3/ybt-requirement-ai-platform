@@ -9,8 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    ImpactAnalysis, LineageEdge, LineageNode, ReviewDecision, ReviewTask, ScriptChangeItem,
-    ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, WorkflowInstance,
+    ImpactAnalysis, LineageEdge, LineageNode, MartToYbtMapping, ReviewDecision, ReviewTask,
+    ScenarioTechnicalLineage, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile,
+    ScriptFileVersion, SourceToMartMapping, WorkflowInstance,
 )
 
 
@@ -44,6 +45,7 @@ def export_lineage_workbook(db: Session, project_id: int, *, script_file_id: int
         if edge.target_node_id not in node_map:
             row = db.get(LineageNode, edge.target_node_id)
             if row: node_map[row.id] = row
+    lineage_states = _load_lineage_states(db, project_id, node_map.values())
 
     _write(workbook["血缘总览"], ["指标", "数量"], [
         ["节点", len(nodes)], ["边", len(edges)], ["未解析节点", sum(1 for item in nodes if item.unresolved_flag)],
@@ -59,6 +61,7 @@ def export_lineage_workbook(db: Session, project_id: int, *, script_file_id: int
         version = db.get(ScriptFileVersion, edge.script_file_version_id)
         script = db.get(ScriptFile, version.script_file_id) if version else None
         if source and target:
+            lineage_status, verified_at = _edge_lineage_state(lineage_states, source, target)
             if source.column_name or target.column_name:
                 field_rows.append([
                     target.table_name if target.target_field_id else "", target.column_name if target.target_field_id else "",
@@ -66,7 +69,7 @@ def export_lineage_workbook(db: Session, project_id: int, *, script_file_id: int
                     "", source.database_name or "", source.schema_name or "", source.table_name or "", source.column_name or "",
                     edge.transformation_expression or "", edge.filter_condition or "", edge.join_condition or "", edge.code_mapping_rule or "",
                     script.relative_path if script else "", version.version_no if version else "", _line_range(edge), edge.confidence_level,
-                    "verified" if not target.unresolved_flag else "not_linked", "",
+                    lineage_status, verified_at or "",
                 ])
             if source.table_name and target.table_name:
                 table_rows.append([source.logical_name, target.logical_name, edge.edge_type, script.relative_path if script else "", version.version_no if version else "", edge.confidence_level])
@@ -125,3 +128,45 @@ def _write(sheet, headers: list[str], rows: list[list]) -> None:
 def _line_range(edge: LineageEdge) -> str:
     if edge.source_line_start is None: return ""
     return str(edge.source_line_start) if edge.source_line_end in {None, edge.source_line_start} else f"{edge.source_line_start}-{edge.source_line_end}"
+
+
+def _load_lineage_states(db: Session, project_id: int, nodes) -> dict[tuple[str, int], list[tuple[str, object | None]]]:
+    target_ids = {item.target_field_id for item in nodes if item.target_field_id}
+    mart_ids = {item.mart_field_id for item in nodes if item.mart_field_id}
+    result: dict[tuple[str, int], list[tuple[str, object | None]]] = {}
+    technical = list(db.scalars(select(ScenarioTechnicalLineage).where(
+        ScenarioTechnicalLineage.project_id == project_id,
+        ScenarioTechnicalLineage.target_field_id.in_(target_ids),
+    )).all()) if target_ids else []
+    source_mappings = list(db.scalars(select(SourceToMartMapping).where(
+        SourceToMartMapping.project_id == project_id,
+        SourceToMartMapping.mart_field_id.in_(mart_ids),
+    )).all()) if mart_ids else []
+    ybt_mappings = list(db.scalars(select(MartToYbtMapping).where(
+        MartToYbtMapping.project_id == project_id,
+        (MartToYbtMapping.target_field_id.in_(target_ids)) | (MartToYbtMapping.mart_field_id.in_(mart_ids)),
+    )).all()) if target_ids or mart_ids else []
+    for row in technical:
+        result.setdefault(("target", row.target_field_id), []).append((row.lineage_status, row.lineage_last_verified_at))
+    for row in source_mappings:
+        result.setdefault(("mart", row.mart_field_id), []).append((row.lineage_status, row.lineage_last_verified_at))
+    for row in ybt_mappings:
+        result.setdefault(("target", row.target_field_id), []).append((row.lineage_status, row.lineage_last_verified_at))
+        if row.mart_field_id:
+            result.setdefault(("mart", row.mart_field_id), []).append((row.lineage_status, row.lineage_last_verified_at))
+    return result
+
+
+def _edge_lineage_state(states, source: LineageNode, target: LineageNode) -> tuple[str, object | None]:
+    candidates: list[tuple[str, object | None]] = []
+    for node in (source, target):
+        if node.target_field_id:
+            candidates.extend(states.get(("target", node.target_field_id), []))
+        if node.mart_field_id:
+            candidates.extend(states.get(("mart", node.mart_field_id), []))
+    if not candidates:
+        return "not_linked", None
+    rank = {"not_linked": 0, "verified": 1, "possibly_stale": 2, "needs_review": 3, "stale": 4}
+    status = max((item[0] for item in candidates), key=lambda value: rank.get(value, 0))
+    verified = max((item[1] for item in candidates if item[1] is not None), default=None)
+    return status, verified

@@ -17,7 +17,7 @@ from app.services.lineage.sql_parser import LineageNodeSpec, parse_sql_lineage
 from app.services.lineage.shell_parser import parse_shell_dependencies
 from app.services.lineage.resolver import resolve_lineage_node
 from app.services.lineage.impact_analyzer import persist_change_impact
-from app.services.lineage.version_diff import compare_shell_versions, compare_sql_versions
+from app.services.lineage.version_diff import ChangeItemSpec, VersionDiffResult, compare_shell_versions, compare_sql_versions
 from app.services.storage.base import StorageService
 from app.services.governance.audit import record_audit
 
@@ -177,6 +177,26 @@ class ScriptIngestionService:
                     created_by=actor_id,
                 )
                 categories = tuple(item.change_category for item in diff.items)
+        elif previous_version is None:
+            diff = VersionDiffResult(
+                semantic_changed=True,
+                severity="low",
+                items=(ChangeItemSpec(
+                    "source_table_added", "script", {},
+                    {"relative_path": script_file.relative_path}, "low",
+                ),),
+                summary={"semantic_changed": True, "categories": ["source_table_added"]},
+            )
+            change_set, impact = persist_change_impact(
+                self.db,
+                script_file=script_file,
+                from_version=None,
+                to_version=version,
+                diff=diff,
+                created_by=actor_id,
+                change_type="added",
+            )
+            categories = ("source_table_added",)
         record_audit(
             self.db, action="script_ingest", resource_type="script_file_version", resource_id=version.id,
             actor_user_id=actor_id, institution_id=project.institution_id, project_id=project.id,
@@ -230,6 +250,22 @@ class ScriptIngestionService:
             )).all()
             if item.example_value
         }
+        prepared = preprocess_sql(content, configured)
+        existing_names = set(self.db.scalars(select(TemplateVariable.variable_name).where(
+            TemplateVariable.project_id == project.id,
+        )).all())
+        for occurrence in prepared.variables:
+            if occurrence.variable_name in existing_names:
+                continue
+            self.db.add(TemplateVariable(
+                project_id=project.id,
+                variable_name=occurrence.variable_name,
+                variable_type=occurrence.variable_type,
+                example_value=None,
+                description=f"Automatically discovered as {occurrence.expression}",
+                confirmed=False,
+            ))
+            existing_names.add(occurrence.variable_name)
         result = parse_sql_lineage(content, dialect=dialect, variables=configured)
         version.parse_status = result.parse_status
         version.warnings_json = list(result.warnings)

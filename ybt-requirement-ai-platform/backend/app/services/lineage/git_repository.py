@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import base64
 import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
 
 from app.services.lineage.archive_ingestion import ArchivedScript
 from app.services.lineage.ingestion import ALLOWED_SCRIPT_EXTENSIONS, validate_script_path
@@ -17,10 +19,44 @@ class GitRepositorySnapshot:
     files: tuple[ArchivedScript, ...]
 
 
+def validate_repository_location(
+    repository_url: str,
+    *,
+    allowed_hosts: list[str],
+    allowed_local_roots: list[str],
+) -> None:
+    if not repository_url:
+        raise ValueError("repository_url is required")
+    parsed = urlsplit(repository_url)
+    if parsed.query or parsed.fragment or parsed.password or (parsed.username and parsed.scheme in {"http", "https"}):
+        raise ValueError("Repository URL must not contain credentials, query parameters or fragments")
+    normalized_hosts = {item.lower() for item in allowed_hosts}
+    if parsed.scheme in {"https", "ssh"}:
+        if (parsed.hostname or "").lower() not in normalized_hosts:
+            raise ValueError("Repository host is not allowed")
+        return
+    if re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]+", repository_url):
+        host = repository_url.split("@", 1)[1].split(":", 1)[0].lower()
+        if host not in normalized_hosts:
+            raise ValueError("Repository host is not allowed")
+        return
+    windows_path = bool(re.match(r"^[A-Za-z]:[\\/]", repository_url))
+    if parsed.scheme not in {"", "file"} and not windows_path:
+        raise ValueError("Unsupported repository URL scheme")
+    local_path = unquote(parsed.path) if parsed.scheme == "file" else repository_url
+    if parsed.scheme == "file" and re.match(r"^/[A-Za-z]:/", local_path):
+        local_path = local_path[1:]
+    candidate = Path(local_path).expanduser().resolve()
+    roots = [Path(item).expanduser().resolve() for item in allowed_local_roots]
+    if not roots or not any(candidate == root or root in candidate.parents for root in roots):
+        raise ValueError("Local repository is outside the allowed roots")
+
+
 def read_git_repository_scripts(
     repository_url: str,
     *,
     branch: str = "main",
+    credential: str | None = None,
     max_repository_bytes: int = 500 * 1024 * 1024,
     max_file_count: int = 10000,
     max_file_bytes: int = 10 * 1024 * 1024,
@@ -40,11 +76,14 @@ def read_git_repository_scripts(
     }
     with tempfile.TemporaryDirectory(prefix="ybt-lineage-git-") as root:
         bare = Path(root) / "repository.git"
+        clone_env = env.copy()
+        if credential:
+            clone_env.update(_credential_environment(credential))
         _git([
             "-c", "protocol.file.allow=always", "-c", f"core.hooksPath={os.devnull}",
             "clone", "--bare", "--no-local", "--depth", "1", "--branch", branch,
             "--", repository_url, str(bare),
-        ], env=env)
+        ], env=clone_env)
         size = sum(item.stat().st_size for item in bare.rglob("*") if item.is_file())
         if size > max_repository_bytes:
             raise ValueError("Git repository exceeds the size limit")
@@ -79,6 +118,17 @@ def read_git_repository_scripts(
                 raise ValueError(f"Git object size mismatch: {path_text}")
             files.append(ArchivedScript(safe_path, PurePosixPath(safe_path).name, content))
         return GitRepositorySnapshot(commit, tuple(files))
+
+
+def _credential_environment(credential: str) -> dict[str, str]:
+    """Inject an HTTPS authorization header through Git's process environment."""
+
+    encoded = base64.b64encode(f"x-access-token:{credential}".encode("utf-8")).decode("ascii")
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {encoded}",
+    }
 
 
 def _git(arguments: list[str], *, env: dict[str, str]) -> bytes:
