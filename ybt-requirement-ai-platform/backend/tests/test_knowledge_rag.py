@@ -22,6 +22,8 @@ from app.services.vector import VectorRecord
 from app.services.vector.factory import get_vector_store
 from app.services.vector.milvus import MilvusVectorStore
 from app.services.vector.mock import MockVectorStore
+from app.services.storage.factory import get_storage_service
+from app.services.task_queue.factory import get_task_queue
 
 def test_knowledge_versions_hybrid_search_grounded_answer_and_evaluation(tmp_path:Path,monkeypatch):
     monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()
@@ -255,6 +257,7 @@ def _get(client,path):
     response=client.get(path);assert response.status_code==200,response.text;return response.json()
 @contextmanager
 def _client():
+    get_storage_service.cache_clear();get_task_queue.cache_clear()
     engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool);Base.metadata.create_all(engine);factory=sessionmaker(bind=engine,autoflush=False)
     def override():
         session=factory()
@@ -263,4 +266,4 @@ def _client():
     app.dependency_overrides[get_db]=override
     try:
         with TestClient(app) as client:yield client
-    finally:app.dependency_overrides.clear();Base.metadata.drop_all(engine);get_vector_store.cache_clear();get_embedding_service.cache_clear()
+    finally:app.dependency_overrides.clear();Base.metadata.drop_all(engine);get_vector_store.cache_clear();get_embedding_service.cache_clear();get_storage_service.cache_clear();get_task_queue.cache_clear()
