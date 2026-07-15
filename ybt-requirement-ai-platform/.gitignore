@@ -16,7 +16,8 @@ npm-debug.log*
 # Env and storage
 .env
 .env.local
-storage/
+/storage/
+/backend/storage/
 *.db
 
 # Docker and OS
