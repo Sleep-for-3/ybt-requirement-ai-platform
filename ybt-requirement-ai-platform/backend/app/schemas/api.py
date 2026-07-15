@@ -15,6 +15,7 @@ class ProjectCreate(BaseModel):
     institution_id: int | None = None
     project_status: str = "active"
     confidentiality_level: str = "internal"
+    governance_workflow_enabled: bool = False
 
 
 class ProjectRead(OrmModel):
@@ -26,6 +27,7 @@ class ProjectRead(OrmModel):
     project_status: str = "active"
     project_owner_id: int | None = None
     confidentiality_level: str = "internal"
+    governance_workflow_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -834,6 +836,7 @@ def _redact_connection_params(value: dict[str, Any]) -> dict[str, Any]:
 
 
 class ScenarioBusinessMappingCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     business_definition: str | None = None
     source_system_screenshot_required: bool = False
     source_system_change_required: bool = False
@@ -849,13 +852,13 @@ class ScenarioBusinessMappingCreate(BaseModel):
 
 
 class ScenarioBusinessMappingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     business_definition: str | None = None
     source_system_screenshot_required: bool | None = None
     source_system_change_required: bool | None = None
     external_data_required: bool | None = None
     manual_supplement_required: bool | None = None
     business_owner: str | None = None
-    business_confirm_status: str | None = None
     remarks: str | None = None
     ai_generated_content: str | None = None
     final_content: str | None = None
@@ -887,6 +890,7 @@ class ScenarioBusinessMappingRead(OrmModel):
 
 
 class ScenarioTechnicalLineageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     business_mapping_id: int | None = None
     source_system_name: str | None = None
     source_database_name: str | None = None
@@ -907,6 +911,7 @@ class ScenarioTechnicalLineageCreate(BaseModel):
 
 
 class ScenarioTechnicalLineageUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     business_mapping_id: int | None = None
     source_system_name: str | None = None
     source_database_name: str | None = None
@@ -918,7 +923,6 @@ class ScenarioTechnicalLineageUpdate(BaseModel):
     processing_logic: str | None = None
     processing_logic_type: str | None = None
     tech_owner: str | None = None
-    tech_confirm_status: str | None = None
     remarks: str | None = None
     ai_generated_content: str | None = None
     final_content: str | None = None

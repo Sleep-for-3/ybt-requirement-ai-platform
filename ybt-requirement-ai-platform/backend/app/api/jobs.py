@@ -14,6 +14,7 @@ from app.services.governance.audit import record_audit
 from app.services.governance.notifications import notify_user
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
 from app.services.governance.workflow import start_workflow
+from app.services.governance.scenario_review import get_or_create_review_package
 from app.services.export import export_traceability_workbook
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
@@ -107,9 +108,15 @@ def _technical_handler(db: Session, job: BackgroundJob) -> dict:
 def _review_task_handler(db: Session, job: BackgroundJob) -> dict:
     payload=job.payload_summary_json;success=0;failed=0
     for target in payload.get("targets",[]):
-        key=f"{target.get('target_type')}:{target.get('target_id')}"
+        if _job_cancelled(db, job): break
+        key=f"{target.get('target_field_id') or target.get('target_type')}:{target.get('scenario_id') or target.get('target_id')}"
         try:
-            instance=start_workflow(db,project_id=job.project_id,workflow_key=payload["workflow_key"],target_type=target["target_type"],target_id=int(target["target_id"]),created_by=job.created_by,assignments={key:int(value) for key,value in payload.get("assignments",{}).items()},due_at=payload.get("due_at"));success+=1
+            if payload["workflow_key"] == "scenario_mapping_review":
+                package=get_or_create_review_package(db,project_id=job.project_id,target_field_id=int(target["target_field_id"]),scenario_id=int(target["scenario_id"]),created_by=job.created_by)
+                target_type,target_id="scenario_review_package",package.id
+            else:
+                target_type,target_id=target["target_type"],int(target["target_id"])
+            instance=start_workflow(db,project_id=job.project_id,workflow_key=payload["workflow_key"],target_type=target_type,target_id=target_id,created_by=job.created_by,assignments={key:int(value) for key,value in payload.get("assignments",{}).items()},due_at=payload.get("due_at"));success+=1
             db.add(BackgroundJobItem(background_job_id=job.id,item_key=key,status="completed",result_summary_json={"workflow_instance_id":instance.id}));db.commit()
         except Exception as exc:
             db.rollback();job=db.get(BackgroundJob,job.id);failed+=1;db.add(BackgroundJobItem(background_job_id=job.id,item_key=key,status="failed",result_summary_json={},error_message=str(exc)[:1000]));db.commit()
@@ -128,6 +135,7 @@ def _draft_handler(db, job, model, generator):
     if field_ids: statement = statement.where(model.target_field_id.in_(field_ids))
     rows = list(db.scalars(statement).all());success=0;failed=0
     for row in rows:
+        if _job_cancelled(db, job): break
         try:
             asyncio.run(generator(db, row.id));success += 1
             db.add(BackgroundJobItem(background_job_id=job.id, item_key=str(row.id), status="completed", result_summary_json={"mapping_id": row.id}));db.commit()
@@ -136,6 +144,12 @@ def _draft_handler(db, job, model, generator):
             db.add(BackgroundJobItem(background_job_id=job.id, item_key=str(row.id), status="failed", result_summary_json={}, error_message=str(exc)[:1000]));db.commit()
     notify_user(db,job.created_by,"batch_generation_completed","批量草稿生成完成",f"成功 {success}，失败 {failed}",project_id=job.project_id,resource_type="background_job",resource_id=job.id);db.commit()
     return {"success_count": success, "failed_count": failed, "total_count": len(rows)}
+
+
+def _job_cancelled(db: Session, job: BackgroundJob) -> bool:
+    db.expire(job)
+    db.refresh(job)
+    return job.status == "cancelled"
 
 
 def _job_or_404(db, job_id):

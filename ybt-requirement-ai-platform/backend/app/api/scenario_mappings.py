@@ -6,7 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import MappingEvidenceReference, ProductScenario, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
+from app.core.settings import get_settings
+from app.models import MappingEvidenceReference, ProductScenario, Project, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
 from app.schemas import (
     ConfirmMappingRequest,
     ScenarioBusinessMappingCreate,
@@ -18,6 +19,7 @@ from app.schemas import (
 )
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
 from app.services.auth.dependencies import CurrentPrincipal
+from app.services.governance.scenario_review import ensure_scenario_mapping_editable
 
 router = APIRouter(tags=["scenario mappings"])
 
@@ -54,8 +56,8 @@ def get_business_mapping(mapping_id: int, db: Session = Depends(get_db)) -> Scen
 @router.put("/scenario-business-mappings/{mapping_id}", response_model=ScenarioBusinessMappingRead)
 def update_business_mapping(mapping_id: int, payload: ScenarioBusinessMappingUpdate, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
+    ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
     updates = payload.model_dump(exclude_unset=True)
-    _validate_confirm_status(updates.get("business_confirm_status"))
     _apply(mapping, updates)
     db.commit()
     db.refresh(mapping)
@@ -65,6 +67,7 @@ def update_business_mapping(mapping_id: int, payload: ScenarioBusinessMappingUpd
 @router.delete("/scenario-business-mappings/{mapping_id}")
 def delete_business_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     mapping = _business_or_404(db, mapping_id)
+    ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
     db.delete(mapping)
     db.commit()
     return {"status": "deleted"}
@@ -73,6 +76,7 @@ def delete_business_mapping(mapping_id: int, db: Session = Depends(get_db)) -> d
 @router.post("/scenario-business-mappings/{mapping_id}/adopt-ai-draft", response_model=ScenarioBusinessMappingRead)
 def adopt_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
+    ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
     if not _has_text(mapping.ai_generated_content):
         raise HTTPException(status_code=400, detail="AI draft is empty")
     mapping.final_content = mapping.ai_generated_content
@@ -84,6 +88,8 @@ def adopt_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> Scen
 
 @router.post("/scenario-business-mappings/{mapping_id}/generate-draft", response_model=ScenarioBusinessMappingRead)
 async def generate_scenario_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
+    mapping = _business_or_404(db, mapping_id)
+    ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
     try:
         return await generate_business_draft(db, mapping_id)
     except ValueError as exc:
@@ -93,6 +99,7 @@ async def generate_scenario_business_draft(mapping_id: int, db: Session = Depend
 @router.post("/scenario-business-mappings/{mapping_id}/confirm", response_model=ScenarioBusinessMappingRead)
 def confirm_business_mapping(mapping_id: int, principal: CurrentPrincipal, payload: ConfirmMappingRequest | None = None, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
+    _reject_legacy_confirmation(db, mapping.project_id)
     if principal.user_id is not None and mapping.created_by in {principal.username, str(principal.user_id)}:
         raise HTTPException(status_code=409, detail="Business mapping author cannot confirm their own content")
     if not (_has_text(mapping.business_definition) or _has_text(mapping.final_content)):
@@ -110,6 +117,7 @@ def confirm_business_mapping(mapping_id: int, principal: CurrentPrincipal, paylo
 @router.post("/scenario-business-mappings/{mapping_id}/reject", response_model=ScenarioBusinessMappingRead)
 def reject_business_mapping(mapping_id: int, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
+    _reject_legacy_confirmation(db, mapping.project_id)
     mapping.business_confirm_status = "rejected"
     mapping.business_confirm_at = datetime.now(UTC)
     db.commit()
@@ -148,9 +156,9 @@ def get_technical_lineage(lineage_id: int, db: Session = Depends(get_db)) -> Sce
 @router.put("/scenario-technical-lineages/{lineage_id}", response_model=ScenarioTechnicalLineageRead)
 def update_technical_lineage(lineage_id: int, payload: ScenarioTechnicalLineageUpdate, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
+    ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
     _validate_logic_type(payload.processing_logic_type)
     updates = payload.model_dump(exclude_unset=True)
-    _validate_confirm_status(updates.get("tech_confirm_status"))
     _apply(lineage, updates)
     db.commit()
     db.refresh(lineage)
@@ -160,6 +168,7 @@ def update_technical_lineage(lineage_id: int, payload: ScenarioTechnicalLineageU
 @router.delete("/scenario-technical-lineages/{lineage_id}")
 def delete_technical_lineage(lineage_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     lineage = _lineage_or_404(db, lineage_id)
+    ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
     db.delete(lineage)
     db.commit()
     return {"status": "deleted"}
@@ -168,6 +177,7 @@ def delete_technical_lineage(lineage_id: int, db: Session = Depends(get_db)) -> 
 @router.post("/scenario-technical-lineages/{lineage_id}/adopt-ai-draft", response_model=ScenarioTechnicalLineageRead)
 def adopt_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
+    ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
     if not _has_text(lineage.ai_generated_content):
         raise HTTPException(status_code=400, detail="AI draft is empty")
     lineage.final_content = lineage.ai_generated_content
@@ -179,6 +189,8 @@ def adopt_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> Sce
 
 @router.post("/scenario-technical-lineages/{lineage_id}/generate-draft", response_model=ScenarioTechnicalLineageRead)
 async def generate_scenario_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
+    lineage = _lineage_or_404(db, lineage_id)
+    ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
     try:
         return await generate_technical_draft(db, lineage_id)
     except ValueError as exc:
@@ -188,6 +200,7 @@ async def generate_scenario_technical_draft(lineage_id: int, db: Session = Depen
 @router.post("/scenario-technical-lineages/{lineage_id}/confirm", response_model=ScenarioTechnicalLineageRead)
 def confirm_technical_lineage(lineage_id: int, principal: CurrentPrincipal, payload: ConfirmMappingRequest | None = None, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
+    _reject_legacy_confirmation(db, lineage.project_id)
     if principal.user_id is not None and lineage.created_by in {principal.username, str(principal.user_id)}:
         raise HTTPException(status_code=409, detail="Technical lineage author cannot confirm their own content")
     missing = []
@@ -212,6 +225,7 @@ def confirm_technical_lineage(lineage_id: int, principal: CurrentPrincipal, payl
 @router.post("/scenario-technical-lineages/{lineage_id}/reject", response_model=ScenarioTechnicalLineageRead)
 def reject_technical_lineage(lineage_id: int, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
+    _reject_legacy_confirmation(db, lineage.project_id)
     lineage.tech_confirm_status = "rejected"
     lineage.tech_confirm_at = datetime.now(UTC)
     db.commit()
@@ -255,11 +269,10 @@ def _validate_logic_type(value: str | None) -> None:
         raise HTTPException(status_code=400, detail="Invalid processing_logic_type")
 
 
-def _validate_confirm_status(value: str | None) -> None:
-    if value is not None and value not in CONFIRM_STATUSES:
-        raise HTTPException(status_code=400, detail="Invalid confirmation status")
-    if value == "confirmed":
-        raise HTTPException(status_code=400, detail="Use the confirmation endpoint so quality checks cannot be bypassed")
+def _reject_legacy_confirmation(db: Session, project_id: int) -> None:
+    project = db.get(Project, project_id)
+    if get_settings().auth_mode == "required" or bool(project and project.governance_workflow_enabled):
+        raise HTTPException(status_code=409, detail="Confirmation must be completed through the current review task")
 
 
 def _apply(model: object, values: dict) -> None:

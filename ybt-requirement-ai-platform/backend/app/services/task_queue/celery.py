@@ -25,7 +25,10 @@ class CeleryTaskQueue:
             return existing
         job = BackgroundJob(institution_id=institution_id, project_id=project_id, idempotency_key=scoped_key, job_type=job_type, status="queued", progress=0, payload_summary_json=redact_summary(payload_summary), result_summary_json={}, created_by=created_by)
         db.add(job); db.commit(); db.refresh(job)
-        self.celery_app.send_task("app.workers.execute_background_job", args=[job.id])
+        result = self.celery_app.send_task("app.workers.execute_background_job", args=[job.id])
+        job.celery_task_id = getattr(result, "id", None)
+        db.commit()
+        db.refresh(job)
         return job
 
     def get_status(self, db: Session, job_id: int) -> BackgroundJob | None:
@@ -33,8 +36,13 @@ class CeleryTaskQueue:
 
     def cancel(self, db: Session, job: BackgroundJob) -> BackgroundJob:
         if job.status not in {"queued", "running"}: raise ValueError("Only queued or running jobs can be cancelled")
+        if job.status == "queued" and job.celery_task_id:
+            self.celery_app.control.revoke(job.celery_task_id, terminate=False)
         job.status="cancelled";job.finished_at=datetime.now(UTC);db.commit();db.refresh(job);return job
 
     def retry(self, db: Session, job: BackgroundJob) -> BackgroundJob:
+        if job.status not in {"failed", "partially_completed", "cancelled"}: raise ValueError("Only failed, partially completed or cancelled jobs can be retried")
         if job.retry_count >= job.max_retries: raise ValueError("Maximum retry count reached")
-        job.retry_count+=1;job.status="queued";job.error_message=None;job.finished_at=None;db.commit();self.celery_app.send_task("app.workers.execute_background_job",args=[job.id]);db.refresh(job);return job
+        job.retry_count+=1;job.status="queued";job.error_message=None;job.finished_at=None;db.commit()
+        result=self.celery_app.send_task("app.workers.execute_background_job",args=[job.id])
+        job.celery_task_id=getattr(result,"id",None);db.commit();db.refresh(job);return job

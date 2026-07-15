@@ -13,7 +13,12 @@ class S3CompatibleStorageService:
         self.scan(data, file_name)
         digest = hashlib.sha256(data).hexdigest()
         key = f"projects/{project_id or 0}/{digest[:2]}/{digest}{Path(file_name).suffix.lower()}"
-        self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ServerSideEncryption="AES256")
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:
+            if not _is_not_found(exc):
+                raise
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ServerSideEncryption="AES256")
         return StoredObject(key, len(data), digest)
 
     def read(self, storage_key: str) -> bytes:
@@ -32,3 +37,11 @@ class S3CompatibleStorageService:
     def scan(self, data: bytes, file_name: str) -> None:
         if data[:2] == b"MZ" or data.startswith(b"\x7fELF"):
             raise ValueError("Executable files are not allowed")
+
+
+def _is_not_found(exc: Exception) -> bool:
+    if isinstance(exc, KeyError):
+        return True
+    response = getattr(exc, "response", {})
+    code = str(response.get("Error", {}).get("Code", "")) if isinstance(response, dict) else ""
+    return code in {"404", "NoSuchKey", "NotFound"}

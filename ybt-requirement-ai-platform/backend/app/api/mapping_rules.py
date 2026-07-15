@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import MappingEvidenceReference, MappingVersion, MartField, MartToYbtMapping, SourceToMartMapping, TargetField
+from app.core.settings import get_settings
+from app.models import MappingEvidenceReference, MappingVersion, MartField, MartToYbtMapping, Project, SourceToMartMapping, TargetField
 from app.schemas import (
     MappingReviewRequest,
     MappingVersionCreate,
@@ -50,6 +51,8 @@ def get_source_to_mart_mapping(mapping_id: int, db: Session = Depends(get_db)) -
 def update_source_to_mart_mapping(mapping_id: int, payload: SourceToMartMappingUpdate, db: Session = Depends(get_db)) -> SourceToMartMapping:
     mapping = _get_source_to_mart_or_404(db, mapping_id)
     updates = payload.model_dump(exclude_unset=True)
+    if updates.get("mapping_status") in {"approved", "rejected"}:
+        _reject_legacy_review(db, mapping.project_id)
     _validate_status(updates.get("mapping_status"))
     _apply_updates(mapping, updates)
     db.commit()
@@ -89,6 +92,7 @@ def adopt_source_to_mart_draft(mapping_id: int, db: Session = Depends(get_db)) -
 @router.post("/source-to-mart-mappings/{mapping_id}/approve", response_model=SourceToMartMappingRead)
 def approve_source_to_mart_mapping(mapping_id: int, payload: MappingReviewRequest | None = None, db: Session = Depends(get_db)) -> SourceToMartMapping:
     mapping = _get_source_to_mart_or_404(db, mapping_id)
+    _reject_legacy_review(db, mapping.project_id)
     _approve_mapping(db, "source_to_mart", mapping, payload or MappingReviewRequest())
     db.commit()
     db.refresh(mapping)
@@ -98,6 +102,7 @@ def approve_source_to_mart_mapping(mapping_id: int, payload: MappingReviewReques
 @router.post("/source-to-mart-mappings/{mapping_id}/reject", response_model=SourceToMartMappingRead)
 def reject_source_to_mart_mapping(mapping_id: int, payload: MappingReviewRequest | None = None, db: Session = Depends(get_db)) -> SourceToMartMapping:
     mapping = _get_source_to_mart_or_404(db, mapping_id)
+    _reject_legacy_review(db, mapping.project_id)
     _reject_mapping(mapping, payload or MappingReviewRequest())
     db.commit()
     db.refresh(mapping)
@@ -142,6 +147,8 @@ def get_mart_to_ybt_mapping(mapping_id: int, db: Session = Depends(get_db)) -> M
 def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate, db: Session = Depends(get_db)) -> MartToYbtMapping:
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
     updates = payload.model_dump(exclude_unset=True)
+    if updates.get("mapping_status") in {"approved", "rejected"}:
+        _reject_legacy_review(db, mapping.project_id)
     _validate_status(updates.get("mapping_status"))
     if updates.get("mart_field_id") is not None:
         mart_field = _get_mart_field_or_404(db, updates["mart_field_id"])
@@ -185,6 +192,7 @@ def adopt_mart_to_ybt_draft(mapping_id: int, db: Session = Depends(get_db)) -> M
 @router.post("/mart-to-ybt-mappings/{mapping_id}/approve", response_model=MartToYbtMappingRead)
 def approve_mart_to_ybt_mapping(mapping_id: int, payload: MappingReviewRequest | None = None, db: Session = Depends(get_db)) -> MartToYbtMapping:
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    _reject_legacy_review(db, mapping.project_id)
     _approve_mapping(db, "mart_to_ybt", mapping, payload or MappingReviewRequest())
     db.commit()
     db.refresh(mapping)
@@ -194,6 +202,7 @@ def approve_mart_to_ybt_mapping(mapping_id: int, payload: MappingReviewRequest |
 @router.post("/mart-to-ybt-mappings/{mapping_id}/reject", response_model=MartToYbtMappingRead)
 def reject_mart_to_ybt_mapping(mapping_id: int, payload: MappingReviewRequest | None = None, db: Session = Depends(get_db)) -> MartToYbtMapping:
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    _reject_legacy_review(db, mapping.project_id)
     _reject_mapping(mapping, payload or MappingReviewRequest())
     db.commit()
     db.refresh(mapping)
@@ -319,3 +328,9 @@ def _delete_mapping_dependencies(db: Session, mapping_type: str, mapping_id: int
 
 def _has_text(value: str | None) -> bool:
     return bool(value and value.strip())
+
+
+def _reject_legacy_review(db: Session, project_id: int) -> None:
+    project = db.get(Project, project_id)
+    if get_settings().auth_mode == "required" or bool(project and project.governance_workflow_enabled):
+        raise HTTPException(status_code=409, detail="Mapping review must be completed through the current review task")

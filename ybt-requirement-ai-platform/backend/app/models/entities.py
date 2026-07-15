@@ -39,6 +39,7 @@ class Project(Base, TimestampMixin):
     project_status: Mapped[str] = mapped_column(String(50), default="active", index=True)
     project_owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     confidentiality_level: Mapped[str] = mapped_column(String(50), default="internal")
+    governance_workflow_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     target_tables: Mapped[list["TargetTable"]] = relationship(back_populates="project")
     target_fields: Mapped[list["TargetField"]] = relationship(back_populates="project")

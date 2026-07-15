@@ -95,11 +95,15 @@ class ProjectMembershipRead(OrmModel):
 
 
 class WorkflowTarget(BaseModel):
-    target_type: str
-    target_id: int
+    model_config = ConfigDict(extra="forbid")
+    target_type: str | None = None
+    target_id: int | None = None
+    target_field_id: int | None = None
+    scenario_id: int | None = None
 
 
 class BatchReviewTaskCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     workflow_key: str
     targets: list[WorkflowTarget] = Field(min_length=1, max_length=500)
     assignments: dict[str, int] = Field(default_factory=dict)
@@ -113,6 +117,11 @@ class TaskDecisionRequest(BaseModel):
 
 class TaskAssignRequest(BaseModel):
     assignee_user_id: int
+
+
+class ScenarioReviewSubmitRequest(BaseModel):
+    assignments: dict[str, int] = Field(default_factory=dict)
+    due_at: datetime | None = None
 
 
 class BatchOperationRequest(BaseModel):

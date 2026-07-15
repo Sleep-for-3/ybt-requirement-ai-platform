@@ -125,6 +125,23 @@ class ReviewDecision(Base):
     decided_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ScenarioReviewPackage(Base, TimestampMixin):
+    __tablename__ = "scenario_review_packages"
+    __table_args__ = (
+        UniqueConstraint("project_id", "target_field_id", "scenario_id", name="uq_scenario_review_package_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    target_field_id: Mapped[int] = mapped_column(ForeignKey("target_fields.id"), index=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("product_scenarios.id"), index=True)
+    business_mapping_id: Mapped[int] = mapped_column(ForeignKey("scenario_business_mappings.id"), index=True)
+    technical_lineage_id: Mapped[int] = mapped_column(ForeignKey("scenario_technical_lineages.id"), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
+    current_version_no: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+
 class BackgroundJob(Base, TimestampMixin):
     __tablename__ = "background_jobs"
     __table_args__ = (Index("ix_background_jobs_project_status", "project_id", "status"),)
@@ -134,6 +151,7 @@ class BackgroundJob(Base, TimestampMixin):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     job_type: Mapped[str] = mapped_column(String(100), index=True)
+    celery_task_id: Mapped[str | None] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     current_step: Mapped[str | None] = mapped_column(String(255))

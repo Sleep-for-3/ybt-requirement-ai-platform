@@ -221,7 +221,9 @@ def main() -> None:
             "evidence_type": "manual_note", "source_name": "Smoke 脱敏业务访谈记录",
             "evidence_summary": "业务部门确认场景业务口径。",
         })
-        confirmed_business = _post_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}/confirm", {"confirmed_by": "smoke"})
+        legacy_business_confirm = client.post(f"{base}/scenario-business-mappings/{scenario_business['id']}/confirm", json={"confirmed_by": "smoke"})
+        if legacy_business_confirm.status_code != 409:
+            raise AssertionError(f"治理模式旧业务确认接口必须返回 409，实际为 {legacy_business_confirm.status_code}")
 
         manual_technical = "人工确认：来源为 ECIF.ecif_customer.cert_type，按借记卡有效客户范围取值。"
         _put_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}", {"final_content": manual_technical})
@@ -235,7 +237,9 @@ def main() -> None:
             "evidence_type": "manual_note", "source_name": "Smoke 脱敏技术访谈记录",
             "evidence_summary": "科技部门确认场景技术溯源。",
         })
-        confirmed_lineage = _post_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/confirm", {"confirmed_by": "smoke"})
+        legacy_technical_confirm = client.post(f"{base}/scenario-technical-lineages/{scenario_lineage['id']}/confirm", json={"confirmed_by": "smoke"})
+        if legacy_technical_confirm.status_code != 409:
+            raise AssertionError(f"治理模式旧技术确认接口必须返回 409，实际为 {legacy_technical_confirm.status_code}")
         mart_table = _post_json(
             client,
             f"{base}/projects/{project_id}/mart-tables",
@@ -322,8 +326,10 @@ def main() -> None:
                 "open_questions": "请确认报送日期内有效客户判定规则。",
             },
         )
-        source_approved = _post_json(client, f"{base}/source-to-mart-mappings/{source_final['id']}/approve", {"reviewed_by": "smoke"})
-        ybt_approved = _post_json(client, f"{base}/mart-to-ybt-mappings/{ybt_final['id']}/approve", {"reviewed_by": "smoke"})
+        legacy_source_approve = client.post(f"{base}/source-to-mart-mappings/{source_final['id']}/approve", json={"reviewed_by": "smoke"})
+        legacy_ybt_approve = client.post(f"{base}/mart-to-ybt-mappings/{ybt_final['id']}/approve", json={"reviewed_by": "smoke"})
+        if legacy_source_approve.status_code != 409 or legacy_ybt_approve.status_code != 409:
+            raise AssertionError("治理模式双层口径旧审核接口必须返回 409")
         field_export = client.get(f"{base}/target-fields/{field['id']}/export/mapping-document", params={"format": "markdown"})
         field_export.raise_for_status()
         markdown = field_export.json()["content"]
@@ -410,7 +416,7 @@ def main() -> None:
             _post_json(client, f"{base}/projects/{project_id}/members", {"user_id": user["id"], "project_role": role})
             governance_users[role] = {"id": user["id"], "password": password}
         workflow_created = _post_json(client, f"{base}/projects/{project_id}/tasks/batch-create", {
-            "workflow_key": "scenario_mapping_review", "targets": [{"target_type": "project", "target_id": project_id}],
+            "workflow_key": "scenario_mapping_review", "targets": [{"target_field_id": field["id"], "scenario_id": debit_scenario["id"]}],
             "assignments": {role: governance_users[role]["id"] for role in governance_roles},
         })
         workflow_id = workflow_created["workflow_instance_ids"][0]
@@ -424,6 +430,33 @@ def main() -> None:
         final_notifications = _get_json(client, f"{base}/me/notifications")
         client.headers["Authorization"] = admin_authorization
         workflow_result = _get_json(client, f"{base}/workflows/{workflow_id}")
+        confirmed_business = _get_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}")
+        confirmed_lineage = _get_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}")
+        if confirmed_business["business_confirm_status"] != "confirmed" or confirmed_lineage["tech_confirm_status"] != "confirmed":
+            raise AssertionError("五阶段最终审核未同时确认业务口径与技术溯源")
+        double_workflows = _post_json(client, f"{base}/projects/{project_id}/tasks/batch-create", {
+            "workflow_key": "double_layer_mapping_review",
+            "targets": [
+                {"target_type": "source_to_mart", "target_id": source_final["id"]},
+                {"target_type": "mart_to_ybt", "target_id": ybt_final["id"]},
+            ],
+            "assignments": {
+                "technical_reviewer": governance_users["technical_reviewer"]["id"],
+                "final_reviewer": governance_users["final_reviewer"]["id"],
+            },
+        })
+        for double_workflow_id in double_workflows["workflow_instance_ids"]:
+            project_tasks = _get_json(client, f"{base}/projects/{project_id}/tasks")
+            double_tasks = {item["step_key"]: item for item in project_tasks if item["workflow_instance_id"] == double_workflow_id}
+            for step, role in [("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
+                role_session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": governance_users[role]["password"]})
+                client.headers["Authorization"] = f"Bearer {role_session['access_token']}"
+                _post_json(client, f"{base}/review-tasks/{double_tasks[step]['id']}/approve", {"comment": f"{step} double layer approved"})
+            client.headers["Authorization"] = admin_authorization
+        source_approved = _get_json(client, f"{base}/source-to-mart-mappings/{source_final['id']}")
+        ybt_approved = _get_json(client, f"{base}/mart-to-ybt-mappings/{ybt_final['id']}")
+        if source_approved["mapping_status"] != "approved" or ybt_approved["mapping_status"] != "approved":
+            raise AssertionError("双层口径治理工作流未完成正式审核")
         batch_job_response = client.post(f"{base}/projects/{project_id}/batch/generate-business-drafts", headers={"Idempotency-Key": "smoke-business-batch"}, json={"field_ids": []})
         batch_job_response.raise_for_status()
         batch_job = _get_json(client, f"{base}/jobs/{batch_job_response.json()['id']}")
@@ -483,6 +516,7 @@ def main() -> None:
             "mart_field_id": mart_field["id"],
             "source_to_mart_mapping_status": source_approved["mapping_status"],
             "mart_to_ybt_mapping_status": ybt_approved["mapping_status"],
+            "legacy_double_layer_review_statuses": [legacy_source_approve.status_code, legacy_ybt_approve.status_code],
             "source_draft_confidence": source_draft["confidence_level"],
             "ybt_draft_confidence": ybt_draft["confidence_level"],
             "mapping_evidence_ids": [source_evidence["id"], ybt_evidence["id"], source_profile_binding["id"], ybt_profile_binding["id"]],

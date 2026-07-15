@@ -2,15 +2,18 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import inspect as sa_inspect, select
+from sqlalchemy import func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from app.models import (
     MartToYbtMapping,
+    MappingEvidenceReference,
+    MappingVersion,
     Project,
     ProjectMembership,
     ReviewDecision,
     ReviewTask,
+    ScenarioReviewPackage,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
     SourceToMartMapping,
@@ -21,6 +24,11 @@ from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit
 from app.services.governance.notifications import notify_user
+from app.services.governance.scenario_review import (
+    finalize_review_package,
+    snapshot_review_step,
+    validate_review_package,
+)
 
 
 DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
@@ -46,6 +54,7 @@ TARGET_MODELS = {
     "scenario_technical": ScenarioTechnicalLineage,
     "source_to_mart": SourceToMartMapping,
     "mart_to_ybt": MartToYbtMapping,
+    "scenario_review_package": ScenarioReviewPackage,
 }
 
 
@@ -64,7 +73,13 @@ def start_workflow(
     steps = list(definition.steps_json)
     if not steps:
         raise HTTPException(status_code=400, detail="Workflow has no steps")
-    _snapshot_target(db, project_id, target_type, target_id)
+    if workflow_key == "scenario_mapping_review" and target_type != "scenario_review_package":
+        raise HTTPException(status_code=400, detail="Scenario review workflow requires a scenario_review_package target")
+    if workflow_key != "scenario_mapping_review" and target_type == "scenario_review_package":
+        raise HTTPException(status_code=400, detail="Scenario review packages require scenario_mapping_review")
+    package = validate_review_package(db, project_id, target_id) if target_type == "scenario_review_package" else None
+    if package is None:
+        _snapshot_target(db, project_id, target_type, target_id)
     existing = db.scalar(select(WorkflowInstance).where(
         WorkflowInstance.project_id == project_id,
         WorkflowInstance.workflow_key == workflow_key,
@@ -86,6 +101,10 @@ def start_workflow(
     )
     db.add(instance)
     db.flush()
+    if package is not None:
+        if package.status == "withdrawn":
+            package.current_version_no += 1
+        package.status = "in_review"
     assignments = assignments or {}
     for step in steps:
         role = step["assignee_role"]
@@ -151,7 +170,14 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
         )).all())
         if principal.user_id in authors:
             raise HTTPException(status_code=409, detail="Content author cannot perform final review")
-    snapshot = _snapshot_target(db, task.project_id, task.target_type, task.target_id)
+        if decision == "approved" and instance.workflow_key == "double_layer_mapping_review":
+            _validate_double_layer_target(db, task.target_type, task.target_id)
+    if task.target_type == "scenario_review_package":
+        package = validate_review_package(db, task.project_id, task.target_id)
+        snapshot = snapshot_review_step(db, package, task.step_key, instance.id)
+    else:
+        package = None
+        snapshot = _snapshot_target(db, task.project_id, task.target_type, task.target_id)
     db.add(ReviewDecision(
         review_task_id=task.id,
         decision=decision,
@@ -169,6 +195,10 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
             instance.status = "approved"
             instance.current_step = task.step_key
             instance.completed_at = datetime.now(UTC)
+            if package is not None:
+                finalize_review_package(db, package)
+            elif instance.workflow_key == "double_layer_mapping_review":
+                _finalize_double_layer_target(db, task.target_type, task.target_id, principal.username)
         else:
             next_step = steps[position + 1]["step_key"]
             instance.status = "in_progress"
@@ -186,6 +216,8 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
             raise HTTPException(status_code=400, detail="Return step must not be after the current step")
         instance.status = "rejected"
         instance.current_step = target_step
+        if package is not None:
+            package.status = "returned"
         reset_steps = {item["step_key"] for item in steps[target_position:current_position + 1]}
         reset_tasks = list(db.scalars(select(ReviewTask).where(
             ReviewTask.workflow_instance_id == instance.id,
@@ -287,3 +319,41 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return value
     return str(value)
+
+
+def _validate_double_layer_target(db: Session, target_type: str, target_id: int) -> SourceToMartMapping | MartToYbtMapping:
+    model = {"source_to_mart": SourceToMartMapping, "mart_to_ybt": MartToYbtMapping}.get(target_type)
+    if model is None:
+        raise HTTPException(status_code=400, detail="Double-layer review requires a source_to_mart or mart_to_ybt target")
+    mapping = db.get(model, target_id)
+    if mapping is None:
+        raise HTTPException(status_code=404, detail="Double-layer mapping not found")
+    if not mapping.final_content or not mapping.final_content.strip():
+        raise HTTPException(status_code=409, detail="final_content is required before final review")
+    evidence_id = db.scalar(select(MappingEvidenceReference.id).where(
+        MappingEvidenceReference.mapping_type == target_type,
+        MappingEvidenceReference.mapping_id == target_id,
+    ).limit(1))
+    if evidence_id is None:
+        raise HTTPException(status_code=409, detail="At least one evidence reference is required before final review")
+    return mapping
+
+
+def _finalize_double_layer_target(db: Session, target_type: str, target_id: int, reviewed_by: str) -> None:
+    mapping = _validate_double_layer_target(db, target_type, target_id)
+    mapping.mapping_status = "approved"
+    mapping.reviewed_by = reviewed_by
+    mapping.reviewed_at = datetime.now(UTC)
+    current_no = db.scalar(select(func.max(MappingVersion.version_no)).where(
+        MappingVersion.mapping_type == target_type,
+        MappingVersion.mapping_id == target_id,
+    )) or 0
+    db.add(MappingVersion(
+        project_id=mapping.project_id,
+        mapping_type=target_type,
+        mapping_id=target_id,
+        version_no=current_no + 1,
+        content_snapshot=mapping.final_content,
+        change_note="五阶段治理审核通过自动保存版本",
+        created_by=reviewed_by,
+    ))

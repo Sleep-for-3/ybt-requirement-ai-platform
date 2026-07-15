@@ -82,6 +82,13 @@ class InlineTaskQueue:
         db.commit()
         try:
             result = handler(db, job)
+            db.refresh(job)
+            if job.status == "cancelled":
+                job.result_summary_json = redact_summary(result)
+                job.progress = min(job.progress, 99)
+                db.commit()
+                db.refresh(job)
+                return job
             failed = int(result.get("failed_count", 0))
             succeeded = int(result.get("success_count", 0))
             job.status = "partially_completed" if failed and succeeded else "failed" if failed else "completed"

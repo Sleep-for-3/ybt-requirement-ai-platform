@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Clock3, DatabaseZap, Link2, Save, Search, Sparkles, X } from "lucide-react";
+import { Check, Clock3, DatabaseZap, Link2, Save, Search, Sparkles } from "lucide-react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import {
   CandidateSourceRecommendation, ColumnProfileSnapshot, ColumnProfileTask, HybridKnowledgeItem, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
-  ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
+  ScenarioReviewPackageView, ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
 } from "@/lib/api";
 
 const EMPTY_BUSINESS = {
@@ -51,13 +51,13 @@ export default function FieldScenarioPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [reviewTasks,setReviewTasks]=useState<Array<{id:number;step_key:string;status:string;target_type:string;target_id:number;assignee_user_id?:number|null;due_at?:string|null}>>([]);
+  const [reviewPackage,setReviewPackage]=useState<ScenarioReviewPackageView|null>(null);
 
   const business = useMemo(() => businesses.find((item) => item.scenario_id === scenarioId) || null, [businesses, scenarioId]);
   const lineage = useMemo(() => lineages.find((item) => item.scenario_id === scenarioId) || null, [lineages, scenarioId]);
   const contextualReviewTasks = useMemo(() => reviewTasks.filter((task) =>
-    (task.target_type === "scenario_business" && task.target_id === business?.id) ||
-    (task.target_type === "scenario_technical" && task.target_id === lineage?.id)
-  ), [reviewTasks, business?.id, lineage?.id]);
+    task.target_type === "scenario_review_package" && task.target_id === reviewPackage?.id
+  ), [reviewTasks, reviewPackage?.id]);
 
   async function reload() {
     const target = await apiGet<TargetField>(`/fields/${fieldId}`);
@@ -71,6 +71,12 @@ export default function FieldScenarioPage() {
     setScenarioId((value) => value || scenarioItems[0]?.id || null);
   }
   useEffect(() => { if (fieldId) void reload(); }, [fieldId]);
+  useEffect(() => {
+    if (!scenarioId) { setReviewPackage(null); return; }
+    void apiGet<ScenarioReviewPackageView>(`/target-fields/${fieldId}/scenarios/${scenarioId}/review-package`)
+      .then(setReviewPackage)
+      .catch(() => setReviewPackage(null));
+  }, [fieldId, scenarioId, businesses, lineages]);
   useEffect(() => {
     setBusinessForm(business ? {
       business_definition: business.business_definition || "",
@@ -224,6 +230,17 @@ export default function FieldScenarioPage() {
       "业务口径证据已绑定",
     );
   }
+  async function submitReview() {
+    if (!scenarioId) return;
+    await run(
+      () => apiPost(`/target-fields/${fieldId}/scenarios/${scenarioId}/review-package/submit`, { assignments: {} }),
+      "审核申请已提交",
+    );
+  }
+  async function withdrawReview() {
+    if (!reviewPackage) return;
+    await run(() => apiPost(`/scenario-review-packages/${reviewPackage.id}/withdraw`, {}), "审核申请已撤回");
+  }
 
   if (!field) return <main className="p-6 text-sm text-slate-500">加载中...</main>;
   return (
@@ -244,7 +261,7 @@ export default function FieldScenarioPage() {
           {scenarios.map((item) => <button className={item.id === scenarioId ? "button-primary" : "button-secondary"} key={item.id} onClick={() => setScenarioId(item.id)}>{item.scenario_name}</button>)}
         </div>
         {message ? <div className="mb-4 rounded-md border border-line bg-white px-4 py-3 text-sm">{message}</div> : null}
-        <section className="panel mb-5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">协作与审核状态</h2><p className="mt-1 text-xs text-slate-500">仅显示当前字段和场景；点击任务查看审核意见、退回原因与历史快照</p></div><div className="flex gap-2"><Link className="button-secondary" href={`/projects/${field.project_id}/dashboard`}>项目看板</Link><Link className="button-secondary" href={`/audit?projectId=${field.project_id}`}>操作审计</Link></div></div><div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">{contextualReviewTasks.map(task=><Link className="rounded-md border border-line p-3 text-sm hover:bg-slate-50" href={`/tasks/${task.id}`} key={task.id}><b>{task.step_key}</b><div className="mt-1 text-xs text-slate-500">{task.status} · 负责人 #{task.assignee_user_id||"待领取"}</div><div className="mt-1 text-xs text-slate-500">到期：{task.due_at||"未设置"}</div><div className="mt-2 text-xs text-blue-600">审核意见与历史快照 →</div></Link>)}{!contextualReviewTasks.length?<div className="text-sm text-slate-500">当前字段场景暂无审核任务</div>:null}</div></section>
+        <section className="panel mb-5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">协作与审核状态</h2><p className="mt-1 text-xs text-slate-500">业务口径与技术溯源以同一个场景审核包依次完成五阶段审核</p></div><div className="flex flex-wrap gap-2"><button className="button-primary" disabled={!business||!lineage||busy||["in_review","returned","approved"].includes(reviewPackage?.status||"")} onClick={submitReview}>提交审核</button>{reviewPackage?.workflow_instance?.can_withdraw?<button className="button-secondary" disabled={busy} onClick={withdrawReview}>撤回申请</button>:null}{reviewPackage?.workflow_instance?.current_task_id?<Link className="button-secondary" href={`/tasks/${reviewPackage.workflow_instance.current_task_id}`}>查看任务</Link>:null}<Link className="button-secondary" href={`/projects/${field.project_id}/dashboard`}>项目看板</Link><Link className="button-secondary" href={`/audit?projectId=${field.project_id}`}>操作审计</Link></div></div><div className="mt-4 grid gap-3 md:grid-cols-3"><ReviewMeta label="审核包" value={reviewPackage?`#${reviewPackage.id} · ${reviewPackage.status} · v${reviewPackage.current_version_no}`:"尚未创建"}/><ReviewMeta label="当前审核步骤" value={reviewPackage?.workflow_instance?.current_step||"尚未提交"}/><ReviewMeta label="当前负责人" value={reviewPackage?.workflow_instance?.current_assignee_user_id?`用户 #${reviewPackage.workflow_instance.current_assignee_user_id}`:(reviewPackage?.workflow_instance?.current_assignee_role||"待分配")}/></div><div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">{contextualReviewTasks.map(task=><Link className="rounded-md border border-line p-3 text-sm hover:bg-slate-50" href={`/tasks/${task.id}`} key={task.id}><b>{task.step_key}</b><div className="mt-1 text-xs text-slate-500">{task.status} · 负责人 #{task.assignee_user_id||"待领取"}</div><div className="mt-1 text-xs text-slate-500">到期：{task.due_at||"未设置"}</div><div className="mt-2 text-xs text-blue-600">审核意见与历史快照 →</div></Link>)}{!contextualReviewTasks.length?<div className="text-sm text-slate-500">当前字段场景暂无审核任务</div>:null}</div></section>
         <div className="grid gap-5 xl:grid-cols-2">
           <section className="panel overflow-hidden">
             <PanelTitle title="业务口径" status={business?.business_confirm_status || "未维护"} />
@@ -270,8 +287,6 @@ export default function FieldScenarioPage() {
               <button className="button-secondary" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/generate-draft`, {}), "AI 业务草稿已生成")}><Sparkles size={16} />AI 草稿</button>
               <button className="button-secondary" disabled={!business?.ai_generated_content || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/adopt-ai-draft`, {}), "已采用 AI 草稿")}><Check size={16} />采用草稿</button>
               <button className="button-primary" disabled={busy} onClick={saveBusiness}><Save size={16} />保存</button>
-              <button className="button-secondary" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/confirm`, {}), "业务口径已确认")}><Check size={16} />业务确认</button>
-              <button className="button-danger" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/reject`, {}), "业务口径已驳回")}><X size={16} />驳回</button>
               <button className="button-secondary" disabled={!business} onClick={() => setShowBusinessEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
             </div>
             {showBusinessEvidenceForm ? <div className="border-t border-line bg-slate-50 p-4"><label className="text-xs text-slate-500" htmlFor="business-evidence">人工证据说明</label><textarea className="control mt-1 min-h-20" id="business-evidence" onChange={(event) => setBusinessEvidenceText(event.target.value)} placeholder="填写脱敏的业务访谈结论或监管答疑依据" value={businessEvidenceText} /><button className="button-primary mt-2" disabled={!businessEvidenceText.trim() || busy} onClick={bindBusinessEvidence}><Link2 size={16} />确认绑定</button>{businessEvidences.length ? <div className="mt-3 space-y-2">{businessEvidences.map((item) => <div className="rounded-md border border-line bg-white p-2 text-xs" key={item.id}><strong>{item.source_name}</strong><p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p></div>)}</div> : null}</div> : null}
@@ -299,8 +314,6 @@ export default function FieldScenarioPage() {
               <button className="button-secondary" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/generate-draft`, {}), "AI 技术草稿已生成")}><Sparkles size={16} />AI 草稿</button>
               <button className="button-secondary" disabled={!lineage?.ai_generated_content || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/adopt-ai-draft`, {}), "已采用 AI 草稿")}><Check size={16} />采用草稿</button>
               <button className="button-primary" disabled={busy} onClick={saveLineage}><Save size={16} />保存</button>
-              <button className="button-secondary" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/confirm`, {}), "技术口径已确认")}><Check size={16} />技术确认</button>
-              <button className="button-danger" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/reject`, {}), "技术口径已驳回")}><X size={16} />驳回</button>
               <button className="button-secondary" disabled={!lineage} onClick={() => setShowEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
             </div>
             {showEvidenceForm ? <div className="border-t border-line bg-slate-50 p-4">
@@ -326,6 +339,7 @@ export default function FieldScenarioPage() {
 }
 
 function Meta({ label, value }: { label: string; value?: string | null }) { return <div><div className="text-xs text-slate-500">{label}</div><div className="mt-1 line-clamp-3 text-sm">{value || "-"}</div></div>; }
+function ReviewMeta({ label, value }: { label: string; value: string }) { return <div className="rounded-md border border-line bg-slate-50 p-3"><div className="text-xs text-slate-500">{label}</div><div className="mt-1 text-sm font-medium">{value}</div></div>; }
 function PanelTitle({ title, status }: { title: string; status: string }) { return <div className="flex items-center justify-between border-b border-line px-4 py-3"><h2 className="font-semibold">{title}</h2><span className="rounded-md border border-line bg-slate-50 px-2 py-1 text-xs">{status}</span></div>; }
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? "md:col-span-2" : ""}><span className="mb-1 block text-xs text-slate-500">{label}</span>{children}</label>; }
 function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <Field label={label}><input className="control" onChange={(event) => onChange(event.target.value)} value={value} /></Field>; }

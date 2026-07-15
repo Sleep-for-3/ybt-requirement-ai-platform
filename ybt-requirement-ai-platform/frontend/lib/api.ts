@@ -113,6 +113,26 @@ export type ScenarioTechnicalLineage = {
   open_questions?: string | null;
 };
 
+export type ScenarioReviewPackageView = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  scenario_id: number;
+  business_mapping_id: number;
+  technical_lineage_id: number;
+  status: string;
+  current_version_no: number;
+  workflow_instance?: {
+    id: number;
+    status: string;
+    current_step?: string | null;
+    current_task_id?: number | null;
+    current_assignee_user_id?: number | null;
+    current_assignee_role?: string | null;
+    can_withdraw: boolean;
+  } | null;
+};
+
 export type CandidateSourceRecommendation = {
   id: number;
   recommended_source_system?: string | null;

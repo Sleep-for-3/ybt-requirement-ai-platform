@@ -1,8 +1,10 @@
+import hashlib
 from pathlib import Path, PurePath
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -35,20 +37,23 @@ async def upload_file(project_id: int, principal: RealPrincipal, file: UploadFil
     data = await file.read(get_settings().max_upload_bytes + 1)
     if len(data) > get_settings().max_upload_bytes:
         raise HTTPException(status_code=413, detail="File is too large")
+    digest = hashlib.sha256(data).hexdigest()
+    duplicate = db.scalar(select(StoredFile).where(
+        StoredFile.institution_id == project.institution_id,
+        StoredFile.project_id == project_id,
+        StoredFile.content_hash == digest,
+        StoredFile.enabled.is_(True),
+    ))
+    if duplicate:
+        _raise_classification(duplicate, classification)
+        record_audit(db, action="duplicate_upload", resource_type="stored_file", resource_id=duplicate.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"file_name": Path(file_name).name, "content_hash": digest})
+        db.commit()
+        return _public_file(duplicate)
     service = get_storage_service()
     try:
         saved = service.save(data, file_name=file_name, project_id=project_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    duplicate = db.scalar(select(StoredFile).where(
-        StoredFile.institution_id == project.institution_id,
-        StoredFile.project_id == project_id,
-        StoredFile.content_hash == saved.content_hash,
-        StoredFile.enabled.is_(True),
-    ))
-    if duplicate:
-        service.delete(saved.storage_key)
-        return _public_file(duplicate)
     row = StoredFile(
         institution_id=project.institution_id,
         project_id=project_id,
@@ -61,7 +66,23 @@ async def upload_file(project_id: int, principal: RealPrincipal, file: UploadFil
         created_by=principal.user_id,
         enabled=True,
     )
-    db.add(row);db.flush()
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        duplicate = db.scalar(select(StoredFile).where(
+            StoredFile.institution_id == project.institution_id,
+            StoredFile.project_id == project_id,
+            StoredFile.content_hash == digest,
+            StoredFile.enabled.is_(True),
+        ))
+        if duplicate is None:
+            raise HTTPException(status_code=409, detail="A file with this storage key already exists")
+        _raise_classification(duplicate, classification)
+        record_audit(db, action="duplicate_upload", resource_type="stored_file", resource_id=duplicate.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"file_name": Path(file_name).name, "content_hash": digest})
+        db.commit()
+        return _public_file(duplicate)
     record_audit(db, action="upload", resource_type="stored_file", resource_id=row.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"file_name": row.original_file_name, "classification": classification, "byte_size": row.byte_size})
     db.commit();db.refresh(row)
     return _public_file(row)
@@ -88,3 +109,9 @@ def _safe_file_name(value: str) -> bool:
 
 def _public_file(row: StoredFile) -> dict:
     return {"id": row.id, "project_id": row.project_id, "file_name": row.original_file_name, "content_type": row.content_type, "byte_size": row.byte_size, "content_hash": row.content_hash, "classification": row.classification, "created_at": row.created_at}
+
+
+def _raise_classification(row: StoredFile, requested: str) -> None:
+    rank = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
+    if rank[requested] > rank.get(row.classification, 0):
+        row.classification = requested

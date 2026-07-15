@@ -16,7 +16,8 @@ class LocalStorageService:
         storage_key = f"projects/{project_id or 0}/{digest[:2]}/{digest}{suffix}"
         target = self._resolve(storage_key)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        if not target.exists():
+            target.write_bytes(data)
         return StoredObject(storage_key=storage_key, byte_size=len(data), content_hash=digest)
 
     def read(self, storage_key: str) -> bytes:
