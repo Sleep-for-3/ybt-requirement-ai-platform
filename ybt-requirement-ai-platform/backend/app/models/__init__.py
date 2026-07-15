@@ -55,8 +55,27 @@ from app.models.entities import (
     TraceabilityTemplateParseResult,
     User,
 )
+from app.models.governance import (
+    AuditLog,
+    BackgroundJob,
+    BackgroundJobItem,
+    Institution,
+    InstitutionMembership,
+    LoginAttempt,
+    Notification,
+    ProjectMembership,
+    RefreshToken,
+    ReviewDecision,
+    ReviewTask,
+    StoredFile,
+    WorkflowDefinition,
+    WorkflowInstance,
+)
 
 __all__ = [
+    "AuditLog",
+    "BackgroundJob",
+    "BackgroundJobItem",
     "BusinessSystem",
     "CandidateSourceRecommendation",
     "CatalogColumn",
@@ -112,4 +131,15 @@ __all__ = [
     "TraceabilityTemplateDocument",
     "TraceabilityTemplateParseResult",
     "User",
+    "Institution",
+    "InstitutionMembership",
+    "LoginAttempt",
+    "Notification",
+    "ProjectMembership",
+    "RefreshToken",
+    "ReviewDecision",
+    "ReviewTask",
+    "StoredFile",
+    "WorkflowDefinition",
+    "WorkflowInstance",
 ]

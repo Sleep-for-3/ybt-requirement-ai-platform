@@ -1,10 +1,12 @@
 "use client";
 
-import { BrainCircuit, Building2, ChartNoAxesCombined, Database, FileOutput, FileSpreadsheet, FolderKanban, Layers3, LibraryBig, ListTree, TableProperties, Workflow } from "lucide-react";
+import { Bell, BrainCircuit, Building2, ChartNoAxesCombined, ClipboardCheck, Database, FileOutput, FileSpreadsheet, FolderKanban, History, Layers3, LibraryBig, ListTree, TableProperties, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
-import { ProjectProvider, ProjectSelector } from "@/components/ProjectContext";
+import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
+import { apiGet } from "@/lib/api";
 
 const NAV = [
   { href: "/projects", label: "项目", icon: FolderKanban },
@@ -19,14 +21,23 @@ const NAV = [
   { href: "/knowledge", label: "知识库", icon: BrainCircuit },
   { href: "/evaluations", label: "RAG 评测", icon: ChartNoAxesCombined },
   { href: "/tasks", label: "安全查询", icon: Workflow },
+  { href: "/review-tasks", label: "我的待办", icon: ClipboardCheck },
+  { href: "/notifications", label: "通知", icon: Bell },
+  { href: "/jobs", label: "后台任务", icon: History },
+  { href: "/audit", label: "审计", icon: History },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  if (pathname === "/login") return <>{children}</>;
   return <ProjectProvider><ShellContent>{children}</ShellContent></ProjectProvider>;
 }
 
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { selectedProject } = useProjectWorkspace();
+  const [user, setUser] = useState<{display_name?:string|null;username:string}|null>(null);
+  useEffect(()=>{apiGet<{display_name?:string|null;username:string}>("/auth/me").then(setUser).catch(()=>setUser(null));},[]);
   return (
     <div className="min-h-screen bg-mist">
       <header className="sticky top-0 z-40 border-b border-line bg-white">
@@ -49,6 +60,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <ProjectSelector className="w-48 shrink-0" />
+          <div className="hidden shrink-0 text-right text-xs text-slate-500 xl:block"><div>{selectedProject?.bank_name||"当前银行"}</div><div className="font-medium text-ink">{user?.display_name||user?.username||"未登录"}</div></div>
+          <Link className="button-secondary shrink-0" href="/admin/institutions">管理</Link>
           <Link className="button-secondary shrink-0" href="/legacy">综合工作台</Link>
         </div>
       </header>

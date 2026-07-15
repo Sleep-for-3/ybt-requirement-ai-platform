@@ -2,6 +2,7 @@
 
 import { Check, Clock3, DatabaseZap, Link2, Save, Search, Sparkles, X } from "lucide-react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
@@ -49,9 +50,14 @@ export default function FieldScenarioPage() {
   const [showEvidenceForm, setShowEvidenceForm] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reviewTasks,setReviewTasks]=useState<Array<{id:number;step_key:string;status:string;target_type:string;target_id:number;assignee_user_id?:number|null;due_at?:string|null}>>([]);
 
   const business = useMemo(() => businesses.find((item) => item.scenario_id === scenarioId) || null, [businesses, scenarioId]);
   const lineage = useMemo(() => lineages.find((item) => item.scenario_id === scenarioId) || null, [lineages, scenarioId]);
+  const contextualReviewTasks = useMemo(() => reviewTasks.filter((task) =>
+    (task.target_type === "scenario_business" && task.target_id === business?.id) ||
+    (task.target_type === "scenario_technical" && task.target_id === lineage?.id)
+  ), [reviewTasks, business?.id, lineage?.id]);
 
   async function reload() {
     const target = await apiGet<TargetField>(`/fields/${fieldId}`);
@@ -61,6 +67,7 @@ export default function FieldScenarioPage() {
       apiGet<ScenarioTechnicalLineage[]>(`/target-fields/${fieldId}/scenario-technical-lineages`),
     ]);
     setField(target); setScenarios(scenarioItems); setBusinesses(businessItems); setLineages(lineageItems);
+    try { setReviewTasks(await apiGet(`/projects/${target.project_id}/tasks`)); } catch { setReviewTasks([]); }
     setScenarioId((value) => value || scenarioItems[0]?.id || null);
   }
   useEffect(() => { if (fieldId) void reload(); }, [fieldId]);
@@ -237,6 +244,7 @@ export default function FieldScenarioPage() {
           {scenarios.map((item) => <button className={item.id === scenarioId ? "button-primary" : "button-secondary"} key={item.id} onClick={() => setScenarioId(item.id)}>{item.scenario_name}</button>)}
         </div>
         {message ? <div className="mb-4 rounded-md border border-line bg-white px-4 py-3 text-sm">{message}</div> : null}
+        <section className="panel mb-5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">协作与审核状态</h2><p className="mt-1 text-xs text-slate-500">仅显示当前字段和场景；点击任务查看审核意见、退回原因与历史快照</p></div><div className="flex gap-2"><Link className="button-secondary" href={`/projects/${field.project_id}/dashboard`}>项目看板</Link><Link className="button-secondary" href={`/audit?projectId=${field.project_id}`}>操作审计</Link></div></div><div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">{contextualReviewTasks.map(task=><Link className="rounded-md border border-line p-3 text-sm hover:bg-slate-50" href={`/tasks/${task.id}`} key={task.id}><b>{task.step_key}</b><div className="mt-1 text-xs text-slate-500">{task.status} · 负责人 #{task.assignee_user_id||"待领取"}</div><div className="mt-1 text-xs text-slate-500">到期：{task.due_at||"未设置"}</div><div className="mt-2 text-xs text-blue-600">审核意见与历史快照 →</div></Link>)}{!contextualReviewTasks.length?<div className="text-sm text-slate-500">当前字段场景暂无审核任务</div>:null}</div></section>
         <div className="grid gap-5 xl:grid-cols-2">
           <section className="panel overflow-hidden">
             <PanelTitle title="业务口径" status={business?.business_confirm_status || "未维护"} />

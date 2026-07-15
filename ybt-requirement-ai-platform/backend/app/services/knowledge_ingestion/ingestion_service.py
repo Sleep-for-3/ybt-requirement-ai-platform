@@ -1,7 +1,6 @@
 import hashlib
 from datetime import UTC,datetime
 from pathlib import Path
-from uuid import uuid4
 from sqlalchemy import select
 from app.core.settings import get_settings
 from app.models import (BusinessSystem,CatalogColumn,CatalogTable,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeEntityLink,KnowledgeIngestionTask,KnowledgeUnit,MartField,MartTable,ProductScenario,SourceField,SourceTable,TargetField,TargetTable)
@@ -10,6 +9,7 @@ from app.services.security import ensure_external_allowed,redact_content
 from app.services.vector import get_vector_store
 from app.services.vector.knowledge_record import build_knowledge_vector_record
 from app.services.retrieval.keyword_index import index_knowledge_unit
+from app.services.storage import get_storage_service
 from .normalizer import normalize_content
 from .parsers import parse_document
 
@@ -17,14 +17,14 @@ async def ingest_knowledge_document(db,project_id,upload,knowledge_type,knowledg
     content=await upload.read();file_name=upload.filename or "knowledge.txt";digest=hashlib.sha256(content).hexdigest()
     document=db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.project_id==project_id,KnowledgeDocument.file_name==file_name,KnowledgeDocument.knowledge_type==knowledge_type,KnowledgeDocument.knowledge_scope==knowledge_scope,KnowledgeDocument.institution_name==institution_name,KnowledgeDocument.document_status!="archived"))
     if document and document.file_hash==digest:return document
-    storage=Path(get_settings().storage_dir)/"projects"/str(project_id)/"knowledge";storage.mkdir(parents=True,exist_ok=True);path=storage/f"{uuid4().hex}-{file_name.replace('/','_').replace(chr(92),'_')}";path.write_bytes(content)
+    storage_key=get_storage_service().save(content,file_name=file_name,project_id=project_id).storage_key
     if document is None:
-        document=KnowledgeDocument(project_id=project_id,file_name=file_name,file_type=Path(file_name).suffix.lstrip("."),source_type=knowledge_type,storage_path=str(path),knowledge_type=knowledge_type,knowledge_scope=knowledge_scope,institution_name=institution_name,confidentiality_level=confidentiality_level,file_hash=digest,current_version_no=1,document_status="parsing",parse_status="parsing",created_by=created_by);db.add(document);db.flush()
+        document=KnowledgeDocument(project_id=project_id,file_name=file_name,file_type=Path(file_name).suffix.lstrip("."),source_type=knowledge_type,storage_path=storage_key,knowledge_type=knowledge_type,knowledge_scope=knowledge_scope,institution_name=institution_name,confidentiality_level=confidentiality_level,file_hash=digest,current_version_no=1,document_status="parsing",parse_status="parsing",created_by=created_by);db.add(document);db.flush()
     else:
-        document.current_version_no+=1;document.storage_path=str(path);document.file_hash=digest;document.document_status="parsing";document.parse_status="parsing";document.confidentiality_level=confidentiality_level
+        document.current_version_no+=1;document.storage_path=storage_key;document.file_hash=digest;document.document_status="parsing";document.parse_status="parsing";document.confidentiality_level=confidentiality_level
         old=list(db.scalars(select(KnowledgeUnit).where(KnowledgeUnit.document_id==document.id,KnowledgeUnit.enabled.is_(True))).all());get_vector_store().delete(ids=[f"knowledge-unit-{item.id}" for item in old])
         for item in old:item.enabled=False
-    version=KnowledgeDocumentVersion(project_id=project_id,document_id=document.id,version_no=document.current_version_no,file_name=file_name,storage_path=str(path),file_hash=digest,change_note=change_note,parse_status="parsing",created_by=created_by);db.add(version);db.flush()
+    version=KnowledgeDocumentVersion(project_id=project_id,document_id=document.id,version_no=document.current_version_no,file_name=file_name,storage_path=storage_key,file_hash=digest,change_note=change_note,parse_status="parsing",created_by=created_by);db.add(version);db.flush()
     task=KnowledgeIngestionTask(project_id=project_id,document_id=document.id,document_version_id=version.id,status="parsing",parser_name=Path(file_name).suffix.lower(),started_at=datetime.now(UTC),created_by=created_by);db.add(task);db.flush()
     drafts,warnings=parse_document(file_name,content,knowledge_type);units=[]
     for draft in drafts:

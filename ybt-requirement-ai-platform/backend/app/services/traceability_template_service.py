@@ -1,12 +1,11 @@
 from dataclasses import asdict, dataclass, field
+from io import BytesIO
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_settings
 from app.models import (
     ProductScenario,
     Project,
@@ -20,6 +19,7 @@ from app.models import (
 )
 from app.schemas import TraceabilityTemplateUploadResponse
 from app.services.template_parser import TraceabilityExcelParser
+from app.services.storage import get_storage_service
 
 
 @dataclass
@@ -46,7 +46,9 @@ async def ingest_traceability_template(db: Session, project_id: int, upload: Upl
     if suffix != ".xlsx":
         raise ValueError("业务口径及溯源表只支持 .xlsx 文件。")
     content = await upload.read()
-    storage_path = _store(project_id, upload.filename or "traceability.xlsx", content)
+    storage_path = get_storage_service().save(
+        content, file_name=upload.filename or "traceability.xlsx", project_id=project_id,
+    ).storage_key
     document = TraceabilityTemplateDocument(
         project_id=project_id, file_name=upload.filename or "traceability.xlsx", storage_path=storage_path,
         parse_status="pending", sheet_names_json=[], detected_scenarios_json=[], parse_summary_json={}, warnings_json=[],
@@ -54,7 +56,7 @@ async def ingest_traceability_template(db: Session, project_id: int, upload: Upl
     db.add(document)
     db.flush()
     try:
-        output = TraceabilityExcelParser().parse(storage_path)
+        output = TraceabilityExcelParser().parse(BytesIO(content))
         document.parse_status = "success"
         document.sheet_names_json = output.sheet_names
         document.detected_scenarios_json = output.detected_scenarios
@@ -273,12 +275,3 @@ def _add_knowledge(db: Session, document: TraceabilityTemplateDocument, result: 
 def _apply(model: object, values: dict) -> None:
     for key, value in values.items():
         setattr(model, key, value)
-
-
-def _store(project_id: int, original_name: str, content: bytes) -> str:
-    directory = Path(get_settings().storage_dir) / "projects" / str(project_id) / "traceability-templates"
-    directory.mkdir(parents=True, exist_ok=True)
-    safe_name = original_name.replace("/", "_").replace("\\", "_")
-    path = directory / f"{uuid4().hex}-{safe_name}"
-    path.write_bytes(content)
-    return str(path)

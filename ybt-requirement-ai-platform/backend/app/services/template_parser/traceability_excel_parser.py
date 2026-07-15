@@ -59,11 +59,14 @@ class TraceabilityParseOutput:
 
 
 class TraceabilityExcelParser:
-    def parse(self, file_path: str) -> TraceabilityParseOutput:
-        path = Path(file_path)
-        if path.suffix.lower() != ".xlsx":
-            raise ValueError("业务口径及溯源表只支持 .xlsx 文件。")
-        workbook = load_workbook(path, data_only=True)
+    def parse(self, file_path: Any) -> TraceabilityParseOutput:
+        source = file_path
+        if isinstance(file_path, (str, Path)):
+            path = Path(file_path)
+            if path.suffix.lower() != ".xlsx":
+                raise ValueError("业务口径及溯源表只支持 .xlsx 文件。")
+            source = path
+        workbook = load_workbook(source, data_only=True)
         results = []
         for sheet in workbook.worksheets:
             try:

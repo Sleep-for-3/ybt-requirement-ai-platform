@@ -1,0 +1,4 @@
+"use client";
+import { useEffect,useState } from "react";import { WorkspaceHeader } from "@/components/WorkspaceHeader";import { apiGet } from "@/lib/api";
+type Matrix={institution_roles:string[];project_roles:Record<string,string[]>};
+export default function Page(){const[data,setData]=useState<Matrix|null>(null);useEffect(()=>{apiGet<Matrix>("/admin/permissions").then(setData).catch(()=>setData(null));},[]);return <main><WorkspaceHeader title="权限矩阵" meta="统一 PermissionService 的只读视图"/><div className="panel mx-auto mt-6 max-w-5xl overflow-hidden"><div className="border-b border-line p-4 text-sm">机构角色：{data?.institution_roles.join("、")||"加载中"}</div>{Object.entries(data?.project_roles||{}).map(([role,permissions])=><div className="grid grid-cols-[220px_1fr] border-b border-line p-4 text-sm last:border-0" key={role}><b>{role}</b><span className="text-slate-600">{permissions.join("、")}</span></div>)}</div></main>}

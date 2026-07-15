@@ -13,6 +13,8 @@ jobs:
       EMBEDDING_PROVIDER: mock
       VECTOR_STORE_PROVIDER: mock
       APP_SECRET_KEY: smoke-ci-only-key
+      JWT_SECRET_KEY: smoke-ci-jwt-signing-key-with-32-characters
+      AUTH_MODE: required
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

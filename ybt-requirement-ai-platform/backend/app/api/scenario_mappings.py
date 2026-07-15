@@ -17,6 +17,7 @@ from app.schemas import (
     ScenarioTechnicalLineageUpdate,
 )
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
+from app.services.auth.dependencies import CurrentPrincipal
 
 router = APIRouter(tags=["scenario mappings"])
 
@@ -28,9 +29,11 @@ CONFIRM_STATUSES = {"draft", "pending", "confirmed", "rejected"}
 
 
 @router.post("/target-fields/{field_id}/scenarios/{scenario_id}/business-mapping", response_model=ScenarioBusinessMappingRead)
-def create_business_mapping(field_id: int, scenario_id: int, payload: ScenarioBusinessMappingCreate, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
+def create_business_mapping(field_id: int, scenario_id: int, payload: ScenarioBusinessMappingCreate, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     field, scenario = _field_and_scenario(db, field_id, scenario_id)
-    mapping = ScenarioBusinessMapping(project_id=field.project_id, target_field_id=field.id, scenario_id=scenario.id, **payload.model_dump())
+    values = payload.model_dump()
+    if principal.user_id is not None: values["created_by"] = principal.username
+    mapping = ScenarioBusinessMapping(project_id=field.project_id, target_field_id=field.id, scenario_id=scenario.id, **values)
     db.add(mapping)
     _commit_unique(db, "Business mapping already exists for this field and scenario")
     db.refresh(mapping)
@@ -88,8 +91,10 @@ async def generate_scenario_business_draft(mapping_id: int, db: Session = Depend
 
 
 @router.post("/scenario-business-mappings/{mapping_id}/confirm", response_model=ScenarioBusinessMappingRead)
-def confirm_business_mapping(mapping_id: int, payload: ConfirmMappingRequest | None = None, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
+def confirm_business_mapping(mapping_id: int, principal: CurrentPrincipal, payload: ConfirmMappingRequest | None = None, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
+    if principal.user_id is not None and mapping.created_by in {principal.username, str(principal.user_id)}:
+        raise HTTPException(status_code=409, detail="Business mapping author cannot confirm their own content")
     if not (_has_text(mapping.business_definition) or _has_text(mapping.final_content)):
         raise HTTPException(status_code=400, detail="Business definition or final content is required before confirmation")
     _require_evidence(db, "scenario_business", mapping.id)
@@ -113,14 +118,16 @@ def reject_business_mapping(mapping_id: int, db: Session = Depends(get_db)) -> S
 
 
 @router.post("/target-fields/{field_id}/scenarios/{scenario_id}/technical-lineage", response_model=ScenarioTechnicalLineageRead)
-def create_technical_lineage(field_id: int, scenario_id: int, payload: ScenarioTechnicalLineageCreate, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
+def create_technical_lineage(field_id: int, scenario_id: int, payload: ScenarioTechnicalLineageCreate, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     field, scenario = _field_and_scenario(db, field_id, scenario_id)
     _validate_logic_type(payload.processing_logic_type)
     if payload.business_mapping_id is not None:
         business = _business_or_404(db, payload.business_mapping_id)
         if business.target_field_id != field.id or business.scenario_id != scenario.id:
             raise HTTPException(status_code=400, detail="Business mapping belongs to another field or scenario")
-    lineage = ScenarioTechnicalLineage(project_id=field.project_id, target_field_id=field.id, scenario_id=scenario.id, **payload.model_dump())
+    values = payload.model_dump()
+    if principal.user_id is not None: values["created_by"] = principal.username
+    lineage = ScenarioTechnicalLineage(project_id=field.project_id, target_field_id=field.id, scenario_id=scenario.id, **values)
     db.add(lineage)
     _commit_unique(db, "Technical lineage already exists for this field and scenario")
     db.refresh(lineage)
@@ -179,8 +186,10 @@ async def generate_scenario_technical_draft(lineage_id: int, db: Session = Depen
 
 
 @router.post("/scenario-technical-lineages/{lineage_id}/confirm", response_model=ScenarioTechnicalLineageRead)
-def confirm_technical_lineage(lineage_id: int, payload: ConfirmMappingRequest | None = None, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
+def confirm_technical_lineage(lineage_id: int, principal: CurrentPrincipal, payload: ConfirmMappingRequest | None = None, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
+    if principal.user_id is not None and lineage.created_by in {principal.username, str(principal.user_id)}:
+        raise HTTPException(status_code=409, detail="Technical lineage author cannot confirm their own content")
     missing = []
     if not _has_text(lineage.source_system_name):
         missing.append("source_system_name")

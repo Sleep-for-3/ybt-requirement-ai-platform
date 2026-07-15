@@ -39,14 +39,17 @@ class ExcelTemplateParseOutput:
 
 
 class ExcelTemplateParser:
-    def parse(self, file_path: str) -> ExcelTemplateParseOutput:
-        path = Path(file_path)
-        if path.suffix.lower() == ".xls":
-            raise ValueError("暂不支持 .xls，请另存为 .xlsx 后上传。")
-        if path.suffix.lower() != ".xlsx":
-            raise ValueError("MVP 阶段只支持 .xlsx 一表通模板。")
+    def parse(self, file_path: Any) -> ExcelTemplateParseOutput:
+        source = file_path
+        if isinstance(file_path, (str, Path)):
+            path = Path(file_path)
+            if path.suffix.lower() == ".xls":
+                raise ValueError("暂不支持 .xls，请另存为 .xlsx 后上传。")
+            if path.suffix.lower() != ".xlsx":
+                raise ValueError("MVP 阶段只支持 .xlsx 一表通模板。")
+            source = path
 
-        workbook = load_workbook(path, data_only=True)
+        workbook = load_workbook(source, data_only=True)
         results: list[ExcelSheetParseResult] = []
         all_warnings: list[str] = []
         for sheet in workbook.worksheets:

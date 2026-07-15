@@ -5,13 +5,14 @@ from sqlalchemy.orm import Session
 from urllib.parse import parse_qs,urlsplit
 from app.core.database import get_db
 from app.models import (AIUserFeedback,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelProfile,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
-from app.services.embeddings import get_embedding_service
-from app.services.evaluation import run_evaluation
-from app.services.knowledge_ingestion import ingest_knowledge_document
+from app.services.auth.dependencies import CurrentPrincipal
+from app.services.auth.permission_service import PermissionService
 from app.services.rag import grounded_answer
 from app.services.retrieval import HybridRetriever
-from app.services.retrieval.keyword_index import index_knowledge_unit
-from app.services.security import ensure_external_allowed,redact_content
+from app.services.storage import get_storage_service
+from app.services.task_queue.domain_handlers import knowledge_ingestion_handler,knowledge_reindex_handler,rag_evaluation_handler
+from app.services.task_queue.submission import submit_project_job
+from app.services.governance.audit import record_audit
 from app.services.vector import get_vector_store
 from app.services.vector.knowledge_record import build_knowledge_vector_record
 
@@ -26,13 +27,17 @@ class EvaluationRunCreate(BaseModel):run_name:str;model_profile_id:int|None=None
 class ModelProfileCreate(BaseModel):profile_name:str;provider_type:str="mock";base_url:str|None=None;model_name:str|None=None;embedding_model_name:str|None=None;enabled:bool=True;local_only:bool=False;supports_structured_output:bool=True;max_context_tokens:int=8192;temperature:float=.2;config_json:dict=Field(default_factory=dict)
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
-async def upload(project_id:int,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
+async def upload(project_id:int,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
     if knowledge_type not in KNOWLEDGE_TYPES:raise HTTPException(400,"Invalid knowledge type")
     if knowledge_scope not in KNOWLEDGE_SCOPES:raise HTTPException(400,"Invalid knowledge scope")
     if confidentiality_level not in CONFIDENTIALITY_LEVELS:raise HTTPException(400,"Invalid confidentiality level")
     if knowledge_scope=="institution" and not institution_name:raise HTTPException(400,"Institution scope requires institution_name")
-    try:return _document(await ingest_knowledge_document(db,project_id,file,knowledge_type,knowledge_scope,institution_name,confidentiality_level,change_note=change_note))
-    except (ValueError,RuntimeError) as exc:raise HTTPException(400,str(exc)) from exc
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    content=await file.read();file_name=file.filename or "knowledge.txt"
+    saved=get_storage_service().save(content,file_name=file_name,project_id=project_id)
+    job=submit_project_job(db,project,principal,job_type="knowledge_ingestion",payload={"storage_key":saved.storage_key,"file_name":file_name,"knowledge_type":knowledge_type,"knowledge_scope":knowledge_scope,"institution_name":institution_name,"confidentiality_level":confidentiality_level,"change_note":change_note},handler=knowledge_ingestion_handler)
+    document_id=(job.result_summary_json or {}).get("document_id")
+    return _document(db.get(KnowledgeDocument,int(document_id))) if document_id else _job(job)
 @router.get("/projects/{project_id}/knowledge/documents")
 def documents(project_id:int,db:Session=Depends(get_db)):return [_document(item) for item in db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.project_id==project_id).order_by(KnowledgeDocument.id.desc())).all()]
 @router.get("/knowledge/documents/{document_id}")
@@ -42,16 +47,11 @@ def document(document_id:int,project_id:int,db:Session=Depends(get_db)):
 @router.get("/knowledge/documents/{document_id}/versions")
 def versions(document_id:int,project_id:int,db:Session=Depends(get_db)):_visible_document_or_404(db,document_id,project_id);return [_row(item) for item in db.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id==document_id).order_by(KnowledgeDocumentVersion.version_no.desc())).all()]
 @router.post("/knowledge/documents/{document_id}/reindex")
-def reindex(document_id:int,project_id:int,db:Session=Depends(get_db)):
+def reindex(document_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     document=_visible_document_or_404(db,document_id,project_id,require_owner=True)
-    if document.document_status=="archived":raise HTTPException(400,"Archived knowledge document cannot be reindexed")
-    units=list(db.scalars(select(KnowledgeUnit).where(KnowledgeUnit.document_id==document_id,KnowledgeUnit.enabled.is_(True))).all());embedding=get_embedding_service();local_only=getattr(embedding,"local_only",False)
-    try:
-        for unit in units:ensure_external_allowed(unit.confidentiality_level,local_only)
-    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
-    vectors=embedding.embed_texts([unit.content if local_only else redact_content(unit.content) for unit in units]);records=[]
-    for unit,vector in zip(units,vectors,strict=True):index_knowledge_unit(db,unit,replace=True);records.append(build_knowledge_vector_record(unit,vector))
-    get_vector_store().upsert(records);document.document_status="indexed";db.commit();return _document(document)
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    job=submit_project_job(db,project,principal,job_type="knowledge_reindex",payload={"document_id":document.id},handler=lambda session,item:knowledge_reindex_handler(session,item,vector_store=get_vector_store()))
+    return _document(db.get(KnowledgeDocument,document.id)) if job.status=="completed" else _job(job)
 @router.delete("/knowledge/documents/{document_id}")
 def delete_document(document_id:int,project_id:int,db:Session=Depends(get_db)):
     document=_visible_document_or_404(db,document_id,project_id,require_owner=True)
@@ -70,11 +70,12 @@ def unit(unit_id:int,project_id:int,db:Session=Depends(get_db)):
     if not item or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"Knowledge unit not found")
     return _unit(item)
 @router.post("/projects/{project_id}/knowledge/hybrid-search")
-def hybrid_search(project_id:int,payload:SearchRequest,db:Session=Depends(get_db)):
-    log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k);return {"retrieval_log_id":log.id,"items":items}
+def hybrid_search(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k);project=db.get(Project,project_id);record_audit(db,action="knowledge_search",resource_type="retrieval_log",resource_id=log.id,actor_user_id=principal.user_id,institution_id=project.institution_id if project else None,project_id=project_id,after={"result_count":len(items)});db.commit();return {"retrieval_log_id":log.id,"items":items}
 @router.post("/projects/{project_id}/knowledge/ask")
-async def ask(project_id:int,payload:SearchRequest,db:Session=Depends(get_db)):
-    try:return await grounded_answer(db,project_id,payload.query,target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,knowledge_types=payload.knowledge_types,top_k=payload.top_k)
+async def ask(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    try:
+        result=await grounded_answer(db,project_id,payload.query,target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,knowledge_types=payload.knowledge_types,top_k=payload.top_k);project=db.get(Project,project_id);common={"actor_user_id":principal.user_id,"institution_id":project.institution_id if project else None,"project_id":project_id,"after":{"citation_count":len(result.get("citations") or [])}};record_audit(db,action="knowledge_ask",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common);record_audit(db,action="model_call",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common);db.commit();return result
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 @router.post("/projects/{project_id}/evaluations/cases")
 def create_case(project_id:int,payload:EvaluationCaseCreate,db:Session=Depends(get_db)):
@@ -82,8 +83,11 @@ def create_case(project_id:int,payload:EvaluationCaseCreate,db:Session=Depends(g
 @router.get("/projects/{project_id}/evaluations/cases")
 def cases(project_id:int,db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(RagEvaluationCase).where(RagEvaluationCase.project_id==project_id)).all()]
 @router.post("/projects/{project_id}/evaluations/runs")
-async def create_run(project_id:int,payload:EvaluationRunCreate,db:Session=Depends(get_db)):
-    run=RagEvaluationRun(project_id=project_id,status="pending",**payload.model_dump());db.add(run);db.commit();db.refresh(run);return _row(await run_evaluation(db,run))
+async def create_run(project_id:int,payload:EvaluationRunCreate,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    run=RagEvaluationRun(project_id=project_id,status="pending",**payload.model_dump());db.add(run);db.commit();db.refresh(run)
+    submit_project_job(db,project,principal,job_type="rag_evaluation",payload={"evaluation_run_id":run.id},handler=rag_evaluation_handler)
+    db.refresh(run);return _row(run)
 @router.get("/evaluation-runs/{run_id}")
 def evaluation_run(run_id:int,db:Session=Depends(get_db)):
     item=db.get(RagEvaluationRun,run_id)
@@ -106,6 +110,7 @@ def prompt_versions(db:Session=Depends(get_db)):return [_row(item) for item in d
 def _row(item):return {key:value for key,value in item.__dict__.items() if not key.startswith("_")}
 def _document(item):return _row(item)
 def _unit(item):return _row(item)
+def _job(job):return {column.key:getattr(job,column.key) for column in job.__table__.columns}
 
 def _visible_document_or_404(db,document_id,project_id,require_owner=False):
     item=db.get(KnowledgeDocument,document_id)

@@ -299,6 +299,24 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 - `confidential` 和 `restricted` 知识禁止发送到外部 embedding；外发的允许内容先脱敏，模型配置不得包含明文 key/token/password/secret。
 - citation 保存或返回前校验真实、启用且对当前项目可见的 `KnowledgeUnit`；无证据问答只返回“待确认”。
 
+## 生产治理与多人协作
+
+生产治理层新增机构租户、Argon2 本地登录、短期 JWT Access Token、可撤销 Refresh Token、机构/项目成员、统一资源权限守卫、五阶段审核工作流、站内通知、只追加审计日志、项目看板、安全存储和可恢复后台任务。
+
+开发模式仍可使用 SQLite、`InlineTaskQueue`、本地存储和 Mock AI。首次通过 `POST /api/admin/bootstrap` 创建平台运营管理员，完成初始化后设置 `AUTH_MODE=required`。生产启动会校验认证模式、JWT/应用密钥和 CORS 白名单。
+
+Docker Compose 的 `production` profile 提供 PostgreSQL、Redis、Celery Worker 与 S3-compatible 存储入口；所有凭据必须由环境变量注入，仓库不提供生产默认密码。
+
+运行端点：
+
+- `GET /api/health/live`
+- `GET /api/health/ready`
+- `GET /api/metrics`
+- `GET /api/me/tasks`
+- `GET /api/me/notifications`
+- `GET /api/jobs`
+- `GET /api/audit`
+
 ## 验证命令
 
 后端测试：

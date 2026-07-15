@@ -2,21 +2,23 @@
 
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
 export default function ProjectsPage() {
   const { projects, refreshProjects, selectProject } = useProjectWorkspace();
   const [message, setMessage] = useState("");
+  const [institutions,setInstitutions]=useState<Array<{id:number;institution_name:string}>>([]);
+  useEffect(()=>{apiGet<Array<{id:number;institution_name:string}>>("/admin/institutions").then(setInstitutions).catch(()=>setInstitutions([]));},[]);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
-      await apiPost("/projects", { name: form.get("name"), bank_name: form.get("bank_name"), description: form.get("description") });
+      await apiPost("/projects", { name: form.get("name"), institution_id: Number(form.get("institution_id"))||null, bank_name: form.get("bank_name"), description: form.get("description") });
       event.currentTarget.reset();
       setMessage("项目已创建");
       await refreshProjects();
@@ -31,6 +33,7 @@ export default function ProjectsPage() {
           <h2 className="text-sm font-semibold">新建项目</h2>
           <div className="mt-4 space-y-3">
             <input className="control" name="name" placeholder="项目名称" required />
+            <select className="control" name="institution_id" required><option value="">选择所属机构</option>{institutions.map(item=><option value={item.id} key={item.id}>{item.institution_name}</option>)}</select>
             <input className="control" name="bank_name" placeholder="机构名称（脱敏）" />
             <textarea className="control min-h-24" name="description" placeholder="项目说明" />
             <button className="button-primary w-full" type="submit"><Plus size={16} />新建</button>

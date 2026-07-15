@@ -2,16 +2,17 @@ services:
   postgres:
     image: postgres:16
     container_name: ybt-postgres
+    profiles: ["production"]
     environment:
-      POSTGRES_USER: ybt
-      POSTGRES_PASSWORD: ybt_password
-      POSTGRES_DB: ybt_requirement_ai
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ybt -d ybt_requirement_ai"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,16 +24,55 @@ services:
     env_file:
       - ./backend/.env.example
     environment:
-      DATABASE_URL: postgresql+psycopg://ybt:ybt_password@postgres:5432/ybt_requirement_ai
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/ybt.db}
       CORS_ORIGINS: http://localhost:3000
       STORAGE_DIR: /app/storage
+      AUTH_MODE: ${AUTH_MODE:-optional}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      TASK_QUEUE_PROVIDER: ${TASK_QUEUE_PROVIDER:-inline}
     ports:
       - "8000:8000"
     volumes:
       - backend_storage:/app/storage
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - backend_data:/app/data
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["production"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis_data:/data"]
+
+  worker:
+    build:
+      context: ./backend
+    profiles: ["production"]
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ENVIRONMENT: production
+      AUTH_MODE: required
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      TASK_QUEUE_PROVIDER: celery
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://object-storage:9000}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+    depends_on: [redis, postgres]
+
+  object-storage:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    profiles: ["production"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    command: minio server /data
+    volumes: ["object_storage_data:/data"]
 
   frontend:
     build:
@@ -79,6 +119,9 @@ services:
 volumes:
   postgres_data:
   backend_storage:
+  backend_data:
+  redis_data:
+  object_storage_data:
   etcd_data:
   milvus_minio_data:
   milvus_data:

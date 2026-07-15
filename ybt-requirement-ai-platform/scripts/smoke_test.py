@@ -13,11 +13,21 @@ def main() -> None:
     base = "http://127.0.0.1:8000/api"
     client = httpx.Client(timeout=90, trust_env=False)
 
+    admin_password = "smoke-only-" + "platform-admin-password"
+    bootstrap = _post_json(client, f"{base}/admin/bootstrap", {
+        "institution_code": "PLATFORM", "institution_name": "脱敏平台运营方", "institution_type": "platform_operator",
+        "username": "smoke_admin", "display_name": "Smoke 管理员", "email": "smoke-admin@example.invalid", "password": admin_password,
+    })
+    admin_session = _post_json(client, f"{base}/auth/login", {"username": "smoke_admin", "password": admin_password})
+    client.headers["Authorization"] = f"Bearer {admin_session['access_token']}"
+    bank = _post_json(client, f"{base}/admin/institutions", {"institution_code": "DEMO_BANK", "institution_name": "示例银行", "institution_type": "bank"})
+
     project = _post_json(
         client,
         f"{base}/projects",
         {
             "name": "增强验收测试项目",
+            "institution_id": bank["id"],
             "bank_name": "示例银行",
             "description": "验证模板、数据源、自然语言任务和口径生成",
         },
@@ -389,6 +399,44 @@ def main() -> None:
         draft = legacy_mapping["draft"]
         evidence_types = sorted({item["evidence_type"] for item in draft["evidences"]})
 
+        governance_roles = ["business_analyst", "business_reviewer", "technical_analyst", "technical_reviewer", "final_reviewer"]
+        governance_users = {}
+        for role in governance_roles:
+            password = f"smoke-only-{role}-password"
+            user = _post_json(client, f"{base}/admin/users", {
+                "username": f"smoke_{role}", "display_name": role, "email": f"smoke-{role}@example.invalid", "password": password,
+                "institution_id": bank["id"], "institution_role": "member",
+            })
+            _post_json(client, f"{base}/projects/{project_id}/members", {"user_id": user["id"], "project_role": role})
+            governance_users[role] = {"id": user["id"], "password": password}
+        workflow_created = _post_json(client, f"{base}/projects/{project_id}/tasks/batch-create", {
+            "workflow_key": "scenario_mapping_review", "targets": [{"target_type": "project", "target_id": project_id}],
+            "assignments": {role: governance_users[role]["id"] for role in governance_roles},
+        })
+        workflow_id = workflow_created["workflow_instance_ids"][0]
+        workflow_tasks = _get_json(client, f"{base}/projects/{project_id}/tasks")
+        task_by_step = {item["step_key"]: item for item in workflow_tasks if item["workflow_instance_id"] == workflow_id}
+        admin_authorization = client.headers["Authorization"]
+        for step, role in [("business_draft", "business_analyst"), ("business_review", "business_reviewer"), ("technical_draft", "technical_analyst"), ("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
+            role_session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": governance_users[role]["password"]})
+            client.headers["Authorization"] = f"Bearer {role_session['access_token']}"
+            _post_json(client, f"{base}/review-tasks/{task_by_step[step]['id']}/approve", {"comment": f"{step} smoke approved"})
+        final_notifications = _get_json(client, f"{base}/me/notifications")
+        client.headers["Authorization"] = admin_authorization
+        workflow_result = _get_json(client, f"{base}/workflows/{workflow_id}")
+        batch_job_response = client.post(f"{base}/projects/{project_id}/batch/generate-business-drafts", headers={"Idempotency-Key": "smoke-business-batch"}, json={"field_ids": []})
+        batch_job_response.raise_for_status()
+        batch_job = _get_json(client, f"{base}/jobs/{batch_job_response.json()['id']}")
+        audit_rows = _get_json(client, f"{base}/audit?project_id={project_id}")
+        other_bank = _post_json(client, f"{base}/admin/institutions", {"institution_code": "OTHER_BANK", "institution_name": "其他示例银行", "institution_type": "bank"})
+        outsider_password = "smoke-only-outsider-password"
+        _post_json(client, f"{base}/admin/users", {"username": "smoke_outsider", "display_name": "跨行用户", "email": "smoke-outsider@example.invalid", "password": outsider_password, "institution_id": other_bank["id"], "institution_role": "member"})
+        outsider_session = _post_json(client, f"{base}/auth/login", {"username": "smoke_outsider", "password": outsider_password})
+        cross_bank_response = client.get(f"{base}/projects/{project_id}", headers={"Authorization": f"Bearer {outsider_session['access_token']}"})
+        if cross_bank_response.status_code != 404:
+            raise AssertionError(f"Cross-bank project read must be hidden, got {cross_bank_response.status_code}")
+        client.headers["Authorization"] = admin_authorization
+
         output = {
             "project_id": project_id,
             "knowledge_document_ids": [item["id"] for item in knowledge_documents],
@@ -444,6 +492,13 @@ def main() -> None:
             "template_reference_summary": draft.get("template_reference_summary"),
             "db_query_summary": draft.get("db_query_summary"),
             "evidence_completeness": draft.get("evidence_completeness"),
+            "governance_institution_id": bank["id"],
+            "workflow_status": workflow_result["status"],
+            "workflow_decision_count": len(workflow_result["decisions"]),
+            "notification_count": len(final_notifications),
+            "background_job_status": batch_job["status"],
+            "audit_log_count": len(audit_rows),
+            "cross_bank_status": cross_bank_response.status_code,
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
 

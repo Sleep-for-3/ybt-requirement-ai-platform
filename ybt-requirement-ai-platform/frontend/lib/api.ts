@@ -1,4 +1,25 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
+const ACCESS_TOKEN_KEY = "ybt:access-token";
+const REFRESH_TOKEN_KEY = "ybt:refresh-token";
+
+export function saveSession(accessToken: string, refreshToken: string) {
+  sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+export function clearSession() {
+  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+export function hasSession() {
+  return typeof window !== "undefined" && Boolean(sessionStorage.getItem(ACCESS_TOKEN_KEY));
+}
+
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = typeof window !== "undefined" ? sessionStorage.getItem(ACCESS_TOKEN_KEY) : null;
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+}
 
 export type Project = {
   id: number;
@@ -412,7 +433,7 @@ export type MappingDocumentExport = {
 };
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+  const response = await fetch(`${API_BASE}${path}`, { cache: "no-store", headers: authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -422,7 +443,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body)
   });
   if (!response.ok) {
@@ -434,7 +455,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body)
   });
   if (!response.ok) {
@@ -446,7 +467,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body)
   });
   if (!response.ok) {
@@ -456,7 +477,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  const response = await fetch(`${API_BASE}${path}`, { method: "DELETE", headers: authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -466,6 +487,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
 export async function uploadForm<T>(path: string, formData: FormData): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    headers: authHeaders(),
     body: formData
   });
   if (!response.ok) {
@@ -475,7 +497,7 @@ export async function uploadForm<T>(path: string, formData: FormData): Promise<T
 }
 
 export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string }> {
-  const response = await fetch(`${API_BASE}${path}`);
+  const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
   if (!response.ok) {
     throw new Error(await response.text());
   }

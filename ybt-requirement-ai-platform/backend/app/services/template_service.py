@@ -1,15 +1,15 @@
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_settings
 from app.models import TargetField, TargetTable, TemplateDocument, TemplateParseResult
 from app.schemas import TemplatePreviewItem, TemplateUploadResponse
 from app.services.template_parser import ExcelTemplateParser
+from app.services.storage import get_storage_service
 
 
 @dataclass
@@ -35,7 +35,9 @@ async def ingest_template(db: Session, project_id: int, upload_file: UploadFile)
         raise ValueError("MVP 阶段只支持 .xlsx 一表通模板。")
 
     content = await upload_file.read()
-    storage_path = _write_template_upload(project_id, upload_file.filename or "template.xlsx", content)
+    storage_path = get_storage_service().save(
+        content, file_name=upload_file.filename or "template.xlsx", project_id=project_id,
+    ).storage_key
     document = TemplateDocument(
         project_id=project_id,
         file_name=upload_file.filename or "template.xlsx",
@@ -48,7 +50,7 @@ async def ingest_template(db: Session, project_id: int, upload_file: UploadFile)
     db.flush()
 
     try:
-        output = ExcelTemplateParser().parse(storage_path)
+        output = ExcelTemplateParser().parse(BytesIO(content))
         document.sheet_names_json = output.sheet_names
         document.parse_status = "success"
         for result in output.results:
@@ -149,13 +151,3 @@ def apply_template(db: Session, template_id: int) -> TemplateApplySummary:
                 summary.created_fields += 1
     db.commit()
     return summary
-
-
-def _write_template_upload(project_id: int, original_name: str, content: bytes) -> str:
-    upload_dir = Path(get_settings().storage_dir) / "projects" / str(project_id) / "templates"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = original_name.replace("/", "_").replace("\\", "_")
-    path = upload_dir / f"{uuid4().hex}-{safe_name}"
-    with open(path, "wb") as file:
-        file.write(content)
-    return str(path)

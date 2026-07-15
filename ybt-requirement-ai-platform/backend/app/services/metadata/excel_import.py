@@ -1,20 +1,19 @@
+from io import BytesIO
 from pathlib import Path
-from uuid import uuid4
 from datetime import UTC, datetime
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from sqlalchemy import select
-from app.core.settings import get_settings
 from app.models import CatalogColumn, CatalogSchema, CatalogTable, MetadataImportDocument
 from app.services.metadata.hashing import metadata_hash
+from app.services.storage import get_storage_service
 
 ALIASES={"system_name":{"系统名称","系统名"},"datasource_name":{"数据源名称","数据源名"},"database_name":{"数据库名","库名","database","database_name"},"schema_name":{"schema","模式名","schema_name"},"table_name":{"表英文名","表名","table_name"},"table_comment":{"表中文名","表注释","表说明"},"column_name":{"字段英文名","字段名","column_name"},"column_comment":{"字段中文名","字段注释","字段说明"},"data_type":{"字段类型","数据类型","data_type"},"nullable":{"是否可空","可空"},"is_primary_key":{"主键","是否主键"},"ordinal_position":{"字段顺序","字段序号"}}
 
 async def ingest_metadata_excel(db,datasource,upload):
     if Path(upload.filename or "").suffix.lower() != ".xlsx": raise ValueError("元数据字典只支持 .xlsx")
-    content=await upload.read(); directory=Path(get_settings().storage_dir)/"projects"/str(datasource.project_id)/"metadata-imports"; directory.mkdir(parents=True,exist_ok=True)
-    path=directory/f"{uuid4().hex}-{(upload.filename or 'metadata.xlsx').replace('/','_').replace(chr(92),'_')}"; path.write_bytes(content)
-    rows,warnings=_parse(path); doc=MetadataImportDocument(project_id=datasource.project_id,datasource_id=datasource.id,file_name=upload.filename or "metadata.xlsx",storage_path=str(path),parse_status="success",parse_summary_json={"row_count":len(rows),"sheet_count":len({x['source_sheet'] for x in rows})},parsed_rows_json=rows,warnings_json=warnings)
+    content=await upload.read(); file_name=upload.filename or "metadata.xlsx"; storage_key=get_storage_service().save(content,file_name=file_name,project_id=datasource.project_id).storage_key
+    rows,warnings=_parse(BytesIO(content)); doc=MetadataImportDocument(project_id=datasource.project_id,datasource_id=datasource.id,file_name=file_name,storage_path=storage_key,parse_status="success",parse_summary_json={"row_count":len(rows),"sheet_count":len({x['source_sheet'] for x in rows})},parsed_rows_json=rows,warnings_json=warnings)
     db.add(doc);db.commit();db.refresh(doc);return doc
 
 def _parse(path):

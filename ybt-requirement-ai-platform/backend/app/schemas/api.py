@@ -12,6 +12,9 @@ class ProjectCreate(BaseModel):
     name: str
     bank_name: str | None = None
     description: str | None = None
+    institution_id: int | None = None
+    project_status: str = "active"
+    confidentiality_level: str = "internal"
 
 
 class ProjectRead(OrmModel):
@@ -19,6 +22,10 @@ class ProjectRead(OrmModel):
     name: str
     bank_name: str | None
     description: str | None
+    institution_id: int | None = None
+    project_status: str = "active"
+    project_owner_id: int | None = None
+    confidentiality_level: str = "internal"
     created_at: datetime
     updated_at: datetime
 
@@ -87,7 +94,6 @@ class KnowledgeDocumentRead(OrmModel):
     file_name: str
     file_type: str
     source_type: str
-    storage_path: str
     created_at: datetime
 
 
@@ -119,7 +125,6 @@ class SqlFileRead(OrmModel):
     id: int
     project_id: int
     file_name: str
-    storage_path: str
     raw_sql: str
     created_at: datetime
     parse_result: SqlParseResultRead | None = None
@@ -261,7 +266,6 @@ class TemplateDocumentRead(OrmModel):
     project_id: int
     file_name: str
     file_type: str
-    storage_path: str
     sheet_names_json: list[Any]
     parse_status: str
     error_message: str | None
@@ -1014,7 +1018,6 @@ class TraceabilityTemplateDocumentRead(OrmModel):
     id: int
     project_id: int
     file_name: str
-    storage_path: str
     parse_status: str
     sheet_names_json: list[Any]
     detected_scenarios_json: list[Any]

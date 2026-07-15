@@ -20,6 +20,12 @@ class User(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(100))
+    email: Mapped[str | None] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    last_login_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[object | None] = mapped_column(DateTime(timezone=True))
 
 
 class Project(Base, TimestampMixin):
@@ -29,6 +35,10 @@ class Project(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     bank_name: Mapped[str | None] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
+    institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
+    project_status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    project_owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    confidentiality_level: Mapped[str] = mapped_column(String(50), default="internal")
 
     target_tables: Mapped[list["TargetTable"]] = relationship(back_populates="project")
     target_fields: Mapped[list["TargetField"]] = relationship(back_populates="project")

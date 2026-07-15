@@ -9,9 +9,28 @@ class Settings(BaseSettings):
     app_name: str = "YBT Requirement AI Platform"
     api_prefix: str = "/api"
     app_secret_key: str = ""
-    database_url: str = "postgresql+psycopg://ybt:ybt_password@postgres:5432/ybt_requirement_ai"
+    database_url: str = "sqlite:///./ybt.db"
     storage_dir: str = "/app/storage"
     cors_origins: str = "http://localhost:3000"
+    environment: str = "development"
+    auth_mode: str = "optional"
+    jwt_secret_key: str = ""
+    access_token_minutes: int = 15
+    refresh_token_days: int = 7
+    login_max_failures: int = 5
+    login_lock_seconds: int = 300
+    request_rate_limit_per_minute: int = 600
+    max_upload_bytes: int = 20 * 1024 * 1024
+    task_queue_provider: str = "inline"
+    redis_url: str = "redis://redis:6379/0"
+    celery_broker_url: str = "redis://redis:6379/0"
+    celery_result_backend: str = "redis://redis:6379/1"
+    storage_provider: str = "local"
+    s3_endpoint_url: str = ""
+    s3_bucket_name: str = ""
+    s3_region: str = "us-east-1"
+    database_pool_size: int = 10
+    database_max_overflow: int = 20
 
     llm_provider: str = "mock"
     llm_base_url: str = "https://api.openai.com/v1"
@@ -46,6 +65,21 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+    def validate_production_security(self) -> None:
+        if self.environment.lower() != "production":
+            return
+        missing = []
+        if self.auth_mode != "required":
+            missing.append("AUTH_MODE=required")
+        if len(self.jwt_secret_key) < 32:
+            missing.append("JWT_SECRET_KEY (at least 32 characters)")
+        if not self.app_secret_key:
+            missing.append("APP_SECRET_KEY")
+        if "*" in self.cors_origin_list:
+            missing.append("explicit CORS_ORIGINS")
+        if missing:
+            raise RuntimeError("Unsafe production configuration: " + ", ".join(missing))
 
 
 @lru_cache

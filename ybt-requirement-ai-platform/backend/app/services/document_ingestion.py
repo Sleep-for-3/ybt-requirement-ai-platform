@@ -1,15 +1,13 @@
-import os
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_settings
 from app.models import KnowledgeChunk, KnowledgeDocument
 from app.services.llm import get_llm_service
 from app.services.text_processing import chunk_text
 from app.services.vector import VectorRecord, get_vector_store
+from app.services.storage import get_storage_service
 
 
 SUPPORTED_TEXT_TYPES = {".txt", ".md", ".sql"}
@@ -27,7 +25,9 @@ async def ingest_document(
 
     content_bytes = await upload_file.read()
     text = content_bytes.decode("utf-8")
-    storage_path = _write_upload(project_id, upload_file.filename or f"document{suffix}", content_bytes)
+    storage_path = get_storage_service().save(
+        content_bytes, file_name=upload_file.filename or f"document{suffix}", project_id=project_id,
+    ).storage_key
 
     document = KnowledgeDocument(
         project_id=project_id,
@@ -82,14 +82,3 @@ async def ingest_document(
     db.commit()
     db.refresh(document)
     return document, chunks
-
-
-def _write_upload(project_id: int, original_name: str, content: bytes) -> str:
-    settings = get_settings()
-    upload_dir = Path(settings.storage_dir) / "projects" / str(project_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = original_name.replace("/", "_").replace("\\", "_")
-    storage_path = upload_dir / f"{uuid4().hex}-{safe_name}"
-    with open(storage_path, "wb") as file:
-        file.write(content)
-    return os.fspath(storage_path)
