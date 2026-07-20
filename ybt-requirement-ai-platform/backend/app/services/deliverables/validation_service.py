@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.models import DeliverablePackage, MappingEvidenceReference, PendingQuestion, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
+from app.models import CatalogColumn, DeliverablePackage, MappingEvidenceReference, PendingQuestion, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
 from app.services.deliverables.readiness_service import field_readiness
 
 
@@ -25,6 +25,9 @@ def validate_package(db, package_id: int) -> dict:
                 issues.append(_issue("error", field.id, "physical_source", "来源系统、表或字段不完整"))
             if item.tech_confirm_status != "confirmed": issues.append(_issue("error", field.id, "technical_confirmation", "技术溯源未正式确认"))
             if item.lineage_status == "stale": issues.append(_issue("warning", field.id, "stale_lineage", "技术溯源引用的脚本血缘已过期"))
+            catalog_match = db.scalar(select(CatalogColumn.id).where(CatalogColumn.project_id == package.project_id, CatalogColumn.enabled.is_(True), CatalogColumn.schema_name == (item.source_schema_name or ""), CatalogColumn.table_name == (item.source_table_english_name or ""), CatalogColumn.column_name == (item.source_field_english_name or "")).limit(1))
+            manual_confirmation = db.scalar(select(MappingEvidenceReference.id).where(MappingEvidenceReference.project_id == package.project_id, MappingEvidenceReference.mapping_type == "scenario_technical", MappingEvidenceReference.mapping_id == item.id, MappingEvidenceReference.evidence_type.in_(("catalog_column", "source_field", "manual_note"))).limit(1))
+            if not catalog_match and not manual_confirmation: issues.append(_issue("error", field.id, "unverified_physical_source", "来源字段必须存在于启用的数据目录或具备人工确认记录"))
         readiness = field_readiness(db, field.id)
         if readiness["status"] == "blocked": issues.append(_issue("error", field.id, "readiness", ";".join(readiness["blocking_reasons"])))
     open_high = db.scalar(select(PendingQuestion.id).where(PendingQuestion.project_id == package.project_id, PendingQuestion.target_table_id == package.target_table_id, PendingQuestion.priority == "high", PendingQuestion.question_status.not_in(("closed", "accepted"))).limit(1))

@@ -16,9 +16,9 @@ from app.models import (
     AuditLog, BackgroundJob, BackgroundJobItem, CaliberComparison, DeliverableEvidenceItem,
     DeliverableFieldItem, DeliverablePackage, DeliverablePackageVersion, DeliverableTemplate,
     DeliverableTemplateVersion, HistoricalCaliberImport, HistoricalCaliberItem, MappingEvidenceReference,
-    MartToYbtMapping, PendingQuestion, ProductScenario, Project, ScenarioBusinessMapping,
+    MartToYbtMapping, PendingQuestion, ProductScenario, Project, ProjectMembership, ScenarioBusinessMapping,
     ScenarioTechnicalLineage, SourceToMartMapping, StoredFile, TargetField, TargetTable,
-    TemplateColumnMapping, TemplateSheetMapping,
+    TemplateColumnMapping, TemplateSheetMapping, WorkflowInstance,
 )
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
@@ -29,7 +29,10 @@ from app.services.deliverables.source_to_mart_compiler import compile_source_to_
 from app.services.deliverables.validation_service import validate_package
 from app.services.deliverables.workbook import inspect_workbook, render_workbook
 from app.services.governance.audit import record_audit
+from app.services.governance.notifications import notify_user
+from app.services.governance.workflow import start_workflow
 from app.services.storage import get_storage_service
+from app.services.task_queue import get_task_queue
 
 router = APIRouter(tags=["deliverables"])
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -189,7 +192,13 @@ def reuse_historical(item_id: int, principal: CurrentPrincipal, payload: dict = 
 @router.post("/projects/{project_id}/caliber-comparisons", status_code=201)
 def create_comparison(project_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     _permission(db, principal, project_id, "deliverable.view")
+    for key, model in (("historical_import_id", HistoricalCaliberImport), ("target_field_id", TargetField), ("left_package_version_id", DeliverablePackageVersion), ("right_package_version_id", DeliverablePackageVersion)):
+        if payload.get(key) is not None:
+            _resource(db, model, int(payload[key]), project_id)
     left, right = payload.get("left", {}), payload.get("right", {})
+    if payload.get("left_package_version_id") and payload.get("right_package_version_id"):
+        left = _snapshot_comparable(db.get(DeliverablePackageVersion, int(payload["left_package_version_id"])).content_snapshot_json)
+        right = _snapshot_comparable(db.get(DeliverablePackageVersion, int(payload["right_package_version_id"])).content_snapshot_json)
     keys = sorted(set(left) | set(right)); result = {key: {"left": left.get(key), "right": right.get(key), "difference_type": semantic_diff(left.get(key), right.get(key))} for key in keys}
     comparison = CaliberComparison(project_id=project_id, historical_import_id=payload.get("historical_import_id"), target_field_id=payload.get("target_field_id"), left_package_version_id=payload.get("left_package_version_id"), right_package_version_id=payload.get("right_package_version_id"), result_json=result, created_by=principal.user_id)
     db.add(comparison); db.flush(); record_audit(db, action="compare_versions", resource_type="caliber_comparison", resource_id=comparison.id, actor_user_id=principal.user_id, project_id=project_id, after={"field_count": len(result)}); db.commit(); return _row(comparison)
@@ -214,8 +223,19 @@ def get_table_readiness(table_id: int, principal: CurrentPrincipal, db: Session 
 def create_question(project_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     project = _permission(db, principal, project_id, "question.manage")
     table = _resource(db, TargetTable, int(payload["target_table_id"]), project_id)
+    if payload.get("target_field_id") is not None:
+        target_field = _resource(db, TargetField, int(payload["target_field_id"]), project_id)
+        if target_field.target_table_id != table.id: raise HTTPException(400, "Target field does not belong to target table")
+    if payload.get("scenario_id") is not None:
+        _resource(db, ProductScenario, int(payload["scenario_id"]), project_id)
+    if payload.get("assigned_user_id") is not None:
+        membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == int(payload["assigned_user_id"]), ProjectMembership.status == "active"))
+        if membership is None: raise HTTPException(400, "Assigned user is not an active project member")
     question = PendingQuestion(institution_id=project.institution_id, project_id=project_id, target_table_id=table.id, target_field_id=payload.get("target_field_id"), scenario_id=payload.get("scenario_id"), question_type=payload.get("question_type", "other"), question_text=payload["question_text"], priority=payload.get("priority", "medium"), assigned_role=payload.get("assigned_role"), assigned_user_id=payload.get("assigned_user_id"), source_type=payload.get("source_type"), source_id=payload.get("source_id"), question_status="assigned" if payload.get("assigned_user_id") or payload.get("assigned_role") else "open")
-    db.add(question); db.flush(); record_audit(db, action="create_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"question_type": question.question_type, "priority": question.priority}); db.commit(); return _row(question)
+    db.add(question); db.flush(); record_audit(db, action="create_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"question_type": question.question_type, "priority": question.priority})
+    if question.assigned_user_id:
+        notify_user(db, question.assigned_user_id, "pending_question_assigned", "新的待确认问题", question.question_text[:200], project_id=project_id, resource_type="pending_question", resource_id=question.id)
+    db.commit(); return _row(question)
 
 
 @router.get("/projects/{project_id}/questions")
@@ -278,22 +298,38 @@ def get_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = 
 @router.post("/deliverables/{package_id}/generate")
 def generate_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.generate")
-    job = BackgroundJob(institution_id=package.institution_id, project_id=package.project_id, idempotency_key=uuid.uuid4().hex, job_type="deliverable_generate_field_items", status="running", progress=0, payload_summary_json={"package_id": package.id}, result_summary_json={}, created_by=principal.user_id or 0)
-    db.add(job); db.flush(); package.status = "generating"; package.generation_job_id = job.id
+    package.status = "generating"; db.commit()
+    job = get_task_queue().enqueue(db, job_type="deliverable_generate_field_items", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=uuid.uuid4().hex, payload_summary={"package_id": package.id}, handler=_deliverable_generate_handler)
+    package = db.get(DeliverablePackage, package.id); package.generation_job_id = job.id; db.commit()
+    return {"package": _package_detail(db, package), "job": _row(job)}
+
+
+def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
+    package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
+    if package is None or package.project_id != job.project_id: raise ValueError("Deliverable package not found")
     items = _ensure_field_items(db, package); success = failed = 0
+    prior_items = {row.item_key: row for row in db.scalars(select(BackgroundJobItem).where(BackgroundJobItem.background_job_id == job.id)).all()}
+    completed = {key for key, row in prior_items.items() if row.status == "completed"}
     for index, item in enumerate(items, 1):
+        db.refresh(job)
+        if job.status == "cancelled": break
+        if str(item.target_field_id) in completed:
+            success += 1; continue
         try:
             _sync_evidence_items(db, package, item.target_field_id)
             readiness = field_readiness(db, item.target_field_id); item.field_status = readiness["status"]; item.evidence_completeness = readiness["evidence_completeness"]; item.open_question_count = readiness["open_question_count"]
             business = list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.target_field_id == item.target_field_id)).all()); technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.target_field_id == item.target_field_id)).all())
             item.business_summary = "\n".join(row.final_content or row.ai_generated_content or "待确认" for row in business); item.technical_summary = "\n".join(row.final_content or row.ai_generated_content or "待确认" for row in technical)
             item.confidence_level = "confirmed" if readiness["status"] == "approved" else "evidence_supported" if readiness["evidence_completeness"] >= .5 else "unverified"
-            db.add(BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), status="completed", result_summary_json={"readiness": item.field_status})); success += 1
+            job_item = prior_items.get(str(item.target_field_id)) or BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), result_summary_json={})
+            job_item.status = "completed"; job_item.result_summary_json = {"readiness": item.field_status}; job_item.error_message = None; db.add(job_item); success += 1
         except Exception as exc:
-            db.add(BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), status="failed", result_summary_json={}, error_message=str(exc)[:1000])); failed += 1
+            job_item = prior_items.get(str(item.target_field_id)) or BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), result_summary_json={})
+            job_item.status = "failed"; job_item.result_summary_json = {}; job_item.error_message = str(exc)[:1000]; db.add(job_item); failed += 1
         job.progress = int(index / max(len(items), 1) * 100)
-    job.status = "partially_completed" if failed and success else "failed" if failed else "completed"; job.result_summary_json = {"success_count": success, "failed_count": failed}; job.finished_at = datetime.now(timezone.utc); package.status = "draft"
-    record_audit(db, action="generate_deliverable", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id, after=job.result_summary_json); db.commit(); return {"package": _package_detail(db, package), "job": _row(job)}
+    package.status = "draft" if job.status != "cancelled" else "generating"
+    result = {"success_count": success, "failed_count": failed, "total_count": len(items)}
+    record_audit(db, action="generate_deliverable", resource_type="deliverable_package", resource_id=package.id, actor_user_id=job.created_by, project_id=package.project_id, after=result); db.commit(); return result
 
 
 @router.post("/deliverables/{package_id}/validate")
@@ -303,7 +339,13 @@ def validate_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
 
 @router.post("/deliverables/{package_id}/submit-review")
 def submit_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.manage"); package.status = "pending_review"; record_audit(db, action="submit_deliverable_review", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id); db.commit(); return _row(package)
+    package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.manage")
+    validation = validate_package(db, package.id)
+    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
+    package.status = "pending_review"; db.flush()
+    instance = start_workflow(db, project_id=package.project_id, workflow_key="project_export_review", target_type="deliverable_package", target_id=package.id, created_by=principal.user_id or 0, assignments={})
+    record_audit(db, action="submit_deliverable_review", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"workflow_instance_id": instance.id}); db.commit()
+    return {"package": _row(package), "workflow_instance": _row(instance)}
 
 
 @router.post("/deliverables/{package_id}/render")
@@ -327,6 +369,8 @@ def approve_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessio
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.review"); validation = validate_package(db, package.id)
     if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
     if not package.generated_file_id: raise HTTPException(409, "Render the deliverable before approval")
+    workflow = db.scalar(select(WorkflowInstance).where(WorkflowInstance.project_id == package.project_id, WorkflowInstance.workflow_key == "project_export_review", WorkflowInstance.target_type == "deliverable_package", WorkflowInstance.target_id == package.id).order_by(WorkflowInstance.id.desc()))
+    if workflow is None or workflow.status != "approved": raise HTTPException(409, "Deliverable final review task has not been approved")
     package.version_no += 1; package.status = "approved"; package.approved_at = datetime.now(timezone.utc); package.approved_by = principal.user_id
     snapshot = _package_snapshot(db, package); version = DeliverablePackageVersion(project_id=package.project_id, deliverable_package_id=package.id, version_no=package.version_no, generated_file_id=package.generated_file_id, content_hash=package.content_hash or "", content_snapshot_json=snapshot, change_summary_json={}, approved_by=principal.user_id, approved_at=package.approved_at)
     db.add(version); db.flush(); record_audit(db, action="approve_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"version_no": version.version_no, "content_hash": version.content_hash}); db.commit(); return {"package": _row(package), "version": _row(version)}
@@ -335,6 +379,20 @@ def approve_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessio
 @router.get("/deliverables/{package_id}/versions")
 def list_deliverable_versions(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> list[dict]:
     package = _resource_visible(db, principal, DeliverablePackage, package_id); return [_row(item) for item in db.scalars(select(DeliverablePackageVersion).where(DeliverablePackageVersion.deliverable_package_id == package.id).order_by(DeliverablePackageVersion.version_no.desc())).all()]
+
+
+@router.get("/deliverable-package-versions/{version_id}")
+def get_deliverable_version(version_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    return _row(_resource_visible(db, principal, DeliverablePackageVersion, version_id))
+
+
+@router.get("/deliverable-package-versions/{version_id}/download")
+def download_deliverable_version(version_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
+    version = _resource_visible(db, principal, DeliverablePackageVersion, version_id, "deliverable.export")
+    stored = db.get(StoredFile, version.generated_file_id)
+    if stored is None or not stored.enabled: raise HTTPException(404, "Version file not found")
+    record_audit(db, action="download_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=version.project_id, after={"version_no": version.version_no}); db.commit()
+    return Response(get_storage_service().read(stored.storage_key), media_type=XLSX, headers={"Content-Disposition": f"attachment; filename=deliverable-version-{version.version_no}.xlsx"})
 
 
 @router.post("/source-to-mart-mappings/{mapping_id}/compile")
@@ -392,11 +450,23 @@ def _package_records(db, package):
     field_ids = [field.id for field in fields]
     questions=[_row(item) for item in db.scalars(select(PendingQuestion).where(PendingQuestion.project_id==package.project_id,PendingQuestion.target_table_id==package.target_table_id)).all()]
     evidence=[{"target_field_id":item.target_field_id,"evidence_type":item.evidence_type,"evidence_source":item.citation_summary_json.get("source_name"),"evidence_location":item.citation_summary_json.get("location"),"evidence_summary":item.claim_text,"citation":json.dumps(item.citation_summary_json,ensure_ascii=False),"claim_type":item.claim_type} for item in db.scalars(select(DeliverableEvidenceItem).where(DeliverableEvidenceItem.deliverable_package_id==package.id)).all()]
-    source_rows=[{"mapping_id":item.id,"source_to_mart_final_content":item.final_content,"source_to_mart_status":item.mapping_status,"source_system_name":item.source_system_summary,"source_field_name":item.source_fields_summary,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"priority_rule":item.priority_rule,"null_handling_rule":item.null_handling_rule} for item in db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id==package.project_id)).all()]
-    mart_rows=[{"mapping_id":item.id,"target_field_id":item.target_field_id,"mart_to_ybt_final_content":item.final_content,"mart_to_ybt_status":item.mapping_status,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"null_handling_rule":item.null_handling_rule} for item in db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.target_field_id.in_(field_ids))).all()]
+    mart_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.target_field_id.in_(field_ids))).all())
+    mart_field_ids = [item.mart_field_id for item in mart_mappings if item.mart_field_id]
+    source_rows=[{"mapping_id":item.id,"source_to_mart_final_content":item.final_content,"source_to_mart_status":item.mapping_status,"source_system_name":item.source_system_summary,"source_field_name":item.source_fields_summary,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"priority_rule":item.priority_rule,"null_handling_rule":item.null_handling_rule} for item in db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id==package.project_id, SourceToMartMapping.mart_field_id.in_(mart_field_ids))).all()]
+    mart_rows=[{"mapping_id":item.id,"target_field_id":item.target_field_id,"mart_to_ybt_final_content":item.final_content,"mart_to_ybt_status":item.mapping_status,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"null_handling_rule":item.null_handling_rule} for item in mart_mappings]
     reviews=[{"action":item.action,"resource_type":item.resource_type,"resource_id":item.resource_id,"reviewer":item.actor_user_id,"approved_at":item.created_at,"review_comment":json.dumps(item.after_summary_json,ensure_ascii=False)} for item in db.scalars(select(AuditLog).where(AuditLog.project_id==package.project_id,AuditLog.action.in_(("approve","approve_deliverable_version","submit_deliverable_review"))).order_by(AuditLog.id)).all()]
     return {"target_field":field_records,"scenario_business_mapping":business_records,"scenario_technical_lineage":technical_records,"pending_question":questions,"evidence":evidence,"source_to_mart":source_rows,"mart_to_ybt":mart_rows,"review_record":reviews,"lineage":technical_records,"change_impact":[]}
 def _sample_records(): return {"target_field":[{"target_table_code":"YBT_SAMPLE","target_table_name":"脱敏示例表","target_field_code":f"FIELD_{i:03d}","target_field_name":f"脱敏示例字段{i}","regulatory_definition":"用于模板预览的脱敏模拟定义","data_type":"VARCHAR","field_order":i} for i in range(1,21)],"scenario_business_mapping":[],"scenario_technical_lineage":[],"pending_question":[],"evidence":[],"source_to_mart":[],"mart_to_ybt":[],"review_record":[],"lineage":[],"change_impact":[]}
+
+
+def _snapshot_comparable(snapshot):
+    records = snapshot.get("records", {}) if isinstance(snapshot, dict) else {}
+    result = {}
+    for section in ("scenario_business_mapping", "scenario_technical_lineage", "source_to_mart", "mart_to_ybt"):
+        for index, row in enumerate(records.get(section, [])):
+            identity = row.get("target_field_code") or row.get("target_field_id") or row.get("mapping_id") or index
+            result[f"{section}:{identity}:{index}"] = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
+    return result
 
 
 def _sync_evidence_items(db, package, field_id):
@@ -411,5 +481,9 @@ def _sync_evidence_items(db, package, field_id):
         for ref in refs:
             key = (mapping_type, mapping_id, ref.evidence_type, ref.evidence_id)
             if key in existing: continue
-            db.add(DeliverableEvidenceItem(project_id=package.project_id, deliverable_package_id=package.id, target_field_id=field_id, scenario_id=scenario_id, mapping_type=mapping_type, mapping_id=mapping_id, evidence_type=ref.evidence_type, evidence_id=ref.evidence_id, claim_type="confirmed" if confirmed else "evidence_supported", claim_text=ref.evidence_summary or ref.quoted_content or ref.source_name, citation_summary_json={"source_name": ref.source_name, "location": ref.location_text}))
+            # Formal deliverables only carry curated summaries. Raw quoted
+            # evidence may be confidential/restricted and is never copied to
+            # package snapshots or exported workbooks.
+            safe_summary = ref.evidence_summary or f"已绑定 {ref.evidence_type} 证据，摘要待人工补充"
+            db.add(DeliverableEvidenceItem(project_id=package.project_id, deliverable_package_id=package.id, target_field_id=field_id, scenario_id=scenario_id, mapping_type=mapping_type, mapping_id=mapping_id, evidence_type=ref.evidence_type, evidence_id=ref.evidence_id, claim_type="confirmed" if confirmed else "evidence_supported", claim_text=safe_summary, citation_summary_json={"source_name": ref.source_name, "location": ref.location_text}))
             existing.add(key)

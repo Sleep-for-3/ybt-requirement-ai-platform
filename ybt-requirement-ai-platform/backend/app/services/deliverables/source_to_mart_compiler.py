@@ -1,13 +1,14 @@
 from sqlalchemy import select
 
-from app.models import ScenarioBusinessMapping, ScenarioTechnicalLineage, SourceToMartMapping
+from app.models import MartToYbtMapping, ScenarioBusinessMapping, ScenarioTechnicalLineage, SourceToMartMapping
 
 
 def compile_source_to_mart(db, mapping_id: int) -> dict:
     mapping = db.get(SourceToMartMapping, mapping_id)
     if mapping is None: raise ValueError("Source-to-mart mapping not found")
-    business = list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.project_id == mapping.project_id)).all())
-    technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.project_id == mapping.project_id)).all())
+    target_field_ids = select(MartToYbtMapping.target_field_id).where(MartToYbtMapping.project_id == mapping.project_id, MartToYbtMapping.mart_field_id == mapping.mart_field_id)
+    business = list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.project_id == mapping.project_id, ScenarioBusinessMapping.target_field_id.in_(target_field_ids))).all())
+    technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.project_id == mapping.project_id, ScenarioTechnicalLineage.target_field_id.in_(target_field_ids))).all())
     systems = sorted({item.source_system_name for item in technical if item.source_system_name})
     sources = sorted({f"{item.source_schema_name or ''}.{item.source_table_english_name or ''}.{item.source_field_english_name or ''}".strip(".") for item in technical if item.source_field_english_name})
     questions = [item.open_questions for item in business + technical if item.open_questions]

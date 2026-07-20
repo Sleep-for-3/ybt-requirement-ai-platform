@@ -655,14 +655,26 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
     downloaded = client.get(f"{base}/deliverables/{package['id']}/download"); downloaded.raise_for_status()
     workbook = load_workbook(BytesIO(downloaded.content), data_only=False); sheet = workbook["业务口径及技术溯源表"]
     if sheet["A3"].value != "DELIVERY_CERT_TYPE" or sheet["D3"].value != "=1+1" or "A1:C1" not in [str(item) for item in sheet.merged_cells.ranges] or not sheet["A2"].font.bold: raise AssertionError("正式 Excel 未保留内容、公式、样式或合并单元格")
+    _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
     approved1 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
     approved2 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     comparison = _post_json(client, f"{base}/projects/{project_id}/caliber-comparisons", {"left_package_version_id": approved1["version"]["id"], "right_package_version_id": approved2["version"]["id"], "left": {"source_field": "cert_type"}, "right": {"source_field": "cert_type_v2"}})
     cross = client.get(f"{base}/deliverables/{package['id']}", headers={"Authorization": f"Bearer {outsider_token}"})
     if cross.status_code != 404: raise AssertionError("跨银行用户可读取正式交付包")
     client.headers["Authorization"] = admin_authorization
     return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "rendered_file_id": rendered["file_id"], "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames)}
+
+
+def _approve_delivery_workflow(client, base, project_id, package_id, users, admin_authorization):
+    submitted = _post_json(client, f"{base}/deliverables/{package_id}/submit-review", {})
+    workflow_id = submitted["workflow_instance"]["id"]
+    task = next(item for item in _get_json(client, f"{base}/projects/{project_id}/tasks") if item["workflow_instance_id"] == workflow_id and item["step_key"] == "final_review")
+    session = _post_json(client, f"{base}/auth/login", {"username": "smoke_final_reviewer", "password": users["final_reviewer"]["password"]})
+    client.headers["Authorization"] = f"Bearer {session['access_token']}"
+    _post_json(client, f"{base}/review-tasks/{task['id']}/approve", {"comment": "正式交付包最终审核通过"})
+    client.headers["Authorization"] = admin_authorization
 
 
 def _delivery_template_bytes():

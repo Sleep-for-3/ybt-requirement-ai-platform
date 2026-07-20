@@ -54,12 +54,16 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
         if preview_limit is not None:
             rows = rows[:preview_limit]
         mapped_columns = columns_by_sheet.get(mapping.id, [])
+        horizontal = mapping.repeat_direction == "horizontal" or any(column.write_mode == "repeat_by_scenario" for column in mapped_columns)
         for offset, record in enumerate(rows):
-            row_number = mapping.data_start_row + offset
+            row_number = mapping.data_start_row if horizontal else mapping.data_start_row + offset
             _copy_template_row(sheet, mapping.data_start_row, row_number)
             for column in mapped_columns:
-                col_number = column_index_from_string(column.excel_column)
+                base_column = column_index_from_string(column.excel_column)
+                col_number = base_column + (offset * len(mapped_columns) if horizontal else 0)
                 cell = sheet.cell(row_number, col_number)
+                if horizontal and offset and sheet.cell(mapping.data_start_row, base_column).has_style:
+                    cell._style = copy(sheet.cell(mapping.data_start_row, base_column)._style)
                 if isinstance(cell, MergedCell):
                     warnings.append({"type": "merge_conflict", "sheet": sheet.title, "cell": f"{column.excel_column}{row_number}"})
                     continue
@@ -71,14 +75,18 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
                     continue
                 if column.write_mode == "fill_blank_only" and cell.value not in (None, ""):
                     continue
-                cell.value = value
+                if column.write_mode == "append" and cell.value not in (None, "") and value not in (None, ""):
+                    cell.value = f"{cell.value}\n{value}"
+                else:
+                    cell.value = value
                 if isinstance(value, str) and len(value) > 30:
                     alignment = copy(cell.alignment)
                     alignment.wrap_text = True
                     alignment.vertical = "top"
                     cell.alignment = alignment
                     sheet.row_dimensions[row_number].height = max(sheet.row_dimensions[row_number].height or 15, min(120, 15 + len(value) // 20 * 12))
-            _apply_merges(sheet, mapping, mapped_columns, row_number, record, rows, offset, warnings)
+            if not horizontal:
+                _apply_merges(sheet, mapping, mapped_columns, row_number, record, rows, offset, warnings)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue(), warnings

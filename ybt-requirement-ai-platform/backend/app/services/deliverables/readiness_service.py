@@ -16,8 +16,9 @@ def field_readiness(db, target_field_id: int) -> dict:
     technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.target_field_id == field.id)).all())
     business_confirmed = sum(item.business_confirm_status == "confirmed" for item in business)
     technical_confirmed = sum(item.tech_confirm_status == "confirmed" for item in technical)
-    source_to_mart = list(db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id == field.project_id)).all())
     mart_to_ybt = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.target_field_id == field.id)).all())
+    mart_field_ids = [item.mart_field_id for item in mart_to_ybt if item.mart_field_id]
+    source_to_mart = list(db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id == field.project_id, SourceToMartMapping.mart_field_id.in_(mart_field_ids))).all()) if mart_field_ids else []
     questions = list(db.scalars(select(PendingQuestion).where(PendingQuestion.target_field_id == field.id, PendingQuestion.question_status.not_in(("closed", "accepted")))).all())
     dimensions = {
         "regulatory_definition": bool(field.regulatory_description or field.regulatory_original_definition),

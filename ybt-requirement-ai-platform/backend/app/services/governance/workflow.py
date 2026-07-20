@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     ImpactAnalysis,
+    DeliverablePackage,
     MartToYbtMapping,
     MappingEvidenceReference,
     MappingVersion,
@@ -62,6 +63,7 @@ TARGET_MODELS = {
     "source_to_mart": SourceToMartMapping,
     "mart_to_ybt": MartToYbtMapping,
     "scenario_review_package": ScenarioReviewPackage,
+    "deliverable_package": DeliverablePackage,
     "impact_analysis": ImpactAnalysis,
 }
 
