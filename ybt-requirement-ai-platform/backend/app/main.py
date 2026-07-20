@@ -42,6 +42,7 @@ from app.api import (
     traceability_templates,
     traceability_export,
     lineage,
+    deliverables,
 )
 from app.core.settings import get_settings
 from app.core.observability import RequestContextMiddleware
@@ -113,3 +114,4 @@ app.include_router(catalog.router, prefix=settings.api_prefix, dependencies=secu
 app.include_router(metadata_imports.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(profiling.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(lineage.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(deliverables.router, prefix=settings.api_prefix)

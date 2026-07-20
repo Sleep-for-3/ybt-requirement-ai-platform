@@ -11,15 +11,16 @@ from app.services.auth.dependencies import Principal
 
 INSTITUTION_ROLES = {"institution_admin", "security_admin", "auditor", "member"}
 PROJECT_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "project_manager": {"project.view", "project.manage", "business.edit", "business.review", "technical.edit", "technical.review", "final.review", "knowledge.manage", "catalog.manage", "audit.read", "export", "task.manage", "lineage.view", "lineage.manage", "lineage.review", "script.upload", "script.sync", "impact.view", "impact.review"},
-    "business_analyst": {"project.view", "business.edit", "knowledge.search", "export", "task.claim"},
-    "technical_analyst": {"project.view", "technical.edit", "catalog.search", "profile.request", "knowledge.search", "export", "task.claim", "lineage.view", "script.upload", "impact.view"},
-    "business_reviewer": {"project.view", "business.review", "knowledge.search", "export", "task.claim"},
-    "technical_reviewer": {"project.view", "technical.review", "catalog.search", "knowledge.search", "export", "task.claim", "lineage.view", "lineage.review", "impact.view", "impact.review"},
-    "final_reviewer": {"project.view", "final.review", "export", "task.claim"},
-    "knowledge_manager": {"project.view", "knowledge.manage", "knowledge.search", "export", "task.claim"},
+    "project_manager": {"project.view", "project.manage", "business.edit", "business.review", "technical.edit", "technical.review", "final.review", "knowledge.manage", "catalog.manage", "audit.read", "export", "task.manage", "lineage.view", "lineage.manage", "lineage.review", "script.upload", "script.sync", "impact.view", "impact.review", "deliverable.view", "deliverable.manage", "deliverable.generate", "deliverable.review", "deliverable.export", "template.manage", "historical_caliber.import", "historical_caliber.reuse", "question.manage", "question.answer"},
+    "business_analyst": {"project.view", "business.edit", "knowledge.search", "export", "task.claim", "deliverable.view", "deliverable.generate", "question.answer"},
+    "technical_analyst": {"project.view", "technical.edit", "catalog.search", "profile.request", "knowledge.search", "export", "task.claim", "lineage.view", "script.upload", "impact.view", "deliverable.view", "deliverable.generate", "question.answer"},
+    "business_reviewer": {"project.view", "business.review", "knowledge.search", "export", "task.claim", "deliverable.view"},
+    "technical_reviewer": {"project.view", "technical.review", "catalog.search", "knowledge.search", "export", "task.claim", "lineage.view", "lineage.review", "impact.view", "impact.review", "deliverable.view"},
+    "final_reviewer": {"project.view", "final.review", "export", "task.claim", "deliverable.view", "deliverable.review", "deliverable.export"},
+    "knowledge_manager": {"project.view", "knowledge.manage", "knowledge.search", "export", "task.claim", "deliverable.view", "historical_caliber.import", "historical_caliber.reuse"},
     "data_catalog_manager": {"project.view", "catalog.manage", "catalog.search", "profile.request", "export", "task.claim", "lineage.view", "lineage.manage", "script.sync", "impact.view"},
-    "viewer": {"project.view", "export", "lineage.view"},
+    "viewer": {"project.view", "export", "lineage.view", "deliverable.view"},
+    "auditor": {"project.view", "audit.read", "deliverable.view", "deliverable.export"},
 }
 
 T = TypeVar("T")

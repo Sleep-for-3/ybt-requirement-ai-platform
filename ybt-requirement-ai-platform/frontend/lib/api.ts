@@ -181,6 +181,13 @@ export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog
 export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; parse_summary_json:Record<string,unknown>; warnings_json:string[] };
 export type KnowledgeUnit = { id:number; document_id:number; knowledge_type:string; unit_type:string; title?:string|null; content:string; source_file_name:string; source_sheet_name?:string|null; source_page_no?:number|null; source_heading?:string|null; source_cell_range?:string|null; target_field_code?:string|null; enabled:boolean };
 export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[] };
+export type DeliverableTemplate = { id:number;project_id:number;template_name:string;template_type:string;description?:string|null;enabled:boolean;is_default:boolean;current_version_no:number;current_version_id?:number|null };
+export type DeliverableTemplateVersion = { id:number;project_id:number;template_id:number;version_no:number;file_hash:string;sheet_config_json:Array<Record<string,unknown>>;parse_status:string;warnings_json:unknown[] };
+export type DeliverableFieldItem = { id:number;target_field_id:number;field_order:number;field_status:string;business_summary?:string|null;technical_summary?:string|null;evidence_completeness:number;confidence_level:string;open_question_count:number };
+export type DeliverablePackage = { id:number;project_id:number;package_name:string;package_type:string;target_table_id:number;template_version_id:number;status:string;version_no:number;generated_file_id?:number|null;summary_json:Record<string,unknown>;warnings_json:unknown[];field_count:number;approved_field_count:number;items:DeliverableFieldItem[] };
+export type PendingQuestion = { id:number;project_id:number;target_table_id:number;target_field_id?:number|null;scenario_id?:number|null;question_type:string;question_text:string;question_status:string;priority:string;assigned_role?:string|null;assigned_user_id?:number|null;resolution_text?:string|null };
+export type HistoricalCaliberImport = { id:number;project_id:number;import_name:string;document_type:string;status:string;parse_summary_json:Record<string,number>;warnings_json:unknown[] };
+export type HistoricalCaliberItem = { id:number;target_field_code?:string|null;target_field_name?:string|null;scenario_name?:string|null;business_content?:string|null;technical_content?:string|null;source_sheet_name:string;source_cell_range:string;match_status:string };
 
 export type RegulatoryKnowledgeItem = {
   id: number;
@@ -542,4 +549,12 @@ export async function apiDownload(path: string): Promise<{ blob: Blob; fileName:
   const disposition = response.headers.get("content-disposition") || "";
   const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : "业务口径及技术溯源表.xlsx" };
+}
+
+export async function apiPostDownload(path: string, body: unknown = {}): Promise<{ blob: Blob; fileName: string }> {
+  const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) });
+  if (!response.ok) throw new Error(await response.text());
+  const disposition = response.headers.get("content-disposition") || "";
+  const name = disposition.match(/filename=([^;]+)/i)?.[1] || "preview.xlsx";
+  return { blob: await response.blob(), fileName: name.replaceAll('"', "") };
 }

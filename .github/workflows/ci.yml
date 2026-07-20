@@ -37,6 +37,11 @@ jobs:
         shell: bash
         run: |
           set +e
+          python -m pytest -q tests/test_deliverables.py
+          deliverable_status=$?
+          if [ "$deliverable_status" -ne 0 ]; then
+            exit "$deliverable_status"
+          fi
           python -m pytest -q tests/test_sql_lineage.py
           lineage_status=$?
           if [ "$lineage_status" -ne 0 ]; then

@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 from docx import Document
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font
 
 
 def main() -> None:
@@ -516,6 +517,11 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             raise AssertionError(f"Cross-bank lineage read must be hidden, got {cross_bank_lineage.status_code}")
         client.headers["Authorization"] = admin_authorization
 
+        delivery_smoke = _run_delivery_smoke(
+            client, base, project_id, debit_scenario, mart_field,
+            governance_users, outsider_session["access_token"], admin_authorization,
+        )
+
         output = {
             "project_id": project_id,
             "knowledge_document_ids": [item["id"] for item in knowledge_documents],
@@ -585,8 +591,89 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             "lineage_impact_status": lineage_impact_reviewed["status"],
             "lineage_excel_bytes": len(lineage_excel.content),
             "cross_bank_lineage_status": cross_bank_lineage.status_code,
+            "deliverable": delivery_smoke,
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, outsider_token, admin_authorization):
+    table = _post_json(client, f"{base}/target-tables", {"project_id": project_id, "table_code": "YBT_DELIVERY", "table_name": "正式交付验收表"})
+    field = _post_json(client, f"{base}/fields", {"project_id": project_id, "target_table_id": table["id"], "field_code": "DELIVERY_CERT_TYPE", "field_name": "交付证件类型", "field_type": "VARCHAR(20)", "regulatory_description": "正式交付验收使用的脱敏监管定义"})
+    business = _post_json(client, f"{base}/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"business_definition": "借记卡有效客户证件类型", "final_content": "仅包含当前有效借记卡客户，排除注销客户。"})
+    technical = _post_json(client, f"{base}/target-fields/{field['id']}/scenarios/{scenario['id']}/technical-lineage", {"business_mapping_id": business["id"], "source_system_name": "ECIF", "source_database_name": "ECIF_DB", "source_schema_name": "main", "source_table_english_name": "ecif_customer", "source_field_english_name": "cert_type", "processing_logic": "直接取值并按监管代码映射", "final_content": "ECIF_DB.main.ecif_customer.cert_type"})
+    _post_json(client, f"{base}/mappings/scenario_business/{business['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏业务确认记录", "evidence_summary": "业务范围已由业务人员核验"})
+    _post_json(client, f"{base}/mappings/scenario_technical/{technical['id']}/evidence", {"evidence_type": "catalog_column", "source_name": "ecif_customer.cert_type", "evidence_summary": "物理来源字段已由科技人员核验"})
+    workflow = _post_json(client, f"{base}/projects/{project_id}/tasks/batch-create", {"workflow_key": "scenario_mapping_review", "targets": [{"target_field_id": field["id"], "scenario_id": scenario["id"]}], "assignments": {role: users[role]["id"] for role in users}})
+    workflow_id = workflow["workflow_instance_ids"][0]
+    tasks = {item["step_key"]: item for item in _get_json(client, f"{base}/projects/{project_id}/tasks") if item["workflow_instance_id"] == workflow_id}
+    for step, role in [("business_draft", "business_analyst"), ("business_review", "business_reviewer"), ("technical_draft", "technical_analyst"), ("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
+        session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": users[role]["password"]})
+        client.headers["Authorization"] = f"Bearer {session['access_token']}"
+        _post_json(client, f"{base}/review-tasks/{tasks[step]['id']}/approve", {"comment": f"deliverable {step} approved"})
+    client.headers["Authorization"] = admin_authorization
+    mart_mapping = _post_json(client, f"{base}/target-fields/{field['id']}/mart-to-ybt-mappings", {"mart_field_id": mart_field["id"], "mapping_name": "正式交付集市映射", "final_content": "mart_customer.cert_type 映射至 DELIVERY_CERT_TYPE"})
+    _post_json(client, f"{base}/mappings/mart_to_ybt/{mart_mapping['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏集市映射确认", "evidence_summary": "集市到一表通映射已由科技人员核验"})
+    double = _post_json(client, f"{base}/projects/{project_id}/tasks/batch-create", {"workflow_key": "double_layer_mapping_review", "targets": [{"target_type": "mart_to_ybt", "target_id": mart_mapping["id"]}], "assignments": {"technical_reviewer": users["technical_reviewer"]["id"], "final_reviewer": users["final_reviewer"]["id"]}})
+    double_id = double["workflow_instance_ids"][0]
+    double_tasks = {item["step_key"]: item for item in _get_json(client, f"{base}/projects/{project_id}/tasks") if item["workflow_instance_id"] == double_id}
+    for step, role in [("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
+        session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": users[role]["password"]})
+        client.headers["Authorization"] = f"Bearer {session['access_token']}"
+        _post_json(client, f"{base}/review-tasks/{double_tasks[step]['id']}/approve", {"comment": f"deliverable {step} approved"})
+    client.headers["Authorization"] = admin_authorization
+
+    template_content = _delivery_template_bytes()
+    template = _post_file(client, f"{base}/projects/{project_id}/deliverable-templates/upload", {"template_name": "银行正式交付模板", "template_type": "full_delivery_package"}, {"file": ("银行正式交付模板.xlsx", BytesIO(template_content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    version_id = template["version"]["id"]
+    sheet_mappings = [
+        {"business_section": "target_field", "sheet_name": "业务口径及技术溯源表", "header_row_start": 2, "header_row_end": 2, "data_start_row": 3, "columns": [{"business_field": "target_field_code", "excel_column": "A", "required": True}, {"business_field": "target_field_name", "excel_column": "B", "required": True}, {"business_field": "regulatory_definition", "excel_column": "C"}]},
+        {"business_section": "source_to_mart", "sheet_name": "业务系统到监管集市口径", "data_start_row": 2, "columns": [{"business_field": "source_to_mart_final_content", "excel_column": "A"}]},
+        {"business_section": "mart_to_ybt", "sheet_name": "监管集市到一表通口径", "data_start_row": 2, "columns": [{"business_field": "mart_to_ybt_final_content", "excel_column": "A"}]},
+        {"business_section": "evidence", "sheet_name": "证据引用清单", "data_start_row": 2, "columns": [{"business_field": "evidence_type", "excel_column": "A"}, {"business_field": "evidence_summary", "excel_column": "B"}]},
+        {"business_section": "pending_question", "sheet_name": "待确认问题", "data_start_row": 2, "columns": [{"business_field": "question_text", "excel_column": "A"}, {"business_field": "question_status", "excel_column": "B"}]},
+        {"business_section": "review_record", "sheet_name": "审核记录", "data_start_row": 2, "columns": [{"business_field": "action", "excel_column": "A"}, {"business_field": "approved_at", "excel_column": "B"}]},
+    ]
+    _post_json(client, f"{base}/deliverable-template-versions/{version_id}/configure", {"sheet_mappings": sheet_mappings})
+    preview = client.post(f"{base}/deliverable-template-versions/{version_id}/preview-render", json={})
+    preview.raise_for_status(); load_workbook(BytesIO(preview.content), data_only=False)
+
+    historical = _post_file(client, f"{base}/projects/{project_id}/historical-calibers/upload", {"import_name": "历史业务和技术口径", "document_type": "full_package"}, {"file": ("历史口径.xlsx", BytesIO(_delivery_history_bytes()), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    historical_item = historical["items"][0]
+    if historical_item["match_status"] != "matched": raise AssertionError("历史口径未自动唯一匹配")
+    reuse = _post_json(client, f"{base}/historical-caliber-items/{historical_item['id']}/reuse", {})
+    if reuse["final_content_overwritten"]: raise AssertionError("历史复用覆盖了人工 final_content")
+
+    question = _post_json(client, f"{base}/projects/{project_id}/questions", {"target_table_id": table["id"], "target_field_id": field["id"], "scenario_id": scenario["id"], "question_type": "code_mapping", "question_text": "确认码值映射版本", "priority": "high", "assigned_role": "technical_analyst"})
+    package = _post_json(client, f"{base}/projects/{project_id}/deliverables", {"package_name": "正式交付验收包", "target_table_id": table["id"], "template_version_id": version_id})
+    _post_json(client, f"{base}/deliverables/{package['id']}/generate", {})
+    blocked = _post_json(client, f"{base}/deliverables/{package['id']}/validate", {})
+    if not any(item["code"] == "high_priority_question" for item in blocked["issues"]): raise AssertionError("高优问题未阻止正式批准")
+    _post_json(client, f"{base}/questions/{question['id']}/answer", {"resolution_text": "采用当前监管代码集"}); _post_json(client, f"{base}/questions/{question['id']}/accept", {})
+    validation = _post_json(client, f"{base}/deliverables/{package['id']}/validate", {})
+    if validation["error_count"]: raise AssertionError(f"正式交付校验仍有错误: {validation['issues']}")
+    rendered = _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    downloaded = client.get(f"{base}/deliverables/{package['id']}/download"); downloaded.raise_for_status()
+    workbook = load_workbook(BytesIO(downloaded.content), data_only=False); sheet = workbook["业务口径及技术溯源表"]
+    if sheet["A3"].value != "DELIVERY_CERT_TYPE" or sheet["D3"].value != "=1+1" or "A1:C1" not in [str(item) for item in sheet.merged_cells.ranges] or not sheet["A2"].font.bold: raise AssertionError("正式 Excel 未保留内容、公式、样式或合并单元格")
+    approved1 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
+    _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    approved2 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
+    comparison = _post_json(client, f"{base}/projects/{project_id}/caliber-comparisons", {"left_package_version_id": approved1["version"]["id"], "right_package_version_id": approved2["version"]["id"], "left": {"source_field": "cert_type"}, "right": {"source_field": "cert_type_v2"}})
+    cross = client.get(f"{base}/deliverables/{package['id']}", headers={"Authorization": f"Bearer {outsider_token}"})
+    if cross.status_code != 404: raise AssertionError("跨银行用户可读取正式交付包")
+    client.headers["Authorization"] = admin_authorization
+    return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "rendered_file_id": rendered["file_id"], "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames)}
+
+
+def _delivery_template_bytes():
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "业务口径及技术溯源表"; sheet.merge_cells("A1:C1"); sheet["A1"] = "银行正式交付模板"; sheet["A2"] = "字段代码"; sheet["B2"] = "字段名称"; sheet["C2"] = "监管定义"; sheet["D3"] = "=1+1"; sheet["A2"].font = Font(bold=True); sheet.freeze_panes = "A3"
+    for name in ["业务系统到监管集市口径", "监管集市到一表通口径", "字段级血缘", "证据引用清单", "待确认问题", "历史口径差异", "脚本变更影响", "审核记录", "版本说明"]:
+        target = workbook.create_sheet(name); target.append([name, "状态", "说明"])
+    stream = BytesIO(); workbook.save(stream); return stream.getvalue()
+
+
+def _delivery_history_bytes():
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "历史业务口径"; sheet.append(["字段代码", "字段名称", "业务场景", "业务口径", "技术溯源", "来源系统", "来源schema", "来源表英文名", "来源字段英文名"]); sheet.append(["DELIVERY_CERT_TYPE", "交付证件类型", "借记卡", "历史有效客户业务口径", "历史 ECIF 技术溯源", "ECIF", "main", "ecif_customer", "cert_type"]); stream = BytesIO(); workbook.save(stream); return stream.getvalue()
 
 
 def _upload_knowledge(

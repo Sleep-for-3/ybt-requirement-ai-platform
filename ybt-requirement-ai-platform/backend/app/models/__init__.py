@@ -77,6 +77,12 @@ from app.models.lineage import (
     ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion,
     SqlStatement, TemplateVariable,
 )
+from app.models.deliverables import (
+    CaliberComparison, DeliverableEvidenceItem, DeliverableFieldItem, DeliverablePackage,
+    DeliverablePackageVersion, DeliverableTemplate, DeliverableTemplateVersion,
+    HistoricalCaliberImport, HistoricalCaliberItem, PendingQuestion,
+    TemplateColumnMapping, TemplateSheetMapping,
+)
 
 __all__ = [
     "AuditLog",
@@ -161,4 +167,16 @@ __all__ = [
     "ScriptFileVersion",
     "SqlStatement",
     "TemplateVariable",
+    "CaliberComparison",
+    "DeliverableEvidenceItem",
+    "DeliverableFieldItem",
+    "DeliverablePackage",
+    "DeliverablePackageVersion",
+    "DeliverableTemplate",
+    "DeliverableTemplateVersion",
+    "HistoricalCaliberImport",
+    "HistoricalCaliberItem",
+    "PendingQuestion",
+    "TemplateColumnMapping",
+    "TemplateSheetMapping",
 ]

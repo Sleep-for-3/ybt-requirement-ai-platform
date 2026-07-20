@@ -38,7 +38,17 @@ def upgrade() -> None:
             op.add_column("candidate_source_recommendations", column)
     existing_logs = {item["name"] for item in sa.inspect(bind).get_columns("sql_execution_logs")}
     if "profile_task_id" not in existing_logs:
-        op.add_column("sql_execution_logs", sa.Column("profile_task_id", sa.Integer(), sa.ForeignKey("column_profile_tasks.id"), nullable=True))
+        # SQLite cannot add a separately emitted foreign-key constraint with
+        # ALTER TABLE.  Batch mode keeps this migration portable while still
+        # preserving the foreign key on databases that support ALTER directly.
+        with op.batch_alter_table("sql_execution_logs") as batch_op:
+            batch_op.add_column(sa.Column("profile_task_id", sa.Integer(), nullable=True))
+            batch_op.create_foreign_key(
+                "fk_sql_execution_logs_profile_task_id",
+                "column_profile_tasks",
+                ["profile_task_id"],
+                ["id"],
+            )
 
 
 def downgrade() -> None:
