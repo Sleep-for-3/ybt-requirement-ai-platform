@@ -6,6 +6,7 @@ from sqlalchemy import func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    ImpactAnalysis,
     MartToYbtMapping,
     MappingEvidenceReference,
     MappingVersion,
@@ -16,6 +17,7 @@ from app.models import (
     ScenarioReviewPackage,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
+    ScriptChangeSet,
     SourceToMartMapping,
     WorkflowDefinition,
     WorkflowInstance,
@@ -46,6 +48,11 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
     "project_export_review": ("项目导出审核", [
         {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
     ]),
+    "lineage_change_review": ("血缘变更复核", [
+        {"step_key": "impact_analysis", "task_type": "review", "assignee_role": "technical_analyst"},
+        {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
+        {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
+    ]),
 }
 
 TARGET_MODELS = {
@@ -55,6 +62,7 @@ TARGET_MODELS = {
     "source_to_mart": SourceToMartMapping,
     "mart_to_ybt": MartToYbtMapping,
     "scenario_review_package": ScenarioReviewPackage,
+    "impact_analysis": ImpactAnalysis,
 }
 
 
@@ -75,6 +83,10 @@ def start_workflow(
         raise HTTPException(status_code=400, detail="Workflow has no steps")
     if workflow_key == "scenario_mapping_review" and target_type != "scenario_review_package":
         raise HTTPException(status_code=400, detail="Scenario review workflow requires a scenario_review_package target")
+    if workflow_key == "lineage_change_review" and target_type != "impact_analysis":
+        raise HTTPException(status_code=400, detail="Lineage change workflow requires an impact_analysis target")
+    if workflow_key != "lineage_change_review" and target_type == "impact_analysis":
+        raise HTTPException(status_code=400, detail="Impact analyses require lineage_change_review")
     if workflow_key != "scenario_mapping_review" and target_type == "scenario_review_package":
         raise HTTPException(status_code=400, detail="Scenario review packages require scenario_mapping_review")
     package = validate_review_package(db, project_id, target_id) if target_type == "scenario_review_package" else None
@@ -154,7 +166,16 @@ def claim_task(db: Session, task: ReviewTask, principal: Principal) -> ReviewTas
     return task
 
 
-def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: str, comment: str | None = None, return_to_step: str | None = None) -> ReviewTask:
+def decide_task(
+    db: Session,
+    task: ReviewTask,
+    principal: Principal,
+    decision: str,
+    comment: str | None = None,
+    return_to_step: str | None = None,
+    *,
+    impact_decision: str | None = None,
+) -> ReviewTask:
     instance = _current_instance(db, task)
     _require_current_step(instance, task)
     _require_task_actor(db, task, principal)
@@ -178,6 +199,11 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
     else:
         package = None
         snapshot = _snapshot_target(db, task.project_id, task.target_type, task.target_id)
+    if task.target_type == "impact_analysis":
+        effective_impact_decision = impact_decision or ("confirm_no_impact" if decision == "approved" else None)
+        if effective_impact_decision:
+            snapshot = {**snapshot, "impact_review_decision": effective_impact_decision}
+            _record_impact_review_decision(db, task.target_id, task.step_key, effective_impact_decision, principal.user_id, comment)
     db.add(ReviewDecision(
         review_task_id=task.id,
         decision=decision,
@@ -188,6 +214,10 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
     ))
     task.status = decision
     task.completed_at = datetime.now(UTC)
+    if task.target_type == "impact_analysis" and decision == "rejected":
+        impact = db.get(ImpactAnalysis, task.target_id)
+        if impact is not None:
+            impact.status = "rejected"
     steps = list(_definition(db, instance.workflow_key).steps_json)
     if decision == "approved":
         position = next(index for index, item in enumerate(steps) if item["step_key"] == task.step_key)
@@ -199,6 +229,8 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
                 finalize_review_package(db, package)
             elif instance.workflow_key == "double_layer_mapping_review":
                 _finalize_double_layer_target(db, task.target_type, task.target_id, principal.username)
+            elif instance.workflow_key == "lineage_change_review":
+                _finalize_lineage_impact(db, task.target_id)
         else:
             next_step = steps[position + 1]["step_key"]
             instance.status = "in_progress"
@@ -232,7 +264,7 @@ def decide_task(db: Session, task: ReviewTask, principal: Principal, decision: s
                 target_task = reset_task
         if target_task:
             notify_user(db, target_task.assignee_user_id, "review_rejected", "审核退回", comment or "已退回修改", project_id=task.project_id, resource_type="review_task", resource_id=target_task.id)
-    record_audit(db, action="approve" if decision == "approved" else "reject", resource_type="review_task", resource_id=task.id, actor_user_id=principal.user_id, project_id=task.project_id, after={"decision": decision, "return_to_step": return_to_step, "comment": comment})
+    record_audit(db, action="approve" if decision == "approved" else "reject", resource_type="review_task", resource_id=task.id, actor_user_id=principal.user_id, project_id=task.project_id, after={"decision": decision, "impact_decision": impact_decision, "return_to_step": return_to_step, "comment": comment})
     db.commit()
     db.refresh(task)
     return task
@@ -357,3 +389,62 @@ def _finalize_double_layer_target(db: Session, target_type: str, target_id: int,
         change_note="五阶段治理审核通过自动保存版本",
         created_by=reviewed_by,
     ))
+
+
+def _finalize_lineage_impact(db: Session, impact_id: int) -> None:
+    impact = db.get(ImpactAnalysis, impact_id)
+    if impact is None:
+        raise HTTPException(status_code=404, detail="Impact analysis not found")
+    verified_at = datetime.now(UTC)
+    models = {
+        "scenario_technical": ScenarioTechnicalLineage,
+        "source_to_mart": SourceToMartMapping,
+        "mart_to_ybt": MartToYbtMapping,
+    }
+    for reference in impact.affected_mapping_ids_json:
+        mapping_type, _, raw_id = str(reference).partition(":")
+        model = models.get(mapping_type)
+        mapping = db.get(model, int(raw_id)) if model is not None and raw_id.isdigit() else None
+        if mapping is not None and mapping.project_id == impact.project_id:
+            mapping.lineage_status = "verified"
+            mapping.lineage_last_verified_at = verified_at
+    impact.status = "reviewed"
+
+
+def _record_impact_review_decision(
+    db: Session,
+    impact_id: int,
+    step_key: str,
+    action: str,
+    decided_by: int,
+    comment: str | None,
+) -> None:
+    allowed = {
+        "confirm_no_impact",
+        "confirm_after_mapping_update",
+        "require_business_confirmation",
+        "reject_script_version",
+    }
+    if action not in allowed:
+        raise HTTPException(status_code=400, detail="Unsupported lineage impact decision")
+    impact = db.get(ImpactAnalysis, impact_id)
+    if impact is None:
+        raise HTTPException(status_code=404, detail="Impact analysis not found")
+    history = list(impact.summary_json.get("review_decisions", []))
+    history.append({
+        "step_key": step_key,
+        "action": action,
+        "decided_by": decided_by,
+        "comment": comment,
+        "decided_at": datetime.now(UTC).isoformat(),
+    })
+    impact.summary_json = {**impact.summary_json, "review_decisions": history}
+    if action == "require_business_confirmation":
+        impact.status = "business_confirmation_required"
+        question = comment or "需业务确认本次脚本变更影响"
+        impact.open_questions_json = list(dict.fromkeys([*impact.open_questions_json, question]))
+    elif action == "reject_script_version":
+        impact.status = "rejected"
+        change_set = db.get(ScriptChangeSet, impact.change_set_id)
+        if change_set is not None:
+            change_set.status = "rejected"

@@ -298,6 +298,8 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 - 数据库查询结果只作为证据，不作为自动交付 SQL。
 - `confidential` 和 `restricted` 知识禁止发送到外部 embedding；外发的允许内容先脱敏，模型配置不得包含明文 key/token/password/secret。
 - citation 保存或返回前校验真实、启用且对当前项目可见的 `KnowledgeUnit`；无证据问答只返回“待确认”。
+- Git 血缘同步的远程主机由 `LINEAGE_GIT_ALLOWED_HOSTS` 白名单限制；离线本地仓库必须显式配置 `LINEAGE_GIT_ALLOWED_LOCAL_ROOTS`。
+- Git Token 只能通过 `credential_env_name` 引用的环境变量注入 Git 子进程，不写入 URL、数据库、任务 payload 或错误日志。
 
 ## 生产治理与多人协作
 

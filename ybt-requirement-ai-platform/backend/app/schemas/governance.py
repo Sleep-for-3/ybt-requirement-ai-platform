@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -113,6 +113,16 @@ class BatchReviewTaskCreate(BaseModel):
 class TaskDecisionRequest(BaseModel):
     comment: str | None = None
     return_to_step: str | None = None
+
+
+class ImpactTaskDecisionRequest(BaseModel):
+    action: Literal[
+        "confirm_no_impact",
+        "confirm_after_mapping_update",
+        "require_business_confirmation",
+        "reject_script_version",
+    ]
+    comment: str | None = None
 
 
 class TaskAssignRequest(BaseModel):

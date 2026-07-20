@@ -457,6 +457,49 @@ def main() -> None:
         ybt_approved = _get_json(client, f"{base}/mart-to-ybt-mappings/{ybt_final['id']}")
         if source_approved["mapping_status"] != "approved" or ybt_approved["mapping_status"] != "approved":
             raise AssertionError("双层口径治理工作流未完成正式审核")
+
+        lineage_v1 = b"""-- v1 sanitized fixture
+insert into mart_customer (cert_type, customer_name)
+select e.cert_type, e.customer_name from ecif_customer e where e.cert_type is not null;
+insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
+"""
+        lineage_v2 = b"""-- v2 sanitized fixture comment changed
+insert into mart_customer (cert_type)
+select case when e.cert_type='01' then 'A' else e.cert_type end
+from ecif_customer e left join ecif_customer j on e.cert_type=j.cert_type
+where e.cert_type <> '99';
+insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
+"""
+        lineage_upload_v1 = _post_file(client, f"{base}/projects/{project_id}/scripts/upload", {"relative_path": "load_customer.sql", "dialect": "sqlite"}, {"file": ("load_customer.sql", BytesIO(lineage_v1), "text/plain")})
+        shell_upload = _post_file(client, f"{base}/projects/{project_id}/scripts/upload", {"relative_path": "run_customer.sh"}, {"file": ("run_customer.sh", BytesIO(b"psql -f load_customer.sql\n"), "text/plain")})
+        shell_detail = _get_json(client, f"{base}/scripts/{shell_upload['script_file_id']}")
+        if not shell_detail["dependencies"] or shell_detail["dependencies"][0]["child_script_file_id"] != lineage_upload_v1["script_file_id"]:
+            raise AssertionError("Shell 到 SQL 依赖未解析")
+        lineage_graph = _get_json(client, f"{base}/scripts/{lineage_upload_v1['script_file_id']}/lineage?direction=both&depth=5")
+        if not any(edge["transformation_expression"] for edge in lineage_graph["edges"] if edge["edge_type"] in {"derives_from", "maps_code"}):
+            raise AssertionError("字段级 SQL 血缘未生成")
+        lineage_excel = client.get(f"{base}/projects/{project_id}/export/lineage-workbook")
+        lineage_excel.raise_for_status()
+        lineage_book = load_workbook(BytesIO(lineage_excel.content))
+        if "字段级血缘" not in lineage_book.sheetnames or "影响分析" not in lineage_book.sheetnames:
+            raise AssertionError("血缘 Excel 缺少必需 Sheet")
+        lineage_upload_v2 = _post_file(client, f"{base}/projects/{project_id}/scripts/upload", {"relative_path": "load_customer.sql", "dialect": "sqlite"}, {"file": ("load_customer.sql", BytesIO(lineage_v2), "text/plain")})
+        if lineage_upload_v2["version_no"] != 2 or lineage_upload_v2["impact_severity"] != "critical":
+            raise AssertionError("v2 未生成 critical 变更影响")
+        lineage_impact = _get_json(client, f"{base}/lineage/impacts/{lineage_upload_v2['impact_id']}")
+        if lineage_impact["workflow"]["current_step"] != "impact_analysis":
+            raise AssertionError("血缘三阶段复核未自动创建")
+        impact_tasks = {item["step_key"]: item for item in lineage_impact["workflow"]["tasks"]}
+        for step, role in [("impact_analysis", "technical_analyst"), ("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
+            role_session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": governance_users[role]["password"]})
+            client.headers["Authorization"] = f"Bearer {role_session['access_token']}"
+            _post_json(client, f"{base}/review-tasks/{impact_tasks[step]['id']}/approve", {"comment": f"lineage {step} smoke approved"})
+        client.headers["Authorization"] = admin_authorization
+        lineage_impact_reviewed = _get_json(client, f"{base}/lineage/impacts/{lineage_upload_v2['impact_id']}")
+        source_after_lineage_review = _get_json(client, f"{base}/source-to-mart-mappings/{source_final['id']}")
+        ybt_after_lineage_review = _get_json(client, f"{base}/mart-to-ybt-mappings/{ybt_final['id']}")
+        if lineage_impact_reviewed["status"] != "reviewed" or source_after_lineage_review["lineage_status"] != "verified" or ybt_after_lineage_review["lineage_status"] != "verified":
+            raise AssertionError("血缘最终审核后未恢复 verified")
         batch_job_response = client.post(f"{base}/projects/{project_id}/batch/generate-business-drafts", headers={"Idempotency-Key": "smoke-business-batch"}, json={"field_ids": []})
         batch_job_response.raise_for_status()
         batch_job = _get_json(client, f"{base}/jobs/{batch_job_response.json()['id']}")
@@ -468,6 +511,9 @@ def main() -> None:
         cross_bank_response = client.get(f"{base}/projects/{project_id}", headers={"Authorization": f"Bearer {outsider_session['access_token']}"})
         if cross_bank_response.status_code != 404:
             raise AssertionError(f"Cross-bank project read must be hidden, got {cross_bank_response.status_code}")
+        cross_bank_lineage = client.get(f"{base}/scripts/{lineage_upload_v1['script_file_id']}", headers={"Authorization": f"Bearer {outsider_session['access_token']}"})
+        if cross_bank_lineage.status_code != 404:
+            raise AssertionError(f"Cross-bank lineage read must be hidden, got {cross_bank_lineage.status_code}")
         client.headers["Authorization"] = admin_authorization
 
         output = {
@@ -533,6 +579,12 @@ def main() -> None:
             "background_job_status": batch_job["status"],
             "audit_log_count": len(audit_rows),
             "cross_bank_status": cross_bank_response.status_code,
+            "lineage_script_version": lineage_upload_v2["version_no"],
+            "lineage_edge_count": len(lineage_graph["edges"]),
+            "lineage_change_categories": lineage_upload_v2["change_categories"],
+            "lineage_impact_status": lineage_impact_reviewed["status"],
+            "lineage_excel_bytes": len(lineage_excel.content),
+            "cross_bank_lineage_status": cross_bank_lineage.status_code,
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
 

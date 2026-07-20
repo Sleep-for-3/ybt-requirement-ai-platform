@@ -21,7 +21,23 @@ class Settings(BaseSettings):
     login_lock_seconds: int = 300
     request_rate_limit_per_minute: int = 600
     max_upload_bytes: int = 20 * 1024 * 1024
+    lineage_zip_max_total_bytes: int = 100 * 1024 * 1024
+    lineage_zip_max_file_count: int = 2000
+    lineage_script_max_bytes: int = 10 * 1024 * 1024
+    lineage_repository_max_bytes: int = 500 * 1024 * 1024
+    lineage_repository_max_file_count: int = 10000
+    lineage_git_allowed_hosts: str = "github.com,gitee.com"
+    lineage_git_allowed_local_roots: str = ""
     task_queue_provider: str = "inline"
+
+    @property
+    def lineage_git_allowed_host_list(self) -> list[str]:
+        return [item.strip().lower() for item in self.lineage_git_allowed_hosts.split(",") if item.strip()]
+
+    @property
+    def lineage_git_allowed_local_root_list(self) -> list[str]:
+        return [item.strip() for item in self.lineage_git_allowed_local_roots.split(",") if item.strip()]
+
     redis_url: str = "redis://redis:6379/0"
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"

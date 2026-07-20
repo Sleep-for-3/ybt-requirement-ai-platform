@@ -245,6 +245,9 @@ class ScenarioTechnicalLineage(Base, TimestampMixin):
     confidence_level: Mapped[str] = mapped_column(String(50), default="medium")
     open_questions: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str | None] = mapped_column(String(100))
+    lineage_status: Mapped[str] = mapped_column(String(50), default="not_linked", index=True)
+    lineage_last_verified_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    lineage_change_set_id: Mapped[int | None] = mapped_column(ForeignKey("script_change_sets.id"), index=True)
 
 
 class RegulatoryKnowledgeItem(Base, TimestampMixin):
@@ -356,6 +359,9 @@ class SourceToMartMapping(Base, TimestampMixin):
     created_by: Mapped[str | None] = mapped_column(String(100))
     reviewed_by: Mapped[str | None] = mapped_column(String(100))
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    lineage_status: Mapped[str] = mapped_column(String(50), default="not_linked", index=True)
+    lineage_last_verified_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    lineage_change_set_id: Mapped[int | None] = mapped_column(ForeignKey("script_change_sets.id"), index=True)
 
 
 class MartToYbtMapping(Base, TimestampMixin):
@@ -383,6 +389,9 @@ class MartToYbtMapping(Base, TimestampMixin):
     created_by: Mapped[str | None] = mapped_column(String(100))
     reviewed_by: Mapped[str | None] = mapped_column(String(100))
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    lineage_status: Mapped[str] = mapped_column(String(50), default="not_linked", index=True)
+    lineage_last_verified_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    lineage_change_set_id: Mapped[int | None] = mapped_column(ForeignKey("script_change_sets.id"), index=True)
 
 
 class MappingEvidenceReference(Base):
@@ -421,6 +430,14 @@ class MappingEvidenceReference(Base):
             "metadata_sync_task",
             "column_profile",
             "profile_snapshot",
+            "script_file",
+            "script_file_version",
+            "sql_statement",
+            "script_dependency",
+            "lineage_node",
+            "lineage_edge",
+            "script_change_set",
+            "impact_analysis",
         }
 
 

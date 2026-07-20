@@ -111,7 +111,19 @@ export type ScenarioTechnicalLineage = {
   final_content?: string | null;
   confidence_level: string;
   open_questions?: string | null;
+  lineage_status: string;
+  lineage_last_verified_at?: string | null;
+  lineage_change_set_id?: number | null;
 };
+
+export type ScriptFile = { id:number;project_id:number;relative_path:string;file_name:string;file_type:string;logical_target_name?:string|null;enabled:boolean;current_version_no:number };
+export type ScriptVersion = { id:number;version_no:number;file_hash:string;normalized_hash:string;parse_status:string;dialect?:string|null;warnings:string[];git_commit_sha?:string|null;created_at:string };
+export type ScriptDependency = { id:number;child_script_file_id?:number|null;dependency_type:string;call_expression:string;condition_expression?:string|null;source_line_start?:number|null;source_line_end?:number|null;confidence_level:string;warnings:string[] };
+export type LineageNode = { id:number;node_type:string;logical_name:string;database_name?:string|null;schema_name?:string|null;table_name?:string|null;column_name?:string|null;catalog_column_id?:number|null;source_field_id?:number|null;mart_field_id?:number|null;target_field_id?:number|null;unresolved_flag:boolean;metadata:Record<string,unknown> };
+export type LineageEdge = { id:number;source_node_id:number;target_node_id:number;edge_type:string;transformation_type?:string|null;transformation_expression?:string|null;join_condition?:string|null;filter_condition?:string|null;aggregation_rule?:string|null;code_mapping_rule?:string|null;source_line_start?:number|null;source_line_end?:number|null;confidence_level:string;evidence:Record<string,unknown> };
+export type LineageGraph = { nodes:LineageNode[];edges:LineageEdge[];direction:string;depth:number;truncated:boolean };
+export type ScriptChange = { id:number;script_file_id:number;from_version_id?:number|null;to_version_id?:number|null;change_type:string;status:string;summary:Record<string,unknown>;severity:string;impact_id?:number|null;created_at:string };
+export type ImpactAnalysis = { id:number;project_id:number;change_set_id:number;status:string;severity:string;affected_target_field_ids:number[];affected_mart_field_ids:number[];affected_mapping_ids:string[];summary:Record<string,unknown>;open_questions:string[];workflow?:{id:number;status:string;current_step?:string|null;tasks:Array<{id:number;step_key:string;status:string;assignee_user_id?:number|null;assignee_role?:string|null}>}|null };
 
 export type ScenarioReviewPackageView = {
   id: number;
@@ -407,6 +419,9 @@ export type SourceToMartMapping = {
   ai_generated_content?: string | null;
   final_content?: string | null;
   confidence_level: string;
+  lineage_status: string;
+  lineage_last_verified_at?: string | null;
+  lineage_change_set_id?: number | null;
 };
 
 export type MartToYbtMapping = {
@@ -429,6 +444,9 @@ export type MartToYbtMapping = {
   ai_generated_content?: string | null;
   final_content?: string | null;
   confidence_level: string;
+  lineage_status: string;
+  lineage_last_verified_at?: string | null;
+  lineage_change_set_id?: number | null;
 };
 
 export type MappingEvidence = {

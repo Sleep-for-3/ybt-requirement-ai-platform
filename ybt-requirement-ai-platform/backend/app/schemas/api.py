@@ -661,6 +661,9 @@ class SourceToMartMappingRead(OrmModel):
     created_by: str | None
     reviewed_by: str | None
     reviewed_at: datetime | None
+    lineage_status: str
+    lineage_last_verified_at: datetime | None
+    lineage_change_set_id: int | None
 
 
 class MartToYbtMappingCreate(BaseModel):
@@ -725,6 +728,9 @@ class MartToYbtMappingRead(OrmModel):
     created_by: str | None
     reviewed_by: str | None
     reviewed_at: datetime | None
+    lineage_status: str
+    lineage_last_verified_at: datetime | None
+    lineage_change_set_id: int | None
 
 
 class MappingEvidenceCreate(BaseModel):
@@ -955,6 +961,9 @@ class ScenarioTechnicalLineageRead(OrmModel):
     open_questions: str | None
     created_at: datetime
     updated_at: datetime
+    lineage_status: str
+    lineage_last_verified_at: datetime | None
+    lineage_change_set_id: int | None
     created_by: str | None
 
 

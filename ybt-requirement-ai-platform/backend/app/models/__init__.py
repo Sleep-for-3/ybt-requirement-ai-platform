@@ -72,6 +72,11 @@ from app.models.governance import (
     WorkflowDefinition,
     WorkflowInstance,
 )
+from app.models.lineage import (
+    CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate,
+    ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion,
+    SqlStatement, TemplateVariable,
+)
 
 __all__ = [
     "AuditLog",
@@ -144,4 +149,16 @@ __all__ = [
     "StoredFile",
     "WorkflowDefinition",
     "WorkflowInstance",
+    "CodeRepository",
+    "ImpactAnalysis",
+    "LineageEdge",
+    "LineageNode",
+    "LineageResolutionCandidate",
+    "ScriptChangeItem",
+    "ScriptChangeSet",
+    "ScriptDependency",
+    "ScriptFile",
+    "ScriptFileVersion",
+    "SqlStatement",
+    "TemplateVariable",
 ]

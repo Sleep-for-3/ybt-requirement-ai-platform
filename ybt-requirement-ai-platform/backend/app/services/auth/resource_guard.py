@@ -10,7 +10,7 @@ from app.models import (
     MartField, MartTable, MartToYbtMapping, MetadataImportDocument, MetadataSyncTask, NaturalLanguageTask,
     ProductScenario, RagEvaluationCase, RagEvaluationRun, ScenarioBusinessMapping, ScenarioTechnicalLineage,
     SourceField, SourceTable, SourceToMartMapping, TargetField, TargetTable, TemplateDocument,
-    TraceabilityTemplateDocument,
+    TraceabilityTemplateDocument, CodeRepository, LineageNode, ScriptFile, ScriptChangeSet, ImpactAnalysis,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
 from app.services.auth.permission_service import PermissionService
@@ -56,6 +56,14 @@ async def guard_project_resource(
 def _permission(method: str, path: str) -> str:
     if "export" in path:
         return "export"
+    if "/lineage" in path or "/scripts" in path:
+        if "resolution-candidates" in path or path.endswith("/unbind"):
+            return "lineage.manage"
+        return "lineage.view" if method == "GET" else "script.upload"
+    if "/code-repositories" in path:
+        return "lineage.view" if method == "GET" else "script.sync"
+    if "/impacts" in path:
+        return "impact.view" if method == "GET" else "impact.review"
     if "/knowledge" in path or "/documents" in path:
         return "knowledge.search" if method == "GET" or path.endswith(("/search", "/ask")) else "knowledge.manage"
     if any(part in path for part in ["/datasources", "/metadata-", "/catalog"]):
@@ -78,6 +86,9 @@ def _path_resource(db: Session, path: str, params: dict):
         ("datasource_id", DataSource), ("column_id", CatalogColumn), ("recommendation_id", CandidateSourceRecommendation),
         ("lineage_id", ScenarioTechnicalLineage), ("scenario_id", ProductScenario), ("system_id", BusinessSystem),
         ("run_id", RagEvaluationRun), ("case_id", RagEvaluationCase), ("unit_id", KnowledgeUnit),
+        ("node_id", LineageNode), ("script_file_id", ScriptFile), ("change_set_id", ScriptChangeSet),
+        ("impact_id", ImpactAnalysis),
+        ("repository_id", CodeRepository),
     ]
     for key, model in candidates:
         if key in params:
