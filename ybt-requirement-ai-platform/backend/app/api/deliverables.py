@@ -9,6 +9,7 @@ from io import BytesIO
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
 from openpyxl import Workbook
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -25,6 +26,7 @@ from app.services.auth.permission_service import PermissionService
 from app.schemas.deliverables import (
     DeliverableCreateRequest,
     PendingQuestionCreateRequest,
+    PendingQuestionAnswerRequest,
     PendingQuestionUpdateRequest,
     TemplateConfigureRequest,
 )
@@ -321,9 +323,9 @@ def update_question(question_id: int, payload: PendingQuestionUpdateRequest, pri
 
 
 @router.post("/questions/{question_id}/answer")
-def answer_question(question_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+def answer_question(question_id: int, payload: PendingQuestionAnswerRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     question = _resource_visible(db, principal, PendingQuestion, question_id, "question.answer")
-    question.resolution_text = payload.get("resolution_text", ""); question.resolved_by = principal.user_id; question.question_status = "answered"
+    question.resolution_text = payload.resolution_text; question.resolved_by = principal.user_id; question.question_status = "answered"
     record_audit(db, action="answer_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, project_id=question.project_id, after={"question_status": "answered"}); db.commit(); return _row(question)
 
 
@@ -611,7 +613,32 @@ def approve_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessio
         return {"package": _row(package), "version": _row(existing), "idempotent": True}
     package.version_no += 1; package.status = "approved"; package.approved_at = datetime.now(timezone.utc); package.approved_by = principal.user_id
     snapshot = _package_snapshot(db, package); version = DeliverablePackageVersion(project_id=package.project_id, deliverable_package_id=package.id, version_no=package.version_no, generated_file_id=package.generated_file_id, workflow_instance_id=workflow.id, content_hash=package.content_hash or "", review_snapshot_hash=snapshot_hash, review_submission_hash=expected_submission_hash, content_snapshot_json=snapshot, change_summary_json={}, approved_by=principal.user_id, approved_at=package.approved_at)
-    db.add(version); db.flush(); record_audit(db, action="approve_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"version_no": version.version_no, "content_hash": version.content_hash}); db.commit(); return {"package": _row(package), "version": _row(version)}
+    db.add(version)
+    try:
+        db.flush()
+        record_audit(db, action="approve_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"version_no": version.version_no, "content_hash": version.content_hash})
+        notify_user(db, package.created_by, "deliverable_approved", "正式交付包已批准", f"{package.package_name} 的版本 {version.version_no} 已批准", project_id=package.project_id, resource_type="deliverable_package_version", resource_id=version.id)
+        db.commit()
+        return {"package": _row(package), "version": _row(version), "idempotent": False}
+    except IntegrityError:
+        db.rollback()
+        package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.review")
+        existing = db.scalar(select(DeliverablePackageVersion).where(
+            DeliverablePackageVersion.project_id == package.project_id,
+            DeliverablePackageVersion.deliverable_package_id == package.id,
+            or_(
+                DeliverablePackageVersion.workflow_instance_id == workflow.id,
+                DeliverablePackageVersion.review_snapshot_hash == snapshot_hash,
+            ),
+        ))
+        if existing is None:
+            raise
+        package.status = "approved"
+        package.version_no = existing.version_no
+        package.approved_at = existing.approved_at
+        package.approved_by = existing.approved_by
+        db.commit()
+        return {"package": _row(package), "version": _row(existing), "idempotent": True}
 
 
 @router.get("/deliverables/{package_id}/versions")
@@ -843,6 +870,11 @@ def _generation_fingerprint(db: Session, package: DeliverablePackage) -> str:
         TargetField.project_id == package.project_id,
         TargetField.target_table_id == package.target_table_id,
     ).order_by(TargetField.id)).all())
+    mart_to_ybt = _fingerprint_rows(db, MartToYbtMapping, (
+        MartToYbtMapping.project_id == package.project_id,
+        MartToYbtMapping.target_field_id.in_(field_ids),
+    ))
+    mart_field_ids = sorted({row["mart_field_id"] for row in mart_to_ybt if row.get("mart_field_id")})
     payload = {
         "package": [package.id, package.project_id, package.target_table_id, package.template_version_id],
         "fields": _fingerprint_rows(db, TargetField, (
@@ -857,10 +889,12 @@ def _generation_fingerprint(db: Session, package: DeliverablePackage) -> str:
             ScenarioTechnicalLineage.project_id == package.project_id,
             ScenarioTechnicalLineage.target_field_id.in_(field_ids),
         )),
-        "mart_to_ybt": _fingerprint_rows(db, MartToYbtMapping, (
-            MartToYbtMapping.project_id == package.project_id,
-            MartToYbtMapping.target_field_id.in_(field_ids),
+        "source_to_mart": _fingerprint_rows(db, SourceToMartMapping, (
+            SourceToMartMapping.project_id == package.project_id,
+            SourceToMartMapping.mart_field_id.in_(mart_field_ids),
         )),
+        "mart_to_ybt": mart_to_ybt,
+        "lineage_versions": build_lineage_records(db, package.project_id, package.target_table_id),
     }
     evidence_references = []
     for mapping_type, rows in (

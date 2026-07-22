@@ -59,6 +59,7 @@ def build_lineage_records(db, project_id: int, target_table_id: int) -> list[dic
         result.append({
             "source_script": _safe_relative_path(script.relative_path),
             "script_version": version.version_no,
+            "script_version_hash": version.file_hash,
             "source_database": redact_content(source.database_name or ""),
             "source_schema": redact_content(source.schema_name or ""),
             "source_table": redact_content(source.table_name or ""),
@@ -94,14 +95,19 @@ def build_change_impact_records(db, project_id: int, target_table_id: int) -> li
         SourceToMartMapping.project_id == project_id,
         SourceToMartMapping.mart_field_id.in_(mart_field_ids),
     )).all()) if mart_field_ids else []
-    relevant_mapping_ids = {mapping.id for mapping in mart_to_ybt + source_to_mart}
+    relevant_mapping_ids = {
+        "source_to_mart": {mapping.id for mapping in source_to_mart},
+        "mart_to_ybt": {mapping.id for mapping in mart_to_ybt},
+    }
 
     impacts = list(db.scalars(select(ImpactAnalysis).where(ImpactAnalysis.project_id == project_id).order_by(ImpactAnalysis.id)).all())
     result = []
     for impact in impacts:
         affected_fields = field_ids.intersection(impact.affected_target_field_ids_json or [])
-        affected_mappings = relevant_mapping_ids.intersection(_numeric_ids(impact.affected_mapping_ids_json or []))
-        if not affected_fields and not affected_mappings:
+        typed_affected_mappings = _typed_mapping_ids(impact.affected_mapping_ids_json or [])
+        affected_source_to_mart = relevant_mapping_ids["source_to_mart"].intersection(typed_affected_mappings["source_to_mart"])
+        affected_mart_to_ybt = relevant_mapping_ids["mart_to_ybt"].intersection(typed_affected_mappings["mart_to_ybt"])
+        if not affected_fields and not affected_source_to_mart and not affected_mart_to_ybt:
             continue
         change_set = db.scalar(select(ScriptChangeSet).where(
             ScriptChangeSet.project_id == project_id,
@@ -143,8 +149,8 @@ def build_change_impact_records(db, project_id: int, target_table_id: int) -> li
             "affected_target_table": table.table_code,
             "affected_target_field": ", ".join(field_names),
             "affected_scenario": ", ".join(str(item) for item in impact.affected_scenario_mapping_ids_json or []),
-            "affected_source_to_mart_mapping": ", ".join(str(item.id) for item in source_to_mart if item.id in affected_mappings),
-            "affected_mart_to_ybt_mapping": ", ".join(str(item.id) for item in mart_to_ybt if item.id in affected_mappings),
+            "affected_source_to_mart_mapping": ", ".join(str(item.id) for item in source_to_mart if item.id in affected_source_to_mart),
+            "affected_mart_to_ybt_mapping": ", ".join(str(item.id) for item in mart_to_ybt if item.id in affected_mart_to_ybt),
             "change_summary": _change_summary(items),
             "review_decision": decision,
             "reviewer": reviewer,
@@ -206,11 +212,14 @@ def _safe_relative_path(value: str) -> str:
     return redact_content(normalized)
 
 
-def _numeric_ids(values: list) -> set[int]:
-    result = set()
+def _typed_mapping_ids(values: list) -> dict[str, set[int]]:
+    result = {"source_to_mart": set(), "mart_to_ybt": set()}
     for value in values:
+        mapping_type, separator, raw_id = str(value).partition(":")
+        if not separator or mapping_type not in result:
+            continue
         try:
-            result.add(int(str(value).split(":")[-1]))
+            result[mapping_type].add(int(raw_id))
         except ValueError:
             continue
     return result

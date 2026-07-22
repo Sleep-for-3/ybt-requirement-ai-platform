@@ -15,6 +15,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models import (
     ImpactAnalysis,
+    DeliverablePackage,
     LineageEdge,
     LineageNode,
     MartField,
@@ -32,6 +33,7 @@ from app.models import (
     WorkflowInstance,
 )
 from app.services.storage import get_storage_service
+from app.services.deliverables.lineage_records import build_change_impact_records
 from app.services.deliverables.workbook import render_workbook
 
 
@@ -76,6 +78,8 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         assert current["final_content"] == "人工确认前的业务最终内容"; assert "历史建议" in current["ai_generated_content"]
 
         question = _post(client, f"/api/projects/{project['id']}/questions", {"target_table_id": table["id"], "target_field_id": field["id"], "scenario_id": scenario["id"], "question_type": "source_field", "question_text": "来源字段需科技确认", "priority": "high", "assigned_role": "technical_analyst"})
+        assert client.post(f"/api/questions/{question['id']}/answer", json={}).status_code == 422
+        assert client.post(f"/api/questions/{question['id']}/answer", json={"resolution_text": "   "}).status_code == 422
         other_project = _post(client, "/api/projects", {"name": "隔离项目"}); other_table = _post(client, "/api/target-tables", {"project_id": other_project["id"], "table_code": "OTHER", "table_name": "其他表"}); other_field = _post(client, "/api/fields", {"project_id": other_project["id"], "target_table_id": other_table["id"], "field_code": "OTHER_FIELD", "field_name": "其他字段"})
         cross_reference = client.post(f"/api/projects/{project['id']}/questions", json={"target_table_id": table["id"], "target_field_id": other_field["id"], "question_text": "不应允许的跨项目引用"})
         assert cross_reference.status_code == 404
@@ -240,7 +244,16 @@ def test_render_uses_current_sql_lineage_and_change_impact_without_cross_project
             change_set = ScriptChangeSet(project_id=project["id"], script_file_id=script.id, from_version_id=old_version.id, to_version_id=current_version.id, change_type="modified", status="completed")
             db.add(change_set); db.flush()
             db.add(ScriptChangeItem(change_set_id=change_set.id, change_category="字段转换规则调整", entity_type="lineage_edge", old_value_json={}, new_value_json={}, severity="medium"))
-            db.add(ImpactAnalysis(project_id=project["id"], change_set_id=change_set.id, status="reviewed", severity="medium", affected_target_field_ids_json=[field["id"]]))
+            mart_table = MartTable(project_id=project["id"], table_code="MART_LINEAGE", table_name="血缘集市表")
+            db.add(mart_table); db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_LINEAGE_FIELD", field_name="血缘集市字段")
+            db.add(mart_field); db.flush()
+            source_mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源层口径", mapping_status="approved")
+            ybt_mapping = MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="目标层口径", mapping_status="approved")
+            db.add_all([source_mapping, ybt_mapping]); db.flush()
+            assert source_mapping.id == ybt_mapping.id
+            db.add(ImpactAnalysis(project_id=project["id"], change_set_id=change_set.id, status="reviewed", severity="medium", affected_target_field_ids_json=[field["id"]], affected_mapping_ids_json=[f"source_to_mart:{source_mapping.id}"]))
+            source_mapping_id = source_mapping.id
 
             other_script = ScriptFile(project_id=other_project["id"], relative_path="etl/CROSS_PROJECT_SECRET.sql", file_name="CROSS_PROJECT_SECRET.sql", file_type="sql", current_version_no=1)
             db.add(other_script); db.flush()
@@ -251,8 +264,20 @@ def test_render_uses_current_sql_lineage_and_change_impact_without_cross_project
             db.add_all([other_source, other_target]); db.flush()
             db.add(LineageEdge(project_id=other_project["id"], script_file_version_id=other_version.id, source_node_id=other_source.id, target_node_id=other_target.id, edge_type="column_lineage", confidence_level="high", enabled=True))
             db.commit()
+            current_version_id = current_version.id
+
+        with factory() as db:
+            impact_records = build_change_impact_records(db, project["id"], table["id"])
+            assert impact_records[0]["affected_source_to_mart_mapping"] == str(source_mapping_id)
+            assert impact_records[0]["affected_mart_to_ybt_mapping"] == ""
 
         package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "SQL 血缘正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
+        generated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        with factory() as db:
+            db.get(ScriptFileVersion, current_version_id).file_hash = "7" * 64
+            db.commit()
+        regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        assert regenerated["job"]["id"] != generated["job"]["id"]
         rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
         assert rendered["job"]["status"] == "completed", rendered["job"]["error_message"]
         workbook = load_workbook(BytesIO(client.get(f"/api/deliverables/{package['id']}/download").content), data_only=False)
@@ -313,11 +338,12 @@ def test_approval_is_idempotent_and_render_invalidates_old_review(monkeypatch, t
             db.add(mart_table); db.flush()
             mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_APPROVAL_FIELD", field_name="审批集市字段")
             db.add(mart_field); db.flush()
+            source_mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源到集市正式口径", mapping_status="approved")
             db.add_all([
-                SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源到集市正式口径", mapping_status="approved"),
+                source_mapping,
                 MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="集市到一表通正式口径", mapping_status="approved"),
             ])
-            db.commit()
+            db.commit(); source_mapping_id = source_mapping.id
 
         upload = client.post(
             f"/api/projects/{project['id']}/deliverable-templates/upload",
@@ -328,7 +354,17 @@ def test_approval_is_idempotent_and_render_invalidates_old_review(monkeypatch, t
         _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
         _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
         package = _post(client, f"/api/projects/{project['id']}/deliverables", {"target_table_id": table["id"], "template_version_id": version_id})
-        _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        with factory() as db:
+            creator = User(username="deliverable_creator", display_name="交付包创建人", email="deliverable-creator@example.invalid")
+            db.add(creator); db.flush()
+            db.get(DeliverablePackage, package["id"]).created_by = creator.id
+            db.commit()
+        generated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        with factory() as db:
+            db.get(SourceToMartMapping, source_mapping_id).business_rule = "生成指纹需要感知的变更"
+            db.commit()
+        regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        assert regenerated["job"]["id"] != generated["job"]["id"]
         rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
         assert rendered["package"]["status"] == "generated"
         submitted = _post(client, f"/api/deliverables/{package['id']}/submit-review", {})
@@ -343,11 +379,24 @@ def test_approval_is_idempotent_and_render_invalidates_old_review(monkeypatch, t
         assert first["version"]["version_no"] == second["version"]["version_no"] == 1
         assert second["idempotent"] is True
         assert len(client.get(f"/api/deliverables/{package['id']}/versions").json()) == 1
+        with factory() as db:
+            from app.models import Notification
+            notifications = list(db.query(Notification).filter(Notification.notification_type == "deliverable_approved").all())
+            assert len(notifications) == 1
 
         rerendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
         assert rerendered["package"]["status"] == "generated"
         assert rerendered["job"]["id"] == rendered["job"]["id"]
         assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
+        resubmitted = _post(client, f"/api/deliverables/{package['id']}/submit-review", {})
+        with factory() as db:
+            db.get(WorkflowInstance, resubmitted["workflow_instance"]["id"]).status = "approved"
+            db.commit()
+        repeated_snapshot = _post(client, f"/api/deliverables/{package['id']}/approve", {})
+        assert repeated_snapshot["idempotent"] is True
+        assert repeated_snapshot["version"]["id"] == first["version"]["id"]
+        assert repeated_snapshot["package"]["status"] == "approved"
+        assert repeated_snapshot["package"]["version_no"] == 1
 
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

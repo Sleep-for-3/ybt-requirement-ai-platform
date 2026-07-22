@@ -120,6 +120,10 @@ docker compose --profile milvus up --build
 - `/knowledge/documents`、`/knowledge/search`、`/knowledge/ask` 知识摄取、混合检索和有证据问答
 - `/model-profiles`、`/prompt-versions` 模型策略和 Prompt 版本只读查看
 - `/evaluations`、`/evaluations/{runId}` RAG 案例、运行结果与指标
+- `/deliverable-templates`、`/deliverable-templates/{templateId}` 正式交付模板与版本配置
+- `/deliverables`、`/deliverables/{packageId}` 正式交付包、审核、版本下载和比较
+- `/historical-calibers`、`/historical-calibers/{importId}` 历史口径导入、匹配和复用
+- `/questions` 待确认问题的分派、回答、验收、关闭和导出
 
 字段场景工作台可维护业务口径和技术溯源、检索历史知识、生成候选来源、查看推荐依据、AI 生成/采用草稿、保存、确认和驳回。
 所有拆分页面共用顶部项目选择器，选择结果会跨页面保留；技术溯源区可直接绑定并查看脱敏人工证据。

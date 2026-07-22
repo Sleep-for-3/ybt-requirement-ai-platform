@@ -116,3 +116,16 @@ class PendingQuestionUpdateRequest(BaseModel):
     assigned_user_id: int | None = Field(default=None, gt=0)
     question_status: Literal["open", "assigned", "answered", "accepted", "rejected", "closed"] | None = None
 
+
+class PendingQuestionAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_text: str = Field(min_length=1, max_length=10000)
+
+    @field_validator("resolution_text")
+    @classmethod
+    def validate_resolution_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("resolution_text must contain a real answer")
+        return value
