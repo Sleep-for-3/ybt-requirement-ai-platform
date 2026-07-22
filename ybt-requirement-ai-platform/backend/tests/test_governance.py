@@ -66,6 +66,52 @@ def test_admin_can_bootstrap_login_refresh_and_revoke_session(monkeypatch) -> No
         assert rejected.status_code == 401
 
 
+def test_auth_me_returns_backend_computed_effective_project_permissions(monkeypatch) -> None:
+    with _governance_client(monkeypatch) as client:
+        admin_headers = _bootstrap_platform(client)
+        bank = client.post("/api/admin/institutions", headers=admin_headers, json={
+            "institution_code": "BANK_PERM", "institution_name": "权限示例银行", "institution_type": "bank",
+        }).json()
+        project = client.post("/api/projects", headers=admin_headers, json={
+            "name": "权限示例项目", "institution_id": bank["id"],
+        }).json()
+
+        users: dict[str, dict] = {}
+        for username, institution_role in (("perm_analyst", "member"), ("perm_auditor", "auditor")):
+            password = f"test-only-{username}-password"
+            user = client.post("/api/admin/users", headers=admin_headers, json={
+                "username": username,
+                "display_name": username,
+                "email": f"{username}@example.invalid",
+                "password": password,
+                "institution_id": bank["id"],
+                "institution_role": institution_role,
+            }).json()
+            users[username] = {"id": user["id"], "password": password}
+        client.post(f"/api/projects/{project['id']}/members", headers=admin_headers, json={
+            "user_id": users["perm_analyst"]["id"], "project_role": "business_analyst",
+        })
+
+        analyst_token = client.post("/api/auth/login", json={
+            "username": "perm_analyst", "password": users["perm_analyst"]["password"],
+        }).json()["access_token"]
+        analyst_me = client.get("/api/auth/me", headers=_bearer(analyst_token)).json()
+        analyst_permissions = analyst_me["effective_project_permissions"][str(project["id"])]
+        assert "deliverable.generate" in analyst_permissions
+        assert "deliverable.manage" not in analyst_permissions
+        assert "historical.import" not in analyst_me["effective_permissions"]
+        assert "historical_caliber.import" not in analyst_me["effective_permissions"]
+
+        auditor_token = client.post("/api/auth/login", json={
+            "username": "perm_auditor", "password": users["perm_auditor"]["password"],
+        }).json()["access_token"]
+        auditor_me = client.get("/api/auth/me", headers=_bearer(auditor_token)).json()
+        auditor_permissions = auditor_me["effective_project_permissions"][str(project["id"])]
+        assert {"project.view", "audit.read", "uat.view", "deployment.readiness.view"} <= set(auditor_permissions)
+        assert "project.manage" not in auditor_permissions
+        assert client.get(f"/api/projects/{project['id']}/readiness", headers=_bearer(auditor_token)).status_code == 200
+
+
 def test_project_member_cannot_read_another_institutions_project(monkeypatch) -> None:
     with _governance_client(monkeypatch) as client:
         admin_password = "test-only-" + "platform-admin-password"
@@ -534,6 +580,31 @@ def test_project_role_permission_matrix(db_session, role, allowed, denied) -> No
     assert permissions.require_project_permission(project.id,allowed).id==project.id
     with pytest.raises(HTTPException) as error: permissions.require_project_permission(project.id,denied)
     assert error.value.status_code==403
+
+
+@pytest.mark.parametrize("role,signoff_role,allowed", [
+    ("business_reviewer", "business_owner", True),
+    ("business_reviewer", "technical_owner", False),
+    ("technical_reviewer", "technical_owner", True),
+    ("final_reviewer", "final_acceptance", True),
+    ("project_manager", "final_acceptance", True),
+])
+def test_uat_signoff_role_is_enforced_by_backend(db_session, role, signoff_role, allowed) -> None:
+    from app.models import Institution, InstitutionMembership, Project, ProjectMembership, User
+    user = User(username=f"signoff_{role}_{signoff_role}", display_name=role, email=f"{role}-{signoff_role}@signoff.invalid", password_hash=hash_password("test-only-signoff-password"), status="active")
+    institution = Institution(institution_code=f"S_{role}_{signoff_role}", institution_name=role, institution_type="bank", status="active")
+    db_session.add_all([user, institution]); db_session.flush()
+    db_session.add(InstitutionMembership(institution_id=institution.id, user_id=user.id, role="member", status="active", created_by=user.id)); db_session.flush()
+    project = Project(name=f"P_{role}_{signoff_role}", institution_id=institution.id, project_owner_id=user.id, project_status="active", confidentiality_level="internal")
+    db_session.add(project); db_session.flush()
+    db_session.add(ProjectMembership(project_id=project.id, user_id=user.id, project_role=role, status="active", created_by=user.id)); db_session.commit()
+    permissions = PermissionService(db_session, Principal(user.id, user.username, user.display_name))
+    if allowed:
+        assert permissions.require_uat_signoff_role(project.id, signoff_role).id == project.id
+    else:
+        with pytest.raises(HTTPException) as error:
+            permissions.require_uat_signoff_role(project.id, signoff_role)
+        assert error.value.status_code == 403
 
 
 def _bearer(token: str) -> dict[str, str]:

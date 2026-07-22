@@ -46,6 +46,8 @@ class UserRead(OrmModel):
 class AuthMe(UserRead):
     institution_memberships: list[dict[str, Any]] = Field(default_factory=list)
     project_memberships: list[dict[str, Any]] = Field(default_factory=list)
+    effective_permissions: list[str] = Field(default_factory=list)
+    effective_project_permissions: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class BootstrapResponse(BaseModel):

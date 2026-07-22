@@ -7,6 +7,7 @@ from app.models import InstitutionMembership, ProjectMembership, User
 from app.schemas.governance import AuthMe, LoginRequest, RefreshRequest, TokenResponse
 from app.services.auth.authentication import AuthenticationError, authenticate, create_session, revoke_refresh_token, rotate_refresh_token
 from app.services.auth.dependencies import RealPrincipal
+from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit
 
 
@@ -57,6 +58,8 @@ def me(principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
         ProjectMembership.project_role,
         ProjectMembership.status,
     ).where(ProjectMembership.user_id == user.id)).mappings())
+    effective_by_project = PermissionService(db, principal).effective_permissions_for_visible_projects()
+    effective_permissions = sorted({permission for permissions in effective_by_project.values() for permission in permissions})
     return {
         "id": user.id,
         "username": user.username,
@@ -66,4 +69,6 @@ def me(principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
         "last_login_at": user.last_login_at,
         "institution_memberships": [dict(item) for item in institution_memberships],
         "project_memberships": [dict(item) for item in project_memberships],
+        "effective_permissions": effective_permissions,
+        "effective_project_permissions": {str(project_id): permissions for project_id, permissions in effective_by_project.items()},
     }

@@ -244,7 +244,9 @@ def verify_uat_finding(finding_id: int, payload: UatFindingVerify, principal: Cu
 
 @router.post("/uat-runs/{run_id}/signoff", status_code=201)
 def create_uat_signoff(run_id: int, payload: UatSignoffCreate, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    run = PermissionService(db, principal).load_project_resource_or_404(UatRun, run_id, "uat.signoff")
+    permissions = PermissionService(db, principal)
+    run = permissions.load_project_resource_or_404(UatRun, run_id, "uat.signoff")
+    permissions.require_uat_signoff_role(run.project_id, payload.signoff_role)
     if run.status != "passed":
         raise HTTPException(409, "Only a completed and passed UAT run can be signed off")
     blocking = db.scalar(select(UatFinding.id).where(UatFinding.project_id == run.project_id, UatFinding.uat_run_id == run.id, UatFinding.severity == "critical", UatFinding.status.not_in(("verified", "rejected", "closed"))).limit(1))
