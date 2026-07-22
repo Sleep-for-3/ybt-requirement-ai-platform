@@ -28,6 +28,12 @@ export type Project = {
   description?: string | null;
 };
 
+export type ReadinessBlocker = { code:string;message:string;dimension:string;severity:"critical"|"warning" };
+export type ReadinessDimension = { status:"ready"|"partial"|"blocked"|"not_started";score:number;completed_count:number;required_count:number;blocking_reasons:ReadinessBlocker[];recommended_actions:string[];links:string[] };
+export type ProjectReadiness = { project_id:number;overall_status:"ready"|"partial"|"blocked"|"not_started";score:number;scoring_method:string;critical_blockers:ReadinessBlocker[];dimensions:Record<string,ReadinessDimension> };
+export type OnboardingStep = { step:number;key:string;title:string;status:"completed"|"in_progress"|"blocked"|"not_started";blocking_reasons:ReadinessBlocker[];next_action?:string|null;links:string[];skippable:boolean };
+export type ProjectOnboarding = { project_id:number;overall_status:string;steps:OnboardingStep[] };
+
 export type TargetTable = {
   id: number;
   project_id: number;

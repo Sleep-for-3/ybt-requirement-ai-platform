@@ -31,6 +31,7 @@ from app.api import (
     profiling,
     nl_tasks,
     projects,
+    project_readiness,
     retrieval,
     scenarios,
     scenario_mappings,
@@ -77,6 +78,7 @@ def legacy_health() -> dict[str, str]:
 secured = [Depends(guard_project_resource)]
 
 app.include_router(projects.router, prefix=settings.api_prefix)
+app.include_router(project_readiness.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(admin.router, prefix=settings.api_prefix)
 app.include_router(governance.router, prefix=settings.api_prefix)
