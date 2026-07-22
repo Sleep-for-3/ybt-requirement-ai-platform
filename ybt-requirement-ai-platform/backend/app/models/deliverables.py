@@ -84,6 +84,9 @@ class DeliverablePackage(Base, TimestampMixin):
     version_no: Mapped[int] = mapped_column(Integer, default=0)
     generated_file_id: Mapped[int | None] = mapped_column(ForeignKey("stored_files.id"))
     generation_job_id: Mapped[int | None] = mapped_column(ForeignKey("background_jobs.id"))
+    render_job_id: Mapped[int | None] = mapped_column(ForeignKey("background_jobs.id"))
+    generation_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+    render_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
     content_hash: Mapped[str | None] = mapped_column(String(64))
     summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
@@ -212,13 +215,20 @@ class CaliberComparison(Base):
 
 class DeliverablePackageVersion(Base):
     __tablename__ = "deliverable_package_versions"
-    __table_args__ = (UniqueConstraint("deliverable_package_id", "version_no", name="uq_deliverable_package_version"),)
+    __table_args__ = (
+        UniqueConstraint("deliverable_package_id", "version_no", name="uq_deliverable_package_version"),
+        UniqueConstraint("deliverable_package_id", "workflow_instance_id", name="uq_deliverable_package_workflow"),
+        UniqueConstraint("deliverable_package_id", "review_snapshot_hash", name="uq_deliverable_package_review_snapshot"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     deliverable_package_id: Mapped[int] = mapped_column(ForeignKey("deliverable_packages.id"), index=True)
     version_no: Mapped[int] = mapped_column(Integer)
     generated_file_id: Mapped[int] = mapped_column(ForeignKey("stored_files.id"))
+    workflow_instance_id: Mapped[int | None] = mapped_column(ForeignKey("workflow_instances.id"), index=True)
     content_hash: Mapped[str] = mapped_column(String(64))
+    review_snapshot_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    review_submission_hash: Mapped[str | None] = mapped_column(String(64))
     content_snapshot_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     change_summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
