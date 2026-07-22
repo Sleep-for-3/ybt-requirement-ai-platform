@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -29,6 +29,7 @@ from app.schemas.deliverables import (
     TemplateConfigureRequest,
 )
 from app.services.deliverables.historical import parse_historical_workbook, semantic_diff
+from app.services.deliverables.lineage_records import build_change_impact_records, build_lineage_records
 from app.services.deliverables.mart_to_ybt_compiler import compile_mart_to_ybt
 from app.services.deliverables.readiness_service import field_readiness, table_readiness
 from app.services.deliverables.source_to_mart_compiler import compile_source_to_mart
@@ -40,6 +41,7 @@ from app.services.governance.notifications import notify_user
 from app.services.governance.workflow import start_workflow
 from app.services.storage import get_storage_service
 from app.services.security import redact_content
+from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
 from app.services.task_queue import get_task_queue
 
 router = APIRouter(tags=["deliverables"])
@@ -354,37 +356,95 @@ def get_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = 
 @router.post("/deliverables/{package_id}/generate")
 def generate_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.generate")
-    package.status = "generating"; db.commit()
-    job = get_task_queue().enqueue(db, job_type="deliverable_generate_field_items", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=uuid.uuid4().hex, payload_summary={"package_id": package.id}, handler=_deliverable_generate_handler)
-    package = db.get(DeliverablePackage, package.id); package.generation_job_id = job.id; db.commit()
+    fingerprint = _generation_fingerprint(db, package)
+    package.status = "generating"; package.generation_fingerprint = fingerprint; db.commit()
+    job = get_task_queue().enqueue(db, job_type="deliverable_generate_field_items", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=fingerprint, payload_summary={"package_id": package.id, "generation_fingerprint": fingerprint}, handler=_deliverable_generate_handler)
+    package = db.get(DeliverablePackage, package.id); package.generation_job_id = job.id
+    if job.status == "completed" and package.status == "generating": package.status = "draft"
+    db.commit()
     return {"package": _package_detail(db, package), "job": _row(job)}
 
 
 def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
     package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
     if package is None or package.project_id != job.project_id: raise ValueError("Deliverable package not found")
-    items = _ensure_field_items(db, package); success = failed = 0
+    if package.generation_fingerprint != job.payload_summary_json.get("generation_fingerprint"):
+        raise ValueError("Deliverable generation fingerprint is stale")
+    items = _ensure_field_items(db, package); success = failed = blocked = skipped = 0
+    job.current_step = "build_lineage_records"
+    lineage_records = build_lineage_records(db, package.project_id, package.target_table_id)
+    job.current_step = "build_change_impact_records"
+    impact_records = build_change_impact_records(db, package.project_id, package.target_table_id)
     prior_items = {row.item_key: row for row in db.scalars(select(BackgroundJobItem).where(BackgroundJobItem.background_job_id == job.id)).all()}
     completed = {key for key, row in prior_items.items() if row.status == "completed"}
     for index, item in enumerate(items, 1):
         db.refresh(job)
         if job.status == "cancelled": break
         if str(item.target_field_id) in completed:
-            success += 1; continue
+            skipped += 1; continue
         try:
+            job.current_step = "sync_evidence"
             _sync_evidence_items(db, package, item.target_field_id)
+            business = list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.project_id == package.project_id, ScenarioBusinessMapping.target_field_id == item.target_field_id)).all())
+            technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.project_id == package.project_id, ScenarioTechnicalLineage.target_field_id == item.target_field_id)).all())
+            job.current_step = "generate_business_drafts"
+            for mapping in business:
+                if mapping.final_content or mapping.business_confirm_status == "confirmed" or mapping.ai_generated_content:
+                    _record_generation_item(db, job.id, f"business:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                    continue
+                asyncio.run(generate_business_draft(db, mapping.id))
+                _record_generation_item(db, job.id, f"business:{mapping.id}", "completed", {"mapping_id": mapping.id})
+            db.refresh(job)
+            if job.status == "cancelled": break
+            job.current_step = "generate_technical_drafts"
+            for mapping in technical:
+                if mapping.final_content or mapping.tech_confirm_status == "confirmed" or mapping.ai_generated_content:
+                    _record_generation_item(db, job.id, f"technical:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                    continue
+                asyncio.run(generate_technical_draft(db, mapping.id))
+                _record_generation_item(db, job.id, f"technical:{mapping.id}", "completed", {"mapping_id": mapping.id})
+            db.refresh(job)
+            if job.status == "cancelled": break
+            ybt_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.project_id == package.project_id, MartToYbtMapping.target_field_id == item.target_field_id)).all())
+            job.current_step = "compile_source_to_mart_drafts"
+            for ybt_mapping in ybt_mappings:
+                source_mappings = list(db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id == package.project_id, SourceToMartMapping.mart_field_id == ybt_mapping.mart_field_id)).all())
+                for mapping in source_mappings:
+                    if mapping.final_content or mapping.mapping_status == "approved" or mapping.ai_generated_content:
+                        _record_generation_item(db, job.id, f"source_to_mart:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                        continue
+                    compile_source_to_mart(db, mapping.id)
+                    _record_generation_item(db, job.id, f"source_to_mart:{mapping.id}", "completed", {"mapping_id": mapping.id})
+            db.refresh(job)
+            if job.status == "cancelled": break
+            job.current_step = "compile_mart_to_ybt_drafts"
+            for mapping in ybt_mappings:
+                if mapping.final_content or mapping.mapping_status == "approved" or mapping.ai_generated_content:
+                    _record_generation_item(db, job.id, f"mart_to_ybt:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                    continue
+                compile_mart_to_ybt(db, mapping.id)
+                _record_generation_item(db, job.id, f"mart_to_ybt:{mapping.id}", "completed", {"mapping_id": mapping.id})
+            db.refresh(job)
+            if job.status == "cancelled": break
+            job.current_step = "create_pending_questions"
+            _ensure_generation_questions(db, package, item.target_field_id)
+            job.current_step = "calculate_readiness"
             readiness = field_readiness(db, item.target_field_id); item.field_status = readiness["status"]; item.evidence_completeness = readiness["evidence_completeness"]; item.open_question_count = readiness["open_question_count"]
-            business = list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.target_field_id == item.target_field_id)).all()); technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.target_field_id == item.target_field_id)).all())
+            job.current_step = "assemble_field_items"
+            db.expire_all()
+            package = db.get(DeliverablePackage, package.id); job = db.get(BackgroundJob, job.id); item = db.get(DeliverableFieldItem, item.id)
+            business = list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.project_id == package.project_id, ScenarioBusinessMapping.target_field_id == item.target_field_id)).all()); technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.project_id == package.project_id, ScenarioTechnicalLineage.target_field_id == item.target_field_id)).all())
             item.business_summary = "\n".join(row.final_content or row.ai_generated_content or "待确认" for row in business); item.technical_summary = "\n".join(row.final_content or row.ai_generated_content or "待确认" for row in technical)
             item.confidence_level = "confirmed" if readiness["status"] == "approved" else "evidence_supported" if readiness["evidence_completeness"] >= .5 else "unverified"
             job_item = prior_items.get(str(item.target_field_id)) or BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), result_summary_json={})
             job_item.status = "completed"; job_item.result_summary_json = {"readiness": item.field_status}; job_item.error_message = None; db.add(job_item); success += 1
+            if readiness["status"] != "approved": blocked += 1
         except Exception as exc:
             job_item = prior_items.get(str(item.target_field_id)) or BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), result_summary_json={})
             job_item.status = "failed"; job_item.result_summary_json = {}; job_item.error_message = str(exc)[:1000]; db.add(job_item); failed += 1
         job.progress = int(index / max(len(items), 1) * 100)
-    package.status = "draft" if job.status != "cancelled" else "generating"
-    result = {"success_count": success, "failed_count": failed, "total_count": len(items)}
+    package.status = "cancelled" if job.status == "cancelled" else "generation_failed" if failed and not success else "draft"
+    result = {"success_count": success, "failed_count": failed, "blocked_count": blocked, "skipped_count": skipped, "total_count": len(items), "lineage_count": len(lineage_records), "change_impact_count": len(impact_records)}
     record_audit(db, action="generate_deliverable", resource_type="deliverable_package", resource_id=package.id, actor_user_id=job.created_by, project_id=package.project_id, after=result); db.commit(); return result
 
 
@@ -416,6 +476,30 @@ def submit_deliverable(package_id: int, principal: CurrentPrincipal, db: Session
 @router.post("/deliverables/{package_id}/render")
 def render_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.export")
+    fingerprint = _render_fingerprint(db, package)
+    package.status = "generating"
+    package.render_fingerprint = fingerprint
+    package.summary_json = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"}
+    db.commit()
+    job = get_task_queue().enqueue(db, job_type="deliverable_render_excel", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=fingerprint, payload_summary={"package_id": package.id, "render_fingerprint": fingerprint}, handler=_deliverable_render_handler)
+    package = db.get(DeliverablePackage, package.id)
+    package.render_job_id = job.id
+    if job.status == "completed" and package.status == "generating":
+        package.status = "generated" if package.generated_file_id else "render_failed"
+    db.commit()
+    result = {"package": _row(package), "job": _row(job), "file_id": package.generated_file_id, "issues": package.warnings_json, "warnings": package.warnings_json}
+    return result
+
+
+def _deliverable_render_handler(db: Session, job: BackgroundJob) -> dict:
+    package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
+    if package is None or package.project_id != job.project_id:
+        raise ValueError("Deliverable package not found")
+    if package.render_fingerprint != job.payload_summary_json.get("render_fingerprint"):
+        raise ValueError("Deliverable render fingerprint is stale")
+    if job.status == "cancelled":
+        package.status = "cancelled"; db.commit(); return {"success_count": 0, "failed_count": 0, "cancelled_count": 1}
+    job.current_step = "validate_template"; job.progress = 10
     template_validation = validate_template_version(db, package.template_version_id)
     if not template_validation["valid"]:
         package.status = "render_failed"
@@ -423,8 +507,10 @@ def render_deliverable(package_id: int, principal: CurrentPrincipal, db: Session
         package.content_hash = None
         package.summary_json = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"} | {"render_validation": template_validation}
         package.warnings_json = template_validation["issues"]
+        notify_user(db, job.created_by, "deliverable_render_failed", "正式交付 Excel 渲染失败", "模板配置校验未通过", project_id=package.project_id, resource_type="deliverable_package", resource_id=package.id)
         db.commit()
-        return {"package": _row(package), "file_id": None, "issues": template_validation["issues"]}
+        return {"success_count": 0, "failed_count": 1, "error_count": template_validation["error_count"]}
+    job.current_step = "build_records"; job.progress = 30
     version = db.get(DeliverableTemplateVersion, package.template_version_id); template_content = _read_stored(db, version.stored_file_id)
     records = _package_records(db, package); rendered, warnings = render_workbook(template_content, _sheet_mappings(db, version.id), _column_mappings(db, version.id), records)
     render_validation = {"valid": not any(item["severity"] == "error" for item in warnings), "error_count": sum(item["severity"] == "error" for item in warnings), "warning_count": sum(item["severity"] == "warning" for item in warnings), "issues": warnings}
@@ -435,12 +521,19 @@ def render_deliverable(package_id: int, principal: CurrentPrincipal, db: Session
         package.status = "render_failed"
         package.warnings_json = warnings
         package.summary_json = base_summary | {"render_validation": render_validation, "rendered_at": datetime.now(timezone.utc).isoformat()}
-        record_audit(db, action="render_deliverable_failed", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, institution_id=package.institution_id, project_id=package.project_id, after={"error_count": render_validation["error_count"], "warning_count": render_validation["warning_count"]})
+        record_audit(db, action="render_deliverable_failed", resource_type="deliverable_package", resource_id=package.id, actor_user_id=job.created_by, institution_id=package.institution_id, project_id=package.project_id, after={"error_count": render_validation["error_count"], "warning_count": render_validation["warning_count"]})
+        notify_user(db, job.created_by, "deliverable_render_failed", "正式交付 Excel 渲染失败", f"阻断问题 {render_validation['error_count']} 项", project_id=package.project_id, resource_type="deliverable_package", resource_id=package.id)
         db.commit()
-        return {"package": _row(package), "file_id": None, "issues": warnings}
-    project = db.get(Project, package.project_id); stored = _store_file(db, project, principal.user_id, f"{package.package_name}-v{package.version_no + 1}.xlsx", rendered, XLSX)
+        return {"success_count": 0, "failed_count": 1, "error_count": render_validation["error_count"]}
+    db.refresh(job)
+    if job.status == "cancelled":
+        package.status = "cancelled"; db.commit(); return {"success_count": 0, "failed_count": 0, "cancelled_count": 1}
+    job.current_step = "save_workbook"; job.progress = 80
+    project = db.get(Project, package.project_id); stored = _store_file(db, project, job.created_by, f"{package.package_name}-v{package.version_no + 1}.xlsx", rendered, XLSX)
     package.generated_file_id = stored.id; package.content_hash = stored.content_hash; package.status = "generated"; package.warnings_json = warnings; package.summary_json = base_summary | {"rendered_at": datetime.now(timezone.utc).isoformat(), "render_validation": render_validation}
-    record_audit(db, action="render_deliverable_excel", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, institution_id=package.institution_id, project_id=package.project_id, after={"file_id": stored.id, "content_hash": stored.content_hash, "warning_count": len(warnings)}); db.commit(); return {"package": _row(package), "file_id": stored.id, "issues": warnings, "warnings": warnings}
+    record_audit(db, action="render_deliverable_excel", resource_type="deliverable_package", resource_id=package.id, actor_user_id=job.created_by, institution_id=package.institution_id, project_id=package.project_id, after={"file_id": stored.id, "content_hash": stored.content_hash, "warning_count": len(warnings)})
+    notify_user(db, job.created_by, "deliverable_render_completed", "正式交付 Excel 渲染完成", f"文件 {stored.original_file_name} 已生成", project_id=package.project_id, resource_type="stored_file", resource_id=stored.id)
+    db.commit(); return {"success_count": 1, "failed_count": 0, "file_id": stored.id, "warning_count": len(warnings)}
 
 
 @router.get("/deliverables/{package_id}/download")
@@ -550,7 +643,7 @@ def _package_records(db, package):
     fields = list(db.scalars(select(TargetField).where(TargetField.target_table_id == package.target_table_id).order_by(TargetField.id)).all()); field_records=[]; business_records=[]; technical_records=[]
     for order, field in enumerate(fields, 1):
         base={"target_table_code": db.get(TargetTable, field.target_table_id).table_code, "target_table_name": db.get(TargetTable, field.target_table_id).table_name, "target_field_code": field.field_code, "target_field_name": field.field_name, "regulatory_definition": field.regulatory_description or field.regulatory_original_definition, "data_type": field.field_type, "field_order": order}; field_records.append(base)
-        businesses=list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.target_field_id==field.id)).all()); technical=list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.target_field_id==field.id)).all())
+        businesses=list(db.scalars(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.project_id==package.project_id,ScenarioBusinessMapping.target_field_id==field.id)).all()); technical=list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.project_id==package.project_id,ScenarioTechnicalLineage.target_field_id==field.id)).all())
         for item in businesses:
             scenario=db.get(ProductScenario,item.scenario_id); business_records.append({**base,"scenario_code":scenario.scenario_code,"scenario_name":scenario.scenario_name,"business_final_content":item.final_content,"business_ai_draft":item.ai_generated_content,"business_confirm_status":item.business_confirm_status,"business_confidence_level":item.confidence_level,"business_open_questions":item.open_questions})
         for item in technical:
@@ -558,7 +651,7 @@ def _package_records(db, package):
     field_ids = [field.id for field in fields]
     questions=[_row(item) for item in db.scalars(select(PendingQuestion).where(PendingQuestion.project_id==package.project_id,PendingQuestion.target_table_id==package.target_table_id)).all()]
     evidence=[{"target_field_id":item.target_field_id,"evidence_type":item.evidence_type,"evidence_source":item.citation_summary_json.get("source_name"),"evidence_location":item.citation_summary_json.get("location"),"evidence_summary":item.claim_text,"citation":json.dumps(item.citation_summary_json,ensure_ascii=False),"claim_type":item.claim_type} for item in db.scalars(select(DeliverableEvidenceItem).where(DeliverableEvidenceItem.deliverable_package_id==package.id)).all()]
-    mart_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.target_field_id.in_(field_ids))).all())
+    mart_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.project_id==package.project_id,MartToYbtMapping.target_field_id.in_(field_ids))).all())
     mart_field_ids = [item.mart_field_id for item in mart_mappings if item.mart_field_id]
     source_rows=[{"mapping_id":item.id,"source_to_mart_final_content":item.final_content,"source_to_mart_status":item.mapping_status,"source_system_name":item.source_system_summary,"source_field_name":item.source_fields_summary,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"priority_rule":item.priority_rule,"null_handling_rule":item.null_handling_rule} for item in db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id==package.project_id, SourceToMartMapping.mart_field_id.in_(mart_field_ids))).all()]
     mart_rows=[{"mapping_id":item.id,"target_field_id":item.target_field_id,"mart_to_ybt_final_content":item.final_content,"mart_to_ybt_status":item.mapping_status,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"null_handling_rule":item.null_handling_rule} for item in mart_mappings]
@@ -570,7 +663,7 @@ def _package_records(db, package):
     workflow_ids = select(WorkflowInstance.id).where(WorkflowInstance.project_id == package.project_id, WorkflowInstance.workflow_key == "project_export_review", WorkflowInstance.target_type == "deliverable_package", WorkflowInstance.target_id == package.id)
     decisions = db.execute(select(ReviewDecision, ReviewTask).join(ReviewTask, ReviewTask.id == ReviewDecision.review_task_id).where(ReviewTask.workflow_instance_id.in_(workflow_ids)).order_by(ReviewDecision.id)).all()
     reviews.extend({"action":decision.decision,"resource_type":"review_task","resource_id":task.id,"reviewer":decision.decided_by,"approved_at":decision.decided_at,"review_comment":redact_content(decision.comment or "")} for decision, task in decisions)
-    return {"target_field":field_records,"scenario_business_mapping":business_records,"scenario_technical_lineage":technical_records,"pending_question":questions,"evidence":evidence,"source_to_mart":source_rows,"mart_to_ybt":mart_rows,"review_record":reviews,"lineage":technical_records,"change_impact":[]}
+    return {"target_field":field_records,"scenario_business_mapping":business_records,"scenario_technical_lineage":technical_records,"pending_question":questions,"evidence":evidence,"source_to_mart":source_rows,"mart_to_ybt":mart_rows,"review_record":reviews,"lineage":build_lineage_records(db, package.project_id, package.target_table_id),"change_impact":build_change_impact_records(db, package.project_id, package.target_table_id)}
 def _sample_records(): return {"target_field":[{"target_table_code":"YBT_SAMPLE","target_table_name":"脱敏示例表","target_field_code":f"FIELD_{i:03d}","target_field_name":f"脱敏示例字段{i}","regulatory_definition":"用于模板预览的脱敏模拟定义","data_type":"VARCHAR","field_order":i} for i in range(1,21)],"scenario_business_mapping":[],"scenario_technical_lineage":[],"pending_question":[],"evidence":[],"source_to_mart":[],"mart_to_ybt":[],"review_record":[],"lineage":[],"change_impact":[]}
 
 
@@ -605,6 +698,143 @@ def _sync_evidence_items(db, package, field_id):
                 continue
             row = DeliverableEvidenceItem(project_id=package.project_id, deliverable_package_id=package.id, target_field_id=field_id, scenario_id=scenario_id, mapping_type=mapping_type, mapping_id=mapping_id, evidence_type=ref.evidence_type, evidence_id=ref.evidence_id, claim_type="confirmed" if confirmed else "evidence_supported", claim_text=safe_summary, citation_summary_json=citation_summary)
             db.add(row); existing[key] = row
+
+
+def _ensure_generation_questions(db, package: DeliverablePackage, field_id: int) -> None:
+    """Create stable, non-duplicating questions for missing generation inputs."""
+    field = db.scalar(select(TargetField).where(
+        TargetField.project_id == package.project_id,
+        TargetField.target_table_id == package.target_table_id,
+        TargetField.id == field_id,
+    ))
+    if field is None:
+        raise ValueError("Target field not found in deliverable project")
+    checks = (
+        (
+            "business_mapping",
+            "business_analyst",
+            "业务场景及口径",
+            db.scalar(select(ScenarioBusinessMapping.id).where(
+                ScenarioBusinessMapping.project_id == package.project_id,
+                ScenarioBusinessMapping.target_field_id == field.id,
+            ).limit(1)),
+        ),
+        (
+            "technical_lineage",
+            "technical_analyst",
+            "技术来源及加工链路",
+            db.scalar(select(ScenarioTechnicalLineage.id).where(
+                ScenarioTechnicalLineage.project_id == package.project_id,
+                ScenarioTechnicalLineage.target_field_id == field.id,
+            ).limit(1)),
+        ),
+    )
+    for question_type, assigned_role, missing_label, evidence_id in checks:
+        if evidence_id is not None:
+            continue
+        existing = db.scalar(select(PendingQuestion.id).where(
+            PendingQuestion.project_id == package.project_id,
+            PendingQuestion.target_table_id == package.target_table_id,
+            PendingQuestion.target_field_id == field.id,
+            PendingQuestion.question_type == question_type,
+            PendingQuestion.source_type == "deliverable_generation",
+            PendingQuestion.source_id == package.id,
+            PendingQuestion.question_status.in_(("open", "assigned", "answered")),
+        ).limit(1))
+        if existing is not None:
+            continue
+        db.add(PendingQuestion(
+            institution_id=package.institution_id,
+            project_id=package.project_id,
+            target_table_id=package.target_table_id,
+            target_field_id=field.id,
+            question_type=question_type,
+            question_text=f"请确认字段 {field.field_code} 的{missing_label}",
+            question_status="assigned",
+            priority="medium",
+            assigned_role=assigned_role,
+            source_type="deliverable_generation",
+            source_id=package.id,
+        ))
+
+
+def _record_generation_item(db: Session, job_id: int, item_key: str, status: str, result: dict) -> None:
+    item = db.scalar(select(BackgroundJobItem).where(
+        BackgroundJobItem.background_job_id == job_id,
+        BackgroundJobItem.item_key == item_key,
+    ))
+    if item is None:
+        item = BackgroundJobItem(background_job_id=job_id, item_key=item_key, result_summary_json={})
+        db.add(item)
+    item.status = status
+    item.result_summary_json = result
+    item.error_message = None
+
+
+def _generation_fingerprint(db: Session, package: DeliverablePackage) -> str:
+    """Fingerprint only governed inputs; generated items/questions are outputs."""
+    field_ids = list(db.scalars(select(TargetField.id).where(
+        TargetField.project_id == package.project_id,
+        TargetField.target_table_id == package.target_table_id,
+    ).order_by(TargetField.id)).all())
+    payload = {
+        "package": [package.id, package.project_id, package.target_table_id, package.template_version_id],
+        "fields": _fingerprint_rows(db, TargetField, (
+            TargetField.project_id == package.project_id,
+            TargetField.target_table_id == package.target_table_id,
+        )),
+        "business": _fingerprint_rows(db, ScenarioBusinessMapping, (
+            ScenarioBusinessMapping.project_id == package.project_id,
+            ScenarioBusinessMapping.target_field_id.in_(field_ids),
+        )),
+        "technical": _fingerprint_rows(db, ScenarioTechnicalLineage, (
+            ScenarioTechnicalLineage.project_id == package.project_id,
+            ScenarioTechnicalLineage.target_field_id.in_(field_ids),
+        )),
+        "mart_to_ybt": _fingerprint_rows(db, MartToYbtMapping, (
+            MartToYbtMapping.project_id == package.project_id,
+            MartToYbtMapping.target_field_id.in_(field_ids),
+        )),
+    }
+    evidence_references = []
+    for mapping_type, rows in (
+        ("scenario_business", payload["business"]),
+        ("scenario_technical", payload["technical"]),
+    ):
+        mapping_ids = [row["id"] for row in rows]
+        if mapping_ids:
+            evidence_references.extend(_fingerprint_rows(db, MappingEvidenceReference, (
+                MappingEvidenceReference.project_id == package.project_id,
+                MappingEvidenceReference.mapping_type == mapping_type,
+                MappingEvidenceReference.mapping_id.in_(mapping_ids),
+            )))
+    payload["evidence_references"] = evidence_references
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _render_fingerprint(db: Session, package: DeliverablePackage) -> str:
+    version = db.scalar(select(DeliverableTemplateVersion).where(
+        DeliverableTemplateVersion.project_id == package.project_id,
+        DeliverableTemplateVersion.id == package.template_version_id,
+    ))
+    if version is None:
+        raise HTTPException(409, "Deliverable template version is unavailable")
+    payload = {
+        "package_id": package.id,
+        "template_file_hash": version.file_hash,
+        "review_content_hash": _review_content_hash(db, package),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _fingerprint_rows(db: Session, model, predicates: tuple) -> list[dict]:
+    rows = db.scalars(select(model).where(*predicates).order_by(model.id)).all()
+    result = []
+    for row in rows:
+        values = _row(row)
+        values.pop("created_at", None)
+        result.append(values)
+    return result
 
 
 def _review_content_hash(db, package) -> str:

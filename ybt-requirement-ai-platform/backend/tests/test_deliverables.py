@@ -14,12 +14,19 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models import (
+    ImpactAnalysis,
+    LineageEdge,
+    LineageNode,
     MartField,
     MartTable,
     MartToYbtMapping,
     ProjectMembership,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
+    ScriptChangeItem,
+    ScriptChangeSet,
+    ScriptFile,
+    ScriptFileVersion,
     SourceToMartMapping,
     User,
     WorkflowInstance,
@@ -77,6 +84,8 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json=_full_template_configuration())
         assert immutable.status_code == 409
         generated = _post(client, f"/api/deliverables/{package['id']}/generate", {}); assert generated["job"]["status"] == "completed"
+        regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        assert regenerated["job"]["id"] == generated["job"]["id"]
         validation = _post(client, f"/api/deliverables/{package['id']}/validate", {}); assert validation["error_count"] > 0; assert any(item["code"] == "high_priority_question" for item in validation["issues"])
         assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
         _post(client, f"/api/questions/{question['id']}/answer", {"resolution_text": "已确认使用 CERT_TYPE"}); _post(client, f"/api/questions/{question['id']}/accept", {})
@@ -192,6 +201,62 @@ def test_template_renderer_returns_structured_blocking_issues() -> None:
     }]
 
 
+def test_render_uses_current_sql_lineage_and_change_impact_without_cross_project_or_raw_sql(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "SQL 证据交付项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_LINEAGE", "table_name": "血缘交付表"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "LINEAGE_FIELD", "field_name": "血缘字段"})
+        other_project = _post(client, "/api/projects", {"name": "隔离 SQL 项目"})
+        other_table = _post(client, "/api/target-tables", {"project_id": other_project["id"], "table_code": "OTHER_LINEAGE", "table_name": "隔离血缘表"})
+        other_field = _post(client, "/api/fields", {"project_id": other_project["id"], "target_table_id": other_table["id"], "field_code": "OTHER_FIELD", "field_name": "隔离字段"})
+
+        uploaded = client.post(
+            f"/api/projects/{project['id']}/deliverable-templates/upload",
+            data={"template_name": "SQL 证据交付模板", "template_type": "full_delivery_package"},
+            files={"file": ("SQL证据模板.xlsx", _template_workbook(), XLSX)},
+        ).json()
+        version_id = uploaded["version"]["id"]
+        stored_file_id = uploaded["version"]["stored_file_id"]
+        _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
+        _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
+
+        with factory() as db:
+            script = ScriptFile(project_id=project["id"], relative_path="etl/customer_lineage.sql", file_name="customer_lineage.sql", file_type="sql", current_version_no=2)
+            db.add(script); db.flush()
+            old_version = ScriptFileVersion(project_id=project["id"], script_file_id=script.id, version_no=1, file_hash="1" * 64, normalized_hash="2" * 64, raw_content_storage_file_id=stored_file_id, parse_status="parsed")
+            current_version = ScriptFileVersion(project_id=project["id"], script_file_id=script.id, version_no=2, file_hash="3" * 64, normalized_hash="4" * 64, raw_content_storage_file_id=stored_file_id, parse_status="parsed")
+            db.add_all([old_version, current_version]); db.flush()
+            source = LineageNode(project_id=project["id"], node_type="column", logical_name="ODS.CUSTOMER.CERT_TYPE", database_name="SIM_DB", schema_name="ODS", table_name="CUSTOMER", column_name="CERT_TYPE", unresolved_flag=False)
+            target = LineageNode(project_id=project["id"], node_type="target_field", logical_name="YBT_LINEAGE.LINEAGE_FIELD", table_name="YBT_LINEAGE", column_name="LINEAGE_FIELD", target_table_id=table["id"], target_field_id=field["id"], unresolved_flag=False)
+            db.add_all([source, target]); db.flush()
+            db.add(LineageEdge(project_id=project["id"], script_file_version_id=current_version.id, source_node_id=source.id, target_node_id=target.id, edge_type="column_lineage", transformation_type="case", transformation_expression="RAW_SQL_SECRET_CASE_EXPRESSION", filter_condition="RAW_SQL_SECRET_FILTER", join_condition="RAW_SQL_SECRET_JOIN", confidence_level="high", enabled=True))
+            change_set = ScriptChangeSet(project_id=project["id"], script_file_id=script.id, from_version_id=old_version.id, to_version_id=current_version.id, change_type="modified", status="completed")
+            db.add(change_set); db.flush()
+            db.add(ScriptChangeItem(change_set_id=change_set.id, change_category="字段转换规则调整", entity_type="lineage_edge", old_value_json={}, new_value_json={}, severity="medium"))
+            db.add(ImpactAnalysis(project_id=project["id"], change_set_id=change_set.id, status="reviewed", severity="medium", affected_target_field_ids_json=[field["id"]]))
+
+            other_script = ScriptFile(project_id=other_project["id"], relative_path="etl/CROSS_PROJECT_SECRET.sql", file_name="CROSS_PROJECT_SECRET.sql", file_type="sql", current_version_no=1)
+            db.add(other_script); db.flush()
+            other_version = ScriptFileVersion(project_id=other_project["id"], script_file_id=other_script.id, version_no=1, file_hash="5" * 64, normalized_hash="6" * 64, raw_content_storage_file_id=stored_file_id, parse_status="parsed")
+            db.add(other_version); db.flush()
+            other_source = LineageNode(project_id=other_project["id"], node_type="column", logical_name="CROSS_PROJECT_SECRET", table_name="SECRET_TABLE", column_name="SECRET_FIELD", unresolved_flag=False)
+            other_target = LineageNode(project_id=other_project["id"], node_type="target_field", logical_name="OTHER_LINEAGE.OTHER_FIELD", target_table_id=other_table["id"], target_field_id=other_field["id"], unresolved_flag=False)
+            db.add_all([other_source, other_target]); db.flush()
+            db.add(LineageEdge(project_id=other_project["id"], script_file_version_id=other_version.id, source_node_id=other_source.id, target_node_id=other_target.id, edge_type="column_lineage", confidence_level="high", enabled=True))
+            db.commit()
+
+        package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "SQL 血缘正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
+        rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
+        assert rendered["job"]["status"] == "completed"
+        workbook = load_workbook(BytesIO(client.get(f"/api/deliverables/{package['id']}/download").content), data_only=False)
+        assert workbook["字段级血缘"]["A2"].value == "etl/customer_lineage.sql"
+        assert workbook["脚本变更影响"]["A2"].value == "字段转换规则调整"
+        workbook_text = " ".join(str(cell.value or "") for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row)
+        assert "CROSS_PROJECT_SECRET" not in workbook_text
+        assert "RAW_SQL_SECRET" not in workbook_text
+
+
 def test_readiness_requires_approved_double_layer_mappings() -> None:
     with _client_with_factory() as (client, factory):
         project = _post(client, "/api/projects", {"name": "准备度项目"})
@@ -275,6 +340,7 @@ def test_approval_is_idempotent_and_render_invalidates_old_review(monkeypatch, t
 
         rerendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
         assert rerendered["package"]["status"] == "generated"
+        assert rerendered["job"]["id"] == rendered["job"]["id"]
         assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
 
 
