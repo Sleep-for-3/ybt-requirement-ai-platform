@@ -1,0 +1,472 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
+from io import BytesIO
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.worksheet.datavalidation import DataValidation
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.database import Base, get_db
+from app.main import app
+from app.models import (
+    ImpactAnalysis,
+    DeliverablePackage,
+    LineageEdge,
+    LineageNode,
+    MartField,
+    MartTable,
+    MartToYbtMapping,
+    ProjectMembership,
+    ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
+    ScriptChangeItem,
+    ScriptChangeSet,
+    ScriptFile,
+    ScriptFileVersion,
+    SourceToMartMapping,
+    User,
+    WorkflowInstance,
+)
+from app.services.storage import get_storage_service
+from app.services.deliverables.lineage_records import build_change_impact_records
+from app.services.deliverables.workbook import render_workbook
+
+
+def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "正式交付项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_CUSTOMER", "table_name": "客户信息"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "CERT_TYPE", "field_name": "客户证件类型", "field_type": "VARCHAR", "regulatory_description": "客户证件类型监管定义"})
+        scenario = _post(client, f"/api/projects/{project['id']}/scenarios", {"scenario_code": "DEBIT", "scenario_name": "借记卡"})
+        business = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"final_content": "人工确认前的业务最终内容", "business_definition": "借记卡客户主证件类型"})
+        technical = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/technical-lineage", {"business_mapping_id": business["id"], "source_system_name": "ECIF", "source_schema_name": "ODS", "source_table_english_name": "ECIF_CUSTOMER", "source_field_english_name": "CERT_TYPE", "final_content": "ODS.ECIF_CUSTOMER.CERT_TYPE"})
+        _post(client, f"/api/mappings/scenario_technical/{technical['id']}/evidence", {"evidence_type": "manual_note", "source_name": "restricted 技术访谈", "quoted_content": "restricted 原文包含账号 6222000012345678", "evidence_summary": "来源字段已脱敏核验"})
+
+        template_bytes = _template_workbook()
+        upload = client.post(f"/api/projects/{project['id']}/deliverable-templates/upload", data={"template_name": "银行正式交付模板", "template_type": "full_delivery_package"}, files={"file": ("正式模板.xlsx", template_bytes, XLSX)})
+        assert upload.status_code == 201, upload.text
+        uploaded = upload.json(); version_id = uploaded["version"]["id"]; template_id = uploaded["template"]["id"]
+        assert uploaded["version"]["sheet_config_json"][0]["merged_cells"] == ["A1:C1"]
+        repeated = client.post(f"/api/projects/{project['id']}/deliverable-templates/upload", data={"template_id": template_id, "template_name": "银行正式交付模板", "template_type": "full_delivery_package"}, files={"file": ("正式模板.xlsx", template_bytes, XLSX)})
+        assert repeated.status_code == 201; assert repeated.json()["version"]["id"] == version_id
+
+        configured = _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
+        assert len(configured["column_mappings"]) == 12
+        template_validation = _post(client, f"/api/deliverable-template-versions/{version_id}/validate", {})
+        assert template_validation["valid"] is True
+        _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
+        preview = client.post(f"/api/deliverable-template-versions/{version_id}/preview-render")
+        assert preview.status_code == 200
+        preview_book = load_workbook(BytesIO(preview.content), data_only=False); preview_sheet = preview_book["业务口径及技术溯源表"]
+        assert preview_sheet["A3"].value == "FIELD_001"; assert preview_sheet["A2"].font.bold; assert preview_sheet["D3"].value == "=1+1"; assert "A1:C1" in [str(item) for item in preview_sheet.merged_cells.ranges]; assert preview_sheet.freeze_panes == "A3"; assert len(preview_sheet.data_validations.dataValidation) == 1
+
+        history = client.post(f"/api/projects/{project['id']}/historical-calibers/upload", data={"document_type": "business_traceability", "import_name": "脱敏历史业务口径"}, files={"file": ("历史业务口径.xlsx", _history_workbook(), XLSX)})
+        assert history.status_code == 201, history.text; history_item = history.json()["items"][0]; assert history_item["match_status"] == "matched"
+        merged_history = client.post(f"/api/projects/{project['id']}/historical-calibers/upload", data={"document_type": "full_package", "import_name": "合并表头历史口径"}, files={"file": ("合并表头历史口径.xlsx", _merged_history_workbook(), XLSX)})
+        assert merged_history.status_code == 201, merged_history.text; assert merged_history.json()["items"][0]["match_status"] == "matched"
+        historical_list = client.get(f"/api/projects/{project['id']}/historical-calibers").json()
+        assert [item["id"] for item in historical_list] == [merged_history.json()["id"], history.json()["id"]]
+        reused = _post(client, f"/api/historical-caliber-items/{history_item['id']}/reuse", {})
+        assert reused["final_content_overwritten"] is False
+        current = client.get(f"/api/scenario-business-mappings/{business['id']}").json()
+        assert current["final_content"] == "人工确认前的业务最终内容"; assert "历史建议" in current["ai_generated_content"]
+
+        question = _post(client, f"/api/projects/{project['id']}/questions", {"target_table_id": table["id"], "target_field_id": field["id"], "scenario_id": scenario["id"], "question_type": "source_field", "question_text": "来源字段需科技确认", "priority": "high", "assigned_role": "technical_analyst"})
+        assert client.post(f"/api/questions/{question['id']}/answer", json={}).status_code == 422
+        assert client.post(f"/api/questions/{question['id']}/answer", json={"resolution_text": "   "}).status_code == 422
+        other_project = _post(client, "/api/projects", {"name": "隔离项目"}); other_table = _post(client, "/api/target-tables", {"project_id": other_project["id"], "table_code": "OTHER", "table_name": "其他表"}); other_field = _post(client, "/api/fields", {"project_id": other_project["id"], "target_table_id": other_table["id"], "field_code": "OTHER_FIELD", "field_name": "其他字段"})
+        cross_reference = client.post(f"/api/projects/{project['id']}/questions", json={"target_table_id": table["id"], "target_field_id": other_field["id"], "question_text": "不应允许的跨项目引用"})
+        assert cross_reference.status_code == 404
+        cross_comparison = client.post(f"/api/projects/{project['id']}/caliber-comparisons", json={"target_field_id": other_field["id"], "left": {}, "right": {}})
+        assert cross_comparison.status_code == 404
+        readiness = client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json(); assert readiness["status"] == "blocked"; assert readiness["open_question_count"] == 1
+        package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "客户信息正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
+        immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json=_full_template_configuration())
+        assert immutable.status_code == 409
+        generated = _post(client, f"/api/deliverables/{package['id']}/generate", {}); assert generated["job"]["status"] == "completed"
+        workbench = client.get(f"/api/deliverables/{package['id']}").json()
+        assert workbench["generation_job"]["status"] == "completed"
+        assert workbench["readiness"]["items"][0]["blocking_reasons"]
+        assert workbench["questions"][0]["id"] == question["id"]
+        regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        assert regenerated["job"]["id"] == generated["job"]["id"]
+        validation = _post(client, f"/api/deliverables/{package['id']}/validate", {}); assert validation["error_count"] > 0; assert any(item["code"] == "high_priority_question" for item in validation["issues"])
+        assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
+        _post(client, f"/api/questions/{question['id']}/answer", {"resolution_text": "已确认使用 CERT_TYPE"}); _post(client, f"/api/questions/{question['id']}/accept", {})
+        rendered = _post(client, f"/api/deliverables/{package['id']}/render", {}); assert rendered["file_id"]
+        downloaded = client.get(f"/api/deliverables/{package['id']}/download"); assert downloaded.status_code == 200; rendered_book = load_workbook(BytesIO(downloaded.content)); assert rendered_book["业务口径及技术溯源表"]["A3"].value == "CERT_TYPE"; assert rendered_book["证据引用清单"]["B2"].value == "来源字段已脱敏核验"; assert "6222000012345678" not in " ".join(str(cell.value or "") for sheet in rendered_book.worksheets for row in sheet.iter_rows() for cell in row)
+
+
+def test_semantic_comparison_ignores_format_only_changes() -> None:
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "版本比较项目"})
+        comparison = _post(client, f"/api/projects/{project['id']}/caliber-comparisons", {"left": {"business_content": "仅包含 当前有效客户。"}, "right": {"business_content": "仅包含当前有效客户"}})
+        assert comparison["result_json"]["business_content"]["difference_type"] == "unchanged"
+
+
+def test_question_assignment_requires_active_membership_in_same_project() -> None:
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "问题分派项目"})
+        other_project = _post(client, "/api/projects", {"name": "其他项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_QUESTION", "table_name": "问题表"})
+        question = _post(client, f"/api/projects/{project['id']}/questions", {"target_table_id": table["id"], "question_text": "请确认来源字段"})
+
+        with factory() as db:
+            member = User(username="question_member", display_name="本项目成员", email="question-member@example.invalid")
+            outsider = User(username="question_outsider", display_name="其他项目成员", email="question-outsider@example.invalid")
+            db.add_all([member, outsider]); db.flush()
+            db.add_all([
+                ProjectMembership(project_id=project["id"], user_id=member.id, project_role="technical_analyst", status="active"),
+                ProjectMembership(project_id=other_project["id"], user_id=outsider.id, project_role="technical_analyst", status="active"),
+            ])
+            db.commit(); member_id = member.id; outsider_id = outsider.id
+
+        rejected = client.patch(f"/api/questions/{question['id']}", json={"assigned_user_id": outsider_id})
+        assert rejected.status_code == 400
+        assert rejected.json()["detail"] == "Assigned user is not an active project member"
+
+        assigned = client.patch(f"/api/questions/{question['id']}", json={"assigned_user_id": member_id})
+        assert assigned.status_code == 200, assigned.text
+        assert assigned.json()["assigned_user_id"] == member_id
+
+
+def test_template_configuration_rejects_invalid_columns_sheets_and_incomplete_activation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "模板校验项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_TEMPLATE", "table_name": "模板校验表"})
+        uploaded = client.post(
+            f"/api/projects/{project['id']}/deliverable-templates/upload",
+            data={"template_name": "严格模板", "template_type": "full_delivery_package"},
+            files={"file": ("严格模板.xlsx", _template_workbook(), XLSX)},
+        ).json()
+        version_id = uploaded["version"]["id"]
+
+        invalid_column = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json={"sheet_mappings": [{
+            "business_section": "target_field", "sheet_name": "业务口径及技术溯源表",
+            "header_row_start": 2, "header_row_end": 2, "data_start_row": 3,
+            "columns": [{"business_field": "target_field_code", "excel_column": "XFE"}],
+        }]})
+        assert invalid_column.status_code == 422
+
+        missing_sheet = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json={"sheet_mappings": [{
+            "business_section": "target_field", "sheet_name": "不存在的Sheet",
+            "columns": [{"business_field": "target_field_code", "excel_column": "A"}],
+        }]})
+        assert missing_sheet.status_code == 400
+
+        _post(client, f"/api/deliverable-template-versions/{version_id}/configure", {"sheet_mappings": [{
+            "business_section": "target_field", "sheet_name": "业务口径及技术溯源表",
+            "header_row_start": 2, "header_row_end": 2, "data_start_row": 3,
+            "columns": [{"business_field": "target_field_code", "excel_column": "A"}],
+        }]})
+        validation = _post(client, f"/api/deliverable-template-versions/{version_id}/validate", {})
+        assert validation["valid"] is False
+        assert any(issue["code"] == "required_section_missing" for issue in validation["issues"])
+        assert client.post(f"/api/deliverable-template-versions/{version_id}/activate").status_code == 409
+        create_package = client.post(f"/api/projects/{project['id']}/deliverables", json={
+            "target_table_id": table["id"], "template_version_id": version_id,
+        })
+        assert create_package.status_code == 409
+
+
+def test_template_renderer_expands_scenarios_horizontally_and_sources_vertically() -> None:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "场景"; sheet["A2"] = "场景"; source = workbook.create_sheet("来源"); source["A2"] = "来源"; stream = BytesIO(); workbook.save(stream)
+    sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="场景", business_section="scenario_business_mapping", data_start_row=2, repeat_direction="horizontal"), SimpleNamespace(id=2, enabled=True, sheet_name="来源", business_section="source_to_mart", data_start_row=2, repeat_direction="vertical")]
+    columns = [SimpleNamespace(template_sheet_mapping_id=1, business_field="scenario_name", excel_column="A", default_value=None, required=True, write_mode="repeat_by_scenario", merge_strategy="none"), SimpleNamespace(template_sheet_mapping_id=2, business_field="source_field_name", excel_column="A", default_value=None, required=True, write_mode="repeat_by_source", merge_strategy="none")]
+    rendered, warnings = render_workbook(stream.getvalue(), sheets, columns, {"scenario_business_mapping": [{"scenario_name": "借记卡"}, {"scenario_name": "信用卡"}], "source_to_mart": [{"source_field_name": "cert_type"}, {"source_field_name": "id_type"}]})
+    result = load_workbook(BytesIO(rendered)); assert result["场景"]["A2"].value == "借记卡"; assert result["场景"]["B2"].value == "信用卡"; assert result["来源"]["A2"].value == "cert_type"; assert result["来源"]["A3"].value == "id_type"; assert warnings == []
+
+
+def test_template_renderer_uses_real_horizontal_width_and_blocks_formula_injection() -> None:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "场景"; stream = BytesIO(); workbook.save(stream)
+    sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="场景", business_section="scenario_business_mapping", data_start_row=2, repeat_direction="horizontal")]
+    columns = [
+        SimpleNamespace(template_sheet_mapping_id=1, business_field="scenario_name", excel_column="A", default_value=None, required=True, write_mode="repeat_by_scenario", merge_strategy="none"),
+        SimpleNamespace(template_sheet_mapping_id=1, business_field="business_final_content", excel_column="C", default_value=None, required=True, write_mode="repeat_by_scenario", merge_strategy="none"),
+    ]
+    rendered, warnings = render_workbook(stream.getvalue(), sheets, columns, {"scenario_business_mapping": [
+        {"scenario_name": "借记卡", "business_final_content": "=HYPERLINK(\"https://example.invalid\")"},
+        {"scenario_name": "信用卡", "business_final_content": "正常口径"},
+    ]})
+    result = load_workbook(BytesIO(rendered), data_only=False)["场景"]
+    assert result["A2"].value == "借记卡"; assert result["C2"].value.startswith("'=")
+    assert result["D2"].value == "信用卡"; assert result["F2"].value == "正常口径"; assert warnings == []
+
+
+def test_template_renderer_returns_structured_blocking_issues() -> None:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "必填区域"; stream = BytesIO(); workbook.save(stream)
+    sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="必填区域", business_section="target_field", header_row_end=1, data_start_row=2, repeat_direction="vertical")]
+    columns = [SimpleNamespace(template_sheet_mapping_id=1, business_field="target_field_code", excel_column="A", default_value=None, required=True, write_mode="overwrite", merge_strategy="none")]
+    _, issues = render_workbook(stream.getvalue(), sheets, columns, {"target_field": [{}]})
+    assert issues == [{
+        "severity": "error", "code": "required_missing", "sheet_name": "必填区域", "cell": "A2",
+        "business_section": "target_field", "business_field": "target_field_code", "message": "必填业务字段没有可写入值",
+    }]
+
+
+def test_render_uses_current_sql_lineage_and_change_impact_without_cross_project_or_raw_sql(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "SQL 证据交付项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_LINEAGE", "table_name": "血缘交付表"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "LINEAGE_FIELD", "field_name": "血缘字段"})
+        other_project = _post(client, "/api/projects", {"name": "隔离 SQL 项目"})
+        other_table = _post(client, "/api/target-tables", {"project_id": other_project["id"], "table_code": "OTHER_LINEAGE", "table_name": "隔离血缘表"})
+        other_field = _post(client, "/api/fields", {"project_id": other_project["id"], "target_table_id": other_table["id"], "field_code": "OTHER_FIELD", "field_name": "隔离字段"})
+
+        uploaded = client.post(
+            f"/api/projects/{project['id']}/deliverable-templates/upload",
+            data={"template_name": "SQL 证据交付模板", "template_type": "full_delivery_package"},
+            files={"file": ("SQL证据模板.xlsx", _template_workbook(), XLSX)},
+        ).json()
+        version_id = uploaded["version"]["id"]
+        stored_file_id = uploaded["version"]["stored_file_id"]
+        _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
+        _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
+
+        with factory() as db:
+            script = ScriptFile(project_id=project["id"], relative_path="etl/customer_lineage.sql", file_name="customer_lineage.sql", file_type="sql", current_version_no=2)
+            db.add(script); db.flush()
+            old_version = ScriptFileVersion(project_id=project["id"], script_file_id=script.id, version_no=1, file_hash="1" * 64, normalized_hash="2" * 64, raw_content_storage_file_id=stored_file_id, parse_status="parsed")
+            current_version = ScriptFileVersion(project_id=project["id"], script_file_id=script.id, version_no=2, file_hash="3" * 64, normalized_hash="4" * 64, raw_content_storage_file_id=stored_file_id, parse_status="parsed")
+            db.add_all([old_version, current_version]); db.flush()
+            source = LineageNode(project_id=project["id"], node_type="column", logical_name="ODS.CUSTOMER.CERT_TYPE", database_name="SIM_DB", schema_name="ODS", table_name="CUSTOMER", column_name="CERT_TYPE", unresolved_flag=False)
+            target = LineageNode(project_id=project["id"], node_type="target_field", logical_name="YBT_LINEAGE.LINEAGE_FIELD", table_name="YBT_LINEAGE", column_name="LINEAGE_FIELD", target_table_id=table["id"], target_field_id=field["id"], unresolved_flag=False)
+            db.add_all([source, target]); db.flush()
+            db.add(LineageEdge(project_id=project["id"], script_file_version_id=current_version.id, source_node_id=source.id, target_node_id=target.id, edge_type="column_lineage", transformation_type="case", transformation_expression="RAW_SQL_SECRET_CASE_EXPRESSION", filter_condition="RAW_SQL_SECRET_FILTER", join_condition="RAW_SQL_SECRET_JOIN", confidence_level="high", enabled=True))
+            change_set = ScriptChangeSet(project_id=project["id"], script_file_id=script.id, from_version_id=old_version.id, to_version_id=current_version.id, change_type="modified", status="completed")
+            db.add(change_set); db.flush()
+            db.add(ScriptChangeItem(change_set_id=change_set.id, change_category="字段转换规则调整", entity_type="lineage_edge", old_value_json={}, new_value_json={}, severity="medium"))
+            mart_table = MartTable(project_id=project["id"], table_code="MART_LINEAGE", table_name="血缘集市表")
+            db.add(mart_table); db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_LINEAGE_FIELD", field_name="血缘集市字段")
+            db.add(mart_field); db.flush()
+            source_mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源层口径", mapping_status="approved")
+            ybt_mapping = MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="目标层口径", mapping_status="approved")
+            db.add_all([source_mapping, ybt_mapping]); db.flush()
+            assert source_mapping.id == ybt_mapping.id
+            db.add(ImpactAnalysis(project_id=project["id"], change_set_id=change_set.id, status="reviewed", severity="medium", affected_target_field_ids_json=[field["id"]], affected_mapping_ids_json=[f"source_to_mart:{source_mapping.id}"]))
+            source_mapping_id = source_mapping.id
+
+            other_script = ScriptFile(project_id=other_project["id"], relative_path="etl/CROSS_PROJECT_SECRET.sql", file_name="CROSS_PROJECT_SECRET.sql", file_type="sql", current_version_no=1)
+            db.add(other_script); db.flush()
+            other_version = ScriptFileVersion(project_id=other_project["id"], script_file_id=other_script.id, version_no=1, file_hash="5" * 64, normalized_hash="6" * 64, raw_content_storage_file_id=stored_file_id, parse_status="parsed")
+            db.add(other_version); db.flush()
+            other_source = LineageNode(project_id=other_project["id"], node_type="column", logical_name="CROSS_PROJECT_SECRET", table_name="SECRET_TABLE", column_name="SECRET_FIELD", unresolved_flag=False)
+            other_target = LineageNode(project_id=other_project["id"], node_type="target_field", logical_name="OTHER_LINEAGE.OTHER_FIELD", target_table_id=other_table["id"], target_field_id=other_field["id"], unresolved_flag=False)
+            db.add_all([other_source, other_target]); db.flush()
+            db.add(LineageEdge(project_id=other_project["id"], script_file_version_id=other_version.id, source_node_id=other_source.id, target_node_id=other_target.id, edge_type="column_lineage", confidence_level="high", enabled=True))
+            db.commit()
+            current_version_id = current_version.id
+
+        with factory() as db:
+            impact_records = build_change_impact_records(db, project["id"], table["id"])
+            assert impact_records[0]["affected_source_to_mart_mapping"] == str(source_mapping_id)
+            assert impact_records[0]["affected_mart_to_ybt_mapping"] == ""
+
+        package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "SQL 血缘正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
+        generated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        with factory() as db:
+            db.get(ScriptFileVersion, current_version_id).file_hash = "7" * 64
+            db.commit()
+        regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        assert regenerated["job"]["id"] != generated["job"]["id"]
+        rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
+        assert rendered["job"]["status"] == "completed", rendered["job"]["error_message"]
+        workbook = load_workbook(BytesIO(client.get(f"/api/deliverables/{package['id']}/download").content), data_only=False)
+        assert workbook["字段级血缘"]["A2"].value == "etl/customer_lineage.sql"
+        assert workbook["脚本变更影响"]["A2"].value == "字段转换规则调整"
+        workbook_text = " ".join(str(cell.value or "") for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row)
+        assert "CROSS_PROJECT_SECRET" not in workbook_text
+        assert "RAW_SQL_SECRET" not in workbook_text
+
+
+def test_readiness_requires_approved_double_layer_mappings() -> None:
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "准备度项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_READY", "table_name": "准备度表"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "READY_FIELD", "field_name": "准备度字段", "regulatory_description": "脱敏监管定义"})
+        scenario = _post(client, f"/api/projects/{project['id']}/scenarios", {"scenario_code": "READY", "scenario_name": "脱敏场景"})
+        business = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"final_content": "已确认业务口径"})
+        technical = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/technical-lineage", {"business_mapping_id": business["id"], "source_system_name": "SIM_SYSTEM", "source_schema_name": "ODS", "source_table_english_name": "SIM_TABLE", "source_field_english_name": "SIM_FIELD", "processing_logic_type": "direct", "final_content": "脱敏技术口径"})
+        _post(client, f"/api/mappings/scenario_technical/{technical['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏人工确认", "evidence_summary": "物理来源已人工核验"})
+
+        with factory() as db:
+            business_row = db.get(ScenarioBusinessMapping, business["id"])
+            technical_row = db.get(ScenarioTechnicalLineage, technical["id"])
+            business_row.business_confirm_status = "confirmed"; technical_row.tech_confirm_status = "confirmed"
+            mart_table = MartTable(project_id=project["id"], table_code="MART_READY", table_name="脱敏集市表")
+            db.add(mart_table); db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_FIELD", field_name="脱敏集市字段")
+            db.add(mart_field); db.flush()
+            source_mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源到集市口径", mapping_status="draft")
+            ybt_mapping = MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="集市到一表通口径", mapping_status="draft")
+            db.add_all([source_mapping, ybt_mapping]); db.commit(); source_id = source_mapping.id; ybt_id = ybt_mapping.id
+
+        readiness = client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json()
+        assert readiness["status"] == "pending_mapping_review"
+        assert {reason["code"] for reason in readiness["blocking_reasons"]} == {"mapping_review_pending"}
+
+        with factory() as db:
+            db.get(SourceToMartMapping, source_id).mapping_status = "approved"
+            db.get(MartToYbtMapping, ybt_id).mapping_status = "approved"
+            db.commit()
+        assert client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json()["status"] == "approved"
+
+
+def test_approval_is_idempotent_and_render_invalidates_old_review(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "幂等审批项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_APPROVAL", "table_name": "审批表"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "APPROVAL_FIELD", "field_name": "审批字段", "regulatory_description": "脱敏监管定义"})
+        scenario = _post(client, f"/api/projects/{project['id']}/scenarios", {"scenario_code": "APPROVAL", "scenario_name": "审批场景"})
+        business = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"final_content": "正式业务口径"})
+        technical = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/technical-lineage", {"business_mapping_id": business["id"], "source_system_name": "SIM_SYSTEM", "source_schema_name": "ODS", "source_table_english_name": "SIM_TABLE", "source_field_english_name": "SIM_FIELD", "processing_logic_type": "direct", "final_content": "正式技术口径"})
+        _post(client, f"/api/mappings/scenario_technical/{technical['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏人工确认", "evidence_summary": "物理来源已人工核验"})
+        with factory() as db:
+            db.get(ScenarioBusinessMapping, business["id"]).business_confirm_status = "confirmed"
+            db.get(ScenarioTechnicalLineage, technical["id"]).tech_confirm_status = "confirmed"
+            mart_table = MartTable(project_id=project["id"], table_code="MART_APPROVAL", table_name="审批集市表")
+            db.add(mart_table); db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_APPROVAL_FIELD", field_name="审批集市字段")
+            db.add(mart_field); db.flush()
+            source_mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源到集市正式口径", mapping_status="approved")
+            db.add_all([
+                source_mapping,
+                MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="集市到一表通正式口径", mapping_status="approved"),
+            ])
+            db.commit(); source_mapping_id = source_mapping.id
+
+        upload = client.post(
+            f"/api/projects/{project['id']}/deliverable-templates/upload",
+            data={"template_name": "审批模板", "template_type": "full_delivery_package"},
+            files={"file": ("审批模板.xlsx", _template_workbook(), XLSX)},
+        ).json()
+        version_id = upload["version"]["id"]
+        _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
+        _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
+        package = _post(client, f"/api/projects/{project['id']}/deliverables", {"target_table_id": table["id"], "template_version_id": version_id})
+        with factory() as db:
+            creator = User(username="deliverable_creator", display_name="交付包创建人", email="deliverable-creator@example.invalid")
+            db.add(creator); db.flush()
+            db.get(DeliverablePackage, package["id"]).created_by = creator.id
+            db.commit()
+        generated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        with factory() as db:
+            db.get(SourceToMartMapping, source_mapping_id).business_rule = "生成指纹需要感知的变更"
+            db.commit()
+        regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        assert regenerated["job"]["id"] != generated["job"]["id"]
+        rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
+        assert rendered["package"]["status"] == "generated"
+        submitted = _post(client, f"/api/deliverables/{package['id']}/submit-review", {})
+        workflow_id = submitted["workflow_instance"]["id"]
+        with factory() as db:
+            db.get(WorkflowInstance, workflow_id).status = "approved"
+            db.commit()
+
+        first = _post(client, f"/api/deliverables/{package['id']}/approve", {})
+        second = _post(client, f"/api/deliverables/{package['id']}/approve", {})
+        assert first["version"]["id"] == second["version"]["id"]
+        assert first["version"]["version_no"] == second["version"]["version_no"] == 1
+        assert second["idempotent"] is True
+        assert len(client.get(f"/api/deliverables/{package['id']}/versions").json()) == 1
+        with factory() as db:
+            from app.models import Notification
+            notifications = list(db.query(Notification).filter(Notification.notification_type == "deliverable_approved").all())
+            assert len(notifications) == 1
+
+        rerendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
+        assert rerendered["package"]["status"] == "generated"
+        assert rerendered["job"]["id"] == rendered["job"]["id"]
+        assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
+        resubmitted = _post(client, f"/api/deliverables/{package['id']}/submit-review", {})
+        with factory() as db:
+            db.get(WorkflowInstance, resubmitted["workflow_instance"]["id"]).status = "approved"
+            db.commit()
+        repeated_snapshot = _post(client, f"/api/deliverables/{package['id']}/approve", {})
+        assert repeated_snapshot["idempotent"] is True
+        assert repeated_snapshot["version"]["id"] == first["version"]["id"]
+        assert repeated_snapshot["package"]["status"] == "approved"
+        assert repeated_snapshot["package"]["version_no"] == 1
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _template_workbook() -> bytes:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "业务口径及技术溯源表"; sheet.merge_cells("A1:C1"); sheet["A1"] = "银行正式交付模板"; sheet["A2"] = "字段代码"; sheet["B2"] = "字段名称"; sheet["C2"] = "可信等级"; sheet["D3"] = "=1+1"; sheet.freeze_panes = "A3"; sheet["A2"].font = Font(bold=True); sheet["A2"].fill = PatternFill("solid", fgColor="D9EAF7"); sheet.column_dimensions["B"].width = 28; sheet.row_dimensions[2].height = 25
+    validation = DataValidation(type="list", formula1='"confirmed,inferred"'); validation.add("C3:C100"); sheet.add_data_validation(validation)
+    evidence = workbook.create_sheet("证据引用清单"); evidence.append(["证据类型", "脱敏摘要"])
+    for title in ["场景业务口径", "场景技术溯源", "业务系统到监管集市", "监管集市到一表通", "待确认问题", "审核记录", "字段级血缘", "脚本变更影响"]:
+        workbook.create_sheet(title).append([title])
+    stream = BytesIO(); workbook.save(stream); return stream.getvalue()
+
+
+def _full_template_configuration() -> dict:
+    mappings = [
+        {"business_section": "target_field", "sheet_name": "业务口径及技术溯源表", "header_row_start": 2, "header_row_end": 2, "data_start_row": 3, "columns": [{"business_field": "target_field_code", "excel_column": "A", "required": True}, {"business_field": "target_field_name", "excel_column": "B", "required": True}]},
+        {"business_section": "evidence", "sheet_name": "证据引用清单", "data_start_row": 2, "columns": [{"business_field": "evidence_type", "excel_column": "A"}, {"business_field": "evidence_summary", "excel_column": "B"}]},
+    ]
+    mappings.extend([
+        {"business_section": section, "sheet_name": sheet_name, "data_start_row": 2, "columns": [{"business_field": field, "excel_column": "A"}]}
+        for section, sheet_name, field in [
+            ("scenario_business_mapping", "场景业务口径", "business_final_content"),
+            ("scenario_technical_lineage", "场景技术溯源", "technical_final_content"),
+            ("source_to_mart", "业务系统到监管集市", "source_to_mart_final_content"),
+            ("mart_to_ybt", "监管集市到一表通", "mart_to_ybt_final_content"),
+            ("pending_question", "待确认问题", "question_text"),
+            ("review_record", "审核记录", "review_comment"),
+            ("lineage", "字段级血缘", "source_script"),
+            ("change_impact", "脚本变更影响", "change_summary"),
+        ]
+    ])
+    return {"sheet_mappings": mappings}
+
+
+def _history_workbook() -> bytes:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "历史业务口径"; sheet.append(["字段代码", "字段名称", "业务场景", "业务口径", "来源系统", "来源schema", "来源表英文名", "来源字段英文名"]); sheet.append(["CERT_TYPE", "客户证件类型", "借记卡", "历史业务口径建议", "ECIF", "ODS", "ECIF_CUSTOMER", "CERT_TYPE"]); stream = BytesIO(); workbook.save(stream); return stream.getvalue()
+
+
+def _merged_history_workbook() -> bytes:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "合并表头"; sheet.merge_cells("A1:B1"); sheet["A1"] = "字段"; sheet["A2"] = "代码"; sheet["B2"] = "名称"; sheet.merge_cells("C1:D1"); sheet["C1"] = "业务"; sheet["C2"] = "场景"; sheet["D2"] = "口径"; sheet["E1"] = "来源"; sheet["E2"] = "schema"; sheet.append(["CERT_TYPE", "客户证件类型", "借记卡", "合并表头历史建议", "ODS"]); stream = BytesIO(); workbook.save(stream); return stream.getvalue()
+
+
+@contextmanager
+def _client() -> Iterator[TestClient]:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool); Base.metadata.create_all(engine); factory = sessionmaker(bind=engine, autoflush=False)
+    def override() -> Iterator[Session]:
+        session = factory()
+        try: yield session
+        finally: session.close()
+    app.dependency_overrides[get_db] = override
+    try:
+        with TestClient(app) as client: yield client
+    finally:
+        app.dependency_overrides.clear(); Base.metadata.drop_all(engine); get_storage_service.cache_clear()
+
+
+@contextmanager
+def _client_with_factory() -> Iterator[tuple[TestClient, sessionmaker]]:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool); Base.metadata.create_all(engine); factory = sessionmaker(bind=engine, autoflush=False)
+    def override() -> Iterator[Session]:
+        session = factory()
+        try: yield session
+        finally: session.close()
+    app.dependency_overrides[get_db] = override
+    try:
+        with TestClient(app) as client: yield client, factory
+    finally:
+        app.dependency_overrides.clear(); Base.metadata.drop_all(engine); get_storage_service.cache_clear()
+
+
+def _post(client, path, payload):
+    response = client.post(path, json=payload); assert response.status_code in {200, 201}, response.text; return response.json()

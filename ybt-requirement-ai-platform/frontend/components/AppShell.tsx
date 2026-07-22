@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, BrainCircuit, Building2, ChartNoAxesCombined, ClipboardCheck, Database, FileOutput, FileSpreadsheet, FolderKanban, GitBranch, History, Layers3, LibraryBig, ListTree, TableProperties, Workflow } from "lucide-react";
+import { Bell, BrainCircuit, Building2, ChartNoAxesCombined, ClipboardCheck, Database, FileOutput, FileSpreadsheet, FolderKanban, GitBranch, History, Layers3, LibraryBig, ListChecks, ListTree, PackageCheck, TableProperties, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -16,6 +16,10 @@ const NAV = [
   { href: "/mart", label: "监管集市", icon: Layers3 },
   { href: "/fields", label: "字段场景", icon: ListTree },
   { href: "/export", label: "Excel 导出", icon: FileOutput },
+  { href: "/deliverables", label: "正式交付", icon: PackageCheck },
+  { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet },
+  { href: "/historical-calibers", label: "历史口径库", icon: History },
+  { href: "/questions", label: "待确认问题", icon: ListChecks },
   { href: "/datasources", label: "数据源", icon: Database },
   { href: "/catalog", label: "数据目录", icon: LibraryBig },
   { href: "/lineage", label: "脚本血缘", icon: GitBranch },
