@@ -8,14 +8,14 @@ from io import BytesIO
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
 from openpyxl import Workbook
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import (
     AuditLog, BackgroundJob, BackgroundJobItem, CaliberComparison, DeliverableEvidenceItem,
     DeliverableFieldItem, DeliverablePackage, DeliverablePackageVersion, DeliverableTemplate,
-    DeliverableTemplateVersion, HistoricalCaliberImport, HistoricalCaliberItem, MappingEvidenceReference,
+    DeliverableTemplateVersion, HistoricalCaliberImport, HistoricalCaliberItem, ImpactAnalysis, MappingEvidenceReference,
     MartToYbtMapping, PendingQuestion, ProductScenario, Project, ProjectMembership, ReviewDecision, ReviewTask, ScenarioBusinessMapping,
     ScenarioTechnicalLineage, SourceToMartMapping, StoredFile, TargetField, TargetTable,
     TemplateColumnMapping, TemplateSheetMapping, WorkflowInstance,
@@ -83,6 +83,9 @@ def list_templates(project_id: int, principal: CurrentPrincipal, db: Session = D
         row = _row(item)
         version = db.scalar(select(DeliverableTemplateVersion).where(DeliverableTemplateVersion.template_id == item.id, DeliverableTemplateVersion.version_no == item.current_version_no))
         row["current_version_id"] = version.id if version else None
+        row["current_version_status"] = version.parse_status if version else None
+        row["validation_error_count"] = sum(issue.get("severity") == "error" for issue in (version.warnings_json or [])) if version else 0
+        row["validation_warning_count"] = sum(issue.get("severity") == "warning" for issue in (version.warnings_json or [])) if version else 0
         result.append(row)
     return result
 
@@ -91,7 +94,17 @@ def list_templates(project_id: int, principal: CurrentPrincipal, db: Session = D
 def get_template(template_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     template = _resource_visible(db, principal, DeliverableTemplate, template_id)
     versions = list(db.scalars(select(DeliverableTemplateVersion).where(DeliverableTemplateVersion.template_id == template.id).order_by(DeliverableTemplateVersion.version_no.desc())).all())
-    result = _row(template); result["versions"] = [_row(version) for version in versions]; return result
+    result = _row(template)
+    result["versions"] = []
+    for version in versions:
+        validation = validate_template_version(db, version.id)
+        result["versions"].append({
+            **_row(version),
+            "validation": validation,
+            "sheet_mapping_count": len(_sheet_mappings(db, version.id)),
+            "enabled_sheet_mapping_count": sum(item.enabled for item in _sheet_mappings(db, version.id)),
+        })
+    return result
 
 
 @router.get("/deliverable-template-versions/{version_id}/preview")
@@ -177,6 +190,14 @@ async def upload_historical(project_id: int, principal: CurrentPrincipal, file: 
     db.add_all(items); document.status = "parsed"; document.warnings_json = warnings; document.parse_summary_json = {"item_count": len(items), "matched_count": sum(item.match_status == "matched" for item in items), "ambiguous_count": sum(item.match_status == "ambiguous" for item in items)}
     record_audit(db, action="import_historical_caliber", resource_type="historical_caliber_import", resource_id=document.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project.id, after=document.parse_summary_json)
     db.commit(); return {**_row(document), "items": [_row(item) for item in items[:100]]}
+
+
+@router.get("/projects/{project_id}/historical-calibers")
+def list_historical(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> list[dict]:
+    _permission(db, principal, project_id, "deliverable.view")
+    return [_row(item) for item in db.scalars(select(HistoricalCaliberImport).where(
+        HistoricalCaliberImport.project_id == project_id,
+    ).order_by(HistoricalCaliberImport.id.desc())).all()]
 
 
 @router.get("/historical-calibers/{import_id}/preview")
@@ -350,7 +371,23 @@ def list_deliverables(project_id: int, principal: CurrentPrincipal, db: Session 
 
 @router.get("/deliverables/{package_id}")
 def get_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    return _package_detail(db, _resource_visible(db, principal, DeliverablePackage, package_id))
+    package = _resource_visible(db, principal, DeliverablePackage, package_id)
+    result = _package_detail(db, package)
+    readiness = table_readiness(db, package.target_table_id)
+    readiness_by_field = {item["target_field_id"]: item for item in readiness["items"]}
+    result["items"] = [{**item, "readiness": readiness_by_field.get(item["target_field_id"], {})} for item in result["items"]]
+    result["readiness"] = readiness
+    result["questions"] = [_row(item) for item in db.scalars(select(PendingQuestion).where(
+        PendingQuestion.project_id == package.project_id,
+        PendingQuestion.target_table_id == package.target_table_id,
+    ).order_by(PendingQuestion.id.desc())).all()]
+    result["versions"] = [_row(item) for item in db.scalars(select(DeliverablePackageVersion).where(
+        DeliverablePackageVersion.project_id == package.project_id,
+        DeliverablePackageVersion.deliverable_package_id == package.id,
+    ).order_by(DeliverablePackageVersion.version_no.desc())).all()]
+    result["lineage_record_count"] = len(build_lineage_records(db, package.project_id, package.target_table_id))
+    result["change_impact_record_count"] = len(build_change_impact_records(db, package.project_id, package.target_table_id))
+    return result
 
 
 @router.post("/deliverables/{package_id}/generate")
@@ -358,7 +395,7 @@ def generate_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.generate")
     fingerprint = _generation_fingerprint(db, package)
     package.status = "generating"; package.generation_fingerprint = fingerprint; db.commit()
-    job = get_task_queue().enqueue(db, job_type="deliverable_generate_field_items", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=fingerprint, payload_summary={"package_id": package.id, "generation_fingerprint": fingerprint}, handler=_deliverable_generate_handler)
+    job = get_task_queue().enqueue(db, job_type="deliverable_generate_field_items", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=fingerprint, payload_summary={"package_id": package.id, "generation_fingerprint_hash": fingerprint}, handler=_deliverable_generate_handler)
     package = db.get(DeliverablePackage, package.id); package.generation_job_id = job.id
     if job.status == "completed" and package.status == "generating": package.status = "draft"
     db.commit()
@@ -368,7 +405,7 @@ def generate_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
 def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
     package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
     if package is None or package.project_id != job.project_id: raise ValueError("Deliverable package not found")
-    if package.generation_fingerprint != job.payload_summary_json.get("generation_fingerprint"):
+    if package.generation_fingerprint != job.payload_summary_json.get("generation_fingerprint_hash"):
         raise ValueError("Deliverable generation fingerprint is stale")
     items = _ensure_field_items(db, package); success = failed = blocked = skipped = 0
     job.current_step = "build_lineage_records"
@@ -429,7 +466,7 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
             job.current_step = "create_pending_questions"
             _ensure_generation_questions(db, package, item.target_field_id)
             job.current_step = "calculate_readiness"
-            readiness = field_readiness(db, item.target_field_id); item.field_status = readiness["status"]; item.evidence_completeness = readiness["evidence_completeness"]; item.open_question_count = readiness["open_question_count"]
+            readiness = field_readiness(db, item.target_field_id); item.field_status = readiness["status"]; item.evidence_completeness = readiness["evidence_completeness"]; item.open_question_count = readiness["open_question_count"]; item.validation_result_json = readiness
             job.current_step = "assemble_field_items"
             db.expire_all()
             package = db.get(DeliverablePackage, package.id); job = db.get(BackgroundJob, job.id); item = db.get(DeliverableFieldItem, item.id)
@@ -481,7 +518,7 @@ def render_deliverable(package_id: int, principal: CurrentPrincipal, db: Session
     package.render_fingerprint = fingerprint
     package.summary_json = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"}
     db.commit()
-    job = get_task_queue().enqueue(db, job_type="deliverable_render_excel", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=fingerprint, payload_summary={"package_id": package.id, "render_fingerprint": fingerprint}, handler=_deliverable_render_handler)
+    job = get_task_queue().enqueue(db, job_type="deliverable_render_excel", institution_id=package.institution_id, project_id=package.project_id, created_by=principal.user_id or 0, idempotency_key=fingerprint, payload_summary={"package_id": package.id, "render_fingerprint_hash": fingerprint}, handler=_deliverable_render_handler)
     package = db.get(DeliverablePackage, package.id)
     package.render_job_id = job.id
     if job.status == "completed" and package.status == "generating":
@@ -495,7 +532,7 @@ def _deliverable_render_handler(db: Session, job: BackgroundJob) -> dict:
     package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
     if package is None or package.project_id != job.project_id:
         raise ValueError("Deliverable package not found")
-    if package.render_fingerprint != job.payload_summary_json.get("render_fingerprint"):
+    if package.render_fingerprint != job.payload_summary_json.get("render_fingerprint_hash"):
         raise ValueError("Deliverable render fingerprint is stale")
     if job.status == "cancelled":
         package.status = "cancelled"; db.commit(); return {"success_count": 0, "failed_count": 0, "cancelled_count": 1}
@@ -635,7 +672,36 @@ def _ensure_field_items(db, package):
         item = existing.get(field.id) or DeliverableFieldItem(project_id=package.project_id, deliverable_package_id=package.id, target_table_id=package.target_table_id, target_field_id=field.id, field_order=order); db.add(item); result.append(item)
     db.flush(); return result
 def _package_detail(db, package):
-    result = _row(package); items = list(db.scalars(select(DeliverableFieldItem).where(DeliverableFieldItem.deliverable_package_id == package.id).order_by(DeliverableFieldItem.field_order)).all()); result["items"] = [_row(item) for item in items]; result["field_count"] = len(items); result["approved_field_count"] = sum(item.field_status == "approved" for item in items); return result
+    result = _row(package)
+    items = list(db.scalars(select(DeliverableFieldItem).where(DeliverableFieldItem.deliverable_package_id == package.id).order_by(DeliverableFieldItem.field_order)).all())
+    item_rows = [_row(item) for item in items]
+    result["items"] = item_rows
+    result["field_count"] = len(items)
+    result["approved_field_count"] = sum(item.field_status == "approved" for item in items)
+    result["blocking_field_count"] = sum(item.field_status != "approved" for item in items)
+    open_statuses = ("open", "assigned", "answered")
+    result["high_priority_question_count"] = db.scalar(select(func.count(PendingQuestion.id)).where(
+        PendingQuestion.project_id == package.project_id,
+        PendingQuestion.target_table_id == package.target_table_id,
+        PendingQuestion.priority == "high",
+        PendingQuestion.question_status.in_(open_statuses),
+    )) or 0
+    field_ids = [item.target_field_id for item in items]
+    impacts = list(db.scalars(select(ImpactAnalysis).where(
+        ImpactAnalysis.project_id == package.project_id,
+        ImpactAnalysis.severity.in_(("critical", "high")),
+        ImpactAnalysis.status != "reviewed",
+    )).all())
+    result["unreviewed_impact_count"] = sum(bool(set(field_ids).intersection(impact.affected_target_field_ids_json or [])) for impact in impacts)
+    result["generation_job"] = _row(db.get(BackgroundJob, package.generation_job_id)) if package.generation_job_id and db.get(BackgroundJob, package.generation_job_id) else None
+    result["render_job"] = _row(db.get(BackgroundJob, package.render_job_id)) if package.render_job_id and db.get(BackgroundJob, package.render_job_id) else None
+    workflow = db.scalar(select(WorkflowInstance).where(
+        WorkflowInstance.project_id == package.project_id,
+        WorkflowInstance.target_type == "deliverable_package",
+        WorkflowInstance.target_id == package.id,
+    ).order_by(WorkflowInstance.id.desc()).limit(1))
+    result["workflow"] = _row(workflow) if workflow else None
+    return result
 def _package_snapshot(db, package):
     snapshot = {"package": _row(package), "fields": _package_detail(db, package)["items"], "records": _package_records(db, package), "approved_at": package.approved_at.isoformat() if package.approved_at else None}
     return json.loads(json.dumps(snapshot, ensure_ascii=False, default=str))

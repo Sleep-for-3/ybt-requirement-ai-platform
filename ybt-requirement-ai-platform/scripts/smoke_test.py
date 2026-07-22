@@ -622,18 +622,45 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
         _post_json(client, f"{base}/review-tasks/{double_tasks[step]['id']}/approve", {"comment": f"deliverable {step} approved"})
     client.headers["Authorization"] = admin_authorization
 
+    delivery_sql_v1 = b"""-- sanitized delivery lineage v1
+insert into YBT_DELIVERY (DELIVERY_CERT_TYPE)
+select cert_type from mart_customer where cert_type is not null;
+"""
+    delivery_sql_v2 = b"""-- sanitized delivery lineage v2 SMOKE_RAW_SQL_MARKER
+insert into YBT_DELIVERY (DELIVERY_CERT_TYPE)
+select case when cert_type='01' then 'A' else cert_type end from mart_customer where cert_type <> '99';
+"""
+    delivery_lineage_v1 = _post_file(client, f"{base}/projects/{project_id}/scripts/upload", {"relative_path": "load_delivery.sql", "dialect": "sqlite"}, {"file": ("load_delivery.sql", BytesIO(delivery_sql_v1), "text/plain")})
+    delivery_lineage_v2 = _post_file(client, f"{base}/projects/{project_id}/scripts/upload", {"relative_path": "load_delivery.sql", "dialect": "sqlite"}, {"file": ("load_delivery.sql", BytesIO(delivery_sql_v2), "text/plain")})
+    if delivery_lineage_v2["version_no"] != 2 or not delivery_lineage_v2.get("impact_id"):
+        raise AssertionError("正式交付字段未产生脚本 v2 变更影响")
+    delivery_impact = _get_json(client, f"{base}/lineage/impacts/{delivery_lineage_v2['impact_id']}")
+    delivery_impact_tasks = {item["step_key"]: item for item in delivery_impact["workflow"]["tasks"]}
+    for step, role in [("impact_analysis", "technical_analyst"), ("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
+        session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": users[role]["password"]})
+        client.headers["Authorization"] = f"Bearer {session['access_token']}"
+        _post_json(client, f"{base}/review-tasks/{delivery_impact_tasks[step]['id']}/approve", {"comment": f"delivery impact {step} approved"})
+    client.headers["Authorization"] = admin_authorization
+
     template_content = _delivery_template_bytes()
     template = _post_file(client, f"{base}/projects/{project_id}/deliverable-templates/upload", {"template_name": "银行正式交付模板", "template_type": "full_delivery_package"}, {"file": ("银行正式交付模板.xlsx", BytesIO(template_content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     version_id = template["version"]["id"]
     sheet_mappings = [
         {"business_section": "target_field", "sheet_name": "业务口径及技术溯源表", "header_row_start": 2, "header_row_end": 2, "data_start_row": 3, "columns": [{"business_field": "target_field_code", "excel_column": "A", "required": True}, {"business_field": "target_field_name", "excel_column": "B", "required": True}, {"business_field": "regulatory_definition", "excel_column": "C"}]},
+        {"business_section": "scenario_business_mapping", "sheet_name": "场景业务口径", "data_start_row": 2, "columns": [{"business_field": "business_final_content", "excel_column": "A"}, {"business_field": "business_confirm_status", "excel_column": "B"}]},
+        {"business_section": "scenario_technical_lineage", "sheet_name": "场景技术溯源", "data_start_row": 2, "columns": [{"business_field": "technical_final_content", "excel_column": "A"}, {"business_field": "lineage_status", "excel_column": "B"}]},
         {"business_section": "source_to_mart", "sheet_name": "业务系统到监管集市口径", "data_start_row": 2, "columns": [{"business_field": "source_to_mart_final_content", "excel_column": "A"}]},
         {"business_section": "mart_to_ybt", "sheet_name": "监管集市到一表通口径", "data_start_row": 2, "columns": [{"business_field": "mart_to_ybt_final_content", "excel_column": "A"}]},
         {"business_section": "evidence", "sheet_name": "证据引用清单", "data_start_row": 2, "columns": [{"business_field": "evidence_type", "excel_column": "A"}, {"business_field": "evidence_summary", "excel_column": "B"}]},
         {"business_section": "pending_question", "sheet_name": "待确认问题", "data_start_row": 2, "columns": [{"business_field": "question_text", "excel_column": "A"}, {"business_field": "question_status", "excel_column": "B"}]},
         {"business_section": "review_record", "sheet_name": "审核记录", "data_start_row": 2, "columns": [{"business_field": "action", "excel_column": "A"}, {"business_field": "approved_at", "excel_column": "B"}]},
+        {"business_section": "lineage", "sheet_name": "字段级血缘", "data_start_row": 2, "columns": [{"business_field": "source_script", "excel_column": "A"}, {"business_field": "affected_target_field_code", "excel_column": "B"}]},
+        {"business_section": "change_impact", "sheet_name": "脚本变更影响", "data_start_row": 2, "columns": [{"business_field": "change_summary", "excel_column": "A"}, {"business_field": "review_decision", "excel_column": "B"}]},
     ]
     _post_json(client, f"{base}/deliverable-template-versions/{version_id}/configure", {"sheet_mappings": sheet_mappings})
+    template_validation = _post_json(client, f"{base}/deliverable-template-versions/{version_id}/validate", {})
+    if not template_validation["valid"]: raise AssertionError(f"正式交付模板校验失败: {template_validation['issues']}")
+    _post_json(client, f"{base}/deliverable-template-versions/{version_id}/activate", {})
     preview = client.post(f"{base}/deliverable-template-versions/{version_id}/preview-render", json={})
     preview.raise_for_status(); load_workbook(BytesIO(preview.content), data_only=False)
 
@@ -655,8 +682,19 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
     downloaded = client.get(f"{base}/deliverables/{package['id']}/download"); downloaded.raise_for_status()
     workbook = load_workbook(BytesIO(downloaded.content), data_only=False); sheet = workbook["业务口径及技术溯源表"]
     if sheet["A3"].value != "DELIVERY_CERT_TYPE" or sheet["D3"].value != "=1+1" or "A1:C1" not in [str(item) for item in sheet.merged_cells.ranges] or not sheet["A2"].font.bold: raise AssertionError("正式 Excel 未保留内容、公式、样式或合并单元格")
+    lineage_rows = workbook["字段级血缘"].max_row - 1
+    impact_rows = workbook["脚本变更影响"].max_row - 1
+    if lineage_rows < 1 or impact_rows < 1: raise AssertionError("正式 Excel 缺少真实字段血缘或脚本影响记录")
+    workbook_text = " ".join(str(cell.value or "") for workbook_sheet in workbook.worksheets for row in workbook_sheet.iter_rows() for cell in row)
+    if "SMOKE_RAW_SQL_MARKER" in workbook_text or "insert into YBT_DELIVERY" in workbook_text: raise AssertionError("正式 Excel 泄漏了原始 SQL")
     _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
     approved1 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
+    repeated_approval = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
+    if repeated_approval["version"]["id"] != approved1["version"]["id"] or not repeated_approval.get("idempotent"):
+        raise AssertionError("重复批准未幂等复用正式版本 v1")
+    version_note = _post_json(client, f"{base}/projects/{project_id}/questions", {"target_table_id": table["id"], "target_field_id": field["id"], "scenario_id": scenario["id"], "question_type": "version_note", "question_text": "确认第二版交付说明", "priority": "medium", "assigned_role": "project_manager"})
+    _post_json(client, f"{base}/questions/{version_note['id']}/answer", {"resolution_text": "第二版纳入最新已审核脚本影响说明"})
+    _post_json(client, f"{base}/questions/{version_note['id']}/accept", {})
     _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
     stale_approval = client.post(f"{base}/deliverables/{package['id']}/approve", json={})
     if stale_approval.status_code != 409: raise AssertionError("重新渲染后的交付包复用了旧审核结果")
@@ -666,7 +704,9 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
     cross = client.get(f"{base}/deliverables/{package['id']}", headers={"Authorization": f"Bearer {outsider_token}"})
     if cross.status_code != 404: raise AssertionError("跨银行用户可读取正式交付包")
     client.headers["Authorization"] = admin_authorization
-    return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "rendered_file_id": rendered["file_id"], "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames)}
+    version1_download = client.get(f"{base}/deliverable-package-versions/{approved1['version']['id']}/download"); version1_download.raise_for_status()
+    version2_download = client.get(f"{base}/deliverable-package-versions/{approved2['version']['id']}/download"); version2_download.raise_for_status()
+    return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "generation_job_status": "completed", "render_job_status": rendered["job"]["status"], "rendered_file_id": rendered["file_id"], "rendered_file_bytes": len(downloaded.content), "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "repeat_approval_idempotent": repeated_approval["idempotent"], "lineage_sheet_rows": lineage_rows, "change_impact_sheet_rows": impact_rows, "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames), "version_file_bytes": [len(version1_download.content), len(version2_download.content)]}
 
 
 def _approve_delivery_workflow(client, base, project_id, package_id, users, admin_authorization):
@@ -681,7 +721,7 @@ def _approve_delivery_workflow(client, base, project_id, package_id, users, admi
 
 def _delivery_template_bytes():
     workbook = Workbook(); sheet = workbook.active; sheet.title = "业务口径及技术溯源表"; sheet.merge_cells("A1:C1"); sheet["A1"] = "银行正式交付模板"; sheet["A2"] = "字段代码"; sheet["B2"] = "字段名称"; sheet["C2"] = "监管定义"; sheet["D3"] = "=1+1"; sheet["A2"].font = Font(bold=True); sheet.freeze_panes = "A3"
-    for name in ["业务系统到监管集市口径", "监管集市到一表通口径", "字段级血缘", "证据引用清单", "待确认问题", "历史口径差异", "脚本变更影响", "审核记录", "版本说明"]:
+    for name in ["场景业务口径", "场景技术溯源", "业务系统到监管集市口径", "监管集市到一表通口径", "字段级血缘", "证据引用清单", "待确认问题", "历史口径差异", "脚本变更影响", "审核记录", "版本说明"]:
         target = workbook.create_sheet(name); target.append([name, "状态", "说明"])
     stream = BytesIO(); workbook.save(stream); return stream.getvalue()
 

@@ -33,6 +33,9 @@ jobs:
           python -m alembic upgrade head
           python -m alembic downgrade -1
           python -m alembic upgrade head
+          rm -f ci_upgrade_from_main.db
+          DATABASE_URL=sqlite:///./ci_upgrade_from_main.db python -m alembic upgrade 202607150009
+          DATABASE_URL=sqlite:///./ci_upgrade_from_main.db python -m alembic upgrade head
       - name: Run backend tests
         shell: bash
         run: |

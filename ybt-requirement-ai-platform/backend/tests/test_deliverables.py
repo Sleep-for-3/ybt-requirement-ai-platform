@@ -68,6 +68,8 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         assert history.status_code == 201, history.text; history_item = history.json()["items"][0]; assert history_item["match_status"] == "matched"
         merged_history = client.post(f"/api/projects/{project['id']}/historical-calibers/upload", data={"document_type": "full_package", "import_name": "合并表头历史口径"}, files={"file": ("合并表头历史口径.xlsx", _merged_history_workbook(), XLSX)})
         assert merged_history.status_code == 201, merged_history.text; assert merged_history.json()["items"][0]["match_status"] == "matched"
+        historical_list = client.get(f"/api/projects/{project['id']}/historical-calibers").json()
+        assert [item["id"] for item in historical_list] == [merged_history.json()["id"], history.json()["id"]]
         reused = _post(client, f"/api/historical-caliber-items/{history_item['id']}/reuse", {})
         assert reused["final_content_overwritten"] is False
         current = client.get(f"/api/scenario-business-mappings/{business['id']}").json()
@@ -84,6 +86,10 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json=_full_template_configuration())
         assert immutable.status_code == 409
         generated = _post(client, f"/api/deliverables/{package['id']}/generate", {}); assert generated["job"]["status"] == "completed"
+        workbench = client.get(f"/api/deliverables/{package['id']}").json()
+        assert workbench["generation_job"]["status"] == "completed"
+        assert workbench["readiness"]["items"][0]["blocking_reasons"]
+        assert workbench["questions"][0]["id"] == question["id"]
         regenerated = _post(client, f"/api/deliverables/{package['id']}/generate", {})
         assert regenerated["job"]["id"] == generated["job"]["id"]
         validation = _post(client, f"/api/deliverables/{package['id']}/validate", {}); assert validation["error_count"] > 0; assert any(item["code"] == "high_priority_question" for item in validation["issues"])
@@ -248,7 +254,7 @@ def test_render_uses_current_sql_lineage_and_change_impact_without_cross_project
 
         package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "SQL 血缘正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
         rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
-        assert rendered["job"]["status"] == "completed"
+        assert rendered["job"]["status"] == "completed", rendered["job"]["error_message"]
         workbook = load_workbook(BytesIO(client.get(f"/api/deliverables/{package['id']}/download").content), data_only=False)
         assert workbook["字段级血缘"]["A2"].value == "etl/customer_lineage.sql"
         assert workbook["脚本变更影响"]["A2"].value == "字段转换规则调整"
