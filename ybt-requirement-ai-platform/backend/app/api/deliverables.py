@@ -22,10 +22,17 @@ from app.models import (
 )
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.schemas.deliverables import (
+    DeliverableCreateRequest,
+    PendingQuestionCreateRequest,
+    PendingQuestionUpdateRequest,
+    TemplateConfigureRequest,
+)
 from app.services.deliverables.historical import parse_historical_workbook, semantic_diff
 from app.services.deliverables.mart_to_ybt_compiler import compile_mart_to_ybt
 from app.services.deliverables.readiness_service import field_readiness, table_readiness
 from app.services.deliverables.source_to_mart_compiler import compile_source_to_mart
+from app.services.deliverables.template_validation import validate_template_version
 from app.services.deliverables.validation_service import validate_package
 from app.services.deliverables.workbook import inspect_workbook, render_workbook
 from app.services.governance.audit import record_audit
@@ -92,24 +99,37 @@ def preview_template(version_id: int, principal: CurrentPrincipal, db: Session =
 
 
 @router.post("/deliverable-template-versions/{version_id}/configure")
-def configure_template(version_id: int, principal: CurrentPrincipal, payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
+def configure_template(version_id: int, principal: CurrentPrincipal, payload: TemplateConfigureRequest, db: Session = Depends(get_db)) -> dict:
     version = _resource_visible(db, principal, DeliverableTemplateVersion, version_id, "template.manage")
     referenced = db.scalar(select(DeliverablePackage.id).where(DeliverablePackage.template_version_id == version.id).limit(1))
     if version.parse_status == "active" or referenced is not None:
         raise HTTPException(409, "Activated or referenced template versions are immutable; upload a new version")
+    configured = payload.model_dump()
     available_sheets = {item["sheet_name"] for item in version.sheet_config_json}
+    for item in configured["sheet_mappings"]:
+        if item["sheet_name"] not in available_sheets:
+            raise HTTPException(400, "Configured sheet does not exist in the workbook")
     for existing in _column_mappings(db, version.id): db.delete(existing)
     db.flush()
     for existing in _sheet_mappings(db, version.id): db.delete(existing)
     db.flush()
-    for item in payload.get("sheet_mappings", []):
-        if item.get("business_section") not in SECTIONS or item.get("sheet_name") not in available_sheets: raise HTTPException(400, "Invalid sheet mapping")
-        sheet = TemplateSheetMapping(project_id=version.project_id, template_version_id=version.id, business_section=item["business_section"], sheet_name=item["sheet_name"], header_row_start=item.get("header_row_start", 1), header_row_end=item.get("header_row_end", 1), data_start_row=item.get("data_start_row", 2), repeat_direction=item.get("repeat_direction", "vertical"), enabled=item.get("enabled", True))
+    for item in configured["sheet_mappings"]:
+        sheet = TemplateSheetMapping(project_id=version.project_id, template_version_id=version.id, business_section=item["business_section"], sheet_name=item["sheet_name"], header_row_start=item["header_row_start"], header_row_end=item["header_row_end"], data_start_row=item["data_start_row"], repeat_direction=item["repeat_direction"], enabled=item["enabled"])
         db.add(sheet); db.flush()
-        for column in item.get("columns", []):
-            db.add(TemplateColumnMapping(project_id=version.project_id, template_sheet_mapping_id=sheet.id, business_field=column["business_field"], excel_column=column["excel_column"].upper(), excel_header=column.get("excel_header"), write_mode=column.get("write_mode", "overwrite"), merge_strategy=column.get("merge_strategy", "none"), required=column.get("required", False), default_value=column.get("default_value"), format_config_json=column.get("format_config_json", {})))
-    version.column_mapping_json = payload.get("sheet_mappings", [])
-    record_audit(db, action="configure_template_mapping", resource_type="deliverable_template_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=version.project_id, after={"sheet_mapping_count": len(payload.get("sheet_mappings", []))})
+        for column in item["columns"]:
+            db.add(TemplateColumnMapping(project_id=version.project_id, template_sheet_mapping_id=sheet.id, business_field=column["business_field"], excel_column=column["excel_column"], excel_header=column["excel_header"], write_mode=column["write_mode"], merge_strategy=column["merge_strategy"], required=column["required"], default_value=column["default_value"], format_config_json=column["format_config_json"]))
+    db.flush()
+    validation = validate_template_version(db, version.id)
+    structural_errors = [
+        issue for issue in validation["issues"]
+        if issue["severity"] == "error" and issue["code"] != "required_section_missing"
+    ]
+    if structural_errors:
+        db.rollback()
+        raise HTTPException(400, {"message": "Invalid template configuration", "issues": structural_errors})
+    version.column_mapping_json = configured["sheet_mappings"]
+    version.warnings_json = validation["issues"]
+    record_audit(db, action="configure_template_mapping", resource_type="deliverable_template_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=version.project_id, after={"sheet_mapping_count": len(configured["sheet_mappings"])})
     db.commit(); return preview_template(version.id, principal, db)
 
 
@@ -117,6 +137,9 @@ def configure_template(version_id: int, principal: CurrentPrincipal, payload: di
 def activate_template(version_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     version = _resource_visible(db, principal, DeliverableTemplateVersion, version_id, "template.manage")
     template = db.get(DeliverableTemplate, version.template_id)
+    validation = validate_template_version(db, version.id)
+    if not validation["valid"]:
+        raise HTTPException(409, {"message": "Template validation failed", "validation": validation})
     siblings = list(db.scalars(select(DeliverableTemplate).where(DeliverableTemplate.project_id == template.project_id, DeliverableTemplate.template_type == template.template_type)).all())
     for sibling in siblings: sibling.is_default = sibling.id == template.id
     template.current_version_no = version.version_no; template.enabled = True; version.parse_status = "active"
@@ -127,11 +150,10 @@ def activate_template(version_id: int, principal: CurrentPrincipal, db: Session 
 @router.post("/deliverable-template-versions/{version_id}/validate")
 def validate_template(version_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     version = _resource_visible(db, principal, DeliverableTemplateVersion, version_id, "template.manage")
-    mappings = _sheet_mappings(db, version.id); columns = _column_mappings(db, version.id)
-    issues = []
-    if not any(item.enabled for item in mappings): issues.append({"severity": "error", "message": "至少启用一个 Sheet 映射"})
-    if not columns: issues.append({"severity": "error", "message": "至少配置一个列映射"})
-    return {"valid": not any(item["severity"] == "error" for item in issues), "issues": issues}
+    result = validate_template_version(db, version.id)
+    version.warnings_json = result["issues"]
+    db.commit()
+    return result
 
 
 @router.post("/deliverable-template-versions/{version_id}/preview-render")
@@ -234,18 +256,19 @@ def get_table_readiness(table_id: int, principal: CurrentPrincipal, db: Session 
 
 
 @router.post("/projects/{project_id}/questions", status_code=201)
-def create_question(project_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+def create_question(project_id: int, payload: PendingQuestionCreateRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    values = payload.model_dump()
     project = _permission(db, principal, project_id, "question.manage")
-    table = _resource(db, TargetTable, int(payload["target_table_id"]), project_id)
-    if payload.get("target_field_id") is not None:
-        target_field = _resource(db, TargetField, int(payload["target_field_id"]), project_id)
+    table = _resource(db, TargetTable, values["target_table_id"], project_id)
+    if values["target_field_id"] is not None:
+        target_field = _resource(db, TargetField, values["target_field_id"], project_id)
         if target_field.target_table_id != table.id: raise HTTPException(400, "Target field does not belong to target table")
-    if payload.get("scenario_id") is not None:
-        _resource(db, ProductScenario, int(payload["scenario_id"]), project_id)
-    if payload.get("assigned_user_id") is not None:
-        membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == int(payload["assigned_user_id"]), ProjectMembership.status == "active"))
+    if values["scenario_id"] is not None:
+        _resource(db, ProductScenario, values["scenario_id"], project_id)
+    if values["assigned_user_id"] is not None:
+        membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == values["assigned_user_id"], ProjectMembership.status == "active"))
         if membership is None: raise HTTPException(400, "Assigned user is not an active project member")
-    question = PendingQuestion(institution_id=project.institution_id, project_id=project_id, target_table_id=table.id, target_field_id=payload.get("target_field_id"), scenario_id=payload.get("scenario_id"), question_type=payload.get("question_type", "other"), question_text=payload["question_text"], priority=payload.get("priority", "medium"), assigned_role=payload.get("assigned_role"), assigned_user_id=payload.get("assigned_user_id"), source_type=payload.get("source_type"), source_id=payload.get("source_id"), question_status="assigned" if payload.get("assigned_user_id") or payload.get("assigned_role") else "open")
+    question = PendingQuestion(institution_id=project.institution_id, project_id=project_id, target_table_id=table.id, target_field_id=values["target_field_id"], scenario_id=values["scenario_id"], question_type=values["question_type"], question_text=values["question_text"], priority=values["priority"], assigned_role=values["assigned_role"], assigned_user_id=values["assigned_user_id"], source_type=values["source_type"], source_id=values["source_id"], question_status="assigned" if values["assigned_user_id"] or values["assigned_role"] else "open")
     db.add(question); db.flush(); record_audit(db, action="create_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"question_type": question.question_type, "priority": question.priority})
     if question.assigned_user_id:
         notify_user(db, question.assigned_user_id, "pending_question_assigned", "新的待确认问题", question.question_text[:200], project_id=project_id, resource_type="pending_question", resource_id=question.id)
@@ -261,15 +284,15 @@ def list_questions(project_id: int, principal: CurrentPrincipal, status: str | N
 
 
 @router.patch("/questions/{question_id}")
-def update_question(question_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+def update_question(question_id: int, payload: PendingQuestionUpdateRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    values = payload.model_dump(exclude_unset=True)
     question = _resource_visible(db, principal, PendingQuestion, question_id, "question.manage")
-    if payload.get("assigned_user_id") is not None:
-        membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == question.project_id, ProjectMembership.user_id == int(payload["assigned_user_id"]), ProjectMembership.status == "active"))
+    if values.get("assigned_user_id") is not None:
+        membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == question.project_id, ProjectMembership.user_id == values["assigned_user_id"], ProjectMembership.status == "active"))
         if membership is None: raise HTTPException(400, "Assigned user is not an active project member")
-    allowed = {"priority", "assigned_role", "assigned_user_id", "question_status"}
-    for key in allowed & payload.keys(): setattr(question, key, payload[key])
-    record_audit(db, action="assign_question" if "assigned_user_id" in payload or "assigned_role" in payload else "update_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, project_id=question.project_id, after={key: payload[key] for key in allowed & payload.keys()})
-    if "assigned_user_id" in payload and question.assigned_user_id:
+    for key, value in values.items(): setattr(question, key, value)
+    record_audit(db, action="assign_question" if "assigned_user_id" in values or "assigned_role" in values else "update_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, project_id=question.project_id, after=values)
+    if "assigned_user_id" in values and question.assigned_user_id:
         notify_user(db, question.assigned_user_id, "pending_question_assigned", "待确认问题已分派", question.question_text[:200], project_id=question.project_id, resource_type="pending_question", resource_id=question.id)
     db.commit(); return _row(question)
 
@@ -299,9 +322,22 @@ def export_questions(project_id: int, principal: CurrentPrincipal, db: Session =
 
 
 @router.post("/projects/{project_id}/deliverables", status_code=201)
-def create_deliverable(project_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    project = _permission(db, principal, project_id, "deliverable.manage"); table = _resource(db, TargetTable, int(payload["target_table_id"]), project_id); version = _resource(db, DeliverableTemplateVersion, int(payload["template_version_id"]), project_id)
-    package = DeliverablePackage(institution_id=project.institution_id, project_id=project_id, package_name=payload.get("package_name") or f"{table.table_name}正式交付包", package_type=payload.get("package_type", "full_delivery_package"), target_table_id=table.id, template_version_id=version.id, created_by=principal.user_id)
+def create_deliverable(project_id: int, payload: DeliverableCreateRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    project = _permission(db, principal, project_id, "deliverable.manage")
+    table = _resource(db, TargetTable, payload.target_table_id, project_id)
+    version = _resource(db, DeliverableTemplateVersion, payload.template_version_id, project_id)
+    template = _resource(db, DeliverableTemplate, version.template_id, project_id)
+    stored = db.get(StoredFile, version.stored_file_id)
+    if version.parse_status != "active" or not template.enabled:
+        raise HTTPException(409, "An active enabled template version is required")
+    if template.template_type != payload.package_type:
+        raise HTTPException(409, "Template type is not compatible with package_type")
+    if stored is None or stored.project_id != project_id or not stored.enabled:
+        raise HTTPException(409, "Template source file is unavailable")
+    template_validation = validate_template_version(db, version.id)
+    if not template_validation["valid"]:
+        raise HTTPException(409, {"message": "Template validation failed", "validation": template_validation})
+    package = DeliverablePackage(institution_id=project.institution_id, project_id=project_id, package_name=payload.package_name or f"{table.table_name}正式交付包", package_type=payload.package_type, target_table_id=table.id, template_version_id=version.id, created_by=principal.user_id)
     db.add(package); db.flush(); _ensure_field_items(db, package); db.commit(); return _package_detail(db, package)
 
 
@@ -360,24 +396,51 @@ def validate_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
 @router.post("/deliverables/{package_id}/submit-review")
 def submit_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.manage")
-    if not package.generated_file_id or not package.content_hash:
-        raise HTTPException(409, "Render the deliverable before submitting it for review")
-    validation = validate_package(db, package.id)
+    if package.status != "generated":
+        raise HTTPException(409, "Only a generated deliverable can be submitted for review")
+    template_validation = validate_template_version(db, package.template_version_id)
+    if not template_validation["valid"]:
+        raise HTTPException(409, {"message": "Template validation failed", "validation": template_validation})
+    _verify_rendered_file(db, package)
+    validation = validate_package(db, package.id, update_status=False)
     if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
     package.status = "pending_review"; db.flush()
     instance = start_workflow(db, project_id=package.project_id, workflow_key="project_export_review", target_type="deliverable_package", target_id=package.id, created_by=principal.user_id or 0, assignments={})
-    package.summary_json = {**(package.summary_json or {}), "review_submission": {"workflow_instance_id": instance.id, "generated_file_id": package.generated_file_id, "content_hash": package.content_hash, "snapshot_hash": _review_content_hash(db, package)}}
+    snapshot_hash = _review_content_hash(db, package)
+    submission_hash = _review_submission_hash(instance.id, package.generated_file_id, package.content_hash, snapshot_hash)
+    package.summary_json = {**(package.summary_json or {}), "review_submission": {"workflow_instance_id": instance.id, "generated_file_id": package.generated_file_id, "content_hash": package.content_hash, "review_snapshot_hash": snapshot_hash, "review_submission_hash": submission_hash}}
     record_audit(db, action="submit_deliverable_review", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"workflow_instance_id": instance.id, "generated_file_id": package.generated_file_id, "content_hash": package.content_hash}); db.commit()
     return {"package": _row(package), "workflow_instance": _row(instance)}
 
 
 @router.post("/deliverables/{package_id}/render")
 def render_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.export"); version = db.get(DeliverableTemplateVersion, package.template_version_id); template_content = _read_stored(db, version.stored_file_id)
+    package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.export")
+    template_validation = validate_template_version(db, package.template_version_id)
+    if not template_validation["valid"]:
+        package.status = "render_failed"
+        package.generated_file_id = None
+        package.content_hash = None
+        package.summary_json = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"} | {"render_validation": template_validation}
+        package.warnings_json = template_validation["issues"]
+        db.commit()
+        return {"package": _row(package), "file_id": None, "issues": template_validation["issues"]}
+    version = db.get(DeliverableTemplateVersion, package.template_version_id); template_content = _read_stored(db, version.stored_file_id)
     records = _package_records(db, package); rendered, warnings = render_workbook(template_content, _sheet_mappings(db, version.id), _column_mappings(db, version.id), records)
+    render_validation = {"valid": not any(item["severity"] == "error" for item in warnings), "error_count": sum(item["severity"] == "error" for item in warnings), "warning_count": sum(item["severity"] == "warning" for item in warnings), "issues": warnings}
+    base_summary = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"}
+    if not render_validation["valid"]:
+        package.generated_file_id = None
+        package.content_hash = None
+        package.status = "render_failed"
+        package.warnings_json = warnings
+        package.summary_json = base_summary | {"render_validation": render_validation, "rendered_at": datetime.now(timezone.utc).isoformat()}
+        record_audit(db, action="render_deliverable_failed", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, institution_id=package.institution_id, project_id=package.project_id, after={"error_count": render_validation["error_count"], "warning_count": render_validation["warning_count"]})
+        db.commit()
+        return {"package": _row(package), "file_id": None, "issues": warnings}
     project = db.get(Project, package.project_id); stored = _store_file(db, project, principal.user_id, f"{package.package_name}-v{package.version_no + 1}.xlsx", rendered, XLSX)
-    package.generated_file_id = stored.id; package.content_hash = stored.content_hash; package.status = "generated"; package.warnings_json = warnings; package.summary_json = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"} | {"rendered_at": datetime.now(timezone.utc).isoformat(), "warning_count": len(warnings)}
-    record_audit(db, action="render_deliverable_excel", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, institution_id=package.institution_id, project_id=package.project_id, after={"file_id": stored.id, "content_hash": stored.content_hash, "warning_count": len(warnings)}); db.commit(); return {"package": _row(package), "file_id": stored.id, "warnings": warnings}
+    package.generated_file_id = stored.id; package.content_hash = stored.content_hash; package.status = "generated"; package.warnings_json = warnings; package.summary_json = base_summary | {"rendered_at": datetime.now(timezone.utc).isoformat(), "render_validation": render_validation}
+    record_audit(db, action="render_deliverable_excel", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, institution_id=package.institution_id, project_id=package.project_id, after={"file_id": stored.id, "content_hash": stored.content_hash, "warning_count": len(warnings)}); db.commit(); return {"package": _row(package), "file_id": stored.id, "issues": warnings, "warnings": warnings}
 
 
 @router.get("/deliverables/{package_id}/download")
@@ -389,16 +452,35 @@ def download_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
 
 @router.post("/deliverables/{package_id}/approve")
 def approve_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.review"); validation = validate_package(db, package.id)
-    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
-    if not package.generated_file_id: raise HTTPException(409, "Render the deliverable before approval")
-    workflow = db.scalar(select(WorkflowInstance).where(WorkflowInstance.project_id == package.project_id, WorkflowInstance.workflow_key == "project_export_review", WorkflowInstance.target_type == "deliverable_package", WorkflowInstance.target_id == package.id).order_by(WorkflowInstance.id.desc()))
-    if workflow is None or workflow.status != "approved": raise HTTPException(409, "Deliverable final review task has not been approved")
+    package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.review")
     submission = (package.summary_json or {}).get("review_submission") or {}
-    if submission.get("workflow_instance_id") != workflow.id or submission.get("generated_file_id") != package.generated_file_id or submission.get("content_hash") != package.content_hash or submission.get("snapshot_hash") != _review_content_hash(db, package):
+    workflow_id = submission.get("workflow_instance_id")
+    if package.status == "approved" and workflow_id:
+        existing = db.scalar(select(DeliverablePackageVersion).where(DeliverablePackageVersion.project_id == package.project_id, DeliverablePackageVersion.deliverable_package_id == package.id, DeliverablePackageVersion.workflow_instance_id == workflow_id))
+        if existing is not None:
+            return {"package": _row(package), "version": _row(existing), "idempotent": True}
+    if package.status != "pending_review":
+        raise HTTPException(409, "Only a pending-review deliverable can be approved")
+    template_validation = validate_template_version(db, package.template_version_id)
+    if not template_validation["valid"]:
+        raise HTTPException(409, {"message": "Template validation failed", "validation": template_validation})
+    _verify_rendered_file(db, package)
+    validation = validate_package(db, package.id, update_status=False)
+    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
+    workflow = db.get(WorkflowInstance, workflow_id) if workflow_id else None
+    if workflow is not None and (workflow.project_id != package.project_id or workflow.target_type != "deliverable_package" or workflow.target_id != package.id):
+        workflow = None
+    if workflow is None or workflow.status != "approved": raise HTTPException(409, "Deliverable final review task has not been approved")
+    snapshot_hash = _review_content_hash(db, package)
+    expected_submission_hash = _review_submission_hash(workflow.id, package.generated_file_id, package.content_hash, snapshot_hash)
+    if submission.get("workflow_instance_id") != workflow.id or submission.get("generated_file_id") != package.generated_file_id or submission.get("content_hash") != package.content_hash or submission.get("review_snapshot_hash") != snapshot_hash or submission.get("review_submission_hash") != expected_submission_hash:
         raise HTTPException(409, "The current rendered deliverable has not completed final review")
+    existing = db.scalar(select(DeliverablePackageVersion).where(DeliverablePackageVersion.project_id == package.project_id, DeliverablePackageVersion.deliverable_package_id == package.id, DeliverablePackageVersion.workflow_instance_id == workflow.id))
+    if existing is not None:
+        package.status = "approved"; package.version_no = existing.version_no; db.commit()
+        return {"package": _row(package), "version": _row(existing), "idempotent": True}
     package.version_no += 1; package.status = "approved"; package.approved_at = datetime.now(timezone.utc); package.approved_by = principal.user_id
-    snapshot = _package_snapshot(db, package); version = DeliverablePackageVersion(project_id=package.project_id, deliverable_package_id=package.id, version_no=package.version_no, generated_file_id=package.generated_file_id, content_hash=package.content_hash or "", content_snapshot_json=snapshot, change_summary_json={}, approved_by=principal.user_id, approved_at=package.approved_at)
+    snapshot = _package_snapshot(db, package); version = DeliverablePackageVersion(project_id=package.project_id, deliverable_package_id=package.id, version_no=package.version_no, generated_file_id=package.generated_file_id, workflow_instance_id=workflow.id, content_hash=package.content_hash or "", review_snapshot_hash=snapshot_hash, review_submission_hash=expected_submission_hash, content_snapshot_json=snapshot, change_summary_json={}, approved_by=principal.user_id, approved_at=package.approved_at)
     db.add(version); db.flush(); record_audit(db, action="approve_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"version_no": version.version_no, "content_hash": version.content_hash}); db.commit(); return {"package": _row(package), "version": _row(version)}
 
 
@@ -529,6 +611,24 @@ def _review_content_hash(db, package) -> str:
     records = _package_records(db, package); records.pop("review_record", None)
     payload = {"records": records, "fields": _package_detail(db, package)["items"]}
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _review_submission_hash(workflow_instance_id: int, generated_file_id: int | None, content_hash: str | None, snapshot_hash: str) -> str:
+    payload = f"{workflow_instance_id}:{generated_file_id}:{content_hash or ''}:{snapshot_hash}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _verify_rendered_file(db, package: DeliverablePackage) -> StoredFile:
+    if not package.generated_file_id or not package.content_hash:
+        raise HTTPException(409, "Render the deliverable before continuing")
+    stored = db.get(StoredFile, package.generated_file_id)
+    if stored is None or stored.project_id != package.project_id or not stored.enabled:
+        raise HTTPException(409, "Rendered deliverable file is unavailable")
+    content = get_storage_service().read(stored.storage_key)
+    actual_hash = hashlib.sha256(content).hexdigest()
+    if actual_hash != package.content_hash or actual_hash != stored.content_hash:
+        raise HTTPException(409, "Rendered deliverable content hash mismatch")
+    return stored
 
 
 def _safe_excel_text(value):

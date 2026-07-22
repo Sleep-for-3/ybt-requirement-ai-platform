@@ -47,15 +47,30 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
         if not mapping.enabled:
             continue
         if mapping.sheet_name not in workbook.sheetnames:
-            warnings.append({"type": "missing_sheet", "sheet": mapping.sheet_name})
+            warnings.append(_render_issue("error", "missing_sheet", mapping, message="配置的 Sheet 不存在"))
             continue
         sheet = workbook[mapping.sheet_name]
+        if mapping.data_start_row <= getattr(mapping, "header_row_end", 0):
+            warnings.append(_render_issue("error", "invalid_data_start_row", mapping, message="数据起始行不得覆盖模板表头"))
+            continue
         rows = list(records.get(mapping.business_section, []))
         if preview_limit is not None:
             rows = rows[:preview_limit]
         mapped_columns = columns_by_sheet.get(mapping.id, [])
         horizontal = mapping.repeat_direction == "horizontal" or any(column.write_mode == "repeat_by_scenario" for column in mapped_columns)
-        horizontal_columns = [column_index_from_string(column.excel_column) for column in mapped_columns]
+        horizontal_columns = []
+        valid_columns = []
+        for column in mapped_columns:
+            try:
+                column_number = column_index_from_string(column.excel_column)
+            except ValueError:
+                column_number = 0
+            if not 1 <= column_number <= 16384:
+                warnings.append(_render_issue("error", "invalid_column_mapping", mapping, column, message="Excel 列必须位于 A 到 XFD"))
+                continue
+            horizontal_columns.append(column_number)
+            valid_columns.append(column)
+        mapped_columns = valid_columns
         horizontal_block_width = max(horizontal_columns) - min(horizontal_columns) + 1 if horizontal_columns else 1
         for offset, record in enumerate(rows):
             row_number = mapping.data_start_row if horizontal else mapping.data_start_row + offset
@@ -67,13 +82,15 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
                 if horizontal and offset and sheet.cell(mapping.data_start_row, base_column).has_style:
                     cell._style = copy(sheet.cell(mapping.data_start_row, base_column)._style)
                 if isinstance(cell, MergedCell):
-                    warnings.append({"type": "merge_conflict", "sheet": sheet.title, "cell": f"{column.excel_column}{row_number}"})
+                    warnings.append(_render_issue("error", "merge_conflict", mapping, column, f"{column.excel_column}{row_number}", "目标单元格属于不可写的合并区域"))
                     continue
                 value = _safe_excel_value(record.get(column.business_field, column.default_value))
                 if column.required and value in (None, ""):
-                    warnings.append({"type": "required_missing", "sheet": sheet.title, "cell": cell.coordinate, "business_field": column.business_field})
+                    warnings.append(_render_issue("error", "required_missing", mapping, column, cell.coordinate, "必填业务字段没有可写入值"))
                 if cell.data_type == "f" and column.write_mode != "fill_blank_only":
-                    warnings.append({"type": "formula_overlap", "sheet": sheet.title, "cell": cell.coordinate})
+                    code = "required_field_formula_overlap" if column.required else "formula_overlap"
+                    severity = "error" if column.required else "warning"
+                    warnings.append(_render_issue(severity, code, mapping, column, cell.coordinate, "列映射与模板公式重叠，已跳过写入"))
                     continue
                 if column.write_mode == "fill_blank_only" and cell.value not in (None, ""):
                     continue
@@ -137,4 +154,16 @@ def _apply_merges(sheet, mapping, columns, row_number, record, rows, offset, war
             try:
                 sheet.merge_cells(start_row=row_number - 1, start_column=col, end_row=row_number, end_column=col)
             except ValueError:
-                warnings.append({"type": "merge_conflict", "sheet": sheet.title, "cell": f"{column.excel_column}{row_number}"})
+                warnings.append(_render_issue("error", "merge_conflict", mapping, column, f"{column.excel_column}{row_number}", "无法按配置合并单元格"))
+
+
+def _render_issue(severity: str, code: str, mapping, column=None, cell: str | None = None, message: str = "") -> dict:
+    return {
+        "severity": severity,
+        "code": code,
+        "sheet_name": getattr(mapping, "sheet_name", None),
+        "cell": cell,
+        "business_section": getattr(mapping, "business_section", None),
+        "business_field": getattr(column, "business_field", None),
+        "message": message,
+    }

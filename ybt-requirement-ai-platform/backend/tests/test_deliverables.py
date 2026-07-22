@@ -13,7 +13,17 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import ProjectMembership, User
+from app.models import (
+    MartField,
+    MartTable,
+    MartToYbtMapping,
+    ProjectMembership,
+    ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
+    SourceToMartMapping,
+    User,
+    WorkflowInstance,
+)
 from app.services.storage import get_storage_service
 from app.services.deliverables.workbook import render_workbook
 
@@ -37,8 +47,11 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         repeated = client.post(f"/api/projects/{project['id']}/deliverable-templates/upload", data={"template_id": template_id, "template_name": "银行正式交付模板", "template_type": "full_delivery_package"}, files={"file": ("正式模板.xlsx", template_bytes, XLSX)})
         assert repeated.status_code == 201; assert repeated.json()["version"]["id"] == version_id
 
-        configured = _post(client, f"/api/deliverable-template-versions/{version_id}/configure", {"sheet_mappings": [{"business_section": "target_field", "sheet_name": "业务口径及技术溯源表", "header_row_start": 2, "header_row_end": 2, "data_start_row": 3, "columns": [{"business_field": "target_field_code", "excel_column": "A", "required": True}, {"business_field": "target_field_name", "excel_column": "B", "required": True}]}, {"business_section": "evidence", "sheet_name": "证据引用清单", "data_start_row": 2, "columns": [{"business_field": "evidence_type", "excel_column": "A"}, {"business_field": "evidence_summary", "excel_column": "B"}]}]})
-        assert len(configured["column_mappings"]) == 4
+        configured = _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
+        assert len(configured["column_mappings"]) == 12
+        template_validation = _post(client, f"/api/deliverable-template-versions/{version_id}/validate", {})
+        assert template_validation["valid"] is True
+        _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
         preview = client.post(f"/api/deliverable-template-versions/{version_id}/preview-render")
         assert preview.status_code == 200
         preview_book = load_workbook(BytesIO(preview.content), data_only=False); preview_sheet = preview_book["业务口径及技术溯源表"]
@@ -61,7 +74,7 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         assert cross_comparison.status_code == 404
         readiness = client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json(); assert readiness["status"] == "blocked"; assert readiness["open_question_count"] == 1
         package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "客户信息正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
-        immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json={"sheet_mappings": []})
+        immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json=_full_template_configuration())
         assert immutable.status_code == 409
         generated = _post(client, f"/api/deliverables/{package['id']}/generate", {}); assert generated["job"]["status"] == "completed"
         validation = _post(client, f"/api/deliverables/{package['id']}/validate", {}); assert validation["error_count"] > 0; assert any(item["code"] == "high_priority_question" for item in validation["issues"])
@@ -104,6 +117,46 @@ def test_question_assignment_requires_active_membership_in_same_project() -> Non
         assert assigned.json()["assigned_user_id"] == member_id
 
 
+def test_template_configuration_rejects_invalid_columns_sheets_and_incomplete_activation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "模板校验项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_TEMPLATE", "table_name": "模板校验表"})
+        uploaded = client.post(
+            f"/api/projects/{project['id']}/deliverable-templates/upload",
+            data={"template_name": "严格模板", "template_type": "full_delivery_package"},
+            files={"file": ("严格模板.xlsx", _template_workbook(), XLSX)},
+        ).json()
+        version_id = uploaded["version"]["id"]
+
+        invalid_column = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json={"sheet_mappings": [{
+            "business_section": "target_field", "sheet_name": "业务口径及技术溯源表",
+            "header_row_start": 2, "header_row_end": 2, "data_start_row": 3,
+            "columns": [{"business_field": "target_field_code", "excel_column": "XFE"}],
+        }]})
+        assert invalid_column.status_code == 422
+
+        missing_sheet = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json={"sheet_mappings": [{
+            "business_section": "target_field", "sheet_name": "不存在的Sheet",
+            "columns": [{"business_field": "target_field_code", "excel_column": "A"}],
+        }]})
+        assert missing_sheet.status_code == 400
+
+        _post(client, f"/api/deliverable-template-versions/{version_id}/configure", {"sheet_mappings": [{
+            "business_section": "target_field", "sheet_name": "业务口径及技术溯源表",
+            "header_row_start": 2, "header_row_end": 2, "data_start_row": 3,
+            "columns": [{"business_field": "target_field_code", "excel_column": "A"}],
+        }]})
+        validation = _post(client, f"/api/deliverable-template-versions/{version_id}/validate", {})
+        assert validation["valid"] is False
+        assert any(issue["code"] == "required_section_missing" for issue in validation["issues"])
+        assert client.post(f"/api/deliverable-template-versions/{version_id}/activate").status_code == 409
+        create_package = client.post(f"/api/projects/{project['id']}/deliverables", json={
+            "target_table_id": table["id"], "template_version_id": version_id,
+        })
+        assert create_package.status_code == 409
+
+
 def test_template_renderer_expands_scenarios_horizontally_and_sources_vertically() -> None:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "场景"; sheet["A2"] = "场景"; source = workbook.create_sheet("来源"); source["A2"] = "来源"; stream = BytesIO(); workbook.save(stream)
     sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="场景", business_section="scenario_business_mapping", data_start_row=2, repeat_direction="horizontal"), SimpleNamespace(id=2, enabled=True, sheet_name="来源", business_section="source_to_mart", data_start_row=2, repeat_direction="vertical")]
@@ -128,6 +181,103 @@ def test_template_renderer_uses_real_horizontal_width_and_blocks_formula_injecti
     assert result["D2"].value == "信用卡"; assert result["F2"].value == "正常口径"; assert warnings == []
 
 
+def test_template_renderer_returns_structured_blocking_issues() -> None:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "必填区域"; stream = BytesIO(); workbook.save(stream)
+    sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="必填区域", business_section="target_field", header_row_end=1, data_start_row=2, repeat_direction="vertical")]
+    columns = [SimpleNamespace(template_sheet_mapping_id=1, business_field="target_field_code", excel_column="A", default_value=None, required=True, write_mode="overwrite", merge_strategy="none")]
+    _, issues = render_workbook(stream.getvalue(), sheets, columns, {"target_field": [{}]})
+    assert issues == [{
+        "severity": "error", "code": "required_missing", "sheet_name": "必填区域", "cell": "A2",
+        "business_section": "target_field", "business_field": "target_field_code", "message": "必填业务字段没有可写入值",
+    }]
+
+
+def test_readiness_requires_approved_double_layer_mappings() -> None:
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "准备度项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_READY", "table_name": "准备度表"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "READY_FIELD", "field_name": "准备度字段", "regulatory_description": "脱敏监管定义"})
+        scenario = _post(client, f"/api/projects/{project['id']}/scenarios", {"scenario_code": "READY", "scenario_name": "脱敏场景"})
+        business = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"final_content": "已确认业务口径"})
+        technical = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/technical-lineage", {"business_mapping_id": business["id"], "source_system_name": "SIM_SYSTEM", "source_schema_name": "ODS", "source_table_english_name": "SIM_TABLE", "source_field_english_name": "SIM_FIELD", "processing_logic_type": "direct", "final_content": "脱敏技术口径"})
+        _post(client, f"/api/mappings/scenario_technical/{technical['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏人工确认", "evidence_summary": "物理来源已人工核验"})
+
+        with factory() as db:
+            business_row = db.get(ScenarioBusinessMapping, business["id"])
+            technical_row = db.get(ScenarioTechnicalLineage, technical["id"])
+            business_row.business_confirm_status = "confirmed"; technical_row.tech_confirm_status = "confirmed"
+            mart_table = MartTable(project_id=project["id"], table_code="MART_READY", table_name="脱敏集市表")
+            db.add(mart_table); db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_FIELD", field_name="脱敏集市字段")
+            db.add(mart_field); db.flush()
+            source_mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源到集市口径", mapping_status="draft")
+            ybt_mapping = MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="集市到一表通口径", mapping_status="draft")
+            db.add_all([source_mapping, ybt_mapping]); db.commit(); source_id = source_mapping.id; ybt_id = ybt_mapping.id
+
+        readiness = client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json()
+        assert readiness["status"] == "pending_mapping_review"
+        assert {reason["code"] for reason in readiness["blocking_reasons"]} == {"mapping_review_pending"}
+
+        with factory() as db:
+            db.get(SourceToMartMapping, source_id).mapping_status = "approved"
+            db.get(MartToYbtMapping, ybt_id).mapping_status = "approved"
+            db.commit()
+        assert client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json()["status"] == "approved"
+
+
+def test_approval_is_idempotent_and_render_invalidates_old_review(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "幂等审批项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_APPROVAL", "table_name": "审批表"})
+        field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "APPROVAL_FIELD", "field_name": "审批字段", "regulatory_description": "脱敏监管定义"})
+        scenario = _post(client, f"/api/projects/{project['id']}/scenarios", {"scenario_code": "APPROVAL", "scenario_name": "审批场景"})
+        business = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"final_content": "正式业务口径"})
+        technical = _post(client, f"/api/target-fields/{field['id']}/scenarios/{scenario['id']}/technical-lineage", {"business_mapping_id": business["id"], "source_system_name": "SIM_SYSTEM", "source_schema_name": "ODS", "source_table_english_name": "SIM_TABLE", "source_field_english_name": "SIM_FIELD", "processing_logic_type": "direct", "final_content": "正式技术口径"})
+        _post(client, f"/api/mappings/scenario_technical/{technical['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏人工确认", "evidence_summary": "物理来源已人工核验"})
+        with factory() as db:
+            db.get(ScenarioBusinessMapping, business["id"]).business_confirm_status = "confirmed"
+            db.get(ScenarioTechnicalLineage, technical["id"]).tech_confirm_status = "confirmed"
+            mart_table = MartTable(project_id=project["id"], table_code="MART_APPROVAL", table_name="审批集市表")
+            db.add(mart_table); db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="MART_APPROVAL_FIELD", field_name="审批集市字段")
+            db.add(mart_field); db.flush()
+            db.add_all([
+                SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, final_content="来源到集市正式口径", mapping_status="approved"),
+                MartToYbtMapping(project_id=project["id"], target_field_id=field["id"], mart_field_id=mart_field.id, final_content="集市到一表通正式口径", mapping_status="approved"),
+            ])
+            db.commit()
+
+        upload = client.post(
+            f"/api/projects/{project['id']}/deliverable-templates/upload",
+            data={"template_name": "审批模板", "template_type": "full_delivery_package"},
+            files={"file": ("审批模板.xlsx", _template_workbook(), XLSX)},
+        ).json()
+        version_id = upload["version"]["id"]
+        _post(client, f"/api/deliverable-template-versions/{version_id}/configure", _full_template_configuration())
+        _post(client, f"/api/deliverable-template-versions/{version_id}/activate", {})
+        package = _post(client, f"/api/projects/{project['id']}/deliverables", {"target_table_id": table["id"], "template_version_id": version_id})
+        _post(client, f"/api/deliverables/{package['id']}/generate", {})
+        rendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
+        assert rendered["package"]["status"] == "generated"
+        submitted = _post(client, f"/api/deliverables/{package['id']}/submit-review", {})
+        workflow_id = submitted["workflow_instance"]["id"]
+        with factory() as db:
+            db.get(WorkflowInstance, workflow_id).status = "approved"
+            db.commit()
+
+        first = _post(client, f"/api/deliverables/{package['id']}/approve", {})
+        second = _post(client, f"/api/deliverables/{package['id']}/approve", {})
+        assert first["version"]["id"] == second["version"]["id"]
+        assert first["version"]["version_no"] == second["version"]["version_no"] == 1
+        assert second["idempotent"] is True
+        assert len(client.get(f"/api/deliverables/{package['id']}/versions").json()) == 1
+
+        rerendered = _post(client, f"/api/deliverables/{package['id']}/render", {})
+        assert rerendered["package"]["status"] == "generated"
+        assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
+
+
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -135,7 +285,30 @@ def _template_workbook() -> bytes:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "业务口径及技术溯源表"; sheet.merge_cells("A1:C1"); sheet["A1"] = "银行正式交付模板"; sheet["A2"] = "字段代码"; sheet["B2"] = "字段名称"; sheet["C2"] = "可信等级"; sheet["D3"] = "=1+1"; sheet.freeze_panes = "A3"; sheet["A2"].font = Font(bold=True); sheet["A2"].fill = PatternFill("solid", fgColor="D9EAF7"); sheet.column_dimensions["B"].width = 28; sheet.row_dimensions[2].height = 25
     validation = DataValidation(type="list", formula1='"confirmed,inferred"'); validation.add("C3:C100"); sheet.add_data_validation(validation)
     evidence = workbook.create_sheet("证据引用清单"); evidence.append(["证据类型", "脱敏摘要"])
+    for title in ["场景业务口径", "场景技术溯源", "业务系统到监管集市", "监管集市到一表通", "待确认问题", "审核记录", "字段级血缘", "脚本变更影响"]:
+        workbook.create_sheet(title).append([title])
     stream = BytesIO(); workbook.save(stream); return stream.getvalue()
+
+
+def _full_template_configuration() -> dict:
+    mappings = [
+        {"business_section": "target_field", "sheet_name": "业务口径及技术溯源表", "header_row_start": 2, "header_row_end": 2, "data_start_row": 3, "columns": [{"business_field": "target_field_code", "excel_column": "A", "required": True}, {"business_field": "target_field_name", "excel_column": "B", "required": True}]},
+        {"business_section": "evidence", "sheet_name": "证据引用清单", "data_start_row": 2, "columns": [{"business_field": "evidence_type", "excel_column": "A"}, {"business_field": "evidence_summary", "excel_column": "B"}]},
+    ]
+    mappings.extend([
+        {"business_section": section, "sheet_name": sheet_name, "data_start_row": 2, "columns": [{"business_field": field, "excel_column": "A"}]}
+        for section, sheet_name, field in [
+            ("scenario_business_mapping", "场景业务口径", "business_final_content"),
+            ("scenario_technical_lineage", "场景技术溯源", "technical_final_content"),
+            ("source_to_mart", "业务系统到监管集市", "source_to_mart_final_content"),
+            ("mart_to_ybt", "监管集市到一表通", "mart_to_ybt_final_content"),
+            ("pending_question", "待确认问题", "question_text"),
+            ("review_record", "审核记录", "review_comment"),
+            ("lineage", "字段级血缘", "source_script"),
+            ("change_impact", "脚本变更影响", "change_summary"),
+        ]
+    ])
+    return {"sheet_mappings": mappings}
 
 
 def _history_workbook() -> bytes:
