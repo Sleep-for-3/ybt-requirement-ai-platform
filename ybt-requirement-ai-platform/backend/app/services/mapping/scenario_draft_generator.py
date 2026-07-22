@@ -45,7 +45,7 @@ async def generate_technical_draft(db: Session, lineage_id: int) -> ScenarioTech
     physical_keys = {"source_database_name", "source_schema_name", "source_table_english_name", "source_field_english_name"}
     for key in ["source_system_name", "source_database_name", "source_schema_name", "source_table_english_name", "source_table_chinese_name", "source_field_english_name", "source_field_chinese_name", "processing_logic", "processing_logic_type", "tech_owner", "remarks"]:
         if output.get(key) is not None:
-            if key in physical_keys and not _physical_value_allowed(db, lineage, key, output[key]):
+            if key in physical_keys and not _physical_value_allowed(db, lineage, key, output[key], output):
                 continue
             setattr(lineage, key, output[key])
     lineage.open_questions = _text(output.get("open_questions")) or lineage.open_questions
@@ -90,18 +90,23 @@ def _text(value) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _physical_value_allowed(db, lineage, key: str, value: str) -> bool:
+def _physical_value_allowed(db, lineage, key: str, value: str, output: dict) -> bool:
     current = getattr(lineage, key, None)
     if current:
         return str(current).lower() == str(value).lower()
-    column_name = value if key == "source_field_english_name" else None
-    query = select(CatalogColumn.id).where(CatalogColumn.project_id == lineage.project_id, CatalogColumn.enabled.is_(True))
-    if column_name:
-        query = query.where(CatalogColumn.column_name == value)
-    elif key == "source_table_english_name":
-        query = query.where(CatalogColumn.table_name == value)
-    elif key == "source_schema_name":
-        query = query.where(CatalogColumn.schema_name == value)
-    else:
+    candidates = {
+        "source_schema_name": output.get("source_schema_name") or lineage.source_schema_name,
+        "source_table_english_name": output.get("source_table_english_name") or lineage.source_table_english_name,
+        "source_field_english_name": output.get("source_field_english_name") or lineage.source_field_english_name,
+    }
+    candidates[key] = value
+    if not all(candidates.values()):
         return False
+    query = select(CatalogColumn.id).where(
+        CatalogColumn.project_id == lineage.project_id,
+        CatalogColumn.enabled.is_(True),
+        CatalogColumn.schema_name == candidates["source_schema_name"],
+        CatalogColumn.table_name == candidates["source_table_english_name"],
+        CatalogColumn.column_name == candidates["source_field_english_name"],
+    )
     return db.scalar(query.limit(1)) is not None

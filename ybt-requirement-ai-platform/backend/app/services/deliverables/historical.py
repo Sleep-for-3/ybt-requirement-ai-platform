@@ -64,13 +64,28 @@ def _normalize(value: str | None) -> str:
 
 
 def _find_header(sheet) -> tuple[int, dict[str, int]]:
-    for row in range(1, min(sheet.max_row, 12) + 1):
-        mapping = {}
-        for col in range(1, sheet.max_column + 1):
-            header = str(sheet.cell(row, col).value or "").strip().lower()
-            for field, aliases in ALIASES.items():
-                if header in {alias.lower() for alias in aliases}:
-                    mapping[field] = col
-        if mapping.get("target_field_code") or mapping.get("target_field_name"):
-            return row, mapping
-    return 1, {}
+    best: tuple[int, dict[str, int]] = (1, {})
+    max_header_row = min(sheet.max_row, 12)
+    for start_row in range(1, max_header_row + 1):
+        for end_row in range(start_row, min(start_row + 2, max_header_row) + 1):
+            mapping = {}
+            for col in range(1, sheet.max_column + 1):
+                parts = [_header_cell_text(sheet, row, col) for row in range(start_row, end_row + 1)]
+                parts = [part for index, part in enumerate(parts) if part and part not in parts[:index]]
+                candidates = {"".join(parts).lower(), " ".join(parts).lower(), "-".join(parts).lower()}
+                for field, aliases in ALIASES.items():
+                    if candidates & {alias.lower() for alias in aliases}:
+                        mapping[field] = col
+            if (mapping.get("target_field_code") or mapping.get("target_field_name")) and len(mapping) > len(best[1]):
+                best = (end_row, mapping)
+    return best
+
+
+def _header_cell_text(sheet, row: int, col: int) -> str:
+    value = sheet.cell(row, col).value
+    if value not in (None, ""):
+        return str(value).strip()
+    for merged in sheet.merged_cells.ranges:
+        if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
+            return str(sheet.cell(merged.min_row, merged.min_col).value or "").strip()
+    return ""

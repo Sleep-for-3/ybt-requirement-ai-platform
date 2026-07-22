@@ -8,7 +8,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
 from openpyxl import Workbook
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,7 +16,7 @@ from app.models import (
     AuditLog, BackgroundJob, BackgroundJobItem, CaliberComparison, DeliverableEvidenceItem,
     DeliverableFieldItem, DeliverablePackage, DeliverablePackageVersion, DeliverableTemplate,
     DeliverableTemplateVersion, HistoricalCaliberImport, HistoricalCaliberItem, MappingEvidenceReference,
-    MartToYbtMapping, PendingQuestion, ProductScenario, Project, ProjectMembership, ScenarioBusinessMapping,
+    MartToYbtMapping, PendingQuestion, ProductScenario, Project, ProjectMembership, ReviewDecision, ReviewTask, ScenarioBusinessMapping,
     ScenarioTechnicalLineage, SourceToMartMapping, StoredFile, TargetField, TargetTable,
     TemplateColumnMapping, TemplateSheetMapping, WorkflowInstance,
 )
@@ -32,6 +32,7 @@ from app.services.governance.audit import record_audit
 from app.services.governance.notifications import notify_user
 from app.services.governance.workflow import start_workflow
 from app.services.storage import get_storage_service
+from app.services.security import redact_content
 from app.services.task_queue import get_task_queue
 
 router = APIRouter(tags=["deliverables"])
@@ -93,6 +94,9 @@ def preview_template(version_id: int, principal: CurrentPrincipal, db: Session =
 @router.post("/deliverable-template-versions/{version_id}/configure")
 def configure_template(version_id: int, principal: CurrentPrincipal, payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
     version = _resource_visible(db, principal, DeliverableTemplateVersion, version_id, "template.manage")
+    referenced = db.scalar(select(DeliverablePackage.id).where(DeliverablePackage.template_version_id == version.id).limit(1))
+    if version.parse_status == "active" or referenced is not None:
+        raise HTTPException(409, "Activated or referenced template versions are immutable; upload a new version")
     available_sheets = {item["sheet_name"] for item in version.sheet_config_json}
     for existing in _column_mappings(db, version.id): db.delete(existing)
     db.flush()
@@ -115,7 +119,7 @@ def activate_template(version_id: int, principal: CurrentPrincipal, db: Session 
     template = db.get(DeliverableTemplate, version.template_id)
     siblings = list(db.scalars(select(DeliverableTemplate).where(DeliverableTemplate.project_id == template.project_id, DeliverableTemplate.template_type == template.template_type)).all())
     for sibling in siblings: sibling.is_default = sibling.id == template.id
-    template.current_version_no = version.version_no; template.enabled = True
+    template.current_version_no = version.version_no; template.enabled = True; version.parse_status = "active"
     record_audit(db, action="activate_template_version", resource_type="deliverable_template_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=version.project_id)
     db.commit(); return _row(template)
 
@@ -189,6 +193,16 @@ def reuse_historical(item_id: int, principal: CurrentPrincipal, payload: dict = 
     db.commit(); return {"item_id": item.id, "business_mapping_id": business.id if business else None, "technical_lineage_id": technical.id if technical else None, "final_content_overwritten": False}
 
 
+@router.post("/historical-caliber-items/{item_id}/resolve-match")
+def resolve_historical_match(item_id: int, principal: CurrentPrincipal, payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
+    item = _resource_visible(db, principal, HistoricalCaliberItem, item_id, "historical_caliber.reuse")
+    field = _resource(db, TargetField, int(payload["target_field_id"]), item.project_id)
+    scenario = _resource(db, ProductScenario, int(payload["scenario_id"]), item.project_id) if payload.get("scenario_id") is not None else None
+    item.matched_target_field_id = field.id; item.matched_scenario_id = scenario.id if scenario else None; item.match_status = "matched"
+    record_audit(db, action="resolve_historical_caliber_match", resource_type="historical_caliber_item", resource_id=item.id, actor_user_id=principal.user_id, project_id=item.project_id, after={"target_field_id": field.id, "scenario_id": scenario.id if scenario else None})
+    db.commit(); return _row(item)
+
+
 @router.post("/projects/{project_id}/caliber-comparisons", status_code=201)
 def create_comparison(project_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     _permission(db, principal, project_id, "deliverable.view")
@@ -249,8 +263,14 @@ def list_questions(project_id: int, principal: CurrentPrincipal, status: str | N
 @router.patch("/questions/{question_id}")
 def update_question(question_id: int, payload: dict, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     question = _resource_visible(db, principal, PendingQuestion, question_id, "question.manage")
+    if payload.get("assigned_user_id") is not None:
+        membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == question.project_id, ProjectMembership.user_id == int(payload["assigned_user_id"]), ProjectMembership.status == "active"))
+        if membership is None: raise HTTPException(400, "Assigned user is not an active project member")
     allowed = {"priority", "assigned_role", "assigned_user_id", "question_status"}
     for key in allowed & payload.keys(): setattr(question, key, payload[key])
+    record_audit(db, action="assign_question" if "assigned_user_id" in payload or "assigned_role" in payload else "update_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, project_id=question.project_id, after={key: payload[key] for key in allowed & payload.keys()})
+    if "assigned_user_id" in payload and question.assigned_user_id:
+        notify_user(db, question.assigned_user_id, "pending_question_assigned", "待确认问题已分派", question.question_text[:200], project_id=question.project_id, resource_type="pending_question", resource_id=question.id)
     db.commit(); return _row(question)
 
 
@@ -274,7 +294,7 @@ def decide_question(question_id: int, decision: str, principal: CurrentPrincipal
 def export_questions(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
     _permission(db, principal, project_id, "deliverable.export"); rows = list(db.scalars(select(PendingQuestion).where(PendingQuestion.project_id == project_id).order_by(PendingQuestion.id)).all())
     workbook = Workbook(); sheet = workbook.active; sheet.title = "待确认问题"; sheet.append(["问题ID", "类型", "问题", "状态", "优先级", "负责人角色", "回答"])
-    for row in rows: sheet.append([row.id, row.question_type, row.question_text, row.question_status, row.priority, row.assigned_role, row.resolution_text])
+    for row in rows: sheet.append([row.id, row.question_type, _safe_excel_text(row.question_text), row.question_status, row.priority, row.assigned_role, _safe_excel_text(row.resolution_text)])
     stream = BytesIO(); workbook.save(stream); return Response(stream.getvalue(), media_type=XLSX, headers={"Content-Disposition": "attachment; filename=pending-questions.xlsx"})
 
 
@@ -340,11 +360,14 @@ def validate_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
 @router.post("/deliverables/{package_id}/submit-review")
 def submit_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.manage")
+    if not package.generated_file_id or not package.content_hash:
+        raise HTTPException(409, "Render the deliverable before submitting it for review")
     validation = validate_package(db, package.id)
     if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
     package.status = "pending_review"; db.flush()
     instance = start_workflow(db, project_id=package.project_id, workflow_key="project_export_review", target_type="deliverable_package", target_id=package.id, created_by=principal.user_id or 0, assignments={})
-    record_audit(db, action="submit_deliverable_review", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"workflow_instance_id": instance.id}); db.commit()
+    package.summary_json = {**(package.summary_json or {}), "review_submission": {"workflow_instance_id": instance.id, "generated_file_id": package.generated_file_id, "content_hash": package.content_hash, "snapshot_hash": _review_content_hash(db, package)}}
+    record_audit(db, action="submit_deliverable_review", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"workflow_instance_id": instance.id, "generated_file_id": package.generated_file_id, "content_hash": package.content_hash}); db.commit()
     return {"package": _row(package), "workflow_instance": _row(instance)}
 
 
@@ -353,7 +376,7 @@ def render_deliverable(package_id: int, principal: CurrentPrincipal, db: Session
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.export"); version = db.get(DeliverableTemplateVersion, package.template_version_id); template_content = _read_stored(db, version.stored_file_id)
     records = _package_records(db, package); rendered, warnings = render_workbook(template_content, _sheet_mappings(db, version.id), _column_mappings(db, version.id), records)
     project = db.get(Project, package.project_id); stored = _store_file(db, project, principal.user_id, f"{package.package_name}-v{package.version_no + 1}.xlsx", rendered, XLSX)
-    package.generated_file_id = stored.id; package.content_hash = stored.content_hash; package.status = "generated"; package.warnings_json = warnings; package.summary_json = {**(package.summary_json or {}), "rendered_at": datetime.now(timezone.utc).isoformat(), "warning_count": len(warnings)}
+    package.generated_file_id = stored.id; package.content_hash = stored.content_hash; package.status = "generated"; package.warnings_json = warnings; package.summary_json = {key: value for key, value in (package.summary_json or {}).items() if key != "review_submission"} | {"rendered_at": datetime.now(timezone.utc).isoformat(), "warning_count": len(warnings)}
     record_audit(db, action="render_deliverable_excel", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, institution_id=package.institution_id, project_id=package.project_id, after={"file_id": stored.id, "content_hash": stored.content_hash, "warning_count": len(warnings)}); db.commit(); return {"package": _row(package), "file_id": stored.id, "warnings": warnings}
 
 
@@ -371,6 +394,9 @@ def approve_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessio
     if not package.generated_file_id: raise HTTPException(409, "Render the deliverable before approval")
     workflow = db.scalar(select(WorkflowInstance).where(WorkflowInstance.project_id == package.project_id, WorkflowInstance.workflow_key == "project_export_review", WorkflowInstance.target_type == "deliverable_package", WorkflowInstance.target_id == package.id).order_by(WorkflowInstance.id.desc()))
     if workflow is None or workflow.status != "approved": raise HTTPException(409, "Deliverable final review task has not been approved")
+    submission = (package.summary_json or {}).get("review_submission") or {}
+    if submission.get("workflow_instance_id") != workflow.id or submission.get("generated_file_id") != package.generated_file_id or submission.get("content_hash") != package.content_hash or submission.get("snapshot_hash") != _review_content_hash(db, package):
+        raise HTTPException(409, "The current rendered deliverable has not completed final review")
     package.version_no += 1; package.status = "approved"; package.approved_at = datetime.now(timezone.utc); package.approved_by = principal.user_id
     snapshot = _package_snapshot(db, package); version = DeliverablePackageVersion(project_id=package.project_id, deliverable_package_id=package.id, version_no=package.version_no, generated_file_id=package.generated_file_id, content_hash=package.content_hash or "", content_snapshot_json=snapshot, change_summary_json={}, approved_by=principal.user_id, approved_at=package.approved_at)
     db.add(version); db.flush(); record_audit(db, action="approve_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"version_no": version.version_no, "content_hash": version.content_hash}); db.commit(); return {"package": _row(package), "version": _row(version)}
@@ -454,7 +480,14 @@ def _package_records(db, package):
     mart_field_ids = [item.mart_field_id for item in mart_mappings if item.mart_field_id]
     source_rows=[{"mapping_id":item.id,"source_to_mart_final_content":item.final_content,"source_to_mart_status":item.mapping_status,"source_system_name":item.source_system_summary,"source_field_name":item.source_fields_summary,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"priority_rule":item.priority_rule,"null_handling_rule":item.null_handling_rule} for item in db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id==package.project_id, SourceToMartMapping.mart_field_id.in_(mart_field_ids))).all()]
     mart_rows=[{"mapping_id":item.id,"target_field_id":item.target_field_id,"mart_to_ybt_final_content":item.final_content,"mart_to_ybt_status":item.mapping_status,"filter_condition":item.filter_condition,"join_condition":item.join_condition,"code_mapping_rule":item.code_mapping_rule,"null_handling_rule":item.null_handling_rule} for item in mart_mappings]
-    reviews=[{"action":item.action,"resource_type":item.resource_type,"resource_id":item.resource_id,"reviewer":item.actor_user_id,"approved_at":item.created_at,"review_comment":json.dumps(item.after_summary_json,ensure_ascii=False)} for item in db.scalars(select(AuditLog).where(AuditLog.project_id==package.project_id,AuditLog.action.in_(("approve","approve_deliverable_version","submit_deliverable_review"))).order_by(AuditLog.id)).all()]
+    version_ids = [str(item) for item in db.scalars(select(DeliverablePackageVersion.id).where(DeliverablePackageVersion.deliverable_package_id == package.id)).all()]
+    reviews=[{"action":item.action,"resource_type":item.resource_type,"resource_id":item.resource_id,"reviewer":item.actor_user_id,"approved_at":item.created_at,"review_comment":json.dumps(item.after_summary_json,ensure_ascii=False)} for item in db.scalars(select(AuditLog).where(AuditLog.project_id==package.project_id,AuditLog.action.in_(("approve","approve_deliverable_version","submit_deliverable_review")),or_(
+        (AuditLog.resource_type == "deliverable_package") & (AuditLog.resource_id == str(package.id)),
+        (AuditLog.resource_type == "deliverable_package_version") & (AuditLog.resource_id.in_(version_ids)),
+    )).order_by(AuditLog.id)).all()]
+    workflow_ids = select(WorkflowInstance.id).where(WorkflowInstance.project_id == package.project_id, WorkflowInstance.workflow_key == "project_export_review", WorkflowInstance.target_type == "deliverable_package", WorkflowInstance.target_id == package.id)
+    decisions = db.execute(select(ReviewDecision, ReviewTask).join(ReviewTask, ReviewTask.id == ReviewDecision.review_task_id).where(ReviewTask.workflow_instance_id.in_(workflow_ids)).order_by(ReviewDecision.id)).all()
+    reviews.extend({"action":decision.decision,"resource_type":"review_task","resource_id":task.id,"reviewer":decision.decided_by,"approved_at":decision.decided_at,"review_comment":redact_content(decision.comment or "")} for decision, task in decisions)
     return {"target_field":field_records,"scenario_business_mapping":business_records,"scenario_technical_lineage":technical_records,"pending_question":questions,"evidence":evidence,"source_to_mart":source_rows,"mart_to_ybt":mart_rows,"review_record":reviews,"lineage":technical_records,"change_impact":[]}
 def _sample_records(): return {"target_field":[{"target_table_code":"YBT_SAMPLE","target_table_name":"脱敏示例表","target_field_code":f"FIELD_{i:03d}","target_field_name":f"脱敏示例字段{i}","regulatory_definition":"用于模板预览的脱敏模拟定义","data_type":"VARCHAR","field_order":i} for i in range(1,21)],"scenario_business_mapping":[],"scenario_technical_lineage":[],"pending_question":[],"evidence":[],"source_to_mart":[],"mart_to_ybt":[],"review_record":[],"lineage":[],"change_impact":[]}
 
@@ -475,15 +508,30 @@ def _sync_evidence_items(db, package, field_id):
     technical = list(db.scalars(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.target_field_id == field_id)).all())
     mappings.extend(("scenario_business", item.id, item.scenario_id, item.business_confirm_status == "confirmed") for item in businesses)
     mappings.extend(("scenario_technical", item.id, item.scenario_id, item.tech_confirm_status == "confirmed") for item in technical)
-    existing = {(item.mapping_type, item.mapping_id, item.evidence_type, item.evidence_id) for item in db.scalars(select(DeliverableEvidenceItem).where(DeliverableEvidenceItem.deliverable_package_id == package.id, DeliverableEvidenceItem.target_field_id == field_id)).all()}
+    existing = {(item.mapping_type, item.mapping_id, item.evidence_type, item.evidence_id): item for item in db.scalars(select(DeliverableEvidenceItem).where(DeliverableEvidenceItem.deliverable_package_id == package.id, DeliverableEvidenceItem.target_field_id == field_id)).all()}
     for mapping_type, mapping_id, scenario_id, confirmed in mappings:
         refs = db.scalars(select(MappingEvidenceReference).where(MappingEvidenceReference.mapping_type == mapping_type, MappingEvidenceReference.mapping_id == mapping_id)).all()
         for ref in refs:
             key = (mapping_type, mapping_id, ref.evidence_type, ref.evidence_id)
-            if key in existing: continue
             # Formal deliverables only carry curated summaries. Raw quoted
             # evidence may be confidential/restricted and is never copied to
             # package snapshots or exported workbooks.
-            safe_summary = ref.evidence_summary or f"已绑定 {ref.evidence_type} 证据，摘要待人工补充"
-            db.add(DeliverableEvidenceItem(project_id=package.project_id, deliverable_package_id=package.id, target_field_id=field_id, scenario_id=scenario_id, mapping_type=mapping_type, mapping_id=mapping_id, evidence_type=ref.evidence_type, evidence_id=ref.evidence_id, claim_type="confirmed" if confirmed else "evidence_supported", claim_text=safe_summary, citation_summary_json={"source_name": ref.source_name, "location": ref.location_text}))
-            existing.add(key)
+            safe_summary = redact_content(ref.evidence_summary) if ref.evidence_summary else f"已绑定 {ref.evidence_type} 证据，摘要待人工补充"
+            citation_summary = {"source_name": redact_content(ref.source_name), "location": redact_content(ref.location_text or "")}
+            if key in existing:
+                existing[key].claim_text = safe_summary; existing[key].citation_summary_json = citation_summary
+                continue
+            row = DeliverableEvidenceItem(project_id=package.project_id, deliverable_package_id=package.id, target_field_id=field_id, scenario_id=scenario_id, mapping_type=mapping_type, mapping_id=mapping_id, evidence_type=ref.evidence_type, evidence_id=ref.evidence_id, claim_type="confirmed" if confirmed else "evidence_supported", claim_text=safe_summary, citation_summary_json=citation_summary)
+            db.add(row); existing[key] = row
+
+
+def _review_content_hash(db, package) -> str:
+    records = _package_records(db, package); records.pop("review_record", None)
+    payload = {"records": records, "fields": _package_detail(db, package)["items"]}
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _safe_excel_text(value):
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value

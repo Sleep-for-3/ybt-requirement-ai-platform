@@ -55,19 +55,21 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
             rows = rows[:preview_limit]
         mapped_columns = columns_by_sheet.get(mapping.id, [])
         horizontal = mapping.repeat_direction == "horizontal" or any(column.write_mode == "repeat_by_scenario" for column in mapped_columns)
+        horizontal_columns = [column_index_from_string(column.excel_column) for column in mapped_columns]
+        horizontal_block_width = max(horizontal_columns) - min(horizontal_columns) + 1 if horizontal_columns else 1
         for offset, record in enumerate(rows):
             row_number = mapping.data_start_row if horizontal else mapping.data_start_row + offset
             _copy_template_row(sheet, mapping.data_start_row, row_number)
             for column in mapped_columns:
                 base_column = column_index_from_string(column.excel_column)
-                col_number = base_column + (offset * len(mapped_columns) if horizontal else 0)
+                col_number = base_column + (offset * horizontal_block_width if horizontal else 0)
                 cell = sheet.cell(row_number, col_number)
                 if horizontal and offset and sheet.cell(mapping.data_start_row, base_column).has_style:
                     cell._style = copy(sheet.cell(mapping.data_start_row, base_column)._style)
                 if isinstance(cell, MergedCell):
                     warnings.append({"type": "merge_conflict", "sheet": sheet.title, "cell": f"{column.excel_column}{row_number}"})
                     continue
-                value = record.get(column.business_field, column.default_value)
+                value = _safe_excel_value(record.get(column.business_field, column.default_value))
                 if column.required and value in (None, ""):
                     warnings.append({"type": "required_missing", "sheet": sheet.title, "cell": cell.coordinate, "business_field": column.business_field})
                 if cell.data_type == "f" and column.write_mode != "fill_blank_only":
@@ -90,6 +92,12 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
     output = BytesIO()
     workbook.save(output)
     return output.getvalue(), warnings
+
+
+def _safe_excel_value(value: Any) -> Any:
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
 
 
 def _detect_header_rows(sheet) -> tuple[int, int]:

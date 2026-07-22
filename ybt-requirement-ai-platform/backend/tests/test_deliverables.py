@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.models import ProjectMembership, User
 from app.services.storage import get_storage_service
 from app.services.deliverables.workbook import render_workbook
 
@@ -45,6 +46,8 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
 
         history = client.post(f"/api/projects/{project['id']}/historical-calibers/upload", data={"document_type": "business_traceability", "import_name": "脱敏历史业务口径"}, files={"file": ("历史业务口径.xlsx", _history_workbook(), XLSX)})
         assert history.status_code == 201, history.text; history_item = history.json()["items"][0]; assert history_item["match_status"] == "matched"
+        merged_history = client.post(f"/api/projects/{project['id']}/historical-calibers/upload", data={"document_type": "full_package", "import_name": "合并表头历史口径"}, files={"file": ("合并表头历史口径.xlsx", _merged_history_workbook(), XLSX)})
+        assert merged_history.status_code == 201, merged_history.text; assert merged_history.json()["items"][0]["match_status"] == "matched"
         reused = _post(client, f"/api/historical-caliber-items/{history_item['id']}/reuse", {})
         assert reused["final_content_overwritten"] is False
         current = client.get(f"/api/scenario-business-mappings/{business['id']}").json()
@@ -58,6 +61,8 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         assert cross_comparison.status_code == 404
         readiness = client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json(); assert readiness["status"] == "blocked"; assert readiness["open_question_count"] == 1
         package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "客户信息正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
+        immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json={"sheet_mappings": []})
+        assert immutable.status_code == 409
         generated = _post(client, f"/api/deliverables/{package['id']}/generate", {}); assert generated["job"]["status"] == "completed"
         validation = _post(client, f"/api/deliverables/{package['id']}/validate", {}); assert validation["error_count"] > 0; assert any(item["code"] == "high_priority_question" for item in validation["issues"])
         assert client.post(f"/api/deliverables/{package['id']}/approve").status_code == 409
@@ -73,12 +78,54 @@ def test_semantic_comparison_ignores_format_only_changes() -> None:
         assert comparison["result_json"]["business_content"]["difference_type"] == "unchanged"
 
 
+def test_question_assignment_requires_active_membership_in_same_project() -> None:
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "问题分派项目"})
+        other_project = _post(client, "/api/projects", {"name": "其他项目"})
+        table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_QUESTION", "table_name": "问题表"})
+        question = _post(client, f"/api/projects/{project['id']}/questions", {"target_table_id": table["id"], "question_text": "请确认来源字段"})
+
+        with factory() as db:
+            member = User(username="question_member", display_name="本项目成员", email="question-member@example.invalid")
+            outsider = User(username="question_outsider", display_name="其他项目成员", email="question-outsider@example.invalid")
+            db.add_all([member, outsider]); db.flush()
+            db.add_all([
+                ProjectMembership(project_id=project["id"], user_id=member.id, project_role="technical_analyst", status="active"),
+                ProjectMembership(project_id=other_project["id"], user_id=outsider.id, project_role="technical_analyst", status="active"),
+            ])
+            db.commit(); member_id = member.id; outsider_id = outsider.id
+
+        rejected = client.patch(f"/api/questions/{question['id']}", json={"assigned_user_id": outsider_id})
+        assert rejected.status_code == 400
+        assert rejected.json()["detail"] == "Assigned user is not an active project member"
+
+        assigned = client.patch(f"/api/questions/{question['id']}", json={"assigned_user_id": member_id})
+        assert assigned.status_code == 200, assigned.text
+        assert assigned.json()["assigned_user_id"] == member_id
+
+
 def test_template_renderer_expands_scenarios_horizontally_and_sources_vertically() -> None:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "场景"; sheet["A2"] = "场景"; source = workbook.create_sheet("来源"); source["A2"] = "来源"; stream = BytesIO(); workbook.save(stream)
     sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="场景", business_section="scenario_business_mapping", data_start_row=2, repeat_direction="horizontal"), SimpleNamespace(id=2, enabled=True, sheet_name="来源", business_section="source_to_mart", data_start_row=2, repeat_direction="vertical")]
     columns = [SimpleNamespace(template_sheet_mapping_id=1, business_field="scenario_name", excel_column="A", default_value=None, required=True, write_mode="repeat_by_scenario", merge_strategy="none"), SimpleNamespace(template_sheet_mapping_id=2, business_field="source_field_name", excel_column="A", default_value=None, required=True, write_mode="repeat_by_source", merge_strategy="none")]
     rendered, warnings = render_workbook(stream.getvalue(), sheets, columns, {"scenario_business_mapping": [{"scenario_name": "借记卡"}, {"scenario_name": "信用卡"}], "source_to_mart": [{"source_field_name": "cert_type"}, {"source_field_name": "id_type"}]})
     result = load_workbook(BytesIO(rendered)); assert result["场景"]["A2"].value == "借记卡"; assert result["场景"]["B2"].value == "信用卡"; assert result["来源"]["A2"].value == "cert_type"; assert result["来源"]["A3"].value == "id_type"; assert warnings == []
+
+
+def test_template_renderer_uses_real_horizontal_width_and_blocks_formula_injection() -> None:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "场景"; stream = BytesIO(); workbook.save(stream)
+    sheets = [SimpleNamespace(id=1, enabled=True, sheet_name="场景", business_section="scenario_business_mapping", data_start_row=2, repeat_direction="horizontal")]
+    columns = [
+        SimpleNamespace(template_sheet_mapping_id=1, business_field="scenario_name", excel_column="A", default_value=None, required=True, write_mode="repeat_by_scenario", merge_strategy="none"),
+        SimpleNamespace(template_sheet_mapping_id=1, business_field="business_final_content", excel_column="C", default_value=None, required=True, write_mode="repeat_by_scenario", merge_strategy="none"),
+    ]
+    rendered, warnings = render_workbook(stream.getvalue(), sheets, columns, {"scenario_business_mapping": [
+        {"scenario_name": "借记卡", "business_final_content": "=HYPERLINK(\"https://example.invalid\")"},
+        {"scenario_name": "信用卡", "business_final_content": "正常口径"},
+    ]})
+    result = load_workbook(BytesIO(rendered), data_only=False)["场景"]
+    assert result["A2"].value == "借记卡"; assert result["C2"].value.startswith("'=")
+    assert result["D2"].value == "信用卡"; assert result["F2"].value == "正常口径"; assert warnings == []
 
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -95,6 +142,10 @@ def _history_workbook() -> bytes:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "历史业务口径"; sheet.append(["字段代码", "字段名称", "业务场景", "业务口径", "来源系统", "来源schema", "来源表英文名", "来源字段英文名"]); sheet.append(["CERT_TYPE", "客户证件类型", "借记卡", "历史业务口径建议", "ECIF", "ODS", "ECIF_CUSTOMER", "CERT_TYPE"]); stream = BytesIO(); workbook.save(stream); return stream.getvalue()
 
 
+def _merged_history_workbook() -> bytes:
+    workbook = Workbook(); sheet = workbook.active; sheet.title = "合并表头"; sheet.merge_cells("A1:B1"); sheet["A1"] = "字段"; sheet["A2"] = "代码"; sheet["B2"] = "名称"; sheet.merge_cells("C1:D1"); sheet["C1"] = "业务"; sheet["C2"] = "场景"; sheet["D2"] = "口径"; sheet["E1"] = "来源"; sheet["E2"] = "schema"; sheet.append(["CERT_TYPE", "客户证件类型", "借记卡", "合并表头历史建议", "ODS"]); stream = BytesIO(); workbook.save(stream); return stream.getvalue()
+
+
 @contextmanager
 def _client() -> Iterator[TestClient]:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool); Base.metadata.create_all(engine); factory = sessionmaker(bind=engine, autoflush=False)
@@ -105,6 +156,20 @@ def _client() -> Iterator[TestClient]:
     app.dependency_overrides[get_db] = override
     try:
         with TestClient(app) as client: yield client
+    finally:
+        app.dependency_overrides.clear(); Base.metadata.drop_all(engine); get_storage_service.cache_clear()
+
+
+@contextmanager
+def _client_with_factory() -> Iterator[tuple[TestClient, sessionmaker]]:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool); Base.metadata.create_all(engine); factory = sessionmaker(bind=engine, autoflush=False)
+    def override() -> Iterator[Session]:
+        session = factory()
+        try: yield session
+        finally: session.close()
+    app.dependency_overrides[get_db] = override
+    try:
+        with TestClient(app) as client: yield client, factory
     finally:
         app.dependency_overrides.clear(); Base.metadata.drop_all(engine); get_storage_service.cache_clear()
 

@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
-from app.models import CatalogColumn, DeliverablePackage, MappingEvidenceReference, PendingQuestion, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField
+from app.core.settings import get_settings
+from app.models import CatalogColumn, DeliverableEvidenceItem, DeliverablePackage, MappingEvidenceReference, MartToYbtMapping, PendingQuestion, Project, ScenarioBusinessMapping, ScenarioTechnicalLineage, SourceToMartMapping, TargetField
 from app.services.deliverables.readiness_service import field_readiness
 
 
@@ -10,6 +11,8 @@ def validate_package(db, package_id: int) -> dict:
         raise ValueError("Deliverable package not found")
     fields = list(db.scalars(select(TargetField).where(TargetField.target_table_id == package.target_table_id).order_by(TargetField.id)).all())
     issues = []
+    project = db.get(Project, package.project_id)
+    governed = get_settings().auth_mode == "required" or bool(project and project.governance_workflow_enabled)
     for order, field in enumerate(fields, 1):
         if not field.field_code: issues.append(_issue("error", field.id, "target_field_code", "字段代码为空"))
         if not field.field_name: issues.append(_issue("error", field.id, "target_field_name", "字段名称为空"))
@@ -28,8 +31,28 @@ def validate_package(db, package_id: int) -> dict:
             catalog_match = db.scalar(select(CatalogColumn.id).where(CatalogColumn.project_id == package.project_id, CatalogColumn.enabled.is_(True), CatalogColumn.schema_name == (item.source_schema_name or ""), CatalogColumn.table_name == (item.source_table_english_name or ""), CatalogColumn.column_name == (item.source_field_english_name or "")).limit(1))
             manual_confirmation = db.scalar(select(MappingEvidenceReference.id).where(MappingEvidenceReference.project_id == package.project_id, MappingEvidenceReference.mapping_type == "scenario_technical", MappingEvidenceReference.mapping_id == item.id, MappingEvidenceReference.evidence_type.in_(("catalog_column", "source_field", "manual_note"))).limit(1))
             if not catalog_match and not manual_confirmation: issues.append(_issue("error", field.id, "unverified_physical_source", "来源字段必须存在于启用的数据目录或具备人工确认记录"))
+        mart_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.project_id == package.project_id, MartToYbtMapping.target_field_id == field.id)).all())
+        if not mart_mappings:
+            issues.append(_issue("error", field.id, "mart_to_ybt_mapping", "缺少监管集市到一表通口径"))
+        for mart_mapping in mart_mappings:
+            if not mart_mapping.final_content: issues.append(_issue("error", field.id, "mart_to_ybt_content", "监管集市到一表通口径为空"))
+            if governed and mart_mapping.mapping_status != "approved": issues.append(_issue("error", field.id, "mart_to_ybt_review", "监管集市到一表通口径尚未通过治理审核"))
+            source_mappings = list(db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id == package.project_id, SourceToMartMapping.mart_field_id == mart_mapping.mart_field_id)).all()) if mart_mapping.mart_field_id else []
+            if not source_mappings: issues.append(_issue("error", field.id, "source_to_mart_mapping", "缺少业务系统到监管集市口径"))
+            for source_mapping in source_mappings:
+                if not source_mapping.final_content: issues.append(_issue("error", field.id, "source_to_mart_content", "业务系统到监管集市口径为空"))
+                if governed and source_mapping.mapping_status != "approved": issues.append(_issue("error", field.id, "source_to_mart_review", "业务系统到监管集市口径尚未通过治理审核"))
         readiness = field_readiness(db, field.id)
         if readiness["status"] == "blocked": issues.append(_issue("error", field.id, "readiness", ";".join(readiness["blocking_reasons"])))
+    for citation in db.scalars(select(DeliverableEvidenceItem).where(DeliverableEvidenceItem.deliverable_package_id == package.id)).all():
+        reference = db.scalar(select(MappingEvidenceReference.id).where(
+            MappingEvidenceReference.project_id == package.project_id,
+            MappingEvidenceReference.mapping_type == citation.mapping_type,
+            MappingEvidenceReference.mapping_id == citation.mapping_id,
+            MappingEvidenceReference.evidence_type == citation.evidence_type,
+            MappingEvidenceReference.evidence_id == citation.evidence_id,
+        ).limit(1))
+        if reference is None: issues.append(_issue("error", citation.target_field_id, "invalid_citation", "证据引用不存在或不属于当前项目"))
     open_high = db.scalar(select(PendingQuestion.id).where(PendingQuestion.project_id == package.project_id, PendingQuestion.target_table_id == package.target_table_id, PendingQuestion.priority == "high", PendingQuestion.question_status.not_in(("closed", "accepted"))).limit(1))
     if open_high: issues.append(_issue("error", None, "high_priority_question", "存在未关闭的高优先级问题"))
     result = {"error_count": sum(item["severity"] == "error" for item in issues), "warning_count": sum(item["severity"] == "warning" for item in issues), "info_count": sum(item["severity"] == "info" for item in issues), "issues": issues}

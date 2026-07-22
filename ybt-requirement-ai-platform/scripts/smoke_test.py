@@ -658,6 +658,8 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
     _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
     approved1 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    stale_approval = client.post(f"{base}/deliverables/{package['id']}/approve", json={})
+    if stale_approval.status_code != 409: raise AssertionError("重新渲染后的交付包复用了旧审核结果")
     _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
     approved2 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     comparison = _post_json(client, f"{base}/projects/{project_id}/caliber-comparisons", {"left_package_version_id": approved1["version"]["id"], "right_package_version_id": approved2["version"]["id"], "left": {"source_field": "cert_type"}, "right": {"source_field": "cert_type_v2"}})
