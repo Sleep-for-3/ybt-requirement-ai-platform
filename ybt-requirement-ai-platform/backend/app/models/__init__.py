@@ -83,6 +83,9 @@ from app.models.deliverables import (
     HistoricalCaliberImport, HistoricalCaliberItem, PendingQuestion,
     TemplateColumnMapping, TemplateSheetMapping,
 )
+from app.models.uat import (
+    UatCase, UatCaseResult, UatFinding, UatPack, UatPackItem, UatRun, UatSignoff, UatSuite,
+)
 
 __all__ = [
     "AuditLog",
@@ -155,6 +158,14 @@ __all__ = [
     "StoredFile",
     "WorkflowDefinition",
     "WorkflowInstance",
+    "UatSuite",
+    "UatCase",
+    "UatRun",
+    "UatCaseResult",
+    "UatFinding",
+    "UatSignoff",
+    "UatPack",
+    "UatPackItem",
     "CodeRepository",
     "ImpactAnalysis",
     "LineageEdge",

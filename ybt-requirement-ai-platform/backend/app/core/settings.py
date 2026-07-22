@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     login_lock_seconds: int = 300
     request_rate_limit_per_minute: int = 600
     max_upload_bytes: int = 20 * 1024 * 1024
+    uat_local_pack_dir: str = "./uat_local_packs"
+    uat_zip_max_total_bytes: int = 200 * 1024 * 1024
+    uat_zip_max_file_count: int = 500
+    uat_file_max_bytes: int = 20 * 1024 * 1024
     lineage_zip_max_total_bytes: int = 100 * 1024 * 1024
     lineage_zip_max_file_count: int = 2000
     lineage_script_max_bytes: int = 10 * 1024 * 1024
