@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundJob
+from app.core.observability import current_request_id
 from app.services.governance.audit import redact_summary
 from app.services.task_queue.base import JobHandler
 
@@ -28,6 +29,7 @@ class InlineTaskQueue:
             project_id=project_id,
             idempotency_key=scoped_key,
             job_type=job_type,
+            correlation_id=current_request_id(),
             status="queued",
             progress=0,
             payload_summary_json=redact_summary(payload_summary),

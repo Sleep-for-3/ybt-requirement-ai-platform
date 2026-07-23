@@ -33,6 +33,8 @@ def test_uat_migration_is_deterministic_and_reversible(tmp_path: Path, commands:
     inspector = sa.inspect(sa.create_engine(f"sqlite:///{database_path.as_posix()}"))
     assert {"uat_suites", "uat_cases", "uat_runs", "uat_case_results", "uat_findings", "uat_signoffs", "uat_packs", "uat_pack_items"} <= set(inspector.get_table_names())
     assert {"project_id", "uat_run_id", "signoff_role", "signoff_status"} <= {column["name"] for column in inspector.get_columns("uat_signoffs")}
+    assert "correlation_id" in {column["name"] for column in inspector.get_columns("background_jobs")}
+    assert "correlation_id" in {column["name"] for column in inspector.get_columns("audit_logs")}
 
 
 def test_uat_revision_uses_explicit_alembic_operations() -> None:

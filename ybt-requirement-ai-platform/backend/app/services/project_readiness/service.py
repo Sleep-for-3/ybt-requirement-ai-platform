@@ -1,10 +1,6 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -28,6 +24,7 @@ from app.models import (
     UatRun,
     WorkflowInstance,
 )
+from app.services.deployment import database_revisions
 
 
 @dataclass(frozen=True)
@@ -156,12 +153,7 @@ def _project_counts(db: Session, project_id: int) -> dict[str, Any]:
 
 
 def _database_revisions(db: Session) -> tuple[str | None, str | None]:
-    current = MigrationContext.configure(db.connection()).get_current_revision()
-    backend_root = Path(__file__).resolve().parents[3]
-    config = Config(str(backend_root / "alembic.ini"))
-    config.set_main_option("script_location", str(backend_root / "alembic"))
-    config.set_main_option("path_separator", "os")
-    return current, ScriptDirectory.from_config(config).get_current_head()
+    return database_revisions(db.connection())
 
 
 def _blocker(code: str, message: str, dimension: str, *, critical: bool = False) -> dict[str, str]:

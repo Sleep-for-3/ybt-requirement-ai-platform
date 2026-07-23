@@ -550,12 +550,15 @@ def test_health_metrics_dashboard_and_audit_are_available(monkeypatch) -> None:
         metrics = client.get("/api/metrics")
         dashboard = client.get(f"/api/projects/{project['id']}/dashboard", headers=admin_headers)
         audit = client.get(f"/api/audit?project_id={project['id']}", headers=admin_headers)
+        login_audit = client.get("/api/audit?action=login", headers=admin_headers)
         assert live.status_code == 200
-        assert ready.status_code == 200, ready.text
+        assert ready.status_code == 503, ready.text
+        assert ready.json()["checks"]["alembic_revision"] == "unhealthy"
         assert "ybt_http_requests_total" in metrics.text
         assert dashboard.status_code == 200, dashboard.text
         assert dashboard.json()["field_count"] == 0
         assert audit.status_code == 200
+        assert any(item["correlation_id"] == "bootstrap-login-request" for item in login_audit.json())
 
 
 @pytest.mark.parametrize("role,allowed,denied", [
@@ -618,7 +621,11 @@ def _bootstrap_platform(client: TestClient) -> dict[str, str]:
         "username": "platform_admin", "display_name": "平台管理员", "email": "platform@example.invalid", "password": password,
     })
     assert response.status_code == 201, response.text
-    login = client.post("/api/auth/login", json={"username": "platform_admin", "password": password})
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "platform_admin", "password": password},
+        headers={"X-Request-ID": "bootstrap-login-request"},
+    )
     assert login.status_code == 200, login.text
     return _bearer(login.json()["access_token"])
 

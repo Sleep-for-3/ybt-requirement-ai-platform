@@ -7,7 +7,7 @@ from app.models import AuditLog
 from app.services.security import redact_content
 
 
-SENSITIVE_KEYS = ("password", "passwd", "pwd", "token", "secret", "api_key", "credential", "connection_string", "sqlalchemy_url", "knowledge_content", "raw_content", "document_content")
+SENSITIVE_KEYS = ("password", "passwd", "pwd", "token", "secret", "api_key", "credential", "authorization", "cookie", "connection_string", "sqlalchemy_url", "database_url", "raw_sql", "knowledge_content", "raw_content", "document_content")
 _SAFE_STORAGE_KEY = re.compile(r"projects/\d+/[0-9a-f]{2}/[0-9a-f]{64}(?:\.[A-Za-z0-9]+)?")
 _SAFE_HASH = re.compile(r"[0-9a-f]{32,128}")
 
@@ -50,6 +50,9 @@ def record_audit(
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> AuditLog:
+    from app.core.observability import current_request_id
+
+    correlation_id = request_id or current_request_id()
     log = AuditLog(
         institution_id=institution_id,
         project_id=project_id,
@@ -57,7 +60,8 @@ def record_audit(
         action=action,
         resource_type=resource_type,
         resource_id=str(resource_id) if resource_id is not None else None,
-        request_id=request_id,
+        request_id=correlation_id,
+        correlation_id=correlation_id,
         before_summary_json=redact_summary(before or {}),
         after_summary_json=redact_summary(after or {}),
         result=result,

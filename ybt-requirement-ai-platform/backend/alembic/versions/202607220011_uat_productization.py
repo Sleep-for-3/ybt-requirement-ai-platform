@@ -23,7 +23,25 @@ def _timestamps() -> tuple[sa.Column, sa.Column]:
     )
 
 
+def _column_exists(table_name: str, column_name: str) -> bool:
+    return column_name in {column["name"] for column in sa.inspect(op.get_bind()).get_columns(table_name)}
+
+
+def _add_column_if_missing(table_name: str, column: sa.Column) -> None:
+    if not _column_exists(table_name, column.name):
+        op.add_column(table_name, column)
+
+
+def _drop_column_if_present(table_name: str, column_name: str) -> None:
+    if _column_exists(table_name, column_name):
+        op.drop_column(table_name, column_name)
+
+
 def upgrade() -> None:
+    _add_column_if_missing("background_jobs", sa.Column("correlation_id", sa.String(length=64), nullable=True))
+    op.create_index("ix_background_jobs_correlation_id", "background_jobs", ["correlation_id"], if_not_exists=True)
+    _add_column_if_missing("audit_logs", sa.Column("correlation_id", sa.String(length=64), nullable=True))
+    op.create_index("ix_audit_logs_correlation_id", "audit_logs", ["correlation_id"], if_not_exists=True)
     op.create_table(
         "uat_suites",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -229,3 +247,7 @@ def downgrade() -> None:
         "uat_suites",
     ):
         op.drop_table(table_name)
+    op.drop_index("ix_audit_logs_correlation_id", table_name="audit_logs", if_exists=True)
+    _drop_column_if_present("audit_logs", "correlation_id")
+    op.drop_index("ix_background_jobs_correlation_id", table_name="background_jobs", if_exists=True)
+    _drop_column_if_present("background_jobs", "correlation_id")

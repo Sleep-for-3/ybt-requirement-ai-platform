@@ -67,12 +67,19 @@ def test_uat_run_executes_cases_independently_and_retry_reuses_results() -> None
             "git_commit_sha": "a" * 40,
         })
 
-        executed = _post(client, f"/api/uat-runs/{run['id']}/execute", {})
+        execution_response = client.post(
+            f"/api/uat-runs/{run['id']}/execute",
+            json={},
+            headers={"X-Request-ID": "uat-execution-request"},
+        )
+        assert execution_response.status_code == 200, execution_response.text
+        executed = execution_response.json()
         assert executed["run"]["status"] == "failed"
         assert [item["status"] for item in executed["run"]["results"]] == [
             "passed", "failed", "passed", "pending", "pending",
         ]
         assert executed["job"]["status"] == "partially_completed"
+        assert executed["job"]["correlation_id"] == "uat-execution-request"
         result_ids = [item["id"] for item in executed["run"]["results"]]
 
         retried = _post(client, f"/api/uat-runs/{run['id']}/retry-failed", {})

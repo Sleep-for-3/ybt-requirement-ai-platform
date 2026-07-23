@@ -7,6 +7,7 @@ alembic>=1.13,<2
 pydantic-settings>=2.4,<3
 python-multipart>=0.0.9,<1
 httpx>=0.27,<1
+httpx2>=2.7,<3
 sqlglot>=25,<28
 openpyxl>=3.1,<4
 python-docx>=1.1,<2
