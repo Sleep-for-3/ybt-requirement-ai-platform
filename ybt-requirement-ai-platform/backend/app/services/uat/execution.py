@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import BackgroundJob, UatCase, UatCaseResult, UatRun
 from app.services.governance.audit import record_audit, redact_summary
 from app.services.governance.notifications import notify_user
+from app.services.uat.builtin_checks import evaluate_builtin_case
 
 
 def execute_uat_run(db: Session, run_id: int, *, retry_statuses: set[str] | None = None) -> dict:
@@ -43,7 +44,7 @@ def execute_uat_run(db: Session, run_id: int, *, retry_statuses: set[str] | None
         result.status = "running"
         db.commit()
         try:
-            outcome = _evaluate_case(case)
+            outcome = _evaluate_case(db, run, case, int((run.summary_json or {}).get("attempt", 1)))
             duration_ms = max(0, int((perf_counter() - started) * 1000))
             if case.execution_mode == "hybrid" and outcome["status"] == "passed":
                 _finish_result(db, result, "pending", {**outcome["actual"], "manual_confirmation_required": True}, outcome["evidence"], None, duration_ms, run.started_by)
@@ -81,12 +82,19 @@ def _ensure_results(db: Session, run: UatRun, cases: list[UatCase]) -> dict[int,
     return results
 
 
-def _evaluate_case(case: UatCase) -> dict:
+def _evaluate_case(db: Session, run: UatRun, case: UatCase, attempt: int) -> dict:
     check_key = str(case.precondition_json.get("check_key") or "")
+    if check_key == "fail_once_then_pass":
+        if attempt <= 1:
+            return {"status": "failed", "actual": {"check": "controlled_first_attempt_failure"}, "evidence": {"check_key": check_key, "attempt": attempt}, "error": "Controlled sanitized first-attempt UAT failure"}
+        return {"status": "passed", "actual": {"check": "passed_after_controlled_fix"}, "evidence": {"check_key": check_key, "attempt": attempt}}
     if check_key == "always_fail":
         return {"status": "failed", "actual": {"check": "controlled_failure"}, "evidence": {"check_key": check_key}, "error": "Controlled sanitized UAT failure"}
     if check_key == "always_pass":
         return {"status": "passed", "actual": {"check": "passed"}, "evidence": {"check_key": check_key}}
+    builtin = evaluate_builtin_case(db, run, case, check_key)
+    if builtin is not None:
+        return builtin
     return {"status": "blocked", "actual": {"check": "manual_or_environment_evidence_required"}, "evidence": {"check_key": check_key}}
 
 

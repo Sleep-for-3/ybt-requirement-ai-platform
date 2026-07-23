@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -6,7 +9,7 @@ from app.core.database import get_db
 from app.core.observability import render_metrics, set_job_metrics
 from app.core.settings import get_settings
 from app.models import BackgroundJob
-from app.services.auth.dependencies import CurrentPrincipal
+from app.services.auth.dependencies import bearer_scheme, get_current_principal
 from app.services.auth.permission_service import PermissionService
 from app.services.health_checks import readiness_summary, run_health_checks
 
@@ -28,10 +31,16 @@ def ready(response: Response, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/health/details")
-def details(principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+def details(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    db: Session = Depends(get_db),
+) -> dict:
     settings = get_settings()
-    if not settings.health_details_public and not PermissionService(db, principal).is_platform_admin():
-        raise HTTPException(status_code=403, detail="Platform administrator permission is required")
+    if not settings.health_details_public:
+        principal = get_current_principal(request, credentials, db)
+        if not PermissionService(db, principal).is_platform_admin():
+            raise HTTPException(status_code=403, detail="Platform administrator permission is required")
     return run_health_checks(db, settings)
 
 

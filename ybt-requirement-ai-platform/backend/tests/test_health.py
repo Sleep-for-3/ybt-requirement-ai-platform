@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,6 +12,7 @@ from app.core.observability import build_log_event
 from app.core.settings import Settings, get_settings
 from app.main import app
 from app.services.storage import get_storage_service
+from app.services.health_checks import _check_task_queue
 
 
 def test_production_configuration_validation_is_structured_and_secret_safe() -> None:
@@ -41,6 +43,7 @@ def test_production_configuration_validation_is_structured_and_secret_safe() -> 
 def test_health_endpoints_are_bounded_sanitized_and_revision_aware(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "health-storage"))
     monkeypatch.setenv("HEALTH_DETAILS_PUBLIC", "true")
+    monkeypatch.setenv("AUTH_MODE", "required")
     get_settings.cache_clear()
     get_storage_service.cache_clear()
     try:
@@ -84,6 +87,18 @@ def test_structured_log_event_has_required_fields_and_redacts_sensitive_input() 
     assert "bearer forbidden" not in serialized
     assert "session=forbidden" not in serialized
     assert "secret_column" not in serialized
+
+
+def test_celery_health_requires_a_responding_worker(monkeypatch) -> None:
+    inspector = SimpleNamespace(ping=lambda: {})
+    control = SimpleNamespace(inspect=lambda timeout: inspector)
+    queue = SimpleNamespace(celery_app=SimpleNamespace(control=control))
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue)
+
+    result = _check_task_queue(Settings(task_queue_provider="celery"))
+
+    assert result["status"] == "unhealthy"
+    assert result["provider"] == "celery"
 
 
 @contextmanager

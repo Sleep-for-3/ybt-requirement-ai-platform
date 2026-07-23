@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from io import BytesIO
+import json
 import zipfile
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.settings import get_settings
 from app.main import app
 
 
@@ -43,6 +45,20 @@ def test_builtin_uat_suites_are_initialized_idempotently_in_display_order() -> N
             == sorted(case["display_order"] for case in suite["cases"])
             for suite in suites
         )
+
+
+def test_builtin_automatic_cases_execute_registered_checks_instead_of_blocking() -> None:
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "内置 UAT 执行项目"})
+        suites = client.get(f"/api/projects/{project['id']}/uat-suites").json()
+        delivery = next(item for item in suites if item["suite_type"] == "end_to_end_delivery")
+        run = _post(client, f"/api/uat-suites/{delivery['id']}/runs", {"run_name": "内置自动检查"})
+
+        executed = _post(client, f"/api/uat-runs/{run['id']}/execute", {})["run"]
+
+        assert executed["status"] == "failed"
+        assert {item["status"] for item in executed["results"]} == {"failed"}
+        assert all(item["evidence_json"]["check_key"].startswith("end_to_end_delivery:") for item in executed["results"])
 
 
 def test_uat_run_executes_cases_independently_and_retry_reuses_results() -> None:
@@ -88,6 +104,31 @@ def test_uat_run_executes_cases_independently_and_retry_reuses_results() -> None
         assert retried["run"]["summary_json"]["attempt"] == 2
 
 
+def test_controlled_failure_passes_on_retry_and_reuses_result() -> None:
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "UAT 修复重跑项目"})
+        suite = _post(client, f"/api/projects/{project['id']}/uat-suites", {
+            "suite_name": "受控修复套件",
+            "suite_type": "custom",
+            "cases": [_case("RETRY", "首次失败修复后通过", "automatic", "fail_once_then_pass", "critical", 1)],
+        })
+        run = _post(client, f"/api/uat-suites/{suite['id']}/runs", {"run_name": "受控修复轮次"})
+
+        first = _post(client, f"/api/uat-runs/{run['id']}/execute", {})
+        assert first["run"]["status"] == "failed"
+        first_result = first["run"]["results"][0]
+        assert first_result["status"] == "failed"
+        assert first_result["evidence_json"]["attempt"] == 1
+
+        retried = _post(client, f"/api/uat-runs/{run['id']}/retry-failed", {})
+        retry_result = retried["run"]["results"][0]
+        assert retried["run"]["status"] == "passed"
+        assert retried["run"]["summary_json"]["attempt"] == 2
+        assert retry_result["id"] == first_result["id"]
+        assert retry_result["status"] == "passed"
+        assert retry_result["evidence_json"]["attempt"] == 2
+
+
 def test_critical_finding_blocks_signoff_until_resolution_and_verification() -> None:
     with _client() as client:
         project = _post(client, "/api/projects", {"name": "UAT 签署项目"})
@@ -109,6 +150,12 @@ def test_critical_finding_blocks_signoff_until_resolution_and_verification() -> 
             "signoff_role": "business_owner", "signoff_status": "approved", "comment": "不应通过",
         })
         assert blocked.status_code == 409
+        rejected_finding = client.patch(f"/api/uat-findings/{finding['id']}", json={"status": "rejected"})
+        assert rejected_finding.status_code == 200
+        still_blocked = client.post(f"/api/uat-runs/{run['id']}/signoff", json={
+            "signoff_role": "business_owner", "signoff_status": "approved", "comment": "拒绝问题不能绕过阻断",
+        })
+        assert still_blocked.status_code == 409
 
         assigned = client.patch(f"/api/uat-findings/{finding['id']}", json={"assigned_role": "technical_analyst", "status": "assigned"})
         assert assigned.status_code == 200
@@ -174,6 +221,129 @@ def test_uat_pack_rejects_path_traversal_and_exports_sanitized_evidence(monkeypa
             assert "uat-report.xlsx" in names
             assert not any(".env" in name or "token" in name.lower() or "database" in name.lower() for name in names)
             assert all(not name.startswith("/") and ".." not in name for name in names)
+            version = json.loads(archive.read("version.json"))
+            assert version["alembic_head_revision"] == "202607220011"
+            assert version["alembic_revision"] is None
+
+
+def test_uat_pack_enforces_combined_upload_limit_before_persistence(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("UAT_ZIP_MAX_TOTAL_BYTES", "10")
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "aggregate-storage"))
+    get_settings.cache_clear()
+    from app.services.storage import get_storage_service
+    get_storage_service.cache_clear()
+    try:
+        with _client() as client:
+            project = _post(client, "/api/projects", {"name": "整包容量限制项目"})
+            response = client.post(
+                f"/api/projects/{project['id']}/uat-packs/upload",
+                files=[
+                    ("files", ("one.sql", b"123456", "text/plain")),
+                    ("files", ("two.sql", b"123456", "text/plain")),
+                ],
+            )
+            assert response.status_code == 400
+            assert "total size limit" in response.text
+            assert client.get(f"/api/projects/{project['id']}/uat-packs").json() == []
+    finally:
+        get_settings.cache_clear()
+        get_storage_service.cache_clear()
+
+
+def test_uat_report_escapes_formula_like_user_content() -> None:
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "公式注入防护项目"})
+        suite = _post(client, f"/api/projects/{project['id']}/uat-suites", {
+            "suite_name": "=HYPERLINK(\"https://example.invalid\",\"unsafe\")",
+            "suite_type": "custom",
+            "cases": [_case("PASS", "+SUM(1,1)", "automatic", "always_pass", "medium", 1)],
+        })
+        run = _post(client, f"/api/uat-suites/{suite['id']}/runs", {"run_name": "@formula-like-run"})
+        _post(client, f"/api/uat-runs/{run['id']}/execute", {})
+
+        report = client.get(f"/api/uat-runs/{run['id']}/report")
+        workbook = load_workbook(BytesIO(report.content), data_only=False)
+
+        assert workbook["验收概览"]["C2"].value == "'@formula-like-run"
+        assert workbook["验收概览"]["C2"].data_type == "s"
+        assert workbook["测试套件"]["B2"].value.startswith("'=")
+        assert workbook["测试案例"]["B2"].value.startswith("'+")
+
+
+def test_uat_permissions_hide_cross_institution_resources_and_block_viewer_execution() -> None:
+    with _client() as client:
+        password = "test-only-platform-admin-password"
+        bootstrap = client.post("/api/admin/bootstrap", json={
+            "institution_code": "PLATFORM",
+            "institution_name": "公开测试平台",
+            "institution_type": "platform_operator",
+            "username": "uat_platform_admin",
+            "display_name": "UAT 平台管理员",
+            "email": "uat-platform-admin@example.invalid",
+            "password": password,
+        })
+        assert bootstrap.status_code == 201, bootstrap.text
+        admin_token = _post(client, "/api/auth/login", {"username": "uat_platform_admin", "password": password})["access_token"]
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        bank = client.post("/api/admin/institutions", headers=admin_headers, json={
+            "institution_code": "UAT_BANK",
+            "institution_name": "UAT 示例银行",
+            "institution_type": "bank",
+        })
+        assert bank.status_code == 201, bank.text
+        other_bank = client.post("/api/admin/institutions", headers=admin_headers, json={
+            "institution_code": "OTHER_UAT_BANK",
+            "institution_name": "其他 UAT 示例银行",
+            "institution_type": "bank",
+        })
+        assert other_bank.status_code == 201, other_bank.text
+        project = client.post("/api/projects", headers=admin_headers, json={
+            "name": "UAT 权限隔离项目",
+            "institution_id": bank.json()["id"],
+        })
+        assert project.status_code == 200, project.text
+        suite = client.post(f"/api/projects/{project.json()['id']}/uat-suites", headers=admin_headers, json={
+            "suite_name": "权限验证套件",
+            "suite_type": "custom",
+            "cases": [_case("PASS", "只读验证", "automatic", "always_pass", "medium", 1)],
+        })
+        assert suite.status_code == 201, suite.text
+        run = client.post(f"/api/uat-suites/{suite.json()['id']}/runs", headers=admin_headers, json={"run_name": "权限验证轮次"})
+        assert run.status_code == 201, run.text
+
+        viewer_password = "test-only-viewer-password"
+        viewer = client.post("/api/admin/users", headers=admin_headers, json={
+            "username": "uat_viewer",
+            "display_name": "UAT 只读用户",
+            "email": "uat-viewer@example.invalid",
+            "password": viewer_password,
+            "institution_id": bank.json()["id"],
+            "institution_role": "member",
+        })
+        assert viewer.status_code == 201, viewer.text
+        membership = client.post(f"/api/projects/{project.json()['id']}/members", headers=admin_headers, json={
+            "user_id": viewer.json()["id"],
+            "project_role": "viewer",
+        })
+        assert membership.status_code == 201, membership.text
+        viewer_token = _post(client, "/api/auth/login", {"username": "uat_viewer", "password": viewer_password})["access_token"]
+        viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+        assert client.get(f"/api/uat-suites/{suite.json()['id']}", headers=viewer_headers).status_code == 200
+        assert client.post(f"/api/uat-runs/{run.json()['id']}/execute", headers=viewer_headers, json={}).status_code == 403
+
+        outsider_password = "test-only-outsider-password"
+        outsider = client.post("/api/admin/users", headers=admin_headers, json={
+            "username": "uat_outsider",
+            "display_name": "UAT 跨机构用户",
+            "email": "uat-outsider@example.invalid",
+            "password": outsider_password,
+            "institution_id": other_bank.json()["id"],
+            "institution_role": "member",
+        })
+        assert outsider.status_code == 201, outsider.text
+        outsider_token = _post(client, "/api/auth/login", {"username": "uat_outsider", "password": outsider_password})["access_token"]
+        outsider_headers = {"Authorization": f"Bearer {outsider_token}"}
+        assert client.get(f"/api/uat-suites/{suite.json()['id']}", headers=outsider_headers).status_code == 404
 
 
 def test_critical_precondition_blocks_dependents_manual_completion_and_cancel() -> None:

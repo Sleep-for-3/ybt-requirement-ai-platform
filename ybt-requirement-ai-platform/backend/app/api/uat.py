@@ -6,6 +6,7 @@ from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.settings import get_settings
 from app.models import BackgroundJob, ProjectMembership, UatCase, UatCaseResult, UatFinding, UatPack, UatPackItem, UatRun, UatSignoff, UatSuite
 from app.schemas.uat import EmptyRequest, UatEvidenceAttach, UatFindingCreate, UatFindingResolve, UatFindingUpdate, UatFindingVerify, UatManualResultComplete, UatRunCreate, UatSignoffCreate, UatSuiteCloneRequest, UatSuiteCreate
 from app.services.auth.dependencies import CurrentPrincipal
@@ -153,7 +154,19 @@ def attach_result_evidence(result_id: int, payload: UatEvidenceAttach, principal
 @router.post("/projects/{project_id}/uat-packs/upload", status_code=201)
 async def upload_uat_pack(project_id: int, principal: CurrentPrincipal, files: list[UploadFile] = File(...), pack_name: str = Form("脱敏 UAT 材料包"), db: Session = Depends(get_db)) -> dict:
     project = PermissionService(db, principal).require_project_permission(project_id, "uat.manage")
-    uploads = [(file.filename or "unnamed", await file.read()) for file in files]
+    settings = get_settings()
+    uploads: list[tuple[str, bytes]] = []
+    total_compressed_bytes = 0
+    for file in files:
+        content = bytearray()
+        while chunk := await file.read(1024 * 1024):
+            content.extend(chunk)
+            total_compressed_bytes += len(chunk)
+            if len(content) > settings.max_upload_bytes:
+                raise HTTPException(400, "Uploaded UAT file exceeds the compressed upload limit")
+            if total_compressed_bytes > settings.uat_zip_max_total_bytes:
+                raise HTTPException(400, "Combined UAT uploads exceed the total size limit")
+        uploads.append((file.filename or "unnamed", bytes(content)))
     try:
         pack = create_uat_pack(db, project, pack_name, uploads, principal.user_id)
     except ValueError as exc:
@@ -255,7 +268,7 @@ def create_uat_signoff(run_id: int, payload: UatSignoffCreate, principal: Curren
     permissions.require_uat_signoff_role(run.project_id, payload.signoff_role)
     if run.status != "passed":
         raise HTTPException(409, "Only a completed and passed UAT run can be signed off")
-    blocking = db.scalar(select(UatFinding.id).where(UatFinding.project_id == run.project_id, UatFinding.uat_run_id == run.id, UatFinding.severity == "critical", UatFinding.status.not_in(("verified", "rejected", "closed"))).limit(1))
+    blocking = db.scalar(select(UatFinding.id).where(UatFinding.project_id == run.project_id, UatFinding.uat_run_id == run.id, UatFinding.severity == "critical", UatFinding.status.not_in(("verified", "closed"))).limit(1))
     if blocking is not None:
         raise HTTPException(409, "Critical UAT findings must be verified or closed before signoff")
     signoff = UatSignoff(project_id=run.project_id, uat_run_id=run.id, signoff_role=payload.signoff_role, signoff_status=payload.signoff_status, comment=payload.comment, signed_by=principal.user_id, signed_at=datetime.now(UTC))

@@ -17,6 +17,21 @@ BUILTIN_SUITES: tuple[dict, ...] = (
     {"suite_type": "deployment_readiness", "suite_name": "部署准备度", "description": "验证数据库、存储、队列、模型、磁盘、日志和备份准备度。", "cases": ("数据库连接", "Alembic Revision", "存储读写", "Redis", "Celery", "向量存储", "模型配置", "Secret 强度", "HTTPS 代理配置", "后台任务运行", "磁盘空间", "日志目录", "备份目录")},
 )
 
+HYBRID_CASES = {
+    "Restricted 证据不外发",
+    "跨项目知识不可见",
+    "不存在物理字段不得生成",
+    "填写人与审核人隔离",
+    "驳回",
+    "撤回",
+    "审批后不可静默修改",
+    "模板变量",
+    "多语句部分成功",
+    "Stale 与 Needs Review",
+    "Token 不进入日志",
+    "SQL 与 Shell 不被执行",
+}
+
 
 def ensure_builtin_uat_suites(db: Session, project: Project, created_by: int | None = None) -> list[UatSuite]:
     """Idempotently materialize project-scoped copies of the product-owned UAT catalog."""
@@ -29,9 +44,12 @@ def ensure_builtin_uat_suites(db: Session, project: Project, created_by: int | N
         case_codes = set(db.scalars(select(UatCase.case_code).where(UatCase.uat_suite_id == suite.id)).all())
         for case_index, case_name in enumerate(definition["cases"], 1):
             case_code = f"{suite_index:02d}-{case_index:03d}"
+            execution_mode = "manual" if case_name in {"业务填写", "业务审核", "技术填写", "技术审核", "最终审核", "HTTPS 代理配置", "备份目录"} else "hybrid" if suite.suite_type == "excel_fidelity" or case_name in HYBRID_CASES else "automatic"
             if case_code in case_codes:
+                existing_case = db.scalar(select(UatCase).where(UatCase.uat_suite_id == suite.id, UatCase.case_code == case_code))
+                if existing_case is not None:
+                    existing_case.execution_mode = execution_mode
                 continue
-            execution_mode = "manual" if case_name in {"业务填写", "业务审核", "技术填写", "技术审核", "最终审核", "HTTPS 代理配置", "备份目录"} else "hybrid" if suite.suite_type == "excel_fidelity" else "automatic"
             db.add(UatCase(project_id=project.id, uat_suite_id=suite.id, case_code=case_code, case_name=case_name, description=f"检查：{case_name}", case_category=suite.suite_type, precondition_json={"check_key": _check_key(suite.suite_type, case_name)}, input_requirement_json={"sanitized_fixture_only": True}, expected_result_json={"status": "passed", "description": case_name}, execution_mode=execution_mode, severity="critical" if case_index == 1 else "high" if case_index <= 3 else "medium", enabled=True, display_order=case_index))
     db.commit()
     return list(db.scalars(select(UatSuite).where(UatSuite.project_id == project.id).order_by(UatSuite.id)).all())

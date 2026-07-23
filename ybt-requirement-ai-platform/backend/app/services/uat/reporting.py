@@ -10,8 +10,11 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import UatCase, UatCaseResult, UatFinding, UatRun, UatSignoff, UatSuite
+from app.core.settings import get_settings
+from app.models import DeliverablePackageVersion, StoredFile, UatCase, UatCaseResult, UatFinding, UatRun, UatSignoff, UatSuite
+from app.services.deployment import database_revisions
 from app.services.governance.audit import redact_summary
+from app.services.health_checks import run_health_checks
 
 
 SHEET_NAMES = ["验收概览", "测试套件", "测试案例", "失败案例", "阻断案例", "问题清单", "修复记录", "签署记录", "环境信息", "版本信息"]
@@ -46,12 +49,27 @@ def build_uat_report(db: Session, run: UatRun) -> bytes:
 def build_evidence_package(db: Session, run: UatRun) -> bytes:
     report = build_uat_report(db, run)
     results = list(db.scalars(select(UatCaseResult).where(UatCaseResult.uat_run_id == run.id).order_by(UatCaseResult.id)).all())
+    delivery_files = [{
+        "package_version_id": version.id,
+        "deliverable_package_id": version.deliverable_package_id,
+        "version_no": version.version_no,
+        "stored_file_id": stored.id,
+        "file_name": stored.original_file_name,
+        "byte_size": stored.byte_size,
+        "content_hash": stored.content_hash,
+    } for version, stored in db.execute(
+        select(DeliverablePackageVersion, StoredFile)
+        .join(StoredFile, StoredFile.id == DeliverablePackageVersion.generated_file_id)
+        .where(DeliverablePackageVersion.project_id == run.project_id)
+        .order_by(DeliverablePackageVersion.id)
+    )]
+    current_revision, head_revision = database_revisions(db.connection())
     entries = {
         "uat-report.xlsx": report,
         "case-results.json": _json_bytes([{"case_result_id": item.id, "case_id": item.uat_case_id, "status": item.status, "actual_result": item.actual_result_json, "evidence": item.evidence_json, "duration_ms": item.duration_ms} for item in results]),
-        "health-summary.json": _json_bytes({"status": "summary_only", "secrets_included": False}),
-        "delivery-file-references.json": _json_bytes({"references": [], "restricted_files_included": False}),
-        "version.json": _json_bytes({"alembic_revision": "202607220011", "git_commit_sha": run.git_commit_sha, "application_version": run.application_version}),
+        "health-summary.json": _safe_json_bytes(run_health_checks(db, get_settings())),
+        "delivery-file-references.json": _safe_json_bytes({"references": delivery_files, "restricted_files_included": False}),
+        "version.json": _safe_json_bytes({"alembic_revision": current_revision, "alembic_head_revision": head_revision, "git_commit_sha": run.git_commit_sha, "application_version": run.application_version}),
     }
     checksums = "".join(f"{sha256(content).hexdigest()}  {name}\n" for name, content in sorted(entries.items())).encode()
     entries["SHA256SUMS"] = checksums
@@ -64,10 +82,16 @@ def build_evidence_package(db: Session, run: UatRun) -> bytes:
 
 
 def _append_rows(sheet, headers: list[str], rows: list[list]) -> None:
-    sheet.append(headers)
+    sheet.append([_safe_excel_value(value) for value in headers])
     for row in rows:
-        sheet.append(row)
+        sheet.append([_safe_excel_value(value) for value in row])
     sheet.freeze_panes = "A2"
+
+
+def _safe_excel_value(value):
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
 
 
 def _count(results: list[UatCaseResult], status: str) -> int:
@@ -80,6 +104,10 @@ def _json(value) -> str:
 
 def _json_bytes(value) -> bytes:
     return _json(value).encode("utf-8")
+
+
+def _safe_json_bytes(value) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=_json_default).encode("utf-8")
 
 
 def _json_default(value):

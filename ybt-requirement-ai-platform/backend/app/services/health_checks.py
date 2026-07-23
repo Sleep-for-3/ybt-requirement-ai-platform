@@ -26,7 +26,7 @@ def run_health_checks(db: Session, settings: Settings) -> dict[str, Any]:
         "alembic_revision": _timed(_check_revision, db),
         "storage": _timed(_check_storage),
         "redis": _timed(_check_redis, settings),
-        "task_queue": _check_task_queue(settings),
+        "task_queue": _timed(_check_task_queue, settings),
         "vector_store": _timed(_check_vector_store, settings),
         "llm_provider": _timed(_check_llm_provider, settings),
         "embedding_provider": _timed(_check_embedding_provider, settings),
@@ -101,7 +101,14 @@ def _check_task_queue(settings: Settings) -> CheckResult:
     if settings.task_queue_provider == "inline":
         return _result("healthy", "Inline task queue is enabled.", provider="inline")
     if settings.task_queue_provider == "celery":
-        return _result("healthy", "Celery task queue is configured.", provider="celery")
+        from app.services.task_queue import get_task_queue
+
+        queue = get_task_queue()
+        inspector = queue.celery_app.control.inspect(timeout=settings.health_check_timeout_seconds)
+        workers = inspector.ping() or {}
+        if not workers:
+            return _result("unhealthy", "No Celery worker responded to the bounded ping.", provider="celery")
+        return _result("healthy", "Celery workers responded successfully.", provider="celery", worker_count=len(workers))
     return _result("unhealthy", "Task queue provider is invalid.")
 
 

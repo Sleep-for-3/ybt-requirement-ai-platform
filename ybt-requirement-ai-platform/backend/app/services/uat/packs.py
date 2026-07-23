@@ -27,6 +27,10 @@ def create_uat_pack(db: Session, project: Project, pack_name: str, uploads: list
             entries.extend(_read_zip(data, settings))
         else:
             entries.append((_safe_relative_path(file_name), data))
+        if len(entries) > settings.uat_zip_max_file_count:
+            raise ValueError("UAT pack contains too many files")
+        if sum(len(content) for _, content in entries) > settings.uat_zip_max_total_bytes:
+            raise ValueError("UAT pack extracted content exceeds the total size limit")
     if not entries:
         raise ValueError("UAT pack contains no supported files")
     if len(entries) > settings.uat_zip_max_file_count:

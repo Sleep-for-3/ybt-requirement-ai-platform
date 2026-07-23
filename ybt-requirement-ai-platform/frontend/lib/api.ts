@@ -39,6 +39,8 @@ export type UatCaseResult = { id:number;project_id:number;uat_run_id:number;uat_
 export type UatRun = { id:number;institution_id?:number|null;project_id:number;uat_suite_id:number;run_name:string;run_no:number;status:string;environment_name:string;application_version?:string|null;git_commit_sha?:string|null;started_at?:string|null;completed_at?:string|null;summary_json:Record<string,number>;background_job_id?:number|null;results:UatCaseResult[] };
 export type UatFinding = { id:number;project_id:number;uat_run_id:number;uat_case_result_id?:number|null;finding_no:number;finding_type:string;severity:string;title:string;description:string;reproduction_steps?:string|null;expected_behavior?:string|null;actual_behavior?:string|null;status:string;assigned_role?:string|null;assigned_user_id?:number|null;resolution_text?:string|null;resolved_at?:string|null;verified_at?:string|null };
 export type UatSignoff = { id:number;project_id:number;uat_run_id:number;signoff_role:string;signoff_status:string;comment?:string|null;signed_by?:number|null;signed_at:string };
+export type UatPackItem = { id:number;relative_path:string;original_file_name:string;material_type:string;content_hash:string;byte_size:number };
+export type UatPack = { id:number;project_id:number;pack_name:string;status:string;manifest_json:{file_count?:number;total_bytes?:number};validation_json:{valid?:boolean;missing_material_types?:string[]};items:UatPackItem[] };
 
 export type TargetTable = {
   id: number;
@@ -566,7 +568,9 @@ export async function apiDownload(path: string): Promise<{ blob: Blob; fileName:
   }
   const disposition = response.headers.get("content-disposition") || "";
   const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : "业务口径及技术溯源表.xlsx" };
+  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  const fallback = response.headers.get("content-type")?.includes("application/zip") ? "uat-evidence.zip" : "业务口径及技术溯源表.xlsx";
+  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : plainName || fallback };
 }
 
 export async function apiPostDownload(path: string, body: unknown = {}): Promise<{ blob: Blob; fileName: string }> {

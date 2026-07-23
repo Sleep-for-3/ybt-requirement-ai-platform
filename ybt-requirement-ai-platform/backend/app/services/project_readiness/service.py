@@ -22,6 +22,7 @@ from app.models import (
     TargetField,
     UatFinding,
     UatRun,
+    UatSignoff,
     WorkflowInstance,
 )
 from app.services.deployment import database_revisions
@@ -126,6 +127,20 @@ def _count(db: Session, model: type, project_id: int, *conditions: Any) -> int:
 
 def _project_counts(db: Session, project_id: int) -> dict[str, Any]:
     current_revision, head_revision = _database_revisions(db)
+    latest_signoffs = select(
+        UatSignoff.uat_run_id,
+        UatSignoff.signoff_role,
+        func.max(UatSignoff.id).label("latest_id"),
+    ).where(
+        UatSignoff.project_id == project_id,
+        UatSignoff.signoff_role.in_(("business_owner", "technical_owner", "project_manager", "final_acceptance")),
+    ).group_by(UatSignoff.uat_run_id, UatSignoff.signoff_role).subquery()
+    signed_runs = select(UatSignoff.uat_run_id).join(
+        latest_signoffs,
+        UatSignoff.id == latest_signoffs.c.latest_id,
+    ).where(UatSignoff.signoff_status == "approved").group_by(
+        UatSignoff.uat_run_id,
+    ).having(func.count(func.distinct(UatSignoff.signoff_role)) >= 4)
     return {
         "target_fields": _count(db, TargetField, project_id),
         "scenarios": _count(db, ProductScenario, project_id, ProductScenario.enabled.is_(True)),
@@ -133,9 +148,25 @@ def _project_counts(db: Session, project_id: int) -> dict[str, Any]:
         "datasources": _count(db, DataSource, project_id, DataSource.enabled.is_(True)),
         "profiles": _count(db, ColumnProfileSnapshot, project_id),
         "business_mappings": _count(db, ScenarioBusinessMapping, project_id),
-        "business_confirmed": _count(db, ScenarioBusinessMapping, project_id, ScenarioBusinessMapping.business_confirm_status.in_(("confirmed", "approved"))),
+        "business_confirmed": int(db.scalar(
+            select(func.count()).select_from(ScenarioBusinessMapping)
+            .join(ProductScenario, ProductScenario.id == ScenarioBusinessMapping.scenario_id)
+            .where(
+                ScenarioBusinessMapping.project_id == project_id,
+                ScenarioBusinessMapping.business_confirm_status.in_(("confirmed", "approved")),
+                ProductScenario.enabled.is_(True),
+            )
+        ) or 0),
         "technical_lineages": _count(db, ScenarioTechnicalLineage, project_id),
-        "technical_confirmed": _count(db, ScenarioTechnicalLineage, project_id, ScenarioTechnicalLineage.tech_confirm_status.in_(("confirmed", "approved"))),
+        "technical_confirmed": int(db.scalar(
+            select(func.count()).select_from(ScenarioTechnicalLineage)
+            .join(ProductScenario, ProductScenario.id == ScenarioTechnicalLineage.scenario_id)
+            .where(
+                ScenarioTechnicalLineage.project_id == project_id,
+                ScenarioTechnicalLineage.tech_confirm_status.in_(("confirmed", "approved")),
+                ProductScenario.enabled.is_(True),
+            )
+        ) or 0),
         "source_mart": _count(db, SourceToMartMapping, project_id),
         "mart_ybt": _count(db, MartToYbtMapping, project_id),
         "governance_completed": _count(db, WorkflowInstance, project_id, WorkflowInstance.status.in_(("approved", "completed"))),
@@ -146,6 +177,7 @@ def _project_counts(db: Session, project_id: int) -> dict[str, Any]:
         "failed_packages": _count(db, DeliverablePackage, project_id, DeliverablePackage.status.in_(("validation_failed", "failed", "rejected"))),
         "high_questions": _count(db, PendingQuestion, project_id, PendingQuestion.priority.in_(("critical", "high")), PendingQuestion.question_status.notin_(("answered", "closed", "resolved"))),
         "passed_uat_runs": _count(db, UatRun, project_id, UatRun.status == "passed"),
+        "fully_signed_uat_runs": _count(db, UatRun, project_id, UatRun.status == "passed", UatRun.id.in_(signed_runs)),
         "active_critical_findings": _count(db, UatFinding, project_id, UatFinding.severity == "critical", UatFinding.status.notin_(("verified", "closed"))),
         "database_revision_current": current_revision,
         "database_revision_head": head_revision,
@@ -162,7 +194,7 @@ def _blocker(code: str, message: str, dimension: str, *, critical: bool = False)
 
 def _dimension_specs(project_id: int, c: dict[str, Any]) -> dict[str, DimensionSpec]:
     base = f"/projects/{project_id}"
-    target_required = max(c["target_fields"], 1)
+    target_required = max(c["target_fields"] * max(c["scenarios"], 1), 1)
     return {
         "project_configuration": DimensionSpec(1, 1, (), (), (base,), 2),
         "target_field_definition": DimensionSpec(c["target_fields"], 1, () if c["target_fields"] else (_blocker("target_fields_missing", "尚未定义目标字段。", "target_field_definition", critical=True),), ("导入或创建监管目标字段。",), (f"{base}/target-fields",), 4),
@@ -170,8 +202,8 @@ def _dimension_specs(project_id: int, c: dict[str, Any]) -> dict[str, DimensionS
         "knowledge_base": DimensionSpec(c["knowledge"], 1, (), ("上传监管口径、业务制度或历史参考资料。",), (f"{base}/knowledge",)),
         "datasource_and_catalog": DimensionSpec(c["datasources"], 1, (), ("配置只读数据源并同步数据目录。",), (f"{base}/datasources",), 2),
         "source_profiling": DimensionSpec(c["profiles"], 1, (), ("对候选源字段执行脱敏剖析。",), (f"{base}/profiling",)),
-        "business_mapping": DimensionSpec(c["business_confirmed"], target_required, () if not c["target_fields"] or c["business_confirmed"] >= c["target_fields"] else (_blocker("business_mapping_unconfirmed", "仍有目标字段未完成业务映射确认。", "business_mapping", critical=True),), ("完成每个目标字段的业务口径确认。",), (f"{base}/scenario-mapping",), 4),
-        "technical_lineage": DimensionSpec(c["technical_confirmed"], target_required, () if not c["target_fields"] or c["technical_confirmed"] >= c["target_fields"] else (_blocker("technical_lineage_unconfirmed", "仍有目标字段未完成技术血缘确认。", "technical_lineage", critical=True),), ("完成源系统、表、字段及加工逻辑确认。",), (f"{base}/scenario-mapping",), 4),
+        "business_mapping": DimensionSpec(c["business_confirmed"], target_required, () if not c["target_fields"] or c["business_confirmed"] >= target_required else (_blocker("business_mapping_unconfirmed", "仍有字段场景组合未完成业务映射确认。", "business_mapping", critical=True),), ("完成每个字段场景组合的业务口径确认。",), (f"{base}/scenario-mapping",), 4),
+        "technical_lineage": DimensionSpec(c["technical_confirmed"], target_required, () if not c["target_fields"] or c["technical_confirmed"] >= target_required else (_blocker("technical_lineage_unconfirmed", "仍有字段场景组合未完成技术血缘确认。", "technical_lineage", critical=True),), ("完成每个字段场景组合的源系统、表、字段及加工逻辑确认。",), (f"{base}/scenario-mapping",), 4),
         "double_layer_mapping": DimensionSpec(min(c["source_mart"], c["mart_ybt"]), 1, (), ("补齐源到集市、集市到监管目标的双层映射。",), (f"{base}/double-layer-lineage",), 2),
         "governance_review": DimensionSpec(c["governance_completed"], 1, (), ("提交关键内容并完成治理审批。",), (f"{base}/governance",), 2),
         "sql_lineage": DimensionSpec(c["lineage_edges"], 1, (), ("上传 SQL 并生成可追溯血缘。",), (f"{base}/lineage",), 2),
@@ -179,8 +211,16 @@ def _dimension_specs(project_id: int, c: dict[str, Any]) -> dict[str, DimensionS
         "deliverable_template": DimensionSpec(c["template_versions"], 1, () if c["template_versions"] else (_blocker("formal_template_missing", "尚未配置正式交付模板版本。", "deliverable_template", critical=True),), ("上传、映射并激活正式交付模板。",), (f"{base}/deliverables/templates",), 4),
         "deliverable_package": DimensionSpec(c["valid_packages"], 1, () if not c["failed_packages"] else (_blocker("deliverable_validation_failed", "存在正式交付校验失败记录。", "deliverable_package", critical=True),), ("修复校验错误并重新生成交付包。",), (f"{base}/deliverables",), 3),
         "open_questions": DimensionSpec(0 if c["high_questions"] else 1, 1, () if not c["high_questions"] else (_blocker("high_priority_questions_open", "存在未关闭的高优先级待确认问题。", "open_questions", critical=True),), ("回答并关闭高优先级问题。",), (f"{base}/deliverables/questions",), 3),
-        "uat_status": DimensionSpec(c["passed_uat_runs"], 1, () if not c["active_critical_findings"] else (_blocker("critical_uat_findings_open", "存在未验证关闭的严重 UAT 发现。", "uat_status", critical=True),), ("执行 UAT、关闭严重发现并完成签署。",), (f"{base}/uat",), 4),
-        "deployment_readiness": DimensionSpec(1 if c["passed_uat_runs"] and c["valid_packages"] and c["database_revision_current"] == c["database_revision_head"] else 0, 1, () if c["database_revision_current"] == c["database_revision_head"] else (_blocker("database_revision_not_head", "数据库迁移版本不是当前 head。", "deployment_readiness", critical=True),), ("升级数据库到当前 Alembic head，并通过 UAT 与交付校验。",), (f"{base}/readiness",), 3),
+        "uat_status": DimensionSpec(
+            c["fully_signed_uat_runs"],
+            1,
+            (() if not c["active_critical_findings"] else (_blocker("critical_uat_findings_open", "存在未验证关闭的严重 UAT 发现。", "uat_status", critical=True),))
+            + (() if not c["passed_uat_runs"] or c["fully_signed_uat_runs"] else (_blocker("uat_signoff_incomplete", "通过的 UAT 轮次尚未完成四方签署。", "uat_status", critical=True),)),
+            ("执行 UAT、关闭严重发现并完成签署。",),
+            ("/uat",),
+            4,
+        ),
+        "deployment_readiness": DimensionSpec(1 if c["fully_signed_uat_runs"] and c["valid_packages"] and c["database_revision_current"] == c["database_revision_head"] else 0, 1, () if c["database_revision_current"] == c["database_revision_head"] else (_blocker("database_revision_not_head", "数据库迁移版本不是当前 head。", "deployment_readiness", critical=True),), ("升级数据库到当前 Alembic head，并通过 UAT 与交付校验。",), (f"{base}/readiness",), 3),
     }
 
 

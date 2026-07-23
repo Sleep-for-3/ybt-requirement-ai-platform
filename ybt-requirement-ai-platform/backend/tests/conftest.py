@@ -5,6 +5,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import Base
+from app.core.observability import _lock, _rate_windows
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_state() -> Iterator[None]:
+    """Keep each test independent from process-global request throttling state."""
+    with _lock:
+        _rate_windows.clear()
+    yield
+    with _lock:
+        _rate_windows.clear()
 
 
 @pytest.fixture()

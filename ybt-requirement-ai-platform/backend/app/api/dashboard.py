@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import (
-    BackgroundJob, CatalogColumn, KnowledgeDocument, MappingEvidenceReference, ProductScenario, Project,
-    ReviewTask, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField, TargetTable, WorkflowInstance,
+    BackgroundJob, CatalogColumn, DeliverablePackageVersion, ImpactAnalysis, KnowledgeDocument, MappingEvidenceReference,
+    ProductScenario, Project, ReviewTask, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField, TargetTable,
+    UatRun, WorkflowInstance,
 )
 from app.services.auth.dependencies import RealPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.services.project_readiness import build_project_readiness
 
 
 router = APIRouter(tags=["project dashboard"])
@@ -54,8 +56,22 @@ def project_dashboard(project_id: int, principal: RealPrincipal, target_table_id
         "catalog_column_count": _count(db, CatalogColumn, CatalogColumn.project_id == project_id, CatalogColumn.enabled.is_(True)),
     }
     failed = db.scalars(select(BackgroundJob).where(BackgroundJob.project_id == project_id, BackgroundJob.status.in_(["failed", "partially_completed"])).order_by(BackgroundJob.id.desc()).limit(10)).all()
+    latest_version = db.scalar(select(DeliverablePackageVersion).where(DeliverablePackageVersion.project_id == project_id).order_by(DeliverablePackageVersion.id.desc()).limit(1))
+    latest_uat = db.scalar(select(UatRun).where(UatRun.project_id == project_id).order_by(UatRun.id.desc()).limit(1))
+    unreviewed_impacts = _count(db, ImpactAnalysis, ImpactAnalysis.project_id == project_id, ImpactAnalysis.status.notin_(("reviewed", "approved", "closed")))
+    readiness = build_project_readiness(db, project_id)
+    next_dimension = next((item for item in readiness["dimensions"].values() if item["status"] != "ready"), None)
     if evidence_completeness == "complete": counts["without_evidence_count"] = 0
-    return {**counts, "filters": {"target_table_id": target_table_id, "scenario_id": scenario_id, "assignee_user_id": assignee_user_id, "review_status": review_status, "evidence_completeness": evidence_completeness, "confidence_level": confidence_level}, "recent_failed_jobs": [{"id": job.id, "job_type": job.job_type, "status": job.status, "error_message": job.error_message, "finished_at": job.finished_at} for job in failed]}
+    return {
+        **counts,
+        "readiness": {"status": readiness["overall_status"], "score": readiness["score"], "critical_blocker_count": len(readiness["critical_blockers"])},
+        "recent_failed_jobs": [{"id": job.id, "job_type": job.job_type, "status": job.status, "error_message": job.error_message, "finished_at": job.finished_at} for job in failed],
+        "latest_formal_version": None if latest_version is None else {"id": latest_version.id, "package_id": latest_version.deliverable_package_id, "version_no": latest_version.version_no, "approved_at": latest_version.approved_at},
+        "unreviewed_impact_count": unreviewed_impacts,
+        "latest_uat": None if latest_uat is None else {"id": latest_uat.id, "run_name": latest_uat.run_name, "status": latest_uat.status, "completed_at": latest_uat.completed_at},
+        "next_action": None if next_dimension is None else {"text": next_dimension["recommended_actions"][0] if next_dimension["recommended_actions"] else "查看项目准备度", "href": next_dimension["links"][0] if next_dimension["links"] else f"/projects/{project_id}/readiness"},
+        "filters": {"target_table_id": target_table_id, "scenario_id": scenario_id, "assignee_user_id": assignee_user_id, "review_status": review_status, "evidence_completeness": evidence_completeness, "confidence_level": confidence_level},
+    }
 
 
 def _count(db, model, *conditions): return db.scalar(select(func.count(model.id)).where(*conditions)) or 0

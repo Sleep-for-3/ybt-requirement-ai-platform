@@ -557,6 +557,11 @@ def test_health_metrics_dashboard_and_audit_are_available(monkeypatch) -> None:
         assert "ybt_http_requests_total" in metrics.text
         assert dashboard.status_code == 200, dashboard.text
         assert dashboard.json()["field_count"] == 0
+        assert dashboard.json()["readiness"]["status"] == "blocked"
+        assert dashboard.json()["latest_formal_version"] is None
+        assert dashboard.json()["latest_uat"] is None
+        assert dashboard.json()["next_action"]["text"]
+        assert "unreviewed_impact_count" in dashboard.json()
         assert audit.status_code == 200
         assert any(item["correlation_id"] == "bootstrap-login-request" for item in login_audit.json())
 
