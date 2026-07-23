@@ -33,6 +33,12 @@ export type ReadinessDimension = { status:"ready"|"partial"|"blocked"|"not_start
 export type ProjectReadiness = { project_id:number;overall_status:"ready"|"partial"|"blocked"|"not_started";score:number;scoring_method:string;critical_blockers:ReadinessBlocker[];dimensions:Record<string,ReadinessDimension> };
 export type OnboardingStep = { step:number;key:string;title:string;status:"completed"|"in_progress"|"blocked"|"not_started";blocking_reasons:ReadinessBlocker[];next_action?:string|null;links:string[];skippable:boolean };
 export type ProjectOnboarding = { project_id:number;overall_status:string;steps:OnboardingStep[] };
+export type UatCase = { id:number;project_id:number;uat_suite_id:number;case_code:string;case_name:string;description?:string|null;case_category:string;precondition_json:Record<string,unknown>;input_requirement_json:Record<string,unknown>;expected_result_json:Record<string,unknown>;execution_mode:"automatic"|"manual"|"hybrid";severity:string;enabled:boolean;display_order:number };
+export type UatSuite = { id:number;institution_id?:number|null;project_id:number;suite_name:string;suite_type:string;description?:string|null;enabled:boolean;is_system:boolean;cases:UatCase[] };
+export type UatCaseResult = { id:number;project_id:number;uat_run_id:number;uat_case_id:number;status:string;actual_result_json:Record<string,unknown>;expected_result_json:Record<string,unknown>;evidence_json:Record<string,unknown>;error_message?:string|null;duration_ms?:number|null;executed_at?:string|null;case:UatCase };
+export type UatRun = { id:number;institution_id?:number|null;project_id:number;uat_suite_id:number;run_name:string;run_no:number;status:string;environment_name:string;application_version?:string|null;git_commit_sha?:string|null;started_at?:string|null;completed_at?:string|null;summary_json:Record<string,number>;background_job_id?:number|null;results:UatCaseResult[] };
+export type UatFinding = { id:number;project_id:number;uat_run_id:number;uat_case_result_id?:number|null;finding_no:number;finding_type:string;severity:string;title:string;description:string;reproduction_steps?:string|null;expected_behavior?:string|null;actual_behavior?:string|null;status:string;assigned_role?:string|null;assigned_user_id?:number|null;resolution_text?:string|null;resolved_at?:string|null;verified_at?:string|null };
+export type UatSignoff = { id:number;project_id:number;uat_run_id:number;signoff_role:string;signoff_status:string;comment?:string|null;signed_by?:number|null;signed_at:string };
 
 export type TargetTable = {
   id: number;

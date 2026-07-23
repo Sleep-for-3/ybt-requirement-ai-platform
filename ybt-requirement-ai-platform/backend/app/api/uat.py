@@ -220,6 +220,12 @@ def update_uat_finding(finding_id: int, payload: UatFindingUpdate, principal: Cu
     return _row(finding)
 
 
+@router.get("/uat-findings/{finding_id}")
+def get_uat_finding(finding_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    finding = PermissionService(db, principal).load_project_resource_or_404(UatFinding, finding_id, "uat.view")
+    return _row(finding)
+
+
 @router.post("/uat-findings/{finding_id}/resolve")
 def resolve_uat_finding(finding_id: int, payload: UatFindingResolve, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     finding = PermissionService(db, principal).load_project_resource_or_404(UatFinding, finding_id, "uat.finding.manage")

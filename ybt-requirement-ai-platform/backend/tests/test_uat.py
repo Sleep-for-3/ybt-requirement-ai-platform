@@ -104,6 +104,7 @@ def test_critical_finding_blocks_signoff_until_resolution_and_verification() -> 
             "description": "使用完全虚构条件验证签署阻断。",
             "expected_behavior": "满足验收要求", "actual_behavior": "模拟条件未满足",
         })
+        assert client.get(f"/api/uat-findings/{finding['id']}").json()["title"] == "受控阻断问题"
         blocked = client.post(f"/api/uat-runs/{run['id']}/signoff", json={
             "signoff_role": "business_owner", "signoff_status": "approved", "comment": "不应通过",
         })
