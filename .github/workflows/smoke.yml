@@ -66,6 +66,7 @@ jobs:
         env:
           ENVIRONMENT: test
           AUTH_MODE: optional
+          LLM_PROVIDER: mock
         run: python -m pytest -q
 
       - name: Verify migrations from an empty database
