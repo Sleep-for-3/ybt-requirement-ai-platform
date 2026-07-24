@@ -96,11 +96,10 @@ jobs:
           python ybt-requirement-ai-platform/scripts/fake_openai_provider.py \
             > "$SMOKE_ARTIFACT_DIR/fake-provider.log" 2>&1 &
           fake_pid=$!
-          (
-            cd ybt-requirement-ai-platform/backend
-            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
-              > "$SMOKE_ARTIFACT_DIR/backend.log" 2>&1
-          ) &
+          python -m uvicorn app.main:app \
+            --app-dir ybt-requirement-ai-platform/backend \
+            --host 127.0.0.1 --port 8000 \
+            > "$SMOKE_ARTIFACT_DIR/backend.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" "$fake_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
@@ -130,11 +129,10 @@ jobs:
             cd ybt-requirement-ai-platform/backend
             LLM_PROVIDER=mock python -m alembic upgrade head
           )
-          (
-            cd ybt-requirement-ai-platform/backend
-            LLM_PROVIDER=mock python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
-              > "$SMOKE_ARTIFACT_DIR/backend-mock.log" 2>&1
-          ) &
+          LLM_PROVIDER=mock python -m uvicorn app.main:app \
+            --app-dir ybt-requirement-ai-platform/backend \
+            --host 127.0.0.1 --port 8000 \
+            > "$SMOKE_ARTIFACT_DIR/backend-mock.log" 2>&1 &
           server_pid=$!
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:8000/api/health/live >/dev/null; then
