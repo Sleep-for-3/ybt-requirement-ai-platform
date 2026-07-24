@@ -2,9 +2,8 @@ from fastapi import APIRouter,Depends,File,Form,HTTPException,UploadFile
 from pydantic import BaseModel,Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from urllib.parse import parse_qs,urlsplit
 from app.core.database import get_db
-from app.models import (AIUserFeedback,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelProfile,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
+from app.models import (AIUserFeedback,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,Project,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.rag import grounded_answer
@@ -24,7 +23,6 @@ class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_
 class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None
 class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";query_text:str;target_field_id:int|None=None;scenario_id:int|None=None;expected_knowledge_unit_ids_json:list[int]=Field(default_factory=list);expected_source_system:str|None=None;expected_table_name:str|None=None;expected_field_name:str|None=None;expected_answer_keywords_json:list[str]=Field(default_factory=list);enabled:bool=True
 class EvaluationRunCreate(BaseModel):run_name:str;model_profile_id:int|None=None;retrieval_config_json:dict=Field(default_factory=dict)
-class ModelProfileCreate(BaseModel):profile_name:str;provider_type:str="mock";base_url:str|None=None;model_name:str|None=None;embedding_model_name:str|None=None;enabled:bool=True;local_only:bool=False;supports_structured_output:bool=True;max_context_tokens:int=8192;temperature:float=.2;config_json:dict=Field(default_factory=dict)
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
 async def upload(project_id:int,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
@@ -98,12 +96,6 @@ def evaluation_results(run_id:int,db:Session=Depends(get_db)):return [_row(item)
 @router.post("/projects/{project_id}/feedback")
 def feedback(project_id:int,payload:BindFeedback,db:Session=Depends(get_db)):
     item=AIUserFeedback(project_id=project_id,**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
-@router.post("/model-profiles")
-def model_profile(payload:ModelProfileCreate,db:Session=Depends(get_db)):
-    if _contains_credentials(payload.config_json) or _url_contains_credentials(payload.base_url):raise HTTPException(400,"Model profile config must not contain credentials")
-    item=ModelProfile(**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
-@router.get("/model-profiles")
-def model_profiles(db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(ModelProfile).order_by(ModelProfile.id)).all()]
 @router.get("/prompt-versions")
 def prompt_versions(db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(PromptTemplateVersion).order_by(PromptTemplateVersion.prompt_key,PromptTemplateVersion.version_no.desc())).all()]
 
@@ -121,15 +113,3 @@ def _scope_visible(db,scope,owner_project_id,institution_name,request_project_id
     project=db.get(Project,request_project_id)
     if project is None:return False
     return scope=="global" or (scope=="project" and owner_project_id==request_project_id) or (scope=="institution" and bool(institution_name) and institution_name==project.bank_name)
-
-def _contains_credentials(value):
-    fragments=("key","token","password","secret","credential","authorization")
-    if isinstance(value,dict):
-        return any((not str(key).lower().endswith("_env_name") and any(fragment in str(key).lower() for fragment in fragments)) or _contains_credentials(item) for key,item in value.items())
-    if isinstance(value,list):return any(_contains_credentials(item) for item in value)
-    return False
-
-def _url_contains_credentials(value):
-    if not value:return False
-    parsed=urlsplit(value)
-    return bool(parsed.username or parsed.password or _contains_credentials(parse_qs(parsed.query)))

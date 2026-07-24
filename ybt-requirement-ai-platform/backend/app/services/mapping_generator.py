@@ -15,7 +15,12 @@ from app.models import (
     TemplateParseResult,
 )
 from app.schemas import GenerateMappingRequest, GenerateMappingResponse
-from app.services.llm import get_llm_service
+from app.services.llm.prompt_runtime import (
+    execute_runtime_chat,
+    get_prompt_runtime,
+    prepare_model_input,
+)
+from app.services.llm.structured_outputs import LegacyFieldDraftOutput
 from app.services.retrieval import search_knowledge
 
 
@@ -62,7 +67,22 @@ async def generate_mapping_draft(
         template_results = _search_template_results(db, field) if options.include_template else []
         nl_tasks = _search_nl_task_results(db, field) if options.include_nl_task_results else []
         user_prompt = _build_user_prompt(field, retrieval_results, sql_results, template_results, nl_tasks)
-        llm_output = await get_llm_service().chat_json(SYSTEM_PROMPT, user_prompt)
+        runtime = get_prompt_runtime(db, "legacy_field_mapping")
+        runtime.system_prompt = SYSTEM_PROMPT
+        model_input = prepare_model_input(
+            runtime,
+            user_prompt,
+            ["internal"],
+            db=db,
+            project_id=field.project_id,
+        )
+        llm_output = await execute_runtime_chat(
+            db,
+            field.project_id,
+            runtime,
+            model_input,
+            LegacyFieldDraftOutput,
+        )
 
         draft = FieldMappingDraft(
             task_id=task.id,

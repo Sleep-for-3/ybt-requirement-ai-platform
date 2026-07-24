@@ -26,6 +26,16 @@ jobs:
           cache: pip
           cache-dependency-path: ybt-requirement-ai-platform/backend/requirements.txt
       - run: python -m pip install -r requirements.txt
+      - name: Validate Docker Compose private environment wiring
+        shell: bash
+        run: |
+          touch .env
+          trap 'rm -f .env' EXIT
+          cd ..
+          POSTGRES_USER=test POSTGRES_PASSWORD=test POSTGRES_DB=test \
+          MILVUS_MINIO_ROOT_USER=test MILVUS_MINIO_ROOT_PASSWORD=test \
+            docker compose config > /tmp/docker-compose-config.yml
+          ! grep -q '\.env\.example' /tmp/docker-compose-config.yml
       - name: Verify Alembic upgrade and downgrade
         run: |
           rm -f ci_test.db
@@ -40,6 +50,16 @@ jobs:
         shell: bash
         run: |
           set +e
+          python -m pytest -q tests/test_llm_runtime.py
+          llm_status=$?
+          if [ "$llm_status" -ne 0 ]; then
+            exit "$llm_status"
+          fi
+          python -m pytest -q tests/test_model_profiles.py
+          profile_status=$?
+          if [ "$profile_status" -ne 0 ]; then
+            exit "$profile_status"
+          fi
           python -m pytest -q tests/test_deliverables.py
           deliverable_status=$?
           if [ "$deliverable_status" -ne 0 ]; then

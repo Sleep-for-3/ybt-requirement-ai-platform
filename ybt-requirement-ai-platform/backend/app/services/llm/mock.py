@@ -1,10 +1,20 @@
 import hashlib
+from typing import Any
 
-from app.services.llm.base import LLMService
+from app.services.llm.base import LLMService, ModelCallMetadata, StructuredResponse
 
 
 class MockLLMService(LLMService):
+    def __init__(self) -> None:
+        self.last_call = ModelCallMetadata(
+            provider="mock",
+            model="mock-llm",
+            token_usage={"usage_available": False},
+        )
+
     async def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        if "connection test" in system_prompt.lower():
+            return {"status": "ok", "message": "连接成功"}
         if "场景业务口径" in system_prompt:
             return {
                 "business_definition": "按当前产品场景确认一表通字段的实际业务含义和适用范围。",
@@ -89,6 +99,14 @@ class MockLLMService(LLMService):
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [_hash_embedding(text) for text in texts]
+
+    async def chat_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: type[StructuredResponse],
+    ) -> StructuredResponse:
+        return response_schema.model_validate(await self.chat_json(system_prompt, user_prompt))
 
 
 def _hash_embedding(text: str, dimensions: int = 64) -> list[float]:

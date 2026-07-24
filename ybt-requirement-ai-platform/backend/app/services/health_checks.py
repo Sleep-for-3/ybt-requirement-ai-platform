@@ -6,12 +6,12 @@ import uuid
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
 from app.services.deployment import database_revisions
+from app.services.llm.providers import normalize_provider_type, provider_requires_api_key, validate_provider_url
 from app.services.storage import get_storage_service
 
 
@@ -125,33 +125,45 @@ def _check_vector_store(settings: Settings) -> CheckResult:
     return _result("healthy", "Vector store endpoint is reachable.")
 
 
-def _provider_probe(base_url: str, api_key: str, timeout: float) -> CheckResult:
-    if not base_url.strip() or not api_key.strip():
-        return _result("unhealthy", "Provider configuration is incomplete.")
-    response = httpx.get(
-        f"{base_url.rstrip('/')}/models",
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=timeout,
-        follow_redirects=False,
-    )
-    if response.status_code == 200:
-        return _result("healthy", "Provider endpoint responded successfully.")
-    if response.status_code in {401, 403}:
-        return _result("unhealthy", "Provider rejected configured credentials.")
-    return _result("degraded", "Provider endpoint is reachable but returned a non-success response.")
+def _provider_configuration(
+    provider: str,
+    base_url: str,
+    model: str,
+    api_key: str,
+) -> CheckResult:
+    try:
+        normalized = normalize_provider_type(provider)
+    except RuntimeError:
+        return _result("unhealthy", "Provider type is not supported.")
+    if normalized == "mock":
+        return _result("mock", "Mock provider is configured; no external request is made.", provider="mock")
+    try:
+        validate_provider_url(base_url, local_only=normalized.startswith("local_"))
+    except ValueError:
+        return _result("unhealthy", "Provider Base URL is invalid.", provider=normalized)
+    if not base_url.strip() or not model.strip():
+        return _result("unhealthy", "Provider configuration is incomplete.", provider=normalized)
+    if provider_requires_api_key(normalized) and not api_key.strip():
+        return _result("unhealthy", "Provider API-key environment variable is not set.", provider=normalized)
+    return _result("healthy", "Provider configuration is complete; connectivity is tested only on demand.", provider=normalized)
 
 
 def _check_llm_provider(settings: Settings) -> CheckResult:
-    if settings.llm_provider == "mock":
-        return _result("disabled", "External LLM provider is disabled.")
-    return _provider_probe(settings.llm_base_url, settings.llm_api_key, settings.health_check_timeout_seconds)
+    return _provider_configuration(
+        settings.llm_provider,
+        settings.llm_base_url,
+        settings.llm_model,
+        settings.resolved_llm_api_key,
+    )
 
 
 def _check_embedding_provider(settings: Settings) -> CheckResult:
-    if settings.embedding_provider == "mock":
-        return _result("disabled", "External embedding provider is disabled.")
-    api_key = os.getenv(settings.embedding_api_key_env_name, "")
-    return _provider_probe(settings.embedding_base_url, api_key, settings.health_check_timeout_seconds)
+    return _provider_configuration(
+        settings.embedding_provider,
+        settings.embedding_base_url,
+        settings.embedding_model,
+        settings.resolved_embedding_api_key,
+    )
 
 
 def _check_disk_space(settings: Settings) -> CheckResult:

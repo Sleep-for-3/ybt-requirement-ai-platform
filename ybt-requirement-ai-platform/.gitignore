@@ -17,6 +17,7 @@ npm-debug.log*
 # Env and storage
 .env
 .env.local
+/backend/.env
 /storage/
 /backend/storage/
 /uat_local_packs/

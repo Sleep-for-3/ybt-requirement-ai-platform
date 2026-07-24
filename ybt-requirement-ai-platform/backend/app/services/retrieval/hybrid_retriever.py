@@ -2,6 +2,7 @@ import time
 from sqlalchemy import and_,func,or_,select
 from app.models import KnowledgeKeywordIndex,KnowledgeUnit,Project,RetrievalLog,TargetField
 from app.services.embeddings import get_embedding_service
+from app.services.embeddings.observability import embed_with_observability
 from app.services.vector import get_vector_store
 from .keyword_index import tokenize
 
@@ -20,7 +21,7 @@ class HybridRetriever:
             candidate_ids=[row[0] for row in self.db.execute(ranked).all()]
         candidates=list(self.db.scalars(select(KnowledgeUnit).where(KnowledgeUnit.id.in_(candidate_ids))).all()) if candidate_ids else []
         keyword={unit.id:_keyword_score(unit,tokens,target,scenario_id) for unit in candidates};keyword={key:value for key,value in keyword.items() if value>0}
-        query_vector=get_embedding_service().embed_query(query);store=get_vector_store();scope_filters=[{"knowledge_scope":"project","project_id":project_id},{"knowledge_scope":"global"}]
+        embedding=get_embedding_service();query_vector=embed_with_observability(self.db,project_id,embedding,[query],["internal"])[0];store=get_vector_store();scope_filters=[{"knowledge_scope":"project","project_id":project_id},{"knowledge_scope":"global"}]
         if project and project.bank_name:scope_filters.append({"knowledge_scope":"institution","institution_name":project.bank_name})
         vector_results=[]
         for filters in scope_filters:

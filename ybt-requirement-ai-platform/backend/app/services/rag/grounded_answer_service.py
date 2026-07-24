@@ -1,20 +1,18 @@
 import re
-import time
 
 from app.models import Project
 from app.services.llm.prompt_runtime import (
     get_prompt_runtime,
-    get_runtime_llm_service,
+    execute_runtime_chat,
     prepare_model_input,
-    record_model_call,
 )
+from app.services.llm.structured_outputs import RegulatoryFieldExplanationOutput
 from app.services.retrieval import HybridRetriever
 
 from .citation_validator import validate_citations
 
 
 async def grounded_answer(db, project_id, query, **filters):
-    started = time.perf_counter()
     retrieval_log, items = HybridRetriever(db).search(
         project_id,
         query,
@@ -54,8 +52,18 @@ async def grounded_answer(db, project_id, query, **filters):
         runtime,
         prompt,
         [item["confidentiality_level"] for item in items],
+        db=db,
+        project_id=project_id,
     )
-    output = await get_runtime_llm_service(runtime).chat_json(runtime.system_prompt, model_input)
+    output = await execute_runtime_chat(
+        db,
+        project_id,
+        runtime,
+        model_input,
+        RegulatoryFieldExplanationOutput,
+        confidentiality=_highest_confidentiality(items),
+        retrieval_log_id=retrieval_log.id,
+    )
     answer = str(output.get("answer") or "").strip()
     supported_claims = _string_list(output.get("supported_claims"))
     unsupported_claims = _string_list(output.get("unsupported_claims"))
@@ -74,16 +82,6 @@ async def grounded_answer(db, project_id, query, **filters):
         citations,
         project_id=project_id,
         institution_name=project.bank_name if project else None,
-    )
-    record_model_call(
-        db,
-        project_id,
-        runtime,
-        model_input,
-        output,
-        started=started,
-        confidentiality=_highest_confidentiality(items),
-        retrieval_log_id=retrieval_log.id,
     )
     db.commit()
     return {

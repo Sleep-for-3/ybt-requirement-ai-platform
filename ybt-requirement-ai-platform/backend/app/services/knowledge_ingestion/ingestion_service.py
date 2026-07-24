@@ -5,7 +5,10 @@ from sqlalchemy import select
 from app.core.settings import get_settings
 from app.models import (BusinessSystem,CatalogColumn,CatalogTable,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeEntityLink,KnowledgeIngestionTask,KnowledgeUnit,MartField,MartTable,ProductScenario,SourceField,SourceTable,TargetField,TargetTable)
 from app.services.embeddings import get_embedding_service
-from app.services.security import ensure_external_allowed,redact_content
+from app.services.embeddings.observability import (
+    embed_with_observability,
+    ensure_embedding_external_allowed,
+)
 from app.services.vector import get_vector_store
 from app.services.vector.knowledge_record import build_knowledge_vector_record
 from app.services.retrieval.keyword_index import index_knowledge_unit
@@ -14,7 +17,7 @@ from .normalizer import normalize_content
 from .parsers import parse_document
 
 async def ingest_knowledge_document(db,project_id,upload,knowledge_type,knowledge_scope="project",institution_name=None,confidentiality_level="internal",created_by=None,change_note=None):
-    content=await upload.read();file_name=upload.filename or "knowledge.txt";digest=hashlib.sha256(content).hexdigest()
+    content=await upload.read();embedding=get_embedding_service();ensure_embedding_external_allowed(db,project_id,embedding,[confidentiality_level],persist_denial=True);file_name=upload.filename or "knowledge.txt";digest=hashlib.sha256(content).hexdigest()
     document=db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.project_id==project_id,KnowledgeDocument.file_name==file_name,KnowledgeDocument.knowledge_type==knowledge_type,KnowledgeDocument.knowledge_scope==knowledge_scope,KnowledgeDocument.institution_name==institution_name,KnowledgeDocument.document_status!="archived"))
     if document and document.file_hash==digest:return document
     storage_key=get_storage_service().save(content,file_name=file_name,project_id=project_id).storage_key
@@ -32,7 +35,7 @@ async def ingest_knowledge_document(db,project_id,upload,knowledge_type,knowledg
         duplicate=db.scalar(select(KnowledgeUnit.id).where(KnowledgeUnit.project_id==project_id,KnowledgeUnit.content_hash==unit_hash,KnowledgeUnit.enabled.is_(True)))
         if duplicate:continue
         business_system_id=_resolve_business_system_id(db,project_id,draft.metadata.get("business_system_name"));unit=KnowledgeUnit(project_id=project_id,document_id=document.id,document_version_id=version.id,knowledge_type=knowledge_type,knowledge_scope=knowledge_scope,institution_name=institution_name,unit_type=draft.unit_type,title=draft.title,content=draft.content,normalized_content=normalized,source_file_name=file_name,source_sheet_name=draft.source_sheet_name,source_page_no=draft.source_page_no,source_heading=draft.source_heading,source_cell_range=draft.source_cell_range,target_table_code=draft.target_table_code,target_field_code=draft.target_field_code,target_field_name=draft.target_field_name,scenario_id=scenario_id,business_system_id=business_system_id,source_table_name=draft.source_table_name,source_field_name=draft.source_field_name,mart_table_name=draft.metadata.get("mart_table_name"),mart_field_name=draft.metadata.get("mart_field_name"),tags_json=draft.tags,metadata_json=draft.metadata,confidentiality_level=confidentiality_level,enabled=True,content_hash=unit_hash);db.add(unit);db.flush();units.append(unit);index_knowledge_unit(db,unit);_link_entities(db,unit)
-    embedding=get_embedding_service();ensure_external_allowed(confidentiality_level,getattr(embedding,"local_only",False));texts=[redact_content(unit.content) if not getattr(embedding,"local_only",False) else unit.content for unit in units];vectors=embedding.embed_texts(texts) if texts else []
+    texts=[unit.content for unit in units];vectors=embed_with_observability(db,project_id,embedding,texts,[confidentiality_level]*len(texts))
     records=[]
     for unit,vector in zip(units,vectors,strict=True):
         record=build_knowledge_vector_record(unit,vector);records.append(record);db.add(EmbeddingRecord(project_id=project_id,knowledge_unit_id=unit.id,embedding_provider=get_settings().embedding_provider,embedding_model=get_settings().embedding_model,vector_store_provider=get_settings().vector_store_provider,vector_record_id=record.id,embedding_dimension=len(vector),content_hash=unit.content_hash,status="indexed"))

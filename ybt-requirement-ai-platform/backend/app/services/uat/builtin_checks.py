@@ -376,7 +376,7 @@ def _deployment_outcome(db: Session, check_key: str, check_name: str, project_id
     if not selected:
         return _outcome(False, check_key, {"reason": "unsupported_deployment_check"})
     statuses = {name: checks[name]["status"] for name in selected}
-    return _outcome(all(status in {"healthy", "disabled"} for status in statuses.values()), check_key, {"health_checks": statuses})
+    return _outcome(all(status in {"healthy", "disabled", "mock"} for status in statuses.values()), check_key, {"health_checks": statuses})
 
 
 def _security_control_available(check_name: str) -> bool:
