@@ -10,7 +10,8 @@ from app.models import (
     TargetField,
     TargetTable,
 )
-from app.services.llm.prompt_runtime import get_prompt_runtime,get_runtime_llm_service,prepare_model_input,record_model_call
+from app.services.llm.prompt_runtime import execute_runtime_chat,get_prompt_runtime,prepare_model_input
+from app.services.llm.structured_outputs import MartToYbtOutput
 from app.services.retrieval import HybridRetriever
 
 
@@ -60,7 +61,7 @@ async def generate_mart_to_ybt_draft(db: Session, mapping_id: int) -> MartToYbtM
 证据:
 {_evidence_text(evidence_rows)}
 """
-    runtime=get_prompt_runtime(db,"mart_to_ybt_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,target_field.field_name if target_field else "",mapping.target_field_id,None,None,10);user_prompt+=f"\n混合知识证据:\n"+"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);model_input=prepare_model_input(runtime,user_prompt,[item["confidentiality_level"] for item in knowledge]);output = await get_runtime_llm_service(runtime).chat_json(runtime.system_prompt, model_input);record_model_call(db,mapping.project_id,runtime,model_input,output,retrieval_log_id=retrieval_log.id)
+    runtime=get_prompt_runtime(db,"mart_to_ybt_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,target_field.field_name if target_field else "",mapping.target_field_id,None,None,10);user_prompt+=f"\n混合知识证据:\n"+"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);model_input=prepare_model_input(runtime,user_prompt,[item["confidentiality_level"] for item in knowledge],db=db,project_id=mapping.project_id);output = await execute_runtime_chat(db,mapping.project_id,runtime,model_input,MartToYbtOutput,retrieval_log_id=retrieval_log.id)
     _apply_output(mapping, output)
     db.commit()
     db.refresh(mapping)

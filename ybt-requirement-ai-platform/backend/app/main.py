@@ -4,10 +4,13 @@ import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     admin,
+    ai_runtime,
     auth,
     governance,
     notifications,
@@ -53,6 +56,7 @@ from app.core.database import engine
 from app.core.settings import get_settings
 from app.core.observability import RequestContextMiddleware, build_log_event
 from app.services.auth.resource_guard import guard_project_resource
+from app.services.llm.base import LLMRuntimeError
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
 
@@ -100,6 +104,29 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(LLMRuntimeError)
+async def llm_runtime_error_handler(_, exc: LLMRuntimeError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc), "error_type": exc.error_type},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_, exc: RequestValidationError) -> JSONResponse:
+    safe_errors = [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in exc.errors()
+    ]
+    config_payload_rejected = any("config_json" in error.get("loc", ()) for error in exc.errors())
+    if config_payload_rejected:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Model profile config must not contain credentials or unsupported fields"},
+        )
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
+
+
 @app.get(f"{settings.api_prefix}/health")
 def legacy_health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name}
@@ -111,6 +138,7 @@ app.include_router(projects.router, prefix=settings.api_prefix)
 app.include_router(project_readiness.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(admin.router, prefix=settings.api_prefix)
+app.include_router(ai_runtime.router, prefix=settings.api_prefix)
 app.include_router(governance.router, prefix=settings.api_prefix)
 app.include_router(review_tasks.router, prefix=settings.api_prefix)
 app.include_router(notifications.router, prefix=settings.api_prefix)

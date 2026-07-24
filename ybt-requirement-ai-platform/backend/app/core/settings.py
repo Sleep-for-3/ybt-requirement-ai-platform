@@ -1,6 +1,13 @@
 from functools import lru_cache
+import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.services.llm.providers import (
+    is_local_provider,
+    normalize_provider_type,
+    provider_requires_api_key,
+)
 
 
 class Settings(BaseSettings):
@@ -61,12 +68,20 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
-    llm_model: str = "gpt-4.1-mini"
-    embedding_model: str = "text-embedding-3-small"
+    llm_model: str = ""
+    embedding_model: str = ""
     embedding_provider: str = "mock"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key_env_name: str = "EMBEDDING_API_KEY"
     llm_api_key_env_name: str = "OPENAI_API_KEY"
+
+    @property
+    def resolved_llm_api_key(self) -> str:
+        return os.getenv(self.llm_api_key_env_name, self.llm_api_key)
+
+    @property
+    def resolved_embedding_api_key(self) -> str:
+        return os.getenv(self.embedding_api_key_env_name, "")
 
     vector_store_provider: str = "mock"
     milvus_uri: str = "http://localhost:19530"
@@ -123,10 +138,24 @@ class Settings(BaseSettings):
             add("error", "vector_store_provider_invalid", "VECTOR_STORE_PROVIDER must be mock or milvus.")
         if self.vector_store_provider == "milvus" and not self.milvus_uri.strip():
             add("error", "milvus_uri_missing", "Milvus mode requires MILVUS_URI.")
-        if self.llm_provider != "mock" and not self.llm_api_key.strip():
-            add("error" if production else "warning", "llm_api_key_missing", "The configured cloud LLM provider requires an API key.")
-        if self.embedding_provider != "mock" and not self.embedding_api_key_env_name.strip():
-            add("error" if production else "warning", "embedding_key_reference_missing", "The configured embedding provider requires an API-key environment variable name.")
+        try:
+            llm_provider = normalize_provider_type(self.llm_provider)
+            if llm_provider != "mock" and (not self.llm_base_url.strip() or not self.llm_model.strip()):
+                add("warning", "llm_configuration_incomplete", "The configured LLM provider requires a Base URL and model name.")
+            if provider_requires_api_key(llm_provider) and not self.resolved_llm_api_key:
+                add("warning", "llm_api_key_missing", "The configured cloud LLM provider API-key environment variable is not set.")
+        except RuntimeError:
+            add("warning", "llm_provider_invalid", "LLM_PROVIDER is not supported.")
+        try:
+            embedding_provider = normalize_provider_type(self.embedding_provider)
+            if embedding_provider != "mock" and (not self.embedding_base_url.strip() or not self.embedding_model.strip()):
+                add("warning", "embedding_configuration_incomplete", "The configured embedding provider requires a Base URL and model name.")
+            if provider_requires_api_key(embedding_provider) and not self.resolved_embedding_api_key:
+                add("warning", "embedding_api_key_missing", "The configured cloud embedding provider API-key environment variable is not set.")
+            if is_local_provider(embedding_provider) and not self.embedding_base_url.strip():
+                add("warning", "embedding_local_url_missing", "The local embedding provider requires a Base URL.")
+        except RuntimeError:
+            add("warning", "embedding_provider_invalid", "EMBEDDING_PROVIDER is not supported.")
         if "*" in self.cors_origin_list:
             add("error" if production else "warning", "cors_wildcard", "Unrestricted CORS origins are not allowed in production.")
         add("info", "proxy_headers_explicit", "Trusted proxy headers are enabled." if self.trust_proxy_headers else "Trusted proxy headers are disabled.")

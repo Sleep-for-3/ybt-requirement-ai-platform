@@ -2,7 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import MappingEvidenceReference, MartField, MartTable, SourceField, SourceTable, SourceToMartMapping
-from app.services.llm.prompt_runtime import get_prompt_runtime,get_runtime_llm_service,prepare_model_input,record_model_call
+from app.services.llm.prompt_runtime import execute_runtime_chat,get_prompt_runtime,prepare_model_input
+from app.services.llm.structured_outputs import SourceToMartOutput
 from app.services.retrieval import HybridRetriever
 
 
@@ -46,7 +47,7 @@ async def generate_source_to_mart_draft(db: Session, mapping_id: int) -> SourceT
 证据:
 {_evidence_text(evidence_rows)}
 """
-    runtime=get_prompt_runtime(db,"source_to_mart_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,f"{mart_field.field_name if mart_field else ''} {mapping.source_fields_summary or ''}",None,None,None,10);user_prompt+=f"\n混合知识证据:\n"+"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);model_input=prepare_model_input(runtime,user_prompt,[item["confidentiality_level"] for item in knowledge]);output = await get_runtime_llm_service(runtime).chat_json(runtime.system_prompt, model_input);record_model_call(db,mapping.project_id,runtime,model_input,output,retrieval_log_id=retrieval_log.id)
+    runtime=get_prompt_runtime(db,"source_to_mart_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,f"{mart_field.field_name if mart_field else ''} {mapping.source_fields_summary or ''}",None,None,None,10);user_prompt+=f"\n混合知识证据:\n"+"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);model_input=prepare_model_input(runtime,user_prompt,[item["confidentiality_level"] for item in knowledge],db=db,project_id=mapping.project_id);output = await execute_runtime_chat(db,mapping.project_id,runtime,model_input,SourceToMartOutput,retrieval_log_id=retrieval_log.id)
     _apply_output(mapping, output)
     db.commit()
     db.refresh(mapping)
