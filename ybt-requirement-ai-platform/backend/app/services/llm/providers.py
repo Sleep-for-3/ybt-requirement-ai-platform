@@ -1,5 +1,6 @@
 import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
@@ -22,6 +23,12 @@ SUPPORTED_PROVIDERS = {
 LOCAL_PROVIDERS = {"local_vllm", "local_ollama_compatible"}
 CLOUD_PROVIDERS = {"openai", "openai_compatible"}
 ENV_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+METADATA_HOSTNAMES = {
+    "metadata",
+    "metadata.aws.internal",
+    "metadata.azure.internal",
+    "metadata.google.internal",
+}
 
 
 def normalize_provider_type(provider: str) -> str:
@@ -55,7 +62,24 @@ def sanitize_base_url(value: str | None) -> str | None:
     return urlunsplit((parsed.scheme, f"{host}{port}", parsed.path.rstrip("/"), "", ""))
 
 
-def validate_provider_url(value: str | None, *, local_only: bool) -> str | None:
+def _is_forbidden_external_address(value: str) -> bool:
+    address = ipaddress.ip_address(value)
+    return (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_unspecified
+        or address.is_multicast
+    )
+
+
+def validate_provider_url(
+    value: str | None,
+    *,
+    local_only: bool,
+    resolve_dns: bool = False,
+) -> str | None:
     if not value:
         return value
     parsed = urlsplit(value)
@@ -66,21 +90,32 @@ def validate_provider_url(value: str | None, *, local_only: bool) -> str | None:
     if local_only:
         return value.rstrip("/")
     host = parsed.hostname.lower()
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+    if (
+        host in METADATA_HOSTNAMES
+        or host == "localhost"
+        or host.endswith(".localhost")
+        or host.endswith(".local")
+        or host.startswith("metadata.")
+    ):
         raise ValueError("External providers cannot use local hostnames")
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         address = None
-    if address and (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_reserved
-        or address.is_unspecified
-        or address.is_multicast
-    ):
+    if address and _is_forbidden_external_address(str(address)):
         raise ValueError("External provider address is not allowed")
+    is_reserved_test_host = host.endswith((".example", ".example.com", ".invalid", ".test"))
+    if resolve_dns and address is None and not is_reserved_test_host:
+        try:
+            resolved = socket.getaddrinfo(
+                host,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        except socket.gaierror:
+            resolved = []
+        if any(_is_forbidden_external_address(item[4][0]) for item in resolved):
+            raise ValueError("External provider hostname resolves to a non-public address")
     return value.rstrip("/")
 
 
@@ -104,3 +139,12 @@ class ProviderRuntimeConfig:
         if provider_requires_api_key(normalized) and not self.api_key.strip():
             name = self.api_key_env_name or "configured environment variable"
             raise LLMConfigurationError(f"Model API key environment variable {name} is not configured")
+        try:
+            validate_env_name(self.api_key_env_name)
+            validate_provider_url(
+                self.base_url,
+                local_only=self.local_only,
+                resolve_dns=True,
+            )
+        except ValueError as exc:
+            raise LLMConfigurationError(str(exc)) from exc

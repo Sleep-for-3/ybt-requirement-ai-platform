@@ -3,8 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.models import KnowledgeDocument, KnowledgeUnit
 from app.services.embeddings import get_embedding_service
+from app.services.embeddings.observability import (
+    embed_with_observability,
+    ensure_embedding_external_allowed,
+)
 from app.services.retrieval.keyword_index import index_knowledge_unit
-from app.services.security import ensure_external_allowed, redact_content
 from app.services.vector import get_vector_store
 from app.services.vector.knowledge_record import build_knowledge_vector_record
 
@@ -17,10 +20,21 @@ def reindex_knowledge_document(db: Session, document: KnowledgeDocument, vector_
         KnowledgeUnit.enabled.is_(True),
     )).all())
     embedding = get_embedding_service()
-    local_only = getattr(embedding, "local_only", False)
-    for unit in units:
-        ensure_external_allowed(unit.confidentiality_level, local_only)
-    vectors = embedding.embed_texts([unit.content if local_only else redact_content(unit.content) for unit in units])
+    ensure_embedding_external_allowed(
+        db,
+        document.project_id,
+        embedding,
+        [unit.confidentiality_level for unit in units],
+        persist_denial=True,
+    )
+    texts = [unit.content for unit in units]
+    vectors = embed_with_observability(
+        db,
+        document.project_id,
+        embedding,
+        texts,
+        [unit.confidentiality_level for unit in units],
+    )
     records = []
     for unit, vector in zip(units, vectors, strict=True):
         index_knowledge_unit(db, unit, replace=True)

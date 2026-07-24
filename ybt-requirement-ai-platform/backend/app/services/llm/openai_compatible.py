@@ -72,23 +72,31 @@ class OpenAICompatibleLLMService(LLMService):
         user_prompt: str,
         response_schema: type[StructuredResponse],
     ) -> StructuredResponse:
+        invalid_response = ""
         try:
             payload = await self._chat_and_parse(system_prompt, user_prompt)
+            invalid_response = json.dumps(payload, ensure_ascii=False)
             return response_schema.model_validate(payload)
         except (LLMResponseError, ValidationError) as first_error:
+            first_metadata = _copy_metadata(self.last_call)
+            if isinstance(first_error, LLMResponseError) and first_error.raw_response:
+                invalid_response = first_error.raw_response
             repair_prompt = (
                 "Return one JSON object that conforms exactly to this JSON Schema. "
                 "Do not add commentary or markdown.\n"
                 f"Schema: {json.dumps(response_schema.model_json_schema(), ensure_ascii=False)}\n"
-                f"Invalid response: {getattr(first_error, 'input', '') or 'invalid JSON output'}"
+                f"Invalid response: {invalid_response[:10000] or 'invalid JSON output'}"
             )
             try:
                 repaired = await self._chat_and_parse(
                     "You repair JSON formatting. Return only the corrected JSON object.",
                     repair_prompt,
                 )
-                return response_schema.model_validate(repaired)
+                validated = response_schema.model_validate(repaired)
+                self.last_call = _merge_metadata(first_metadata, self.last_call)
+                return validated
             except (LLMResponseError, ValidationError) as exc:
+                self.last_call = _merge_metadata(first_metadata, self.last_call)
                 raise LLMResponseError("Model did not return valid JSON matching the required schema") from exc
 
     async def _chat_and_parse(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
@@ -115,7 +123,7 @@ class OpenAICompatibleLLMService(LLMService):
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise LLMResponseError("Provider response was not valid JSON") from exc
+            raise LLMResponseError("Provider response was not valid JSON", raw_response=content) from exc
         if not isinstance(parsed, dict):
             raise LLMResponseError("Provider response JSON must be an object")
         return parsed
@@ -211,6 +219,35 @@ def _usage(response: httpx.Response) -> dict[str, Any]:
         "cached_tokens": details.get("cached_tokens", 0),
         "usage_available": True,
     }
+
+
+def _copy_metadata(metadata: ModelCallMetadata) -> ModelCallMetadata:
+    return ModelCallMetadata(
+        provider=metadata.provider,
+        model=metadata.model,
+        latency_ms=metadata.latency_ms,
+        token_usage=dict(metadata.token_usage),
+        retry_count=metadata.retry_count,
+        http_status=metadata.http_status,
+    )
+
+
+def _merge_metadata(first: ModelCallMetadata, second: ModelCallMetadata) -> ModelCallMetadata:
+    first_usage = first.token_usage
+    second_usage = second.token_usage
+    usage_available = bool(first_usage.get("usage_available")) and bool(second_usage.get("usage_available"))
+    usage: dict[str, Any] = {"usage_available": usage_available}
+    if usage_available:
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens"):
+            usage[key] = int(first_usage.get(key, 0)) + int(second_usage.get(key, 0))
+    return ModelCallMetadata(
+        provider=second.provider,
+        model=second.model,
+        latency_ms=first.latency_ms + second.latency_ms,
+        token_usage=usage,
+        retry_count=first.retry_count + second.retry_count,
+        http_status=second.http_status,
+    )
 
 
 def _http_error(status_code: int) -> LLMProviderError:

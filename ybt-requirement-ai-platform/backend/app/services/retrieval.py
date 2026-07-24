@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.models import KnowledgeChunk, KnowledgeDocument
 from app.schemas import RetrievalResult, RetrievalSource
-from app.services.llm import get_llm_service
+from app.services.embeddings import get_embedding_service
+from app.services.embeddings.observability import embed_with_observability
 from app.services.vector import get_vector_store
 
 
@@ -22,7 +23,14 @@ async def search_knowledge(
     if source_types:
         vector_filters["source_type"] = source_types
 
-    query_embedding = (await get_llm_service().embed_texts([query]))[0]
+    embedding_service = get_embedding_service()
+    query_embedding = embed_with_observability(
+        db,
+        project_id,
+        embedding_service,
+        [query],
+        ["internal"],
+    )[0]
     vector_results = get_vector_store().search(query_embedding, top_k=top_k, filters=vector_filters)
 
     merged: dict[tuple[int, int], RetrievalResult] = {}

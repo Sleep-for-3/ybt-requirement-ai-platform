@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -99,13 +99,13 @@ class RuntimeTestRequest(BaseModel):
 
 
 class ConnectionTestOutput(BaseModel):
-    status: str
+    status: Literal["ok"]
     message: str
 
 
 @router.get("/ai-runtime/status")
 def runtime_status(principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict[str, Any]:
-    settings = get_settings()
+    is_admin = PermissionService(db, principal).is_platform_admin()
     profile = _active_profile(db)
     llm = _llm_status(profile)
     embedding = _embedding_status()
@@ -123,8 +123,8 @@ def runtime_status(principal: CurrentPrincipal, db: Session = Depends(get_db)) -
         "llm": llm,
         "embedding": embedding,
         "vector_store": vector,
-        "issues": issues if PermissionService(db, principal).is_platform_admin() else [],
-        "observability": _call_metrics(db),
+        "issues": issues if is_admin else [],
+        "observability": _call_metrics(db) if is_admin else _basic_observability(),
     }
     return response
 
@@ -185,10 +185,12 @@ def test_embedding(
 
 @router.get("/model-profiles")
 def model_profiles(principal: CurrentPrincipal, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    is_admin = PermissionService(db, principal).is_platform_admin()
     query = select(ModelProfile).order_by(ModelProfile.id)
-    if not PermissionService(db, principal).is_platform_admin():
+    if not is_admin:
         query = query.where(ModelProfile.enabled.is_(True))
-    return [_profile_response(item) for item in db.scalars(query).all()]
+    serializer = _profile_response if is_admin else _basic_profile_response
+    return [serializer(item) for item in db.scalars(query).all()]
 
 
 @router.post("/model-profiles", status_code=201)
@@ -202,12 +204,13 @@ def create_model_profile(
     values["config_json"] = payload.config_json.model_dump()
     values["created_by"] = principal.username
     requested_enabled = values.pop("enabled")
-    item = ModelProfile(**values, enabled=False)
+    item = ModelProfile(**values, enabled=requested_enabled)
+    if requested_enabled:
+        _validate_activation(item)
+        _disable_active_profiles(db)
     db.add(item)
     db.commit()
     db.refresh(item)
-    if requested_enabled:
-        _activate_profile(db, item)
     return _profile_response(item)
 
 
@@ -342,12 +345,18 @@ def _llm_status(profile: ModelProfile | None) -> dict[str, Any]:
     model = profile.model_name if profile else settings.llm_model
     env_name = profile.api_key_env_name if profile else settings.llm_api_key_env_name
     local = bool(profile.local_only) if profile else is_local_provider(provider)
-    present = bool(os.getenv(env_name or "", settings.llm_api_key))
+    present = False if provider == "mock" else bool(os.getenv(env_name or "", settings.llm_api_key))
     configured = (
         provider == "mock"
         or bool(base_url and model and (present or not provider_requires_api_key(provider)))
     )
-    safe_url = sanitize_base_url(base_url)
+    if provider != "mock":
+        try:
+            validate_env_name(env_name)
+            validate_provider_url(base_url, local_only=local)
+        except ValueError:
+            configured = False
+    safe_url = None if provider == "mock" else sanitize_base_url(base_url)
     return {
         "provider": provider,
         "model": "mock-llm" if provider == "mock" else model,
@@ -367,12 +376,18 @@ def _embedding_status() -> dict[str, Any]:
     settings = get_settings()
     provider = normalize_provider_type(settings.embedding_provider)
     local = is_local_provider(provider)
-    present = bool(settings.resolved_embedding_api_key)
+    present = False if provider == "mock" else bool(settings.resolved_embedding_api_key)
     configured = (
         provider == "mock"
         or bool(settings.embedding_base_url and settings.embedding_model and (present or not provider_requires_api_key(provider)))
     )
-    safe_url = sanitize_base_url(settings.embedding_base_url)
+    if provider != "mock":
+        try:
+            validate_env_name(settings.embedding_api_key_env_name)
+            validate_provider_url(settings.embedding_base_url, local_only=local)
+        except ValueError:
+            configured = False
+    safe_url = None if provider == "mock" else sanitize_base_url(settings.embedding_base_url)
     return {
         "provider": provider,
         "model": "mock-embedding" if provider == "mock" else settings.embedding_model,
@@ -414,6 +429,15 @@ def _call_metrics(db: Session) -> dict[str, Any]:
     }
 
 
+def _basic_observability() -> dict[str, Any]:
+    return {
+        "last_success_at": None,
+        "last_failure_at": None,
+        "average_latency_ms": None,
+        "recent_token_usage": {"usage_available": False},
+    }
+
+
 def _store_test_result(db: Session, profile: ModelProfile | None, status: str, error: str | None) -> None:
     if profile is None:
         return
@@ -438,13 +462,26 @@ def _profile_response(item: ModelProfile) -> dict[str, Any]:
         "model_name": item.model_name,
         "embedding_model_name": item.embedding_model_name,
         "api_key_env_name": item.api_key_env_name,
-        "api_key_present": bool(os.getenv(item.api_key_env_name or "")),
+        "api_key_present": False if normalize_provider_type(item.provider_type) == "mock" else bool(os.getenv(item.api_key_env_name or "")),
         "local_only": item.local_only,
         "enabled": item.enabled,
         "config_json": item.config_json,
         "created_by": item.created_by,
         "created_at": item.created_at,
         "updated_at": item.updated_at,
+    }
+
+
+def _basic_profile_response(item: ModelProfile) -> dict[str, Any]:
+    provider = normalize_provider_type(item.provider_type)
+    return {
+        "id": item.id,
+        "profile_name": item.profile_name,
+        "provider_type": provider,
+        "model_name": "mock-llm" if provider == "mock" else item.model_name,
+        "is_mock": provider == "mock",
+        "is_local": bool(item.local_only),
+        "enabled": item.enabled,
     }
 
 
@@ -470,15 +507,34 @@ def _validate_activation(item: ModelProfile) -> None:
         raise HTTPException(status_code=422, detail="Base URL and model name are required before activation")
     if provider_requires_api_key(provider) and not os.getenv(item.api_key_env_name or ""):
         raise HTTPException(status_code=422, detail=f"API key environment variable {item.api_key_env_name or '(missing)'} is not configured")
+    try:
+        validate_env_name(item.api_key_env_name)
+        validate_provider_url(
+            item.base_url,
+            local_only=bool(item.local_only),
+            resolve_dns=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _activate_profile(db: Session, item: ModelProfile) -> None:
     _validate_activation(item)
-    for active in db.scalars(select(ModelProfile).where(ModelProfile.enabled.is_(True))).all():
-        active.enabled = False
+    _disable_active_profiles(db)
     item.enabled = True
     db.commit()
     db.refresh(item)
+
+
+def _disable_active_profiles(db: Session) -> None:
+    active_query = (
+        select(ModelProfile)
+        .where(ModelProfile.enabled.is_(True))
+        .with_for_update()
+    )
+    for active in db.scalars(active_query).all():
+        active.enabled = False
+    db.flush()
 
 
 def _profile_or_404(db: Session, profile_id: int) -> ModelProfile:

@@ -35,8 +35,9 @@ class LLMProviderError(LLMRuntimeError):
 
 
 class LLMResponseError(LLMRuntimeError):
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, raw_response: str | None = None) -> None:
         super().__init__(message, error_type="invalid_model_response")
+        self.raw_response = raw_response
 
 
 class LLMService(ABC):

@@ -21,6 +21,7 @@ PROMPT_LABELS = {
     "mart_to_ybt_mapping": "监管集市到一表通",
     "source_recommendation_explanation": "来源字段推荐解释",
     "regulatory_field_explanation": "监管字段解释",
+    "legacy_field_mapping": "字段级双层口径",
 }
 
 

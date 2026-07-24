@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DraftOutput(BaseModel):
@@ -21,6 +21,12 @@ class ScenarioBusinessOutput(DraftOutput):
     business_owner: str | None = None
     remarks: str | None = None
 
+    @model_validator(mode="after")
+    def _requires_business_content(self):
+        if not (self.business_definition or self.final_content_draft):
+            raise ValueError("Scenario business output is missing business content")
+        return self
+
 
 class ScenarioTechnicalOutput(DraftOutput):
     source_system_name: str | None = None
@@ -34,6 +40,12 @@ class ScenarioTechnicalOutput(DraftOutput):
     processing_logic_type: str | None = None
     tech_owner: str | None = None
     remarks: str | None = None
+
+    @model_validator(mode="after")
+    def _requires_technical_content(self):
+        if not (self.processing_logic or self.final_content_draft):
+            raise ValueError("Scenario technical output is missing processing logic")
+        return self
 
 
 class SourceToMartOutput(DraftOutput):
@@ -51,6 +63,12 @@ class SourceToMartOutput(DraftOutput):
     exception_rule: str | None = None
     quality_check_rule: str | None = None
 
+    @model_validator(mode="after")
+    def _requires_mapping_content(self):
+        if not (self.business_rule or self.business_to_mart_rule or self.final_content_draft):
+            raise ValueError("Source-to-mart output is missing mapping content")
+        return self
+
 
 class MartToYbtOutput(DraftOutput):
     mart_table_summary: str | None = None
@@ -64,9 +82,15 @@ class MartToYbtOutput(DraftOutput):
     reporting_condition: str | None = None
     validation_rule: str | None = None
 
+    @model_validator(mode="after")
+    def _requires_mapping_content(self):
+        if not (self.business_rule or self.mart_to_ybt_rule or self.final_content_draft):
+            raise ValueError("Mart-to-YBT output is missing mapping content")
+        return self
+
 
 class SourceRecommendationExplanationOutput(DraftOutput):
-    recommendation_basis: str
+    recommendation_basis: str = Field(min_length=1)
     recommended_source_system: str | None = None
     recommended_table_name: str | None = None
     recommended_field_name: str | None = None
@@ -77,6 +101,12 @@ class RegulatoryFieldExplanationOutput(DraftOutput):
     answer: str = ""
     supported_claims: list[str] = Field(default_factory=list)
     unsupported_claims: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _requires_answer(self):
+        if not self.answer.strip():
+            raise ValueError("Regulatory field explanation is missing an answer")
+        return self
 
 
 class LegacyFieldDraftOutput(BaseModel):
@@ -96,3 +126,9 @@ class LegacyFieldDraftOutput(BaseModel):
     evidence_completeness: str = "low"
     risk_points: list[str] = Field(default_factory=list)
     questions_for_human: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _requires_mapping_content(self):
+        if not (self.business_to_mart_rule or self.mart_to_ybt_rule):
+            raise ValueError("Legacy field mapping output is missing mapping content")
+        return self

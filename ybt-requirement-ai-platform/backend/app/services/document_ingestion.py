@@ -4,7 +4,8 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.models import KnowledgeChunk, KnowledgeDocument
-from app.services.llm import get_llm_service
+from app.services.embeddings import get_embedding_service
+from app.services.embeddings.observability import embed_with_observability
 from app.services.text_processing import chunk_text
 from app.services.vector import VectorRecord, get_vector_store
 from app.services.storage import get_storage_service
@@ -57,7 +58,15 @@ async def ingest_document(
     db.flush()
 
     if chunks:
-        embeddings = await get_llm_service().embed_texts([chunk.content for chunk in chunks])
+        embedding_service = get_embedding_service()
+        embedding_texts = [chunk.content for chunk in chunks]
+        embeddings = embed_with_observability(
+            db,
+            project_id,
+            embedding_service,
+            embedding_texts,
+            ["internal"] * len(embedding_texts),
+        )
         vector_records = []
         for chunk_record, embedding in zip(chunks, embeddings, strict=True):
             embedding_id = f"chunk-{chunk_record.id}"

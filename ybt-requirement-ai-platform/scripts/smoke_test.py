@@ -41,6 +41,18 @@ def main() -> None:
         },
     )
     project_id = project["id"]
+    runtime_status = _get_json(client, f"{base}/ai-runtime/status")
+    expected_provider = os.getenv("LLM_PROVIDER", "mock").replace("-", "_")
+    if expected_provider in {"vllm", "ollama"}:
+        expected_provider = {"vllm": "local_vllm", "ollama": "local_ollama_compatible"}[expected_provider]
+    if runtime_status["llm"]["provider"] != expected_provider:
+        raise AssertionError(f"AI runtime provider mismatch: {runtime_status['llm']['provider']}")
+    if expected_provider != "mock":
+        if runtime_status["llm"]["is_mock"]:
+            raise AssertionError("Fake OpenAI-compatible runtime was incorrectly reported as Mock")
+        runtime_test = _post_json(client, f"{base}/ai-runtime/test-chat", {})
+        if runtime_test["status"] != "ok" or runtime_test["provider"] == "mock":
+            raise AssertionError("Explicit real-provider connection test did not use Fake Provider")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -532,6 +544,17 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             client, base, project_id, bank["id"], outsider_session["access_token"],
             admin_authorization, temp_path, artifact_dir,
         )
+        model_calls = _get_json(client, f"{base}/projects/{project_id}/model-calls?page_size=100")
+        if expected_provider != "mock":
+            successful_calls = [
+                item
+                for item in model_calls["items"]
+                if item["status"] == "success" and item["prompt_key"] != "embedding"
+            ]
+            if not successful_calls or any(item["provider"] == "mock" for item in successful_calls):
+                raise AssertionError("Fake Provider model calls were not recorded as real-provider calls")
+            if not any(item["token_usage"].get("usage_available") for item in successful_calls):
+                raise AssertionError("Fake Provider token usage was not recorded")
 
         output = {
             "project_id": project_id,
@@ -604,6 +627,8 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             "cross_bank_lineage_status": cross_bank_lineage.status_code,
             "deliverable": delivery_smoke,
             "uat": uat_smoke,
+            "ai_runtime_provider": runtime_status["llm"]["provider"],
+            "model_call_count": model_calls["total"],
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
 

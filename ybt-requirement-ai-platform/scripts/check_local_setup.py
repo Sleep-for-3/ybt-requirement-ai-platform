@@ -36,17 +36,17 @@ def env_values() -> dict[str, str]:
     return values
 
 
-def command_available(name: str, args: list[str]) -> None:
-    executable = shutil.which(name)
+def command_available(label: str, executable_name: str, args: list[str]) -> None:
+    executable = shutil.which(executable_name)
     if not executable:
-        report("FAIL", name, "command is not available on PATH")
+        report("FAIL", label, "command is not available on PATH")
         return
     try:
         subprocess.run([executable, *args], capture_output=True, check=True, timeout=10, text=True)
     except (subprocess.SubprocessError, OSError):
-        report("FAIL", name, "command is installed but unavailable")
+        report("FAIL", label, "command is installed but unavailable")
     else:
-        report("PASS", name, "available")
+        report("PASS", label, "available")
 
 
 def check_port(port: int) -> None:
@@ -118,8 +118,8 @@ def check_git_safety() -> None:
 
 
 def main() -> int:
-    command_available("docker", ["version"])
-    command_available("docker", ["compose", "version"])
+    command_available("Docker", "docker", ["version"])
+    command_available("Docker Compose", "docker", ["compose", "version"])
     if ENV_FILE.is_file():
         report("PASS", "backend/.env", "private runtime file exists")
     else:
