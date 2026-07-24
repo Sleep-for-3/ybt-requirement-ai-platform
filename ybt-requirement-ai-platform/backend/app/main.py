@@ -1,3 +1,6 @@
+from contextlib import asynccontextmanager
+import json
+import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -31,6 +34,7 @@ from app.api import (
     profiling,
     nl_tasks,
     projects,
+    project_readiness,
     retrieval,
     scenarios,
     scenario_mappings,
@@ -43,15 +47,48 @@ from app.api import (
     traceability_export,
     lineage,
     deliverables,
+    uat,
 )
+from app.core.database import engine
 from app.core.settings import get_settings
-from app.core.observability import RequestContextMiddleware
+from app.core.observability import RequestContextMiddleware, build_log_event
 from app.services.auth.resource_guard import guard_project_resource
+from app.services.storage import get_storage_service
+from app.services.task_queue import get_task_queue
 
 settings = get_settings()
+logger = logging.getLogger("app.lifecycle")
 
-app = FastAPI(title=settings.app_name)
-settings.validate_production_security()
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    runtime_settings = get_settings()
+    issues = runtime_settings.validate_configuration()
+    for issue in issues:
+        level = logging.ERROR if issue["severity"] == "error" else logging.WARNING if issue["severity"] == "warning" else logging.INFO
+        logger.log(level, json.dumps(build_log_event("configuration_validation", level=issue["severity"].upper(), code=issue["code"], message=issue["message"]), ensure_ascii=False))
+    errors = [issue for issue in issues if issue["severity"] == "error"]
+    if errors:
+        raise RuntimeError("Invalid application configuration: " + ", ".join(issue["code"] for issue in errors))
+    if runtime_settings.storage_provider == "local":
+        Path(runtime_settings.storage_dir).mkdir(parents=True, exist_ok=True)
+    storage = get_storage_service()
+    queue = get_task_queue()
+    try:
+        yield
+    finally:
+        storage_client = getattr(storage, "client", None)
+        if storage_client is not None and callable(getattr(storage_client, "close", None)):
+            storage_client.close()
+        celery_app = getattr(queue, "celery_app", None)
+        if celery_app is not None and callable(getattr(celery_app, "close", None)):
+            celery_app.close()
+        get_storage_service.cache_clear()
+        get_task_queue.cache_clear()
+        engine.dispose()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(RequestContextMiddleware)
 
 app.add_middleware(
@@ -63,11 +100,6 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-def ensure_storage_dir() -> None:
-    Path(settings.storage_dir).mkdir(parents=True, exist_ok=True)
-
-
 @app.get(f"{settings.api_prefix}/health")
 def legacy_health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name}
@@ -76,6 +108,7 @@ def legacy_health() -> dict[str, str]:
 secured = [Depends(guard_project_resource)]
 
 app.include_router(projects.router, prefix=settings.api_prefix)
+app.include_router(project_readiness.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(admin.router, prefix=settings.api_prefix)
 app.include_router(governance.router, prefix=settings.api_prefix)
@@ -85,7 +118,8 @@ app.include_router(jobs.router, prefix=settings.api_prefix)
 app.include_router(storage_files.router, prefix=settings.api_prefix)
 app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
-app.include_router(health.router, prefix=settings.api_prefix)
+app.include_router(health.router)
+app.include_router(health.router, prefix=settings.api_prefix, include_in_schema=False)
 app.include_router(templates.projects_router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(target_tables.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(target_fields.router, prefix=settings.api_prefix, dependencies=secured)
@@ -115,3 +149,4 @@ app.include_router(metadata_imports.router, prefix=settings.api_prefix, dependen
 app.include_router(profiling.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(lineage.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(deliverables.router, prefix=settings.api_prefix)
+app.include_router(uat.router, prefix=settings.api_prefix)

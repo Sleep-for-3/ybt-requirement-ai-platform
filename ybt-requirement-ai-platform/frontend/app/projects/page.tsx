@@ -41,14 +41,14 @@ export default function ProjectsPage() {
           {message ? <p className="mt-3 text-sm text-slate-600">{message}</p> : null}
         </form>
         <section className="panel overflow-hidden">
-          <div className="grid grid-cols-[1fr_180px_120px] border-b border-line bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500">
+          <div className="grid grid-cols-[1fr_180px_220px] border-b border-line bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500">
             <span>项目</span><span>机构</span><span>操作</span>
           </div>
           {projects.map((project) => (
-            <div className="grid grid-cols-[1fr_180px_120px] items-center border-b border-line px-4 py-3 text-sm last:border-0" key={project.id}>
+            <div className="grid grid-cols-[1fr_180px_220px] items-center border-b border-line px-4 py-3 text-sm last:border-0" key={project.id}>
               <div><div className="font-medium">{project.name}</div><div className="mt-1 text-xs text-slate-500">{project.description || "-"}</div></div>
               <span>{project.bank_name || "-"}</span>
-              <Link className="button-secondary" href={`/fields?projectId=${project.id}`} onClick={() => selectProject(project.id)}>进入字段</Link>
+              <div className="flex gap-2"><Link className="button-secondary" href={`/projects/${project.id}/onboarding`} onClick={() => selectProject(project.id)}>初始化</Link><Link className="button-secondary" href={`/projects/${project.id}/readiness`} onClick={() => selectProject(project.id)}>准备度</Link></div>
             </div>
           ))}
         </section>

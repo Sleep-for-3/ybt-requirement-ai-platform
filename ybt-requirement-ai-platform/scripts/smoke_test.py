@@ -1,6 +1,8 @@
 import json
+import os
 import sqlite3
 import tempfile
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
@@ -9,10 +11,15 @@ from docx import Document
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 
+from generate_demo_uat_pack import FIXED_ZIP_TIME, generate_demo_pack
+
 
 def main() -> None:
     base = "http://127.0.0.1:8000/api"
     client = httpx.Client(timeout=90, trust_env=False)
+    artifact_dir = Path(os.environ["SMOKE_ARTIFACT_DIR"]).resolve() if os.getenv("SMOKE_ARTIFACT_DIR") else None
+    if artifact_dir:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
 
     admin_password = "smoke-only-" + "platform-admin-password"
     bootstrap = _post_json(client, f"{base}/admin/bootstrap", {
@@ -519,7 +526,11 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
 
         delivery_smoke = _run_delivery_smoke(
             client, base, project_id, debit_scenario, mart_field,
-            governance_users, outsider_session["access_token"], admin_authorization,
+            governance_users, outsider_session["access_token"], admin_authorization, artifact_dir,
+        )
+        uat_smoke = _run_uat_smoke(
+            client, base, project_id, bank["id"], outsider_session["access_token"],
+            admin_authorization, temp_path, artifact_dir,
         )
 
         output = {
@@ -592,11 +603,12 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             "lineage_excel_bytes": len(lineage_excel.content),
             "cross_bank_lineage_status": cross_bank_lineage.status_code,
             "deliverable": delivery_smoke,
+            "uat": uat_smoke,
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
 
 
-def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, outsider_token, admin_authorization):
+def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, outsider_token, admin_authorization, artifact_dir=None):
     table = _post_json(client, f"{base}/target-tables", {"project_id": project_id, "table_code": "YBT_DELIVERY", "table_name": "正式交付验收表"})
     field = _post_json(client, f"{base}/fields", {"project_id": project_id, "target_table_id": table["id"], "field_code": "DELIVERY_CERT_TYPE", "field_name": "交付证件类型", "field_type": "VARCHAR(20)", "regulatory_description": "正式交付验收使用的脱敏监管定义"})
     business = _post_json(client, f"{base}/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"business_definition": "借记卡有效客户证件类型", "final_content": "仅包含当前有效借记卡客户，排除注销客户。"})
@@ -680,6 +692,8 @@ select case when cert_type='01' then 'A' else cert_type end from mart_customer w
     if validation["error_count"]: raise AssertionError(f"正式交付校验仍有错误: {validation['issues']}")
     rendered = _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
     downloaded = client.get(f"{base}/deliverables/{package['id']}/download"); downloaded.raise_for_status()
+    if artifact_dir:
+        (artifact_dir / "formal-deliverable.xlsx").write_bytes(downloaded.content)
     workbook = load_workbook(BytesIO(downloaded.content), data_only=False); sheet = workbook["业务口径及技术溯源表"]
     if sheet["A3"].value != "DELIVERY_CERT_TYPE" or sheet["D3"].value != "=1+1" or "A1:C1" not in [str(item) for item in sheet.merged_cells.ranges] or not sheet["A2"].font.bold: raise AssertionError("正式 Excel 未保留内容、公式、样式或合并单元格")
     lineage_rows = workbook["字段级血缘"].max_row - 1
@@ -707,6 +721,214 @@ select case when cert_type='01' then 'A' else cert_type end from mart_customer w
     version1_download = client.get(f"{base}/deliverable-package-versions/{approved1['version']['id']}/download"); version1_download.raise_for_status()
     version2_download = client.get(f"{base}/deliverable-package-versions/{approved2['version']['id']}/download"); version2_download.raise_for_status()
     return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "generation_job_status": "completed", "render_job_status": rendered["job"]["status"], "rendered_file_id": rendered["file_id"], "rendered_file_bytes": len(downloaded.content), "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "repeat_approval_idempotent": repeated_approval["idempotent"], "lineage_sheet_rows": lineage_rows, "change_impact_sheet_rows": impact_rows, "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames), "version_file_bytes": [len(version1_download.content), len(version2_download.content)]}
+
+
+def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_authorization, temp_path, artifact_dir=None):
+    demo_dir = temp_path / "demo-uat-pack"
+    demo_manifest = generate_demo_pack(demo_dir)
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as target:
+        for item in sorted(demo_dir.iterdir(), key=lambda path: path.name):
+            info = zipfile.ZipInfo(item.name, date_time=FIXED_ZIP_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            target.writestr(info, item.read_bytes())
+    uploaded = client.post(
+        f"{base}/projects/{project_id}/uat-packs/upload",
+        data={"pack_name": "公开模拟 UAT 材料"},
+        files=[("files", ("demo-uat-pack.zip", archive.getvalue(), "application/zip"))],
+    )
+    uploaded.raise_for_status()
+    pack = uploaded.json()
+    validation = _post_json(client, f"{base}/uat-packs/{pack['id']}/validate", {})
+    if not validation["valid"]:
+        raise AssertionError(f"公开模拟 UAT 材料校验失败: {validation}")
+
+    _post_json(client, f"{base}/admin/users", {
+        "username": "smoke_unassigned",
+        "display_name": "同机构未授权项目用户",
+        "email": "smoke-unassigned@example.invalid",
+        "password": "smoke-unassigned-user-password",
+        "institution_id": bank_id,
+        "institution_role": "member",
+    })
+
+    suites = _get_json(client, f"{base}/projects/{project_id}/uat-suites")
+    builtin_suites = [suite for suite in suites if suite["is_system"]]
+    builtin_cases = [case for suite in builtin_suites for case in suite["cases"]]
+    if len(builtin_suites) != 8 or len(builtin_cases) != 94:
+        raise AssertionError(f"内置 UAT 基线数量错误: suites={len(builtin_suites)}, cases={len(builtin_cases)}")
+    builtin_run_statuses = {}
+    builtin_automatic_count = 0
+    for builtin_suite in builtin_suites:
+        builtin_run = _post_json(client, f"{base}/uat-suites/{builtin_suite['id']}/runs", {
+            "run_name": f"内置自动验收 - {builtin_suite['suite_name']}",
+            "environment_name": "sanitized-full-smoke",
+            "application_version": "productization-v1",
+            "git_commit_sha": os.getenv("GITHUB_SHA", "e" * 40),
+        })
+        builtin_execution = _post_json(client, f"{base}/uat-runs/{builtin_run['id']}/execute", {})
+        automatic_results = [item for item in builtin_execution["run"]["results"] if item["case"]["execution_mode"] == "automatic"]
+        builtin_automatic_count += len(automatic_results)
+        if any(item["status"] != "passed" for item in automatic_results):
+            failed = [(item["case"]["case_name"], item["status"], item["evidence_json"]) for item in automatic_results if item["status"] != "passed"]
+            raise AssertionError(f"内置自动 UAT 未逐项通过: {builtin_suite['suite_type']} {failed}")
+        builtin_run_statuses[builtin_suite["suite_type"]] = builtin_execution["run"]["status"]
+
+    suite = _post_json(client, f"{base}/projects/{project_id}/uat-suites", {
+        "suite_name": "全量冒烟受控回归",
+        "suite_type": "custom",
+        "description": "验证失败、修复、重跑、问题闭环、签署与证据导出的公开模拟套件",
+        "cases": [{
+            "case_code": "CONTROLLED-RETRY",
+            "case_name": "受控首次失败并在修复后通过",
+            "case_category": "deployment",
+            "precondition_json": {"check_key": "fail_once_then_pass"},
+            "input_requirement_json": {"sanitized_fixture_only": True},
+            "expected_result_json": {"status": "passed", "attempt": 2},
+            "execution_mode": "automatic",
+            "severity": "critical",
+            "display_order": 1,
+        }],
+    })
+    run = _post_json(client, f"{base}/uat-suites/{suite['id']}/runs", {
+        "run_name": "全量冒烟 UAT",
+        "environment_name": "sanitized-full-smoke",
+        "application_version": "productization-v1",
+        "git_commit_sha": os.getenv("GITHUB_SHA", "f" * 40),
+    })
+    first = _post_json(client, f"{base}/uat-runs/{run['id']}/execute", {})
+    if first["run"]["status"] != "failed" or first["run"]["results"][0]["status"] != "failed":
+        raise AssertionError("受控 UAT 首次执行没有按预期失败")
+    result_id = first["run"]["results"][0]["id"]
+    finding = _post_json(client, f"{base}/uat-runs/{run['id']}/findings", {
+        "uat_case_result_id": result_id,
+        "finding_type": "deployment",
+        "severity": "critical",
+        "title": "公开模拟首次执行失败",
+        "description": "受控失败用于验证修复、重跑和签署阻断，不包含真实数据。",
+        "expected_behavior": "修复后第二次执行通过",
+        "actual_behavior": "第一次执行按模拟条件失败",
+    })
+
+    blocked_signoff = client.post(f"{base}/uat-runs/{run['id']}/signoff", json={
+        "signoff_role": "business_owner", "signoff_status": "approved", "comment": "阻断验证",
+    })
+    if blocked_signoff.status_code != 409:
+        raise AssertionError(f"失败轮次未阻止签署: {blocked_signoff.status_code}")
+
+    retried = _post_json(client, f"{base}/uat-runs/{run['id']}/retry-failed", {})
+    retried_result = retried["run"]["results"][0]
+    if retried["run"]["status"] != "passed" or retried_result["status"] != "passed":
+        raise AssertionError(f"修复重跑未通过: {retried['run']['status']}/{retried_result['status']}")
+    if retried_result["id"] != result_id or retried["run"]["summary_json"]["attempt"] != 2:
+        raise AssertionError("重跑没有复用结果记录或尝试次数错误")
+
+    _post_json(client, f"{base}/uat-findings/{finding['id']}/resolve", {
+        "resolution_text": "已应用公开模拟修复条件并完成第二次执行。",
+    })
+    verified = _post_json(client, f"{base}/uat-findings/{finding['id']}/verify", {
+        "verification_comment": "第二次执行通过，问题闭环。",
+    })
+    for role in ("business_owner", "technical_owner", "project_manager", "final_acceptance"):
+        _post_json(client, f"{base}/uat-runs/{run['id']}/signoff", {
+            "signoff_role": role,
+            "signoff_status": "approved",
+            "comment": f"{role} 公开模拟验收通过",
+        })
+
+    report = client.get(f"{base}/uat-runs/{run['id']}/report")
+    report.raise_for_status()
+    workbook = load_workbook(BytesIO(report.content), data_only=False)
+    if len(workbook.sheetnames) != 10:
+        raise AssertionError(f"UAT 报告 Sheet 数量错误: {workbook.sheetnames}")
+    evidence = client.get(f"{base}/uat-runs/{run['id']}/evidence-package")
+    evidence.raise_for_status()
+    with zipfile.ZipFile(BytesIO(evidence.content)) as evidence_archive:
+        evidence_names = evidence_archive.namelist()
+        if "SHA256SUMS" not in evidence_names or "uat-report.xlsx" not in evidence_names:
+            raise AssertionError("UAT 证据包缺少校验清单或报告")
+        forbidden_names = (".env", "token", "database", "secret")
+        if any(name.startswith("/") or ".." in name or any(marker in name.lower() for marker in forbidden_names) for name in evidence_names):
+            raise AssertionError("UAT 证据包包含不安全文件名")
+
+    readiness = _get_json(client, f"{base}/projects/{project_id}/readiness")
+    if len(readiness["dimensions"]) != 17:
+        raise AssertionError(f"项目就绪度维度数量错误: {len(readiness['dimensions'])}")
+    uat_dimension = readiness["dimensions"]["uat_status"]
+    if uat_dimension["status"] != "ready":
+        raise AssertionError(f"已闭环 UAT 未进入 ready: {uat_dimension}")
+
+    root = base.removesuffix("/api")
+    live = client.get(f"{root}/health/live", headers={"X-Request-ID": "full-smoke-health"})
+    live.raise_for_status()
+    if live.headers.get("X-Request-ID") != "full-smoke-health":
+        raise AssertionError("健康检查没有回传 X-Request-ID")
+    ready = client.get(f"{root}/health/ready")
+    ready.raise_for_status()
+    details = client.get(f"{root}/health/details")
+    details.raise_for_status()
+
+    cross_bank = client.get(f"{base}/uat-suites/{suite['id']}", headers={"Authorization": f"Bearer {outsider_token}"})
+    if cross_bank.status_code != 404:
+        raise AssertionError(f"跨机构 UAT 资源未隐藏: {cross_bank.status_code}")
+    viewer_password = "smoke-only-viewer-password"
+    viewer = _post_json(client, f"{base}/admin/users", {
+        "username": "smoke_viewer",
+        "display_name": "只读验收用户",
+        "email": "smoke-viewer@example.invalid",
+        "password": viewer_password,
+        "institution_id": bank_id,
+        "institution_role": "member",
+    })
+    _post_json(client, f"{base}/projects/{project_id}/members", {"user_id": viewer["id"], "project_role": "viewer"})
+    viewer_session = _post_json(client, f"{base}/auth/login", {"username": "smoke_viewer", "password": viewer_password})
+    viewer_execute = client.post(
+        f"{base}/uat-runs/{run['id']}/execute",
+        json={},
+        headers={"Authorization": f"Bearer {viewer_session['access_token']}"},
+    )
+    if viewer_execute.status_code != 403:
+        raise AssertionError(f"只读用户可以执行 UAT: {viewer_execute.status_code}")
+    client.headers["Authorization"] = admin_authorization
+
+    audit_rows = _get_json(client, f"{base}/audit?project_id={project_id}&limit=500")
+    uat_audit_actions = sorted({row["action"] for row in audit_rows if "uat" in row["action"]})
+    if not {"execute_uat_run", "resolve_uat_finding", "verify_uat_finding", "signoff_uat_run"} <= set(uat_audit_actions):
+        raise AssertionError(f"UAT 审计事件不完整: {uat_audit_actions}")
+
+    if artifact_dir:
+        (artifact_dir / "uat-report.xlsx").write_bytes(report.content)
+        (artifact_dir / "uat-evidence.zip").write_bytes(evidence.content)
+        (artifact_dir / "readiness.json").write_text(json.dumps(readiness, ensure_ascii=False, indent=2), encoding="utf-8")
+        (artifact_dir / "health-details.json").write_text(json.dumps(details.json(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    mode_counts = {
+        mode: sum(case["execution_mode"] == mode for case in builtin_cases)
+        for mode in ("automatic", "manual", "hybrid")
+    }
+    return {
+        "demo_pack_manifest_sha256": demo_manifest["manifest_sha256"],
+        "pack_item_count": len(pack["items"]),
+        "builtin_suite_count": len(builtin_suites),
+        "builtin_case_count": len(builtin_cases),
+        "execution_mode_counts": mode_counts,
+        "first_status": first["run"]["status"],
+        "builtin_run_statuses": builtin_run_statuses,
+        "builtin_automatic_case_count": builtin_automatic_count,
+        "retry_status": retried["run"]["status"],
+        "retry_attempt": retried["run"]["summary_json"]["attempt"],
+        "finding_status": verified["status"],
+        "signoff_count": 4,
+        "report_sheet_count": len(workbook.sheetnames),
+        "report_bytes": len(report.content),
+        "evidence_file_count": len(evidence_names),
+        "readiness_status": readiness["overall_status"],
+        "uat_readiness_status": uat_dimension["status"],
+        "health_ready_status": ready.json()["status"],
+        "cross_bank_status": cross_bank.status_code,
+        "viewer_execute_status": viewer_execute.status_code,
+        "uat_audit_actions": uat_audit_actions,
+    }
 
 
 def _approve_delivery_workflow(client, base, project_id, package_id, users, admin_authorization):

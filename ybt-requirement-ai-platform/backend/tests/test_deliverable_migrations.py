@@ -79,7 +79,11 @@ def test_deliverable_migration_paths_are_reversible_and_deterministic(
         _run_alembic(database_path, command, revision)
         if command == "downgrade":
             inspector = sa.inspect(sa.create_engine(f"sqlite:///{database_path.as_posix()}"))
-            assert "deliverable_packages" not in inspector.get_table_names()
+            if revision == PREVIOUS_REVISION:
+                assert "deliverable_packages" not in inspector.get_table_names()
+            else:
+                assert revision == "-1"
+                assert "deliverable_packages" in inspector.get_table_names()
 
     _assert_deliverable_schema(database_path)
 

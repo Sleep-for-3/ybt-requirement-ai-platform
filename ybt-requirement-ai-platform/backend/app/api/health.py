@@ -1,12 +1,17 @@
-from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy import func, select, text
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.observability import render_metrics, set_job_metrics
 from app.core.settings import get_settings
 from app.models import BackgroundJob
-from app.services.storage import get_storage_service
+from app.services.auth.dependencies import bearer_scheme, get_current_principal
+from app.services.auth.permission_service import PermissionService
+from app.services.health_checks import readiness_summary, run_health_checks
 
 
 router = APIRouter(tags=["health and observability"])
@@ -14,26 +19,29 @@ router = APIRouter(tags=["health and observability"])
 
 @router.get("/health/live")
 def live() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "healthy", "application": get_settings().app_name}
 
 
 @router.get("/health/ready")
 def ready(response: Response, db: Session = Depends(get_db)) -> dict:
-    checks = {"database": False, "storage": False, "redis": "disabled", "vector_store": "disabled"}
-    try: db.execute(text("select 1")); checks["database"] = True
-    except Exception: checks["database"] = False
-    try: checks["storage"] = get_storage_service().is_ready()
-    except Exception: checks["storage"] = False
+    summary = readiness_summary(run_health_checks(db, get_settings()))
+    if summary["status"] != "ready":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return summary
+
+
+@router.get("/health/details")
+def details(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    db: Session = Depends(get_db),
+) -> dict:
     settings = get_settings()
-    if settings.task_queue_provider == "celery":
-        try:
-            from redis import Redis
-            checks["redis"] = bool(Redis.from_url(settings.redis_url, socket_timeout=2).ping())
-        except Exception: checks["redis"] = False
-    if settings.vector_store_provider != "mock": checks["vector_store"] = "configured"
-    ok = checks["database"] is True and checks["storage"] is True and checks["redis"] is not False
-    if not ok: response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"status": "ready" if ok else "not_ready", "checks": checks}
+    if not settings.health_details_public:
+        principal = get_current_principal(request, credentials, db)
+        if not PermissionService(db, principal).is_platform_admin():
+            raise HTTPException(status_code=403, detail="Platform administrator permission is required")
+    return run_health_checks(db, settings)
 
 
 @router.get("/metrics")

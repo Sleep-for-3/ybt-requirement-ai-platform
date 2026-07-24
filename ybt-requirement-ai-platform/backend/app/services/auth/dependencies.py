@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -23,17 +23,20 @@ class Principal:
 
 
 def get_current_principal(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Principal:
     if credentials is None:
         if get_settings().auth_mode == "optional":
+            request.state.user_id = None
             return Principal(None, "legacy-system", "Legacy development mode", True)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required", headers={"WWW-Authenticate": "Bearer"})
     try:
         user = user_from_access_token(db, credentials.credentials)
     except AuthenticationError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials", headers={"WWW-Authenticate": "Bearer"}) from exc
+    request.state.user_id = user.id
     return Principal(user.id, user.username, user.display_name)
 
 
