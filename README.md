@@ -112,6 +112,8 @@ docker compose --profile milvus up --build
 
 ## 前端工作台
 
+前端采用统一设计系统：深色分组侧边栏导航（工作台 / 需求与口径 / 数据资产 / 智能与知识 / 交付与验收 / 系统六组）、顶栏项目选择器与用户会话、语义化状态徽章（成功/警告/危险/信息）、统一的表格、空态与统计卡组件。设计令牌集中在 `frontend/tailwind.config.ts`（pine/coral/gold 色阶）与 `frontend/app/globals.css` 组件类中。
+
 当前前端已拆分路由：
 
 - `/projects`、`/templates`、`/traceability-templates`
@@ -357,6 +359,8 @@ python -m alembic upgrade head
 ```bash
 python scripts/smoke_test.py
 ```
+
+Smoke 脚本默认访问 `http://127.0.0.1:8000/api`，可用环境变量 `SMOKE_BASE_URL` 覆盖（例如本机 8000 端口被占用时）。
 
 Smoke test 会程序生成监管答疑、历史口径、DOCX、带文本 PDF、SQL、脱敏合并表头 Excel 和 SQLite ECIF 表，验证知识摄取/出处、Mock 向量混合检索、真实 citation、无证据待确认、Recall@5/MRR、推荐知识引用、目录同步/导入、安全探查、两层证据绑定、敏感保护、AI 不覆盖人工口径，以及 Excel 来源表字段值回读，并继续执行原有流程。
 
