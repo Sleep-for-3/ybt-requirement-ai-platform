@@ -1,1 +1,0 @@
-"""Database profiling placeholders."""

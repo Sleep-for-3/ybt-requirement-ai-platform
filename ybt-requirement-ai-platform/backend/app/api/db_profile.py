@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import DbProfileTask
 from app.schemas import DbProfileTaskCreate, DbProfileTaskRead
-from app.services.db_probe.safe_sql_executor import SafeSqlExecutor
+from app.services.db.safe_sql_executor import SafeSqlExecutor
 
 router = APIRouter(prefix="/db-profile", tags=["db profile"])
 

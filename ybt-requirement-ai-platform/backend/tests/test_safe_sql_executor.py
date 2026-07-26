@@ -1,4 +1,4 @@
-from app.services.db_probe.safe_sql_executor import SafeSqlExecutor
+from app.services.db.safe_sql_executor import SafeSqlExecutor
 
 
 def test_safe_sql_executor_allows_select_with_added_limit():
