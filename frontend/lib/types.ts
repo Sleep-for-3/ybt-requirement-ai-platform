@@ -1,0 +1,480 @@
+/**
+ * 前端领域类型定义，与后端 Pydantic Schema 对应。
+ * 通过 lib/api.ts 重导出，页面可继续 `import { X } from "@/lib/api"`。
+ */
+
+export type Project = {
+  id: number;
+  name: string;
+  bank_name?: string | null;
+  description?: string | null;
+};
+
+export type ReadinessBlocker = { code:string;message:string;dimension:string;severity:"critical"|"warning" };
+export type ReadinessDimension = { status:"ready"|"partial"|"blocked"|"not_started";score:number;completed_count:number;required_count:number;blocking_reasons:ReadinessBlocker[];recommended_actions:string[];links:string[] };
+export type ProjectReadiness = { project_id:number;overall_status:"ready"|"partial"|"blocked"|"not_started";score:number;scoring_method:string;critical_blockers:ReadinessBlocker[];dimensions:Record<string,ReadinessDimension> };
+export type OnboardingStep = { step:number;key:string;title:string;status:"completed"|"in_progress"|"blocked"|"not_started";blocking_reasons:ReadinessBlocker[];next_action?:string|null;links:string[];skippable:boolean };
+export type ProjectOnboarding = { project_id:number;overall_status:string;steps:OnboardingStep[] };
+export type UatCase = { id:number;project_id:number;uat_suite_id:number;case_code:string;case_name:string;description?:string|null;case_category:string;precondition_json:Record<string,unknown>;input_requirement_json:Record<string,unknown>;expected_result_json:Record<string,unknown>;execution_mode:"automatic"|"manual"|"hybrid";severity:string;enabled:boolean;display_order:number };
+export type UatSuite = { id:number;institution_id?:number|null;project_id:number;suite_name:string;suite_type:string;description?:string|null;enabled:boolean;is_system:boolean;cases:UatCase[] };
+export type UatCaseResult = { id:number;project_id:number;uat_run_id:number;uat_case_id:number;status:string;actual_result_json:Record<string,unknown>;expected_result_json:Record<string,unknown>;evidence_json:Record<string,unknown>;error_message?:string|null;duration_ms?:number|null;executed_at?:string|null;case:UatCase };
+export type UatRun = { id:number;institution_id?:number|null;project_id:number;uat_suite_id:number;run_name:string;run_no:number;status:string;environment_name:string;application_version?:string|null;git_commit_sha?:string|null;started_at?:string|null;completed_at?:string|null;summary_json:Record<string,number>;background_job_id?:number|null;results:UatCaseResult[] };
+export type UatFinding = { id:number;project_id:number;uat_run_id:number;uat_case_result_id?:number|null;finding_no:number;finding_type:string;severity:string;title:string;description:string;reproduction_steps?:string|null;expected_behavior?:string|null;actual_behavior?:string|null;status:string;assigned_role?:string|null;assigned_user_id?:number|null;resolution_text?:string|null;resolved_at?:string|null;verified_at?:string|null };
+export type UatSignoff = { id:number;project_id:number;uat_run_id:number;signoff_role:string;signoff_status:string;comment?:string|null;signed_by?:number|null;signed_at:string };
+export type UatPackItem = { id:number;relative_path:string;original_file_name:string;material_type:string;content_hash:string;byte_size:number };
+export type UatPack = { id:number;project_id:number;pack_name:string;status:string;manifest_json:{file_count?:number;total_bytes?:number};validation_json:{valid?:boolean;missing_material_types?:string[]};items:UatPackItem[] };
+
+export type TargetTable = {
+  id: number;
+  project_id: number;
+  table_code: string;
+  table_name: string;
+  description?: string | null;
+};
+
+export type TargetField = {
+  id: number;
+  project_id: number;
+  target_table_id: number;
+  field_code: string;
+  field_name: string;
+  field_type?: string | null;
+  required_flag: boolean;
+  field_definition?: string | null;
+  regulatory_description?: string | null;
+  data_category?: string | null;
+  data_format?: string | null;
+  regulatory_original_definition?: string | null;
+  regulatory_refined_definition?: string | null;
+  report_name?: string | null;
+  report_field_name?: string | null;
+  east_definition?: string | null;
+  internal_definition?: string | null;
+  remarks?: string | null;
+};
+
+export type ProductScenario = {
+  id: number;
+  project_id: number;
+  scenario_code: string;
+  scenario_name: string;
+  scenario_type?: string | null;
+  description?: string | null;
+  business_owner?: string | null;
+  tech_owner?: string | null;
+  enabled: boolean;
+  sort_order: number;
+};
+
+export type ScenarioBusinessMapping = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  scenario_id: number;
+  business_definition?: string | null;
+  source_system_screenshot_required: boolean;
+  source_system_change_required: boolean;
+  external_data_required: boolean;
+  manual_supplement_required: boolean;
+  business_owner?: string | null;
+  business_confirm_status: string;
+  remarks?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+  open_questions?: string | null;
+};
+
+export type ScenarioTechnicalLineage = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  scenario_id: number;
+  business_mapping_id?: number | null;
+  source_system_name?: string | null;
+  source_database_name?: string | null;
+  source_schema_name?: string | null;
+  source_table_english_name?: string | null;
+  source_table_chinese_name?: string | null;
+  source_field_english_name?: string | null;
+  source_field_chinese_name?: string | null;
+  processing_logic?: string | null;
+  processing_logic_type?: string | null;
+  tech_owner?: string | null;
+  tech_confirm_status: string;
+  remarks?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+  open_questions?: string | null;
+  lineage_status: string;
+  lineage_last_verified_at?: string | null;
+  lineage_change_set_id?: number | null;
+};
+
+export type ScriptFile = { id:number;project_id:number;relative_path:string;file_name:string;file_type:string;logical_target_name?:string|null;enabled:boolean;current_version_no:number };
+export type ScriptVersion = { id:number;version_no:number;file_hash:string;normalized_hash:string;parse_status:string;dialect?:string|null;warnings:string[];git_commit_sha?:string|null;created_at:string };
+export type ScriptDependency = { id:number;child_script_file_id?:number|null;dependency_type:string;call_expression:string;condition_expression?:string|null;source_line_start?:number|null;source_line_end?:number|null;confidence_level:string;warnings:string[] };
+export type LineageNode = { id:number;node_type:string;logical_name:string;database_name?:string|null;schema_name?:string|null;table_name?:string|null;column_name?:string|null;catalog_column_id?:number|null;source_field_id?:number|null;mart_field_id?:number|null;target_field_id?:number|null;unresolved_flag:boolean;metadata:Record<string,unknown> };
+export type LineageEdge = { id:number;source_node_id:number;target_node_id:number;edge_type:string;transformation_type?:string|null;transformation_expression?:string|null;join_condition?:string|null;filter_condition?:string|null;aggregation_rule?:string|null;code_mapping_rule?:string|null;source_line_start?:number|null;source_line_end?:number|null;confidence_level:string;evidence:Record<string,unknown> };
+export type LineageGraph = { nodes:LineageNode[];edges:LineageEdge[];direction:string;depth:number;truncated:boolean };
+export type ScriptChange = { id:number;script_file_id:number;from_version_id?:number|null;to_version_id?:number|null;change_type:string;status:string;summary:Record<string,unknown>;severity:string;impact_id?:number|null;created_at:string };
+export type ImpactAnalysis = { id:number;project_id:number;change_set_id:number;status:string;severity:string;affected_target_field_ids:number[];affected_mart_field_ids:number[];affected_mapping_ids:string[];summary:Record<string,unknown>;open_questions:string[];workflow?:{id:number;status:string;current_step?:string|null;tasks:Array<{id:number;step_key:string;status:string;assignee_user_id?:number|null;assignee_role?:string|null}>}|null };
+
+export type ScenarioReviewPackageView = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  scenario_id: number;
+  business_mapping_id: number;
+  technical_lineage_id: number;
+  status: string;
+  current_version_no: number;
+  workflow_instance?: {
+    id: number;
+    status: string;
+    current_step?: string | null;
+    current_task_id?: number | null;
+    current_assignee_user_id?: number | null;
+    current_assignee_role?: string | null;
+    can_withdraw: boolean;
+  } | null;
+};
+
+export type CandidateSourceRecommendation = {
+  id: number;
+  recommended_source_system?: string | null;
+  recommended_database_name?: string | null;
+  recommended_schema_name?: string | null;
+  recommended_table_name?: string | null;
+  recommended_table_comment?: string | null;
+  recommended_field_name?: string | null;
+  recommended_field_comment?: string | null;
+  recommended_processing_logic?: string | null;
+  recommend_reason: string;
+  evidence_summary: string;
+  confidence_level: string;
+  score: number;
+  selected_flag: boolean;
+  catalog_column_id?: number | null;
+  datasource_id?: number | null;
+  data_type?: string | null;
+  nullable?: boolean | null;
+  profile_status?: string | null;
+  retrieval_log_id?: number | null;
+  knowledge_unit_ids_json?: number[];
+  citation_summary_json?: Array<{ knowledge_unit_id:number; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null }>;
+  recommendation_basis?: string | null;
+};
+
+export type CatalogSchema = { id:number; datasource_id:number; schema_name:string; schema_comment?:string|null; enabled:boolean };
+export type CatalogTable = { id:number; datasource_id:number; schema_name:string; table_name:string; table_comment?:string|null; table_type:string; estimated_row_count?:number|null; primary_key_columns_json:string[]; enabled:boolean };
+export type CatalogColumn = { id:number; datasource_id:number; catalog_table_id:number; schema_name:string; table_name:string; column_name:string; column_comment?:string|null; data_type?:string|null; nullable:boolean; ordinal_position:number; is_primary_key:boolean; enabled:boolean };
+export type CatalogSearchItem = { catalog_column_id:number; datasource_id:number; datasource_name:string; schema_name:string; table_name:string; table_comment?:string|null; column_name:string; column_comment?:string|null; data_type?:string|null; nullable:boolean; is_primary_key:boolean; score:number; match_reasons:string[]; imported_source_field_id?:number|null; imported_mart_field_id?:number|null };
+export type MetadataSyncTask = { id:number; datasource_id:number; status:string; sync_mode:string; schema_count:number; table_count:number; column_count:number; warnings_json:string[]; error_message?:string|null };
+export type ColumnProfileTask = { id:number; status:string; catalog_column_id:number; profile_result_json:Record<string,unknown>; generated_sql_json:Array<{metric:string;sql:string}>; error_message?:string|null };
+export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog_column_id:number; profile_date:string; total_count?:number|null; null_rate?:number|null; distinct_count?:number|null; min_value_text?:string|null; max_value_text?:string|null; min_length?:number|null; max_length?:number|null; average_length?:number|null; top_values_json:unknown[]; warnings_json:unknown[] };
+export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; parse_summary_json:Record<string,unknown>; warnings_json:string[] };
+export type KnowledgeUnit = { id:number; document_id:number; knowledge_type:string; unit_type:string; title?:string|null; content:string; source_file_name:string; source_sheet_name?:string|null; source_page_no?:number|null; source_heading?:string|null; source_cell_range?:string|null; target_field_code?:string|null; enabled:boolean };
+export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[] };
+export type RenderIssue = { severity:"error"|"warning"|"info";code:string;message:string;sheet_name?:string|null;cell?:string|null;business_section?:string|null;business_field?:string|null;target_field_id?:number|null };
+export type ValidationResult = { valid?:boolean;error_count:number;warning_count:number;info_count?:number;issues:RenderIssue[] };
+export type BackgroundJobSummary = { id:number;job_type:string;status:string;progress:number;current_step?:string|null;result_summary_json:Record<string,unknown>;error_message?:string|null;updated_at?:string };
+export type DeliverableTemplate = { id:number;project_id:number;template_name:string;template_type:string;description?:string|null;enabled:boolean;is_default:boolean;current_version_no:number;current_version_id?:number|null;current_version_status?:string|null;validation_error_count?:number;validation_warning_count?:number };
+export type DeliverableTemplateVersion = { id:number;project_id:number;template_id:number;stored_file_id:number;version_no:number;file_hash:string;sheet_config_json:Array<{sheet_name:string}>;parse_status:string;warnings_json:RenderIssue[];created_at?:string;validation?:ValidationResult;sheet_mapping_count?:number;enabled_sheet_mapping_count?:number };
+export type FieldReadiness = { target_field_id:number;status:string;source_to_mart_status:string;mart_to_ybt_status:string;evidence_completeness:number;open_question_count:number;blocking_reasons:Array<{code:string;message:string}>;evidence_dimensions:Record<string,string> };
+export type DeliverableFieldItem = { id:number;target_field_id:number;field_order:number;field_status:string;business_summary?:string|null;technical_summary?:string|null;evidence_completeness:number;confidence_level:string;open_question_count:number;readiness?:FieldReadiness;validation_result_json?:FieldReadiness };
+export type DeliverablePackageVersion = { id:number;version_no:number;generated_file_id:number;workflow_instance_id?:number|null;content_hash:string;approved_by?:number|null;approved_at?:string;created_at:string };
+export type DeliverablePackage = { id:number;project_id:number;package_name:string;package_type:string;target_table_id:number;template_version_id:number;status:string;version_no:number;generated_file_id?:number|null;generation_job_id?:number|null;render_job_id?:number|null;summary_json:{validation?:ValidationResult;render_validation?:ValidationResult;review_submission?:Record<string,unknown>;[key:string]:unknown};warnings_json:RenderIssue[];field_count:number;approved_field_count:number;blocking_field_count:number;high_priority_question_count:number;unreviewed_impact_count:number;lineage_record_count?:number;change_impact_record_count?:number;generation_job?:BackgroundJobSummary|null;render_job?:BackgroundJobSummary|null;workflow?:{id:number;status:string;current_step?:string|null;current_assignee_user_id?:number|null;current_assignee_role?:string|null}|null;readiness?:{field_count:number;approved_count:number;blocked_count:number;status_counts:Record<string,number>};questions?:PendingQuestion[];versions?:DeliverablePackageVersion[];items:DeliverableFieldItem[];updated_at?:string };
+export type PendingQuestion = { id:number;project_id:number;target_table_id:number;target_field_id?:number|null;scenario_id?:number|null;question_type:string;question_text:string;question_status:string;priority:string;assigned_role?:string|null;assigned_user_id?:number|null;source_type?:string|null;source_id?:number|null;resolution_text?:string|null };
+export type HistoricalCaliberImport = { id:number;project_id:number;import_name:string;document_type:string;status:string;parse_summary_json:Record<string,number>;warnings_json:unknown[];created_at?:string };
+export type HistoricalCaliberItem = { id:number;project_id?:number;target_field_code?:string|null;target_field_name?:string|null;scenario_name?:string|null;business_content?:string|null;technical_content?:string|null;source_sheet_name:string;source_cell_range:string;match_status:string;matched_target_field_id?:number|null;matched_scenario_id?:number|null };
+export type ProjectMembership = { id:number;project_id:number;user_id:number;project_role:string;status:string };
+
+export type RegulatoryKnowledgeItem = {
+  id: number;
+  knowledge_type: string;
+  target_field_code?: string | null;
+  scenario_id?: number | null;
+  business_explanation?: string | null;
+  source_document_name?: string | null;
+  source_sheet_name?: string | null;
+  source_cell_range?: string | null;
+  score?: number;
+};
+
+export type TraceabilityTemplateDocument = {
+  id: number;
+  project_id: number;
+  file_name: string;
+  parse_status: string;
+  sheet_names_json: string[];
+  detected_scenarios_json: Array<{ scenario_code: string; scenario_name: string }>;
+  parse_summary_json: Record<string, number>;
+  warnings_json: string[];
+  error_message?: string | null;
+};
+
+export type KnowledgeDocument = {
+  id: number;
+  project_id: number;
+  file_name: string;
+  file_type: string;
+  source_type: string;
+};
+
+export type SqlFile = {
+  id: number;
+  project_id: number;
+  file_name: string;
+  raw_sql: string;
+  parse_result?: {
+    parsed_success: boolean;
+    source_tables_json: string[];
+    selected_fields_json: string[];
+    joins_json: string[];
+    where_conditions_json: string[];
+    error_message?: string | null;
+  } | null;
+};
+
+export type FieldDraft = {
+  id: number;
+  business_to_mart_rule?: string | null;
+  mart_to_ybt_rule?: string | null;
+  source_system_candidates_json: string[];
+  source_table_candidates_json: string[];
+  source_field_candidates_json: string[];
+  east_reference_summary?: string | null;
+  sql_reference_summary?: string | null;
+  validation_notes?: string | null;
+  confidence_level: string;
+  review_status: string;
+  final_content?: string | null;
+  risk_points_json: string[];
+  questions_for_human_json: string[];
+  template_reference_summary?: string | null;
+  db_query_summary?: string | null;
+  data_quality_notes?: string | null;
+  evidence_completeness?: string;
+  evidences: Array<{
+    id: number;
+    evidence_type: string;
+    source_name: string;
+    location_text: string;
+    quoted_content: string;
+  }>;
+};
+
+export type TemplateDocument = {
+  id: number;
+  project_id: number;
+  file_name: string;
+  parse_status: string;
+  sheet_names_json: string[];
+  error_message?: string | null;
+};
+
+export type TemplateUploadResponse = {
+  template_id: number;
+  file_name: string;
+  parse_status: string;
+  sheet_count: number;
+  table_count: number;
+  field_count: number;
+  warnings: string[];
+  preview: Array<{
+    sheet_name: string;
+    table_code?: string | null;
+    table_name?: string | null;
+    field_count: number;
+  }>;
+};
+
+export type TemplateApplyResponse = {
+  template_id: number;
+  created_tables: number;
+  updated_tables: number;
+  created_fields: number;
+  updated_fields: number;
+  skipped_rows: number;
+  warnings: string[];
+};
+
+export type DataSource = {
+  id: number;
+  project_id: number;
+  name: string;
+  display_name?: string | null;
+  db_type: string;
+  host?: string | null;
+  port?: number | null;
+  database_name?: string | null;
+  schema_name?: string | null;
+  username?: string | null;
+  password_configured: boolean;
+  readonly_flag: boolean;
+  enabled: boolean;
+  last_test_status?: string | null;
+  last_test_message?: string | null;
+};
+
+export type NaturalLanguageTask = {
+  id: number;
+  project_id: number;
+  raw_text: string;
+  datasource_name?: string | null;
+  intent?: string | null;
+  status: string;
+  extracted_table_name?: string | null;
+  extracted_field_name?: string | null;
+  generated_sql_json: Array<{ name: string; sql: string }>;
+  result_summary_json: Record<string, unknown>;
+  error_message?: string | null;
+};
+
+export type NaturalLanguageTaskCreateResponse = {
+  task_id: number;
+  status: string;
+  datasource_name?: string | null;
+  intent?: string | null;
+  extracted_table_name?: string | null;
+  extracted_field_name?: string | null;
+  message: string;
+  available_datasources: string[];
+};
+
+export type BusinessSystem = {
+  id: number;
+  project_id: number;
+  system_code: string;
+  system_name: string;
+  description?: string | null;
+  owner_department?: string | null;
+  enabled: boolean;
+};
+
+export type SourceTable = {
+  id: number;
+  project_id: number;
+  business_system_id: number;
+  table_code: string;
+  table_name: string;
+  table_comment?: string | null;
+  datasource_id?: number | null;
+  schema_name?: string | null;
+  physical_table_name?: string | null;
+  description?: string | null;
+};
+
+export type SourceField = {
+  id: number;
+  project_id: number;
+  source_table_id: number;
+  field_code: string;
+  field_name: string;
+  field_type?: string | null;
+  field_comment?: string | null;
+  physical_column_name?: string | null;
+  description?: string | null;
+};
+
+export type MartTable = {
+  id: number;
+  project_id: number;
+  table_code: string;
+  table_name: string;
+  subject_area?: string | null;
+  table_comment?: string | null;
+  datasource_id?: number | null;
+  schema_name?: string | null;
+  physical_table_name?: string | null;
+  is_existing: boolean;
+  description?: string | null;
+};
+
+export type MartField = {
+  id: number;
+  project_id: number;
+  mart_table_id: number;
+  field_code: string;
+  field_name: string;
+  field_type?: string | null;
+  field_comment?: string | null;
+  physical_column_name?: string | null;
+  is_existing: boolean;
+  description?: string | null;
+};
+
+export type SourceToMartMapping = {
+  id: number;
+  project_id: number;
+  mart_field_id: number;
+  mapping_name?: string | null;
+  mapping_status: string;
+  source_system_summary?: string | null;
+  source_tables_summary?: string | null;
+  source_fields_summary?: string | null;
+  business_rule?: string | null;
+  filter_condition?: string | null;
+  join_condition?: string | null;
+  priority_rule?: string | null;
+  merge_rule?: string | null;
+  code_mapping_rule?: string | null;
+  null_handling_rule?: string | null;
+  exception_rule?: string | null;
+  quality_check_rule?: string | null;
+  open_questions?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+  lineage_status: string;
+  lineage_last_verified_at?: string | null;
+  lineage_change_set_id?: number | null;
+};
+
+export type MartToYbtMapping = {
+  id: number;
+  project_id: number;
+  target_field_id: number;
+  mart_field_id?: number | null;
+  mapping_name?: string | null;
+  mapping_status: string;
+  mart_table_summary?: string | null;
+  mart_field_summary?: string | null;
+  business_rule?: string | null;
+  filter_condition?: string | null;
+  join_condition?: string | null;
+  code_mapping_rule?: string | null;
+  null_handling_rule?: string | null;
+  reporting_condition?: string | null;
+  validation_rule?: string | null;
+  open_questions?: string | null;
+  ai_generated_content?: string | null;
+  final_content?: string | null;
+  confidence_level: string;
+  lineage_status: string;
+  lineage_last_verified_at?: string | null;
+  lineage_change_set_id?: number | null;
+};
+
+export type MappingEvidence = {
+  id: number;
+  project_id: number;
+  mapping_type: string;
+  mapping_id: number;
+  evidence_type: string;
+  evidence_id?: number | null;
+  source_name: string;
+  location_text?: string | null;
+  quoted_content?: string | null;
+  evidence_summary?: string | null;
+};
+
+export type MappingDocumentExport = {
+  format: string;
+  scope: string;
+  scope_id: number;
+  file_name: string;
+  content: string;
+};
