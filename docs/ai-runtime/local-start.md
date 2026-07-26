@@ -7,7 +7,7 @@
 ```powershell
 git checkout main
 git pull origin main
-cd ybt-requirement-ai-platform
+cd <仓库目录>
 Copy-Item backend/.env.example backend/.env
 notepad backend/.env
 python scripts/check_local_setup.py
@@ -19,7 +19,7 @@ docker compose up --build
 ```bash
 git checkout main
 git pull origin main
-cd ybt-requirement-ai-platform
+cd <仓库目录>
 cp backend/.env.example backend/.env
 ${EDITOR:-vi} backend/.env
 python scripts/check_local_setup.py
