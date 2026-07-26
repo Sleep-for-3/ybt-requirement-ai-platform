@@ -15,7 +15,7 @@ from generate_demo_uat_pack import FIXED_ZIP_TIME, generate_demo_pack
 
 
 def main() -> None:
-    base = "http://127.0.0.1:8000/api"
+    base = os.getenv("SMOKE_BASE_URL", "http://127.0.0.1:8000/api")
     client = httpx.Client(timeout=90, trust_env=False)
     artifact_dir = Path(os.environ["SMOKE_ARTIFACT_DIR"]).resolve() if os.getenv("SMOKE_ARTIFACT_DIR") else None
     if artifact_dir:

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Database, Download, FileSpreadsheet, FileUp, Play, Plus, RefreshCw, Save, Search, Upload, Wand2, X } from "lucide-react";
+import { Check, Database, Download, FileSpreadsheet, FileUp, Inbox, Play, Plus, RefreshCw, Save, Search, Upload, Wand2, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Section } from "@/components/Section";
@@ -638,7 +638,7 @@ export default function HomePage() {
               {projects.map((project) => (
                 <button
                   key={project.id}
-                  className={`w-full rounded-md border px-3 py-2 text-left text-sm ${project.id === selectedProjectId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                  className={`w-full rounded-md border px-3 py-2 text-left text-sm ${project.id === selectedProjectId ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                   onClick={() => setSelectedProjectId(project.id)}
                 >
                   <div className="font-medium">{project.name}</div>
@@ -722,7 +722,7 @@ export default function HomePage() {
               </div>
             ) : null}
             {templateApply ? (
-              <div className="mt-3 rounded-md border border-pine/30 bg-pine/10 px-3 py-2 text-sm text-pine">
+              <div className="mt-3 rounded-lg border border-pine-200 bg-pine-50 px-3 py-2 text-sm text-pine-700">
                 已创建 {templateApply.created_tables} 张表、{templateApply.created_fields} 个字段；更新 {templateApply.updated_tables} 张表、{templateApply.updated_fields} 个字段；跳过 {templateApply.skipped_rows} 行。
               </div>
             ) : null}
@@ -730,7 +730,11 @@ export default function HomePage() {
               {templates.map((template) => (
                 <div key={template.id} className="rounded-md border border-line bg-white px-3 py-2 text-sm">
                   <div className="font-medium">{template.file_name}</div>
-                  <div className="text-slate-500">{template.parse_status}</div>
+                  <div className="mt-1">
+                    <span className={template.parse_status === "parsed" ? "badge-info" : template.parse_status === "failed" ? "badge-danger" : "badge-neutral"}>
+                      {template.parse_status}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -809,7 +813,7 @@ export default function HomePage() {
                           {task.datasource_name || "-"} / {task.extracted_table_name || "-"} / {task.extracted_field_name || "-"}
                         </div>
                       </div>
-                      <Badge label={task.status} tone={task.status === "completed" ? "green" : task.status === "failed" ? "red" : "gold"} />
+                      <Badge label={task.status} tone={task.status === "completed" ? "green" : task.status === "failed" ? "red" : task.status === "parsed" ? "sky" : "gold"} />
                     </div>
                     {task.status === "parsed" ? (
                       <button className="button-secondary mt-3" onClick={() => runNaturalLanguageTask(task.id)} type="button">
@@ -821,7 +825,9 @@ export default function HomePage() {
                     {Object.keys(task.result_summary_json).length ? (
                       <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-md bg-mist p-3 text-xs">{JSON.stringify(task.result_summary_json, null, 2)}</pre>
                     ) : null}
-                    {task.error_message ? <p className="mt-2 text-coral">{task.error_message}</p> : null}
+                    {task.error_message ? (
+                      <p className="mt-2 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{task.error_message}</p>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -849,7 +855,7 @@ export default function HomePage() {
                 {businessSystems.map((system) => (
                   <button
                     key={system.id}
-                    className={`rounded-md border px-3 py-2 text-left text-sm ${system.id === selectedBusinessSystemId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${system.id === selectedBusinessSystemId ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                     onClick={() => setSelectedBusinessSystemId(system.id)}
                     type="button"
                   >
@@ -884,7 +890,7 @@ export default function HomePage() {
                 {sourceTables.map((table) => (
                   <button
                     key={table.id}
-                    className={`rounded-md border px-3 py-2 text-left text-sm ${table.id === selectedSourceTableId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${table.id === selectedSourceTableId ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                     onClick={() => setSelectedSourceTableId(table.id)}
                     type="button"
                   >
@@ -950,7 +956,7 @@ export default function HomePage() {
                 {martTables.map((table) => (
                   <button
                     key={table.id}
-                    className={`rounded-md border px-3 py-2 text-left text-sm ${table.id === selectedMartTableId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${table.id === selectedMartTableId ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                     onClick={() => setSelectedMartTableId(table.id)}
                     type="button"
                   >
@@ -982,7 +988,7 @@ export default function HomePage() {
                   return (
                     <button
                       key={field.id}
-                      className={`rounded-md border px-3 py-2 text-left text-sm ${field.id === selectedMartFieldId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                      className={`rounded-md border px-3 py-2 text-left text-sm ${field.id === selectedMartFieldId ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                       onClick={() => setSelectedMartFieldId(field.id)}
                       type="button"
                     >
@@ -1025,7 +1031,7 @@ export default function HomePage() {
                 {fields.map((field) => (
                   <button
                     key={field.id}
-                    className={`rounded-md border px-3 py-2 text-left text-sm ${field.id === selectedFieldId ? "border-pine bg-pine/10" : "border-line bg-white"}`}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${field.id === selectedFieldId ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                     onClick={() => setSelectedFieldId(field.id)}
                   >
                     <div className="font-medium">{field.field_code}</div>
@@ -1048,14 +1054,16 @@ export default function HomePage() {
                   <div key={sqlFile.id} className="rounded-md border border-line bg-white px-3 py-2 text-sm">
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-medium">{sqlFile.file_name}</div>
-                      <span className={sqlFile.parse_result?.parsed_success ? "text-pine" : "text-coral"}>
+                      <span className={sqlFile.parse_result?.parsed_success ? "badge-success" : "badge-danger"}>
                         {sqlFile.parse_result?.parsed_success ? "成功" : "失败"}
                       </span>
                     </div>
                     <SqlParseList label="表" values={sqlFile.parse_result?.source_tables_json || []} />
                     <SqlParseList label="字段" values={sqlFile.parse_result?.selected_fields_json || []} />
                     <SqlParseList label="WHERE" values={sqlFile.parse_result?.where_conditions_json || []} />
-                    {sqlFile.parse_result?.error_message ? <p className="mt-2 text-coral">{sqlFile.parse_result.error_message}</p> : null}
+                    {sqlFile.parse_result?.error_message ? (
+                      <p className="mt-2 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{sqlFile.parse_result.error_message}</p>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1079,18 +1087,21 @@ export default function HomePage() {
                   <Metric label="字段类型" value={selectedField.field_type || "-"} />
                   <Metric label="必填" value={selectedField.required_flag ? "是" : "否"} />
                 </div>
-                {message ? <div className="rounded-md border border-line bg-mist px-3 py-2 text-sm text-slate-700">{message}</div> : null}
+                {message ? <div className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</div> : null}
                 {draft ? (
                   <DraftView draft={draft} onReview={reviewDraft} />
                 ) : (
-                  <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-line bg-white text-sm text-slate-500">
-                    <Search size={16} className="mr-2" />
-                    暂无口径草稿
+                  <div className="empty-state">
+                    <Search className="text-slate-300" size={28} />
+                    <p>暂无口径草稿，点击右上角“生成口径”开始智能分析</p>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="flex min-h-44 items-center justify-center rounded-md border border-dashed border-line bg-white text-sm text-slate-500">暂无字段</div>
+              <div className="empty-state">
+                <Search className="text-slate-300" size={28} />
+                <p>暂无字段，请先在“目标字段”面板新建并选择字段</p>
+              </div>
             )}
           </Section>
 
@@ -1259,7 +1270,7 @@ function DraftView({ draft, onReview }: { draft: FieldDraft; onReview: (status: 
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge label={`置信度 ${draft.confidence_level}`} tone={draft.confidence_level === "high" ? "green" : draft.confidence_level === "low" ? "red" : "gold"} />
-        <Badge label={`审核 ${draft.review_status}`} tone="slate" />
+        <Badge label={`审核 ${draft.review_status}`} tone={draft.review_status === "approved" ? "green" : draft.review_status === "rejected" ? "red" : "slate"} />
         <button className="button-secondary" onClick={() => onReview("approved")}>
           <Check size={16} />
           通过
@@ -1427,7 +1438,12 @@ function MartToYbtCard({
 }
 
 function EmptyBlock({ text }: { text: string }) {
-  return <div className="flex min-h-24 items-center justify-center rounded-md border border-dashed border-line bg-white text-sm text-slate-500">{text}</div>;
+  return (
+    <div className="empty-state">
+      <Inbox className="text-slate-300" size={28} />
+      <p>{text}</p>
+    </div>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -1459,14 +1475,15 @@ function ListBlock({ title, values }: { title: string; values: string[] }) {
   );
 }
 
-function Badge({ label, tone }: { label: string; tone: "green" | "red" | "gold" | "slate" }) {
+function Badge({ label, tone }: { label: string; tone: "green" | "red" | "gold" | "sky" | "slate" }) {
   const classes = {
-    green: "border-pine/30 bg-pine/10 text-pine",
-    red: "border-coral/30 bg-coral/10 text-coral",
-    gold: "border-gold/30 bg-gold/10 text-gold",
-    slate: "border-line bg-mist text-slate-700"
+    green: "badge-success",
+    red: "badge-danger",
+    gold: "badge-warning",
+    sky: "badge-info",
+    slate: "badge-neutral"
   };
-  return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${classes[tone]}`}>{label}</span>;
+  return <span className={classes[tone]}>{label}</span>;
 }
 
 function SqlParseList({ label, values }: { label: string; values: string[] }) {

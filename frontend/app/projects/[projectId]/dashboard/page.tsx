@@ -38,33 +38,57 @@ const LABELS: Record<string, string> = {
 export default function Page() {
   const { projectId } = useParams<{ projectId: string }>();
   const [data, setData] = useState<Dashboard | null>(null);
+
   useEffect(() => {
     apiGet<Dashboard>(`/projects/${projectId}/dashboard`).then(setData);
   }, [projectId]);
-  return <main>
-    <WorkspaceHeader title="项目进度看板" meta="准备度、正式版本、变更影响、UAT 与下一步操作" />
-    <div className="mx-auto max-w-6xl space-y-5 p-6">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Summary label="项目准备度" value={data ? `${Math.round(data.readiness.score * 100)}% · ${data.readiness.status}` : "-"} href={`/projects/${projectId}/readiness`} />
-        <Summary label="失败任务" value={String(data?.recent_failed_jobs.length ?? "-")} href="/jobs" />
-        <Summary label="最近正式版本" value={data?.latest_formal_version ? `v${data.latest_formal_version.version_no}` : "尚无"} href={data?.latest_formal_version ? `/deliverables/${data.latest_formal_version.package_id}` : "/deliverables"} />
-        <Summary label="未审核影响" value={String(data?.unreviewed_impact_count ?? "-")} href="/lineage/changes" />
-        <Summary label="最新 UAT" value={data?.latest_uat ? `${data.latest_uat.run_name} · ${data.latest_uat.status}` : "尚无"} href={data?.latest_uat ? `/uat/runs/${data.latest_uat.id}` : "/uat"} />
-        <Summary label="下一操作" value={data?.next_action?.text || "等待准备度计算"} href={data?.next_action?.href || `/projects/${projectId}/readiness`} />
-      </section>
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Object.entries(LABELS).map(([key, label]) => <div className="panel p-4" key={key}>
-          <div className="text-sm text-slate-500">{label}</div>
-          <div className="mt-2 text-3xl font-semibold">{typeof data?.[key] === "number" ? String(data[key]) : "-"}</div>
-        </div>)}
-      </section>
-    </div>
-  </main>;
+
+  return (
+    <main>
+      <WorkspaceHeader title="项目进度看板" meta="准备度、正式版本、变更影响、UAT 与下一步操作" />
+      <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Summary
+            label="项目准备度"
+            value={data ? `${Math.round(data.readiness.score * 100)}% · ${data.readiness.status}` : "-"}
+            href={`/projects/${projectId}/readiness`}
+          />
+          <Summary label="失败任务" value={String(data?.recent_failed_jobs.length ?? "-")} href="/jobs" />
+          <Summary
+            label="最近正式版本"
+            value={data?.latest_formal_version ? `v${data.latest_formal_version.version_no}` : "尚无"}
+            href={data?.latest_formal_version ? `/deliverables/${data.latest_formal_version.package_id}` : "/deliverables"}
+          />
+          <Summary label="未审核影响" value={String(data?.unreviewed_impact_count ?? "-")} href="/lineage/changes" />
+          <Summary
+            label="最新 UAT"
+            value={data?.latest_uat ? `${data.latest_uat.run_name} · ${data.latest_uat.status}` : "尚无"}
+            href={data?.latest_uat ? `/uat/runs/${data.latest_uat.id}` : "/uat"}
+          />
+          <Summary
+            label="下一操作"
+            value={data?.next_action?.text || "等待准备度计算"}
+            href={data?.next_action?.href || `/projects/${projectId}/readiness`}
+          />
+        </section>
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Object.entries(LABELS).map(([key, label]) => (
+            <div className="stat-card" key={key}>
+              <div className="stat-label">{label}</div>
+              <div className="stat-value">{typeof data?.[key] === "number" ? String(data[key]) : "-"}</div>
+            </div>
+          ))}
+        </section>
+      </div>
+    </main>
+  );
 }
 
 function Summary({ label, value, href }: { label: string; value: string; href: string }) {
-  return <Link className="panel p-4 transition hover:border-pine" href={href}>
-    <div className="text-sm text-slate-500">{label}</div>
-    <div className="mt-2 font-semibold text-slate-900">{value}</div>
-  </Link>;
+  return (
+    <Link className="stat-card block transition hover:border-pine" href={href}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value text-lg">{value}</div>
+    </Link>
+  );
 }

@@ -24,6 +24,15 @@ const EMPTY_LINEAGE = {
 };
 const EMPTY_PROFILE: ColumnProfileTask = { id: 0, status: "", catalog_column_id: 0, profile_result_json: {}, generated_sql_json: [] };
 
+function statusBadgeClass(status?: string | null) {
+  const value = (status || "").toLowerCase();
+  if (["approved", "success", "completed", "enabled"].includes(value)) return "badge-success";
+  if (["failed", "rejected", "error"].includes(value)) return "badge-danger";
+  if (["pending", "running", "processing"].includes(value)) return "badge-warning";
+  if (["parsed", "draft", "info"].includes(value)) return "badge-info";
+  return "badge-neutral";
+}
+
 export default function FieldScenarioPage() {
   const fieldId = Number(useParams<{ fieldId: string }>().fieldId);
   const [field, setField] = useState<TargetField | null>(null);
@@ -258,27 +267,114 @@ export default function FieldScenarioPage() {
       </div>
       <div className="mx-auto max-w-[1600px] p-4 lg:p-6">
         <div className="mb-4 flex gap-2 overflow-x-auto border-b border-line pb-3">
-          {scenarios.map((item) => <button className={item.id === scenarioId ? "button-primary" : "button-secondary"} key={item.id} onClick={() => setScenarioId(item.id)}>{item.scenario_name}</button>)}
+          {scenarios.map((item) => (
+            <button
+              className={`inline-flex h-9 shrink-0 select-none items-center whitespace-nowrap rounded-lg border px-3.5 text-sm font-medium transition ${
+                item.id === scenarioId
+                  ? "border-pine bg-pine-50 text-pine-700"
+                  : "border-line bg-white text-slate-600 hover:bg-mist"
+              }`}
+              key={item.id}
+              onClick={() => setScenarioId(item.id)}
+            >
+              {item.scenario_name}
+            </button>
+          ))}
         </div>
-        {message ? <div className="mb-4 rounded-md border border-line bg-white px-4 py-3 text-sm">{message}</div> : null}
-        <section className="panel mb-5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">协作、审核与脚本血缘状态</h2><p className="mt-1 text-xs text-slate-500">场景口径走五阶段审核；脚本高风险变化另走三阶段血缘复核</p></div><div className="flex flex-wrap gap-2"><button className="button-primary" disabled={!business||!lineage||busy||["in_review","returned","approved"].includes(reviewPackage?.status||"")} onClick={submitReview}>提交审核</button>{reviewPackage?.workflow_instance?.can_withdraw?<button className="button-secondary" disabled={busy} onClick={withdrawReview}>撤回申请</button>:null}{reviewPackage?.workflow_instance?.current_task_id?<Link className="button-secondary" href={`/tasks/${reviewPackage.workflow_instance.current_task_id}`}>查看任务</Link>:null}<Link className="button-secondary" href={`/lineage/fields/${field.id}`}>查看上下游血缘</Link>{lineage?.lineage_change_set_id?<Link className="button-secondary" href={`/lineage/changes/${lineage.lineage_change_set_id}`}>查看最近影响</Link>:null}<Link className="button-secondary" href={`/projects/${field.project_id}/dashboard`}>项目看板</Link><Link className="button-secondary" href={`/audit?projectId=${field.project_id}`}>操作审计</Link></div></div><div className="mt-4 grid gap-3 md:grid-cols-4"><ReviewMeta label="审核包" value={reviewPackage?`#${reviewPackage.id} · ${reviewPackage.status} · v${reviewPackage.current_version_no}`:"尚未创建"}/><ReviewMeta label="当前审核步骤" value={reviewPackage?.workflow_instance?.current_step||"尚未提交"}/><ReviewMeta label="当前负责人" value={reviewPackage?.workflow_instance?.current_assignee_user_id?`用户 #${reviewPackage.workflow_instance.current_assignee_user_id}`:(reviewPackage?.workflow_instance?.current_assignee_role||"待分配")}/><ReviewMeta label="血缘状态" value={lineage?`${lineage.lineage_status}${lineage.lineage_last_verified_at?` · ${new Date(lineage.lineage_last_verified_at).toLocaleString()}`:""}`:"not_linked"}/></div><div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">{contextualReviewTasks.map(task=><Link className="rounded-md border border-line p-3 text-sm hover:bg-slate-50" href={`/tasks/${task.id}`} key={task.id}><b>{task.step_key}</b><div className="mt-1 text-xs text-slate-500">{task.status} · 负责人 #{task.assignee_user_id||"待领取"}</div><div className="mt-1 text-xs text-slate-500">到期：{task.due_at||"未设置"}</div><div className="mt-2 text-xs text-blue-600">审核意见与历史快照 →</div></Link>)}{!contextualReviewTasks.length?<div className="text-sm text-slate-500">当前字段场景暂无审核任务</div>:null}</div></section>
+        {message ? (
+          <div className="mb-4 rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</div>
+        ) : null}
+
+        <section className="panel mb-5 overflow-hidden">
+          <div className="panel-header flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink">协作、审核与脚本血缘状态</h2>
+              <p className="mt-0.5 text-xs text-slate-500">场景口径走五阶段审核；脚本高风险变化另走三阶段血缘复核</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="button-primary"
+                disabled={!business || !lineage || busy || ["in_review", "returned", "approved"].includes(reviewPackage?.status || "")}
+                onClick={submitReview}
+              >
+                提交审核
+              </button>
+              {reviewPackage?.workflow_instance?.can_withdraw ? (
+                <button className="button-secondary" disabled={busy} onClick={withdrawReview}>撤回申请</button>
+              ) : null}
+              {reviewPackage?.workflow_instance?.current_task_id ? (
+                <Link className="button-secondary" href={`/tasks/${reviewPackage.workflow_instance.current_task_id}`}>查看任务</Link>
+              ) : null}
+              <Link className="button-secondary" href={`/lineage/fields/${field.id}`}>查看上下游血缘</Link>
+              {lineage?.lineage_change_set_id ? (
+                <Link className="button-secondary" href={`/lineage/changes/${lineage.lineage_change_set_id}`}>查看最近影响</Link>
+              ) : null}
+              <Link className="button-secondary" href={`/projects/${field.project_id}/dashboard`}>项目看板</Link>
+              <Link className="button-secondary" href={`/audit?projectId=${field.project_id}`}>操作审计</Link>
+            </div>
+          </div>
+          <div className="panel-body">
+            <div className="grid gap-3 md:grid-cols-4">
+              <ReviewMeta label="审核包" value={reviewPackage ? `#${reviewPackage.id} · ${reviewPackage.status} · v${reviewPackage.current_version_no}` : "尚未创建"} />
+              <ReviewMeta label="当前审核步骤" value={reviewPackage?.workflow_instance?.current_step || "尚未提交"} />
+              <ReviewMeta label="当前负责人" value={reviewPackage?.workflow_instance?.current_assignee_user_id ? `用户 #${reviewPackage.workflow_instance.current_assignee_user_id}` : (reviewPackage?.workflow_instance?.current_assignee_role || "待分配")} />
+              <ReviewMeta label="血缘状态" value={lineage ? `${lineage.lineage_status}${lineage.lineage_last_verified_at ? ` · ${new Date(lineage.lineage_last_verified_at).toLocaleString()}` : ""}` : "not_linked"} />
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+              {contextualReviewTasks.map((task) => (
+                <Link
+                  className="rounded-lg border border-line bg-white p-3 text-sm shadow-xs transition hover:bg-mist"
+                  href={`/tasks/${task.id}`}
+                  key={task.id}
+                >
+                  <b>{task.step_key}</b>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                    <span className={statusBadgeClass(task.status)}>{task.status}</span>
+                    <span>负责人 #{task.assignee_user_id || "待领取"}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">到期：{task.due_at || "未设置"}</div>
+                  <div className="mt-2 text-xs font-medium text-pine-600 hover:text-pine-700">审核意见与历史快照 →</div>
+                </Link>
+              ))}
+              {!contextualReviewTasks.length ? (
+                <div className="text-sm text-slate-500">当前字段场景暂无审核任务</div>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
         <div className="grid gap-5 xl:grid-cols-2">
           <section className="panel overflow-hidden">
             <PanelTitle title="业务口径" status={business?.business_confirm_status || "未维护"} />
-            <div className="grid gap-3 p-4 md:grid-cols-2">
-              <Field label="字段业务定义" wide><textarea className="control min-h-24" value={String(businessForm.business_definition || "")} onChange={(e) => setBusinessForm({ ...businessForm, business_definition: e.target.value })} /></Field>
+            <div className="grid gap-3 p-5 md:grid-cols-2">
+              <Field label="字段业务定义" wide>
+                <textarea className="control min-h-24" value={String(businessForm.business_definition || "")} onChange={(e) => setBusinessForm({ ...businessForm, business_definition: e.target.value })} />
+              </Field>
               {[
                 ["source_system_screenshot_required", "源系统截图"], ["source_system_change_required", "源系统改造"],
                 ["external_data_required", "外部数据"], ["manual_supplement_required", "手工补录"],
-              ].map(([key, label]) => <label className="flex h-10 items-center gap-2 rounded-md border border-line px-3 text-sm" key={key}><input checked={Boolean(businessForm[key])} onChange={(e) => setBusinessForm({ ...businessForm, [key]: e.target.checked })} type="checkbox" />{label}</label>)}
+              ].map(([key, label]) => (
+                <label className="flex h-10 items-center gap-2 rounded-lg border border-line px-3 text-sm transition hover:bg-mist" key={key}>
+                  <input checked={Boolean(businessForm[key])} className="accent-pine-600" onChange={(e) => setBusinessForm({ ...businessForm, [key]: e.target.checked })} type="checkbox" />
+                  {label}
+                </label>
+              ))}
               <TextInput label="业务口径确认人" value={String(businessForm.business_owner || "")} onChange={(value) => setBusinessForm({ ...businessForm, business_owner: value })} />
               <TextInput label="置信度" value={String(businessForm.confidence_level || "medium")} onChange={(value) => setBusinessForm({ ...businessForm, confidence_level: value })} />
-              <Field label="备注" wide><textarea className="control min-h-20" value={String(businessForm.remarks || "")} onChange={(e) => setBusinessForm({ ...businessForm, remarks: e.target.value })} /></Field>
-              <Field label="AI 草稿" wide><textarea className="control min-h-28 bg-slate-50" readOnly value={String(businessForm.ai_generated_content || "")} /></Field>
-              <Field label="最终口径" wide><textarea className="control min-h-32" value={String(businessForm.final_content || "")} onChange={(e) => setBusinessForm({ ...businessForm, final_content: e.target.value })} /></Field>
-              <Field label="待确认问题" wide><textarea className="control min-h-20" value={String(businessForm.open_questions || "")} onChange={(e) => setBusinessForm({ ...businessForm, open_questions: e.target.value })} /></Field>
+              <Field label="备注" wide>
+                <textarea className="control min-h-20" value={String(businessForm.remarks || "")} onChange={(e) => setBusinessForm({ ...businessForm, remarks: e.target.value })} />
+              </Field>
+              <Field label="AI 草稿" wide>
+                <textarea className="control min-h-28 bg-mist/60" readOnly value={String(businessForm.ai_generated_content || "")} />
+              </Field>
+              <Field label="最终口径" wide>
+                <textarea className="control min-h-32" value={String(businessForm.final_content || "")} onChange={(e) => setBusinessForm({ ...businessForm, final_content: e.target.value })} />
+              </Field>
+              <Field label="待确认问题" wide>
+                <textarea className="control min-h-20" value={String(businessForm.open_questions || "")} onChange={(e) => setBusinessForm({ ...businessForm, open_questions: e.target.value })} />
+              </Field>
             </div>
-            <div className="flex flex-wrap gap-2 border-t border-line p-4">
+            <div className="flex flex-wrap gap-2 border-t border-line px-5 py-4">
               <button className="button-secondary" onClick={searchKnowledge}><Search size={16} />检索历史知识</button>
               <button className="button-secondary" onClick={() => searchRagKnowledge(["regulatory_qa"])}><Search size={16} />检索监管答疑</button>
               <button className="button-secondary" onClick={() => searchRagKnowledge(["historical_mapping", "historical_traceability"])}><Search size={16} />检索历史口径</button>
@@ -289,58 +385,278 @@ export default function FieldScenarioPage() {
               <button className="button-primary" disabled={busy} onClick={saveBusiness}><Save size={16} />保存</button>
               <button className="button-secondary" disabled={!business} onClick={() => setShowBusinessEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
             </div>
-            {showBusinessEvidenceForm ? <div className="border-t border-line bg-slate-50 p-4"><label className="text-xs text-slate-500" htmlFor="business-evidence">人工证据说明</label><textarea className="control mt-1 min-h-20" id="business-evidence" onChange={(event) => setBusinessEvidenceText(event.target.value)} placeholder="填写脱敏的业务访谈结论或监管答疑依据" value={businessEvidenceText} /><button className="button-primary mt-2" disabled={!businessEvidenceText.trim() || busy} onClick={bindBusinessEvidence}><Link2 size={16} />确认绑定</button>{businessEvidences.length ? <div className="mt-3 space-y-2">{businessEvidences.map((item) => <div className="rounded-md border border-line bg-white p-2 text-xs" key={item.id}><strong>{item.source_name}</strong><p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p></div>)}</div> : null}</div> : null}
+            {showBusinessEvidenceForm ? (
+              <div className="border-t border-line bg-mist/60 p-5">
+                <label className="text-xs font-medium text-slate-500" htmlFor="business-evidence">人工证据说明</label>
+                <textarea className="control mt-1 min-h-20" id="business-evidence" onChange={(event) => setBusinessEvidenceText(event.target.value)} placeholder="填写脱敏的业务访谈结论或监管答疑依据" value={businessEvidenceText} />
+                <button className="button-primary mt-2" disabled={!businessEvidenceText.trim() || busy} onClick={bindBusinessEvidence}><Link2 size={16} />确认绑定</button>
+                {businessEvidences.length ? (
+                  <div className="mt-3 space-y-2">
+                    {businessEvidences.map((item) => (
+                      <div className="rounded-lg border border-line bg-white p-2.5 text-xs shadow-xs" key={item.id}>
+                        <strong className="text-ink">{item.source_name}</strong>
+                        <p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <section className="panel overflow-hidden">
             <PanelTitle title="技术溯源" status={lineage?.tech_confirm_status || "未维护"} />
-            <div className="grid gap-3 p-4 md:grid-cols-2">
+            <div className="grid gap-3 p-5 md:grid-cols-2">
               {[
                 ["source_system_name", "来源系统"], ["source_database_name", "来源库"], ["source_schema_name", "来源 schema"],
                 ["source_table_english_name", "来源表英文名"], ["source_table_chinese_name", "来源表中文名"],
                 ["source_field_english_name", "来源字段英文名"], ["source_field_chinese_name", "来源字段中文名"],
                 ["tech_owner", "技术口径确认人"],
               ].map(([key, label]) => <TextInput key={key} label={label} value={lineageForm[key] || ""} onChange={(value) => setLineageForm({ ...lineageForm, [key]: value })} />)}
-              <Field label="处理逻辑类型"><select className="control" value={lineageForm.processing_logic_type} onChange={(e) => setLineageForm({ ...lineageForm, processing_logic_type: e.target.value })}>{["direct", "default_value", "code_mapping", "concatenate", "calculate", "conditional", "manual_supplement", "external_data", "pending_confirmation"].map((item) => <option key={item}>{item}</option>)}</select></Field>
+              <Field label="处理逻辑类型">
+                <select className="control" value={lineageForm.processing_logic_type} onChange={(e) => setLineageForm({ ...lineageForm, processing_logic_type: e.target.value })}>
+                  {["direct", "default_value", "code_mapping", "concatenate", "calculate", "conditional", "manual_supplement", "external_data", "pending_confirmation"].map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </Field>
               <TextInput label="置信度" value={lineageForm.confidence_level || "medium"} onChange={(value) => setLineageForm({ ...lineageForm, confidence_level: value })} />
-              <Field label="处理逻辑" wide><textarea className="control min-h-24" value={lineageForm.processing_logic} onChange={(e) => setLineageForm({ ...lineageForm, processing_logic: e.target.value })} /></Field>
-              <Field label="备注" wide><textarea className="control min-h-20" value={lineageForm.remarks} onChange={(e) => setLineageForm({ ...lineageForm, remarks: e.target.value })} /></Field>
-              <Field label="AI 草稿" wide><textarea className="control min-h-28 bg-slate-50" readOnly value={lineageForm.ai_generated_content} /></Field>
-              <Field label="最终技术口径" wide><textarea className="control min-h-32" value={lineageForm.final_content} onChange={(e) => setLineageForm({ ...lineageForm, final_content: e.target.value })} /></Field>
-              <Field label="待确认问题" wide><textarea className="control min-h-20" value={lineageForm.open_questions} onChange={(e) => setLineageForm({ ...lineageForm, open_questions: e.target.value })} /></Field>
+              <Field label="处理逻辑" wide>
+                <textarea className="control min-h-24" value={lineageForm.processing_logic} onChange={(e) => setLineageForm({ ...lineageForm, processing_logic: e.target.value })} />
+              </Field>
+              <Field label="备注" wide>
+                <textarea className="control min-h-20" value={lineageForm.remarks} onChange={(e) => setLineageForm({ ...lineageForm, remarks: e.target.value })} />
+              </Field>
+              <Field label="AI 草稿" wide>
+                <textarea className="control min-h-28 bg-mist/60" readOnly value={lineageForm.ai_generated_content} />
+              </Field>
+              <Field label="最终技术口径" wide>
+                <textarea className="control min-h-32" value={lineageForm.final_content} onChange={(e) => setLineageForm({ ...lineageForm, final_content: e.target.value })} />
+              </Field>
+              <Field label="待确认问题" wide>
+                <textarea className="control min-h-20" value={lineageForm.open_questions} onChange={(e) => setLineageForm({ ...lineageForm, open_questions: e.target.value })} />
+              </Field>
             </div>
-            <div className="flex flex-wrap gap-2 border-t border-line p-4">
+            <div className="flex flex-wrap gap-2 border-t border-line px-5 py-4">
               <button className="button-secondary" onClick={recommend}><DatabaseZap size={16} />推荐来源字段</button>
               <button className="button-secondary" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/generate-draft`, {}), "AI 技术草稿已生成")}><Sparkles size={16} />AI 草稿</button>
               <button className="button-secondary" disabled={!lineage?.ai_generated_content || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/adopt-ai-draft`, {}), "已采用 AI 草稿")}><Check size={16} />采用草稿</button>
               <button className="button-primary" disabled={busy} onClick={saveLineage}><Save size={16} />保存</button>
               <button className="button-secondary" disabled={!lineage} onClick={() => setShowEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
             </div>
-            {showEvidenceForm ? <div className="border-t border-line bg-slate-50 p-4">
-              <label className="text-xs text-slate-500" htmlFor="technical-evidence">人工证据说明</label>
-              <textarea className="control mt-1 min-h-20" id="technical-evidence" onChange={(event) => setEvidenceText(event.target.value)} placeholder="填写脱敏的来源依据、访谈结论或待核实说明" value={evidenceText} />
-              <button className="button-primary mt-2" disabled={!evidenceText.trim() || busy} onClick={bindTechnicalEvidence}><Link2 size={16} />确认绑定</button>
-              {technicalEvidences.length ? <div className="mt-3 space-y-2">{technicalEvidences.map((item) => <div className="rounded-md border border-line bg-white p-2 text-xs" key={item.id}><strong>{item.source_name}</strong><p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p></div>)}</div> : null}
-            </div> : null}
+            {showEvidenceForm ? (
+              <div className="border-t border-line bg-mist/60 p-5">
+                <label className="text-xs font-medium text-slate-500" htmlFor="technical-evidence">人工证据说明</label>
+                <textarea className="control mt-1 min-h-20" id="technical-evidence" onChange={(event) => setEvidenceText(event.target.value)} placeholder="填写脱敏的来源依据、访谈结论或待核实说明" value={evidenceText} />
+                <button className="button-primary mt-2" disabled={!evidenceText.trim() || busy} onClick={bindTechnicalEvidence}><Link2 size={16} />确认绑定</button>
+                {technicalEvidences.length ? (
+                  <div className="mt-3 space-y-2">
+                    {technicalEvidences.map((item) => (
+                      <div className="rounded-lg border border-line bg-white p-2.5 text-xs shadow-xs" key={item.id}>
+                        <strong className="text-ink">{item.source_name}</strong>
+                        <p className="mt-1 text-slate-600">{item.evidence_summary || item.quoted_content || "-"}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         </div>
 
-        {(recommendations.length || knowledge.length || ragKnowledge.length || groundedAnswer) ? <section className="mt-5 grid gap-5 xl:grid-cols-2">
-          <div className="panel p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">候选来源</h2><div className="flex gap-2"><select className="control" onChange={e=>setDatasourceFilter(e.target.value)} value={datasourceFilter}><option value="">全部数据源</option>{Array.from(new Set(recommendations.map(item=>item.recommended_source_system||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select><select className="control" onChange={e=>setSchemaFilter(e.target.value)} value={schemaFilter}><option value="">全部 schema</option>{Array.from(new Set(recommendations.map(item=>item.recommended_schema_name||""))).filter(Boolean).map(value=><option key={value}>{value}</option>)}</select></div></div><div className="mt-3 space-y-2">{recommendations.filter(item=>(!datasourceFilter||item.recommended_source_system===datasourceFilter)&&(!schemaFilter||item.recommended_schema_name===schemaFilter)).map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><div className="flex items-center justify-between gap-3"><strong>{item.recommended_source_system} / {item.recommended_database_name || "-"} / {item.recommended_schema_name}.{item.recommended_table_name}.{item.recommended_field_name}</strong><span>{Math.round(item.score * 100)}%</span></div><p className="mt-1 text-xs text-slate-500">{item.data_type||"类型待确认"} / {item.nullable===false?"非空":"可空或未知"} / profile: {item.profile_status||"未探查"} / {item.recommendation_basis || "依据待确认"}</p><p className="mt-2 text-slate-600">{item.recommend_reason}</p><p className="mt-1 text-xs text-slate-500">{item.evidence_summary}</p>{item.citation_summary_json?.length ? <div className="mt-2 rounded bg-slate-50 p-2 text-xs"><strong>知识引用</strong>{item.citation_summary_json.map(citation => <div key={citation.knowledge_unit_id}>#{citation.knowledge_unit_id} {citation.source_file_name} {citation.source_sheet_name || ""} {citation.source_cell_range || ""}</div>)}</div> : null}<div className="mt-3 flex flex-wrap gap-2"><button className="button-secondary" onClick={()=>selectCatalogCandidate(item)}><Check size={16}/>选择候选</button>{item.catalog_column_id?<button className="button-secondary" onClick={()=>showProfileHistory(item)}><Clock3 size={16}/>探查历史</button>:null}{item.catalog_column_id?<button className="button-secondary" disabled={selectedRecommendationId!==item.id} onClick={()=>profileCatalogCandidate(item)}><DatabaseZap size={16}/>执行安全探查</button>:null}{item.catalog_column_id?<button className="button-primary" disabled={selectedRecommendationId!==item.id||!profileTask||profileTask.catalog_column_id!==item.catalog_column_id||!profileTask.status.includes("completed")} onClick={()=>adoptCatalogCandidate(item)}><Check size={16}/>采用为技术来源</button>:null}</div>{profileTask?.catalog_column_id===item.catalog_column_id?<pre className="mt-3 overflow-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(profileTask.profile_result_json,null,2)}</pre>:null}{profileHistory && profileHistory.columnId===item.catalog_column_id?<CandidateProfileHistory items={profileHistory.items}/>:null}</div>)}</div></div>
-          <div className="space-y-5">
-            <div className="panel p-4"><h2 className="text-sm font-semibold">带出处知识</h2><div className="mt-3 space-y-2">{ragKnowledge.map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.knowledge_unit_id}><div className="flex justify-between gap-3"><strong>{item.title || item.knowledge_type}</strong><span>{Math.round(item.rerank_score * 100)}%</span></div><p className="mt-2 text-slate-600">{item.content}</p><p className="mt-1 text-xs text-slate-500">{item.source_file_name} / {item.source_sheet_name || "-"} / {item.source_cell_range || (item.source_page_no ? `第 ${item.source_page_no} 页` : "-")}</p><div className="mt-2 flex gap-2"><button className="button-secondary" onClick={() => submitFeedback(item.knowledge_unit_id, "correct")}>正确</button><button className="button-secondary" onClick={() => submitFeedback(item.knowledge_unit_id, "partially_correct")}>部分正确</button><button className="button-danger" onClick={() => submitFeedback(item.knowledge_unit_id, "incorrect")}>错误</button></div></div>)}</div></div>
-            {groundedAnswer ? <div className="panel p-4"><h2 className="text-sm font-semibold">字段解释与引用</h2><pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(groundedAnswer, null, 2)}</pre></div> : null}
-            {knowledge.length ? <div className="panel p-4"><h2 className="text-sm font-semibold">兼容历史结构化知识</h2><div className="mt-3 space-y-2">{knowledge.map((item) => <div className="rounded-md border border-line p-3 text-sm" key={item.id}><strong>{item.knowledge_type}</strong><p className="mt-2 text-slate-600">{item.business_explanation || "-"}</p><p className="mt-1 text-xs text-slate-500">{item.source_document_name} / {item.source_sheet_name} / {item.source_cell_range}</p></div>)}</div></div> : null}
-          </div>
-        </section> : null}
+        {(recommendations.length || knowledge.length || ragKnowledge.length || groundedAnswer) ? (
+          <section className="mt-5 grid gap-5 xl:grid-cols-2">
+            <div className="panel h-fit overflow-hidden">
+              <div className="panel-header flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-[15px] font-semibold text-ink">候选来源</h2>
+                <div className="flex gap-2">
+                  <select className="control" onChange={(e) => setDatasourceFilter(e.target.value)} value={datasourceFilter}>
+                    <option value="">全部数据源</option>
+                    {Array.from(new Set(recommendations.map((item) => item.recommended_source_system || ""))).filter(Boolean).map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
+                  <select className="control" onChange={(e) => setSchemaFilter(e.target.value)} value={schemaFilter}>
+                    <option value="">全部 schema</option>
+                    {Array.from(new Set(recommendations.map((item) => item.recommended_schema_name || ""))).filter(Boolean).map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="panel-body">
+                {recommendations.length ? (
+                  <div className="space-y-3">
+                    {recommendations
+                      .filter((item) => (!datasourceFilter || item.recommended_source_system === datasourceFilter) && (!schemaFilter || item.recommended_schema_name === schemaFilter))
+                      .map((item) => (
+                        <div className="rounded-lg border border-line bg-white p-3 text-sm shadow-xs" key={item.id}>
+                          <div className="flex items-center justify-between gap-3">
+                            <strong className="text-ink">{item.recommended_source_system} / {item.recommended_database_name || "-"} / {item.recommended_schema_name}.{item.recommended_table_name}.{item.recommended_field_name}</strong>
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-pine-600">{Math.round(item.score * 100)}%</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">{item.data_type || "类型待确认"} / {item.nullable === false ? "非空" : "可空或未知"} / profile: {item.profile_status || "未探查"} / {item.recommendation_basis || "依据待确认"}</p>
+                          <p className="mt-2 text-slate-600">{item.recommend_reason}</p>
+                          <p className="mt-1 text-xs text-slate-500">{item.evidence_summary}</p>
+                          {item.citation_summary_json?.length ? (
+                            <div className="mt-2 rounded-lg border border-line bg-mist/60 p-2 text-xs">
+                              <strong>知识引用</strong>
+                              {item.citation_summary_json.map((citation) => (
+                                <div key={citation.knowledge_unit_id}>#{citation.knowledge_unit_id} {citation.source_file_name} {citation.source_sheet_name || ""} {citation.source_cell_range || ""}</div>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button className="button-secondary" onClick={() => selectCatalogCandidate(item)}><Check size={16} />选择候选</button>
+                            {item.catalog_column_id ? (
+                              <button className="button-secondary" onClick={() => showProfileHistory(item)}><Clock3 size={16} />探查历史</button>
+                            ) : null}
+                            {item.catalog_column_id ? (
+                              <button className="button-secondary" disabled={selectedRecommendationId !== item.id} onClick={() => profileCatalogCandidate(item)}><DatabaseZap size={16} />执行安全探查</button>
+                            ) : null}
+                            {item.catalog_column_id ? (
+                              <button
+                                className="button-primary"
+                                disabled={selectedRecommendationId !== item.id || !profileTask || profileTask.catalog_column_id !== item.catalog_column_id || !profileTask.status.includes("completed")}
+                                onClick={() => adoptCatalogCandidate(item)}
+                              >
+                                <Check size={16} />采用为技术来源
+                              </button>
+                            ) : null}
+                          </div>
+                          {profileTask?.catalog_column_id === item.catalog_column_id ? (
+                            <pre className="mt-3 overflow-auto rounded-lg border border-line bg-mist/60 p-2 text-xs">{JSON.stringify(profileTask.profile_result_json, null, 2)}</pre>
+                          ) : null}
+                          {profileHistory && profileHistory.columnId === item.catalog_column_id ? <CandidateProfileHistory items={profileHistory.items} /> : null}
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <DatabaseZap className="text-slate-300" size={28} />
+                    <p>暂无候选来源，点击“从数据目录搜索”或“推荐来源字段”生成推荐</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="space-y-5">
+              <div className="panel overflow-hidden">
+                <div className="panel-header">
+                  <h2 className="text-[15px] font-semibold text-ink">带出处知识</h2>
+                </div>
+                <div className="panel-body">
+                  {ragKnowledge.length ? (
+                    <div className="space-y-3">
+                      {ragKnowledge.map((item) => (
+                        <div className="rounded-lg border border-line bg-white p-3 text-sm shadow-xs" key={item.knowledge_unit_id}>
+                          <div className="flex justify-between gap-3">
+                            <strong className="text-ink">{item.title || item.knowledge_type}</strong>
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-pine-600">{Math.round(item.rerank_score * 100)}%</span>
+                          </div>
+                          <p className="mt-2 text-slate-600">{item.content}</p>
+                          <p className="mt-1 text-xs text-slate-500">{item.source_file_name} / {item.source_sheet_name || "-"} / {item.source_cell_range || (item.source_page_no ? `第 ${item.source_page_no} 页` : "-")}</p>
+                          <div className="mt-2 flex gap-2">
+                            <button className="button-secondary" onClick={() => submitFeedback(item.knowledge_unit_id, "correct")}>正确</button>
+                            <button className="button-secondary" onClick={() => submitFeedback(item.knowledge_unit_id, "partially_correct")}>部分正确</button>
+                            <button className="button-danger" onClick={() => submitFeedback(item.knowledge_unit_id, "incorrect")}>错误</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <Search className="text-slate-300" size={28} />
+                      <p>暂无检索结果，试试上方的“检索监管答疑”或“检索历史口径”</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {groundedAnswer ? (
+                <div className="panel overflow-hidden">
+                  <div className="panel-header">
+                    <h2 className="text-[15px] font-semibold text-ink">字段解释与引用</h2>
+                  </div>
+                  <div className="panel-body">
+                    <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-mist/60 p-3 text-xs">{JSON.stringify(groundedAnswer, null, 2)}</pre>
+                  </div>
+                </div>
+              ) : null}
+              {knowledge.length ? (
+                <div className="panel overflow-hidden">
+                  <div className="panel-header">
+                    <h2 className="text-[15px] font-semibold text-ink">兼容历史结构化知识</h2>
+                  </div>
+                  <div className="panel-body space-y-3">
+                    {knowledge.map((item) => (
+                      <div className="rounded-lg border border-line bg-white p-3 text-sm shadow-xs" key={item.id}>
+                        <strong className="text-ink">{item.knowledge_type}</strong>
+                        <p className="mt-2 text-slate-600">{item.business_explanation || "-"}</p>
+                        <p className="mt-1 text-xs text-slate-500">{item.source_document_name} / {item.source_sheet_name} / {item.source_cell_range}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
       </div>
     </main>
   );
 }
 
-function Meta({ label, value }: { label: string; value?: string | null }) { return <div><div className="text-xs text-slate-500">{label}</div><div className="mt-1 line-clamp-3 text-sm">{value || "-"}</div></div>; }
-function ReviewMeta({ label, value }: { label: string; value: string }) { return <div className="rounded-md border border-line bg-slate-50 p-3"><div className="text-xs text-slate-500">{label}</div><div className="mt-1 text-sm font-medium">{value}</div></div>; }
-function PanelTitle({ title, status }: { title: string; status: string }) { return <div className="flex items-center justify-between border-b border-line px-4 py-3"><h2 className="font-semibold">{title}</h2><span className="rounded-md border border-line bg-slate-50 px-2 py-1 text-xs">{status}</span></div>; }
-function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? "md:col-span-2" : ""}><span className="mb-1 block text-xs text-slate-500">{label}</span>{children}</label>; }
-function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <Field label={label}><input className="control" onChange={(event) => onChange(event.target.value)} value={value} /></Field>; }
-function CandidateProfileHistory({ items }: { items: ColumnProfileSnapshot[] }) { return <div className="mt-3 rounded bg-slate-50 p-2 text-xs">{items.length ? items.map((snapshot) => <div key={snapshot.id}>{new Date(snapshot.profile_date).toLocaleString()} · total {snapshot.total_count ?? "-"} · null rate {snapshot.null_rate ?? "-"} · distinct {snapshot.distinct_count ?? "-"}</div>) : "暂无探查历史"}</div>; }
+function Meta({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-slate-500">{label}</div>
+      <div className="mt-1 line-clamp-3 text-sm text-ink">{value || "-"}</div>
+    </div>
+  );
+}
+
+function ReviewMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-mist/60 p-3">
+      <div className="text-xs font-medium text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-medium text-ink">{value}</div>
+    </div>
+  );
+}
+
+function PanelTitle({ title, status }: { title: string; status: string }) {
+  return (
+    <div className="panel-header flex items-center justify-between gap-3">
+      <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+      <span className={statusBadgeClass(status)}>{status}</span>
+    </div>
+  );
+}
+
+function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) {
+  return (
+    <label className={wide ? "md:col-span-2" : ""}>
+      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <Field label={label}>
+      <input className="control" onChange={(event) => onChange(event.target.value)} value={value} />
+    </Field>
+  );
+}
+
+function CandidateProfileHistory({ items }: { items: ColumnProfileSnapshot[] }) {
+  return (
+    <div className="mt-3 rounded-lg border border-line bg-mist/60 p-2 text-xs">
+      {items.length
+        ? items.map((snapshot) => (
+            <div key={snapshot.id}>
+              {new Date(snapshot.profile_date).toLocaleString()} · total {snapshot.total_count ?? "-"} · null rate {snapshot.null_rate ?? "-"} · distinct {snapshot.distinct_count ?? "-"}
+            </div>
+          ))
+        : "暂无探查历史"}
+    </div>
+  );
+}

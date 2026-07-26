@@ -2,15 +2,15 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, Plus, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { CheckCircle2, Download, Plus, ShieldCheck, Table2, Trash2, Upload } from "lucide-react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { DeliverableTemplateVersion, ValidationResult, apiGet, apiPost, apiPostDownload, uploadForm } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
 
-type Detail = { id:number;project_id:number;template_name:string;template_type:string;enabled:boolean;is_default:boolean;versions:DeliverableTemplateVersion[] };
-type ColumnDraft = { business_field:string;excel_column:string;write_mode:string;merge_strategy:string;required:boolean };
-type SheetDraft = { business_section:string;sheet_name:string;header_row_start:number;header_row_end:number;data_start_row:number;repeat_direction:string;enabled:boolean;columns:ColumnDraft[] };
+type Detail = { id: number; project_id: number; template_name: string; template_type: string; enabled: boolean; is_default: boolean; versions: DeliverableTemplateVersion[] };
+type ColumnDraft = { business_field: string; excel_column: string; write_mode: string; merge_strategy: string; required: boolean };
+type SheetDraft = { business_section: string; sheet_name: string; header_row_start: number; header_row_end: number; data_start_row: number; repeat_direction: string; enabled: boolean; columns: ColumnDraft[] };
 
 const SECTIONS = ["target_field","scenario_business_mapping","scenario_technical_lineage","source_to_mart","mart_to_ybt","pending_question","evidence","review_record","lineage","change_impact"];
 const FIELDS: Record<string, string[]> = {
@@ -63,58 +63,361 @@ export default function Page() {
 
   async function save() {
     if (!versionId || immutable) return;
-    try { await apiPost(`/deliverable-template-versions/${versionId}/configure`, {sheet_mappings:mappings.filter(item => item.enabled)}); setMessage("映射已保存，请执行正式校验。"); await loadDetail(versionId); }
-    catch (error) { setMessage(readError(error)); }
+    try {
+      await apiPost(`/deliverable-template-versions/${versionId}/configure`, {sheet_mappings:mappings.filter(item => item.enabled)});
+      setMessage("映射已保存，请执行正式校验。");
+      await loadDetail(versionId);
+    } catch (error) {
+      setMessage(readError(error));
+    }
   }
   async function validate() {
     if (!versionId) return;
-    try { const result = await apiPost<ValidationResult>(`/deliverable-template-versions/${versionId}/validate`, {}); setValidation(result); setMessage(result.valid ? "模板校验通过，可以激活。" : `模板存在 ${result.error_count} 个阻断错误。`); }
-    catch (error) { setMessage(readError(error)); }
+    try {
+      const result = await apiPost<ValidationResult>(`/deliverable-template-versions/${versionId}/validate`, {});
+      setValidation(result);
+      setMessage(result.valid ? "模板校验通过，可以激活。" : `模板存在 ${result.error_count} 个阻断错误。`);
+    } catch (error) {
+      setMessage(readError(error));
+    }
   }
   async function activate() {
     if (!versionId) return;
     try {
-      const result = await apiPost<ValidationResult>(`/deliverable-template-versions/${versionId}/validate`, {}); setValidation(result);
+      const result = await apiPost<ValidationResult>(`/deliverable-template-versions/${versionId}/validate`, {});
+      setValidation(result);
       if (!result.valid) { setMessage(`激活已阻止：仍有 ${result.error_count} 个错误。`); return; }
-      await apiPost(`/deliverable-template-versions/${versionId}/activate`, {}); setMessage("模板版本已激活并设为当前默认版本。"); await loadDetail(versionId);
-    } catch (error) { setMessage(readError(error)); }
+      await apiPost(`/deliverable-template-versions/${versionId}/activate`, {});
+      setMessage("模板版本已激活并设为当前默认版本。");
+      await loadDetail(versionId);
+    } catch (error) {
+      setMessage(readError(error));
+    }
   }
   async function preview() {
     if (!versionId) return;
-    try { const file = await apiPostDownload(`/deliverable-template-versions/${versionId}/preview-render`); saveBlob(file.blob, file.fileName); }
-    catch (error) { setMessage(readError(error)); }
+    try {
+      const file = await apiPostDownload(`/deliverable-template-versions/${versionId}/preview-render`);
+      saveBlob(file.blob, file.fileName);
+    } catch (error) {
+      setMessage(readError(error));
+    }
   }
   async function uploadVersion() {
     if (!detail || !newFile) return;
-    const form = new FormData(); form.append("file", newFile); form.append("template_id", String(detail.id)); form.append("template_name", detail.template_name); form.append("template_type", detail.template_type);
-    try { const uploaded = await uploadForm<{version:{id:number}}>(`/projects/${detail.project_id}/deliverable-templates/upload`, form); setMessage("新版本已上传，旧激活版本保持不可变。"); setNewFile(null); await loadDetail(uploaded.version.id); }
-    catch (error) { setMessage(readError(error)); }
+    const form = new FormData();
+    form.append("file", newFile);
+    form.append("template_id", String(detail.id));
+    form.append("template_name", detail.template_name);
+    form.append("template_type", detail.template_type);
+    try {
+      const uploaded = await uploadForm<{version:{id:number}}>(`/projects/${detail.project_id}/deliverable-templates/upload`, form);
+      setMessage("新版本已上传，旧激活版本保持不可变。");
+      setNewFile(null);
+      await loadDetail(uploaded.version.id);
+    } catch (error) {
+      setMessage(readError(error));
+    }
   }
 
-  return <main>
-    <WorkspaceHeader title={detail?.template_name || "模板配置"} meta="Sheet、业务字段、校验与版本激活" />
-    <div className="mx-auto max-w-7xl space-y-5 p-6">
-      <section className="panel grid gap-4 p-4 lg:grid-cols-[220px_1fr_auto]">
-        <label className="text-xs">当前查看版本<select className="control mt-1" value={versionId || ""} onChange={event => setVersionId(Number(event.target.value))}>{detail?.versions.map(item => <option key={item.id} value={item.id}>v{item.version_no} / {statusLabel(item.parse_status)}</option>)}</select></label>
-        <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4"><Stat label="业务区域" value={`${configuredSections}/10`} /><Stat label="Sheet 映射" value={String(version?.enabled_sheet_mapping_count ?? mappings.filter(item => item.enabled).length)} /><Stat label="校验错误" value={String(validation?.error_count ?? 0)} /><Stat label="版本状态" value={statusLabel(version?.parse_status)} /></div>
-        <div className="flex flex-wrap items-end gap-2">{permissions.can("template.manage") ? <button className="button-secondary" onClick={validate}><ShieldCheck size={15} />正式校验</button> : null}{permissions.can("template.manage") ? <button className="button-primary" disabled={immutable || validation?.valid !== true} onClick={activate}><CheckCircle2 size={15} />激活版本</button> : null}{permissions.can("template.manage") ? <button className="button-secondary" onClick={preview}><Download size={15} />预览下载</button> : null}</div>
-      </section>
-      {version?.parse_status === "active" ? <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">此版本已激活并保持不可变。如需调整，请在下方上传新版本。</p> : !permissions.can("template.manage") ? <p className="rounded-md border border-line bg-white p-3 text-sm text-slate-500">当前角色为 {permissions.role || "只读角色"}，只能查看模板配置。</p> : null}
-      {message ? <p className="panel p-3 text-sm">{message}</p> : null}
-      {validation?.issues.length ? <section className="panel overflow-hidden"><div className="panel-header font-semibold">模板校验问题</div>{validation.issues.map((issue, index) => <div className="grid gap-2 border-b p-3 text-sm md:grid-cols-[80px_180px_1fr]" key={`${issue.code}-${index}`}><span className={issue.severity === "error" ? "text-coral" : "text-amber-700"}>{issue.severity}</span><code>{issue.code}</code><span>{issue.message}{issue.sheet_name ? ` · ${issue.sheet_name}${issue.cell ? `!${issue.cell}` : ""}` : ""}</span></div>)}</section> : null}
-      {mappings.map((sheet, sheetIndex) => <section className="panel p-4" key={`${sheet.sheet_name}-${sheetIndex}`}>
-        <div className="grid gap-3 md:grid-cols-7"><label className="text-xs">启用<input className="ml-2" disabled={immutable} type="checkbox" checked={sheet.enabled} onChange={event => patchSheet(sheetIndex, {enabled:event.target.checked})} /></label><label className="text-xs md:col-span-2">Sheet<input className="control mt-1" value={sheet.sheet_name} readOnly /></label><label className="text-xs">业务区域<select className="control mt-1" disabled={immutable} value={sheet.business_section} onChange={event => patchSheet(sheetIndex, {business_section:event.target.value, columns:[]})}>{SECTIONS.map(section => <option key={section}>{section}</option>)}</select></label><NumberField label="表头起始行" value={sheet.header_row_start} disabled={immutable} onChange={value => patchSheet(sheetIndex, {header_row_start:value})} /><NumberField label="表头结束行" value={sheet.header_row_end} disabled={immutable} onChange={value => patchSheet(sheetIndex, {header_row_end:value})} /><NumberField label="数据起始行" value={sheet.data_start_row} disabled={immutable} onChange={value => patchSheet(sheetIndex, {data_start_row:value})} /></div>
-        <label className="mt-3 block max-w-xs text-xs">展开方向<select className="control mt-1" disabled={immutable} value={sheet.repeat_direction} onChange={event => patchSheet(sheetIndex, {repeat_direction:event.target.value})}><option value="vertical">多来源纵向</option><option value="horizontal">多场景横向</option></select></label>
-        <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th>平台业务字段</th><th>Excel 列</th><th>写入方式</th><th>合并方式</th><th>必填</th><th /></tr></thead><tbody>{sheet.columns.map((column, columnIndex) => <tr key={columnIndex}><td><select className="control" disabled={immutable} value={column.business_field} onChange={event => patchColumn(sheetIndex, columnIndex, {business_field:event.target.value})}>{(FIELDS[sheet.business_section] || []).map(field => <option key={field}>{field}</option>)}</select></td><td><input className="control w-24" disabled={immutable} value={column.excel_column} onChange={event => patchColumn(sheetIndex, columnIndex, {excel_column:event.target.value.toUpperCase()})} /></td><td><select className="control" disabled={immutable} value={column.write_mode} onChange={event => patchColumn(sheetIndex, columnIndex, {write_mode:event.target.value})}>{["overwrite","append","fill_blank_only","repeat_by_scenario","repeat_by_source"].map(value => <option key={value}>{value}</option>)}</select></td><td><select className="control" disabled={immutable} value={column.merge_strategy} onChange={event => patchColumn(sheetIndex, columnIndex, {merge_strategy:event.target.value})}>{["none","merge_same_target_field","merge_same_scenario","preserve_template"].map(value => <option key={value}>{value}</option>)}</select></td><td><input disabled={immutable} type="checkbox" checked={column.required} onChange={event => patchColumn(sheetIndex, columnIndex, {required:event.target.checked})} /></td><td><button className="button-secondary" disabled={immutable} onClick={() => removeColumn(sheetIndex, columnIndex)}><Trash2 size={14} /></button></td></tr>)}</tbody></table></div>
-        <button className="button-secondary mt-3" disabled={immutable} onClick={() => addColumn(sheetIndex)}><Plus size={14} />添加列映射</button>
-      </section>)}
-      {permissions.can("template.manage") ? <section className="flex flex-wrap gap-2"><button className="button-primary" disabled={immutable} onClick={save}>保存映射</button><input className="control max-w-md" type="file" accept=".xlsx" onChange={event => setNewFile(event.target.files?.[0] || null)} /><button className="button-secondary" disabled={!newFile} onClick={uploadVersion}><Upload size={15} />上传新版本</button></section> : null}
-    </div>
-  </main>;
+  return (
+    <main>
+      <WorkspaceHeader title={detail?.template_name || "模板配置"} meta="Sheet、业务字段、校验与版本激活" />
+      <div className="mx-auto max-w-7xl space-y-5 p-4 lg:p-6">
+        <section className="panel grid gap-4 p-4 lg:grid-cols-[220px_1fr_auto]">
+          <label className="text-xs font-medium text-slate-500">
+            当前查看版本
+            <select
+              className="control mt-1"
+              onChange={event => setVersionId(Number(event.target.value))}
+              value={versionId || ""}
+            >
+              {detail?.versions.map(item => (
+                <option key={item.id} value={item.id}>
+                  v{item.version_no} / {statusLabel(item.parse_status)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <Stat label="业务区域" value={`${configuredSections}/10`} />
+            <Stat label="Sheet 映射" value={String(version?.enabled_sheet_mapping_count ?? mappings.filter(item => item.enabled).length)} />
+            <Stat label="校验错误" value={String(validation?.error_count ?? 0)} />
+            <Stat label="版本状态" value={statusLabel(version?.parse_status)} />
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            {permissions.can("template.manage") ? (
+              <button className="button-secondary" onClick={validate}>
+                <ShieldCheck size={15} />
+                正式校验
+              </button>
+            ) : null}
+            {permissions.can("template.manage") ? (
+              <button className="button-primary" disabled={immutable || validation?.valid !== true} onClick={activate}>
+                <CheckCircle2 size={15} />
+                激活版本
+              </button>
+            ) : null}
+            {permissions.can("template.manage") ? (
+              <button className="button-secondary" onClick={preview}>
+                <Download size={15} />
+                预览下载
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        {version?.parse_status === "active" ? (
+          <p className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-sm text-gold-800">
+            此版本已激活并保持不可变。如需调整，请在下方上传新版本。
+          </p>
+        ) : !permissions.can("template.manage") ? (
+          <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">
+            当前角色为 {permissions.role || "只读角色"}，只能查看模板配置。
+          </p>
+        ) : null}
+        {message ? (
+          <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
+        ) : null}
+
+        {validation?.issues.length ? (
+          <section className="panel overflow-hidden">
+            <div className="panel-header">
+              <h2 className="text-[15px] font-semibold text-ink">模板校验问题</h2>
+            </div>
+            <div className="grid-head hidden gap-2 md:grid md:grid-cols-[80px_180px_1fr]">
+              <span>级别</span>
+              <span>代码</span>
+              <span>问题说明</span>
+            </div>
+            {validation.issues.map((issue, index) => (
+              <div
+                className="grid-row grid items-center gap-2 md:grid-cols-[80px_180px_1fr]"
+                key={`${issue.code}-${index}`}
+              >
+                <span className={issue.severity === "error" ? "badge-danger" : "badge-warning"}>{issue.severity}</span>
+                <code className="text-xs text-slate-600">{issue.code}</code>
+                <span>
+                  {issue.message}
+                  {issue.sheet_name ? ` · ${issue.sheet_name}${issue.cell ? `!${issue.cell}` : ""}` : ""}
+                </span>
+              </div>
+            ))}
+          </section>
+        ) : null}
+
+        {mappings.map((sheet, sheetIndex) => (
+          <section className="panel p-4" key={`${sheet.sheet_name}-${sheetIndex}`}>
+            <div className="grid gap-3 md:grid-cols-7">
+              <label className="text-xs font-medium text-slate-500">
+                启用
+                <input
+                  checked={sheet.enabled}
+                  className="ml-2"
+                  disabled={immutable}
+                  onChange={event => patchSheet(sheetIndex, { enabled: event.target.checked })}
+                  type="checkbox"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-500 md:col-span-2">
+                Sheet
+                <input className="control mt-1" readOnly value={sheet.sheet_name} />
+              </label>
+              <label className="text-xs font-medium text-slate-500">
+                业务区域
+                <select
+                  className="control mt-1"
+                  disabled={immutable}
+                  onChange={event => patchSheet(sheetIndex, { business_section: event.target.value, columns: [] })}
+                  value={sheet.business_section}
+                >
+                  {SECTIONS.map(section => (
+                    <option key={section}>{section}</option>
+                  ))}
+                </select>
+              </label>
+              <NumberField
+                disabled={immutable}
+                label="表头起始行"
+                onChange={value => patchSheet(sheetIndex, { header_row_start: value })}
+                value={sheet.header_row_start}
+              />
+              <NumberField
+                disabled={immutable}
+                label="表头结束行"
+                onChange={value => patchSheet(sheetIndex, { header_row_end: value })}
+                value={sheet.header_row_end}
+              />
+              <NumberField
+                disabled={immutable}
+                label="数据起始行"
+                onChange={value => patchSheet(sheetIndex, { data_start_row: value })}
+                value={sheet.data_start_row}
+              />
+            </div>
+            <label className="mt-3 block max-w-xs text-xs font-medium text-slate-500">
+              展开方向
+              <select
+                className="control mt-1"
+                disabled={immutable}
+                onChange={event => patchSheet(sheetIndex, { repeat_direction: event.target.value })}
+                value={sheet.repeat_direction}
+              >
+                <option value="vertical">多来源纵向</option>
+                <option value="horizontal">多场景横向</option>
+              </select>
+            </label>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-line bg-slate-50/80 text-xs font-semibold text-slate-500">
+                  <tr>
+                    <th className="px-2 py-2 font-semibold">平台业务字段</th>
+                    <th className="px-2 py-2 font-semibold">Excel 列</th>
+                    <th className="px-2 py-2 font-semibold">写入方式</th>
+                    <th className="px-2 py-2 font-semibold">合并方式</th>
+                    <th className="px-2 py-2 font-semibold">必填</th>
+                    <th className="px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {sheet.columns.map((column, columnIndex) => (
+                    <tr key={columnIndex}>
+                      <td className="p-2">
+                        <select
+                          className="control"
+                          disabled={immutable}
+                          onChange={event => patchColumn(sheetIndex, columnIndex, { business_field: event.target.value })}
+                          value={column.business_field}
+                        >
+                          {(FIELDS[sheet.business_section] || []).map(field => (
+                            <option key={field}>{field}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          className="control w-24"
+                          disabled={immutable}
+                          onChange={event => patchColumn(sheetIndex, columnIndex, { excel_column: event.target.value.toUpperCase() })}
+                          value={column.excel_column}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <select
+                          className="control"
+                          disabled={immutable}
+                          onChange={event => patchColumn(sheetIndex, columnIndex, { write_mode: event.target.value })}
+                          value={column.write_mode}
+                        >
+                          {["overwrite","append","fill_blank_only","repeat_by_scenario","repeat_by_source"].map(value => (
+                            <option key={value}>{value}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <select
+                          className="control"
+                          disabled={immutable}
+                          onChange={event => patchColumn(sheetIndex, columnIndex, { merge_strategy: event.target.value })}
+                          value={column.merge_strategy}
+                        >
+                          {["none","merge_same_target_field","merge_same_scenario","preserve_template"].map(value => (
+                            <option key={value}>{value}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          checked={column.required}
+                          disabled={immutable}
+                          onChange={event => patchColumn(sheetIndex, columnIndex, { required: event.target.checked })}
+                          type="checkbox"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <button className="button-secondary" disabled={immutable} onClick={() => removeColumn(sheetIndex, columnIndex)}>
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button className="button-secondary mt-3" disabled={immutable} onClick={() => addColumn(sheetIndex)}>
+              <Plus size={14} />
+              添加列映射
+            </button>
+          </section>
+        ))}
+
+        {!mappings.length ? (
+          <div className="empty-state">
+            <Table2 className="text-slate-300" size={28} />
+            <p>暂无可配置的 Sheet 映射，上传并解析模板后在此配置业务区域。</p>
+          </div>
+        ) : null}
+
+        {permissions.can("template.manage") ? (
+          <section className="flex flex-wrap gap-2">
+            <button className="button-primary" disabled={immutable} onClick={save}>
+              保存映射
+            </button>
+            <input
+              accept=".xlsx"
+              className="control max-w-md"
+              onChange={event => setNewFile(event.target.files?.[0] || null)}
+              type="file"
+            />
+            <button className="button-secondary" disabled={!newFile} onClick={uploadVersion}>
+              <Upload size={15} />
+              上传新版本
+            </button>
+          </section>
+        ) : null}
+      </div>
+    </main>
+  );
 }
 
-function Stat({label, value}:{label:string;value:string}) { return <div className="rounded bg-slate-50 p-2"><div className="text-xs text-slate-500">{label}</div><b>{value}</b></div>; }
-function NumberField({label, value, disabled, onChange}:{label:string;value:number;disabled:boolean;onChange:(value:number)=>void}) { return <label className="text-xs">{label}<input className="control mt-1" min={1} disabled={disabled} type="number" value={value} onChange={event => onChange(Number(event.target.value))} /></label>; }
-function statusLabel(status?:string|null) { return ({parsed:"待配置",configured:"已配置",active:"已激活"} as Record<string,string>)[status || ""] || status || "未知"; }
-function readError(error:unknown) { return error instanceof Error ? error.message : "操作失败"; }
-function saveBlob(blob:Blob, name:string) { const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = name; link.click(); URL.revokeObjectURL(url); }
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat-card p-3">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value text-lg">{value}</div>
+    </div>
+  );
+}
+
+function NumberField({ label, value, disabled, onChange }: { label: string; value: number; disabled: boolean; onChange: (value: number) => void }) {
+  return (
+    <label className="text-xs font-medium text-slate-500">
+      {label}
+      <input
+        className="control mt-1"
+        disabled={disabled}
+        min={1}
+        onChange={event => onChange(Number(event.target.value))}
+        type="number"
+        value={value}
+      />
+    </label>
+  );
+}
+
+function statusLabel(status?: string | null) {
+  return ({ parsed: "待配置", configured: "已配置", active: "已激活" } as Record<string, string>)[status || ""] || status || "未知";
+}
+
+function readError(error: unknown) {
+  return error instanceof Error ? error.message : "操作失败";
+}
+
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}
