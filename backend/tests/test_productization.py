@@ -50,6 +50,32 @@ def test_smoke_enables_governance_workflow_explicitly() -> None:
     assert '"governance_workflow_enabled": True' in smoke_source
 
 
+def test_windows_lifecycle_script_and_chinese_document_index_are_present() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+    for expected in (
+        'ValidateSet("start", "stop", "restart", "status")',
+        "python.exe",
+        "alembic upgrade head",
+        "Test-ManagedOwner",
+        "health/ready",
+        ".local-run",
+    ):
+        assert expected in lifecycle_source
+
+    expected_documents = (
+        "docs/说明文档索引.md",
+        "docs/ai-runtime/本地启动.md",
+        "docs/ai-runtime/模型调用流程.md",
+        "docs/ai-runtime/模型供应商配置.md",
+        "docs/ai-runtime/AI运行环境故障排查.md",
+        "docs/deployment/部署架构.md",
+        "docs/deployment/Docker编排部署.md",
+        "docs/deployment/UAT验收指南.md",
+    )
+    assert all((ROOT / path).is_file() for path in expected_documents)
+    assert not (ROOT / "docs" / "ai-runtime" / "local-start.md").exists()
+
+
 def test_full_smoke_workflow_is_manual_scheduled_and_uploads_sanitized_evidence() -> None:
     workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "smoke.yml").read_text(encoding="utf-8")
 

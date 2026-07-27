@@ -3,6 +3,8 @@
  * 领域类型定义见 lib/types.ts，从这里统一重导出。
  */
 
+import { BrowserAuthEnvironment, readApiResponse, throwApiError } from "./http-response.mjs";
+
 export * from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -28,12 +30,14 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
 }
 
+function browserAuthEnvironment(): BrowserAuthEnvironment | undefined {
+  if (typeof window === "undefined") return undefined;
+  return { location: window.location, sessionStorage: window.sessionStorage };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return response.json();
+  return readApiResponse<T>(response, path, browserAuthEnvironment());
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -75,7 +79,7 @@ export async function uploadForm<T>(path: string, formData: FormData): Promise<T
 export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string }> {
   const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
   if (!response.ok) {
-    throw new Error(await response.text());
+    return throwApiError(response, path, browserAuthEnvironment());
   }
   const disposition = response.headers.get("content-disposition") || "";
   const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
@@ -86,7 +90,7 @@ export async function apiDownload(path: string): Promise<{ blob: Blob; fileName:
 
 export async function apiPostDownload(path: string, body: unknown = {}): Promise<{ blob: Blob; fileName: string }> {
   const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) return throwApiError(response, path, browserAuthEnvironment());
   const disposition = response.headers.get("content-disposition") || "";
   const name = disposition.match(/filename=([^;]+)/i)?.[1] || "preview.xlsx";
   return { blob: await response.blob(), fileName: name.replaceAll('"', "") };

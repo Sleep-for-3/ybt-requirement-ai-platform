@@ -22,6 +22,7 @@ npm-debug.log*
 /backend/storage/
 /backend/dev_storage*/
 /uat_local_packs/
+/.local-run/
 *.db
 
 # Docker and OS

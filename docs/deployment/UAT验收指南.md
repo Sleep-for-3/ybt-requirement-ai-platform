@@ -1,4 +1,4 @@
-# UAT 操作指南
+# UAT 验收指南
 
 1. 在 `/uat` 选择项目，确认 8 个内置套件已幂等初始化；真实脱敏材料仅放入运行环境的 `UAT_LOCAL_PACK_DIR`。
 2. 可用 `python scripts/generate_demo_uat_pack.py --output <临时目录>` 生成公开虚构材料，或上传经批准的 ZIP/多文件材料包并执行完整性校验。

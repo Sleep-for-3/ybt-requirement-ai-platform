@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test tests/http-response.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

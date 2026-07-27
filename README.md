@@ -52,7 +52,22 @@ docker compose --profile milvus up --build
 - 后端就绪检查：[http://localhost:8000/health/ready](http://localhost:8000/health/ready)
 - 后端 OpenAPI：[http://localhost:8000/docs](http://localhost:8000/docs)
 
-后端与 worker 容器只读取未纳入 Git 的 `backend/.env`；`.env.example` 仅是空 Key 的公开模板。默认 `LLM_PROVIDER=mock`，无需大模型密钥即可验收。Windows 与 Linux/macOS 完整步骤、真实 Provider 配置及排障见 [`docs/ai-runtime/local-start.md`](docs/ai-runtime/local-start.md)。
+后端与 worker 容器只读取未纳入 Git 的 `backend/.env`；`.env.example` 仅是空 Key 的公开模板。默认 `LLM_PROVIDER=mock`，无需大模型密钥即可验收。Windows 与 Linux/macOS 完整步骤、真实 Provider 配置及排障见 [`docs/ai-runtime/本地启动.md`](docs/ai-runtime/本地启动.md)。
+
+## Windows 本地一键启停
+
+已安装 `backend/.venv` 和 `frontend/node_modules` 后，可在仓库根目录执行：
+
+```powershell
+.\scripts\项目启停.ps1 start
+.\scripts\项目启停.ps1 status
+.\scripts\项目启停.ps1 restart
+.\scripts\项目启停.ps1 stop
+```
+
+脚本会读取 `frontend/.env.local` 中的 API 地址确定后端端口，默认前端端口为 3000、后端端口为 8000；可使用 `-BackendPort`、`-FrontendPort` 和 `-DatabaseFile` 覆盖。日志与进程状态保存在已忽略的 `.local-run/`。
+
+所有说明文件及其用途见 [`docs/说明文档索引.md`](docs/说明文档索引.md)。
 
 ## 核心业务概念
 
