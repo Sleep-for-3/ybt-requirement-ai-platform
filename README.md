@@ -22,7 +22,8 @@ SQL 解析、数据源安全查询、自然语言任务和数据库探查结果�
 
 - 前端：Next.js 14、React 18、TypeScript、Tailwind CSS、lucide-react
 - 后端：FastAPI、SQLAlchemy 2、Pydantic、Alembic、Uvicorn
-- 数据库：PostgreSQL（Docker）、SQLite（本机测试）
+- 数据库：PostgreSQL（生产及 Windows 本地默认）、SQLite（自动测试与显式兼容模式）
+- 后台任务：Redis + Celery Worker；知识上传立即返回后台任务，索引按批次写入
 - AI：统一 `LLMService` Gateway，默认 Mock LLM，兼容 OpenAI-compatible API
 - RAG：Mock/OpenAI-compatible embedding、混合检索、MockVectorStore 与真实 pymilvus `MilvusVectorStore` 适配器
 - SQL 能力：sqlglot 解析、SafeSqlExecutor 安全 SELECT 执行
@@ -65,7 +66,15 @@ docker compose --profile milvus up --build
 .\scripts\项目启停.ps1 stop
 ```
 
-脚本会读取 `frontend/.env.local` 中的 API 地址确定后端端口，默认前端端口为 3000、后端端口为 8000；可使用 `-BackendPort`、`-FrontendPort` 和 `-DatabaseFile` 覆盖。日志与进程状态保存在已忽略的 `.local-run/`。
+默认 `production` 模式会启动本机 PostgreSQL、Redis、Celery Worker、FastAPI 和 Next.js，自动执行 Alembic，并在首次成功启动时把 `backend/<DatabaseFile>` 中的 SQLite 历史数据完整迁入 PostgreSQL。迁移采用成功标记防止中断后误判完成，并在覆盖前保护项目数更多的正式库。
+
+本机脚本沿用元项目 MVP 的 `MockVectorStore`：结构化过滤和 PostgreSQL 持久关键词索引可跨进程使用，外部语义向量库在 `/health/ready` 中显示为 `disabled`。需要让 Worker 写入的语义向量也供 API 进程持久检索时，应按部署说明启用 Milvus；Redis 在此拓扑中负责任务 broker/result backend，不冒充向量数据库。
+
+脚本会读取 `frontend/.env.local` 中的 API 地址确定后端端口，默认前端端口为 3000；可使用 `-BackendPort`、`-FrontendPort`、`-PostgresPort`、`-RedisPort` 和 `-DatabaseFile` 覆盖。日志、进程状态、本机随机数据库密码、受限 `pgpass` 文件和迁移成功标记均保存在已忽略的 `.local-run/`；SQLAlchemy URL 本身不携带密码。仅需临时兼容 SQLite 时显式使用：
+
+```powershell
+.\scripts\项目启停.ps1 start -Mode sqlite
+```
 
 所有说明文件及其用途见 [`docs/说明文档索引.md`](docs/说明文档索引.md)。
 

@@ -1,7 +1,9 @@
+import asyncio
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
 from docx import Document
+from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from pypdf import PdfWriter
@@ -11,12 +13,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.core.database import Base,get_db
 from app.main import app
-from app.models import ModelCallLog,ModelProfile,Project,PromptTemplateVersion,RetrievalLog
+from app.models import BackgroundJob,KnowledgeDocument,ModelCallLog,ModelProfile,Project,PromptTemplateVersion,RetrievalLog
 from app.services.db.dialect import qualify_table,quote_identifier
 from app.services.embeddings.factory import get_embedding_service
 from app.services.embeddings.openai_compatible import OpenAICompatibleEmbeddingService
 from app.services.rag.citation_validator import validate_citations
 from app.services.llm.prompt_runtime import get_prompt_runtime,prepare_model_input,record_model_call
+from app.services.knowledge_ingestion import ingest_knowledge_document
 from app.services.security import ensure_external_allowed, redact_content
 from app.services.vector import VectorRecord
 from app.services.vector.factory import get_vector_store
@@ -24,6 +27,186 @@ from app.services.vector.milvus import MilvusVectorStore
 from app.services.vector.mock import MockVectorStore
 from app.services.storage.factory import get_storage_service
 from app.services.task_queue.factory import get_task_queue
+
+
+def test_knowledge_ingestion_reports_progress_by_batch(db_session, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path))
+    get_storage_service.cache_clear()
+    get_embedding_service.cache_clear()
+    get_vector_store.cache_clear()
+    project = Project(name="批量知识索引")
+    db_session.add(project)
+    db_session.commit()
+    db_session.refresh(project)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["问题", "监管回复"])
+    for index in range(5):
+        sheet.append([f"问题 {index}", f"答复 {index}"])
+    stream = BytesIO()
+    workbook.save(stream)
+    progress = []
+
+    document = asyncio.run(
+        ingest_knowledge_document(
+            db_session,
+            project.id,
+            UploadFile(file=BytesIO(stream.getvalue()), filename="批量答疑.xlsx"),
+            "regulatory_qa",
+            batch_size=2,
+            progress=lambda completed, total: progress.append((completed, total)),
+        )
+    )
+
+    assert document.parse_summary_json["unit_count"] == 5
+    assert progress == [(2, 5), (4, 5), (5, 5)]
+
+
+def test_failed_knowledge_ingestion_with_same_hash_can_be_retried(
+    db_session,
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path))
+    get_storage_service.cache_clear()
+    get_embedding_service.cache_clear()
+    project = Project(name="失败索引重试")
+    db_session.add(project)
+    db_session.commit()
+    db_session.refresh(project)
+    store = MockVectorStore()
+    original_upsert = store.upsert
+    attempts = 0
+
+    def fail_once(records):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary vector failure")
+        return original_upsert(records)
+
+    monkeypatch.setattr(store, "upsert", fail_once)
+    monkeypatch.setattr(
+        "app.services.knowledge_ingestion.ingestion_service.get_vector_store",
+        lambda: store,
+    )
+    content = "retryable knowledge".encode()
+    with pytest.raises(RuntimeError, match="temporary vector failure"):
+        asyncio.run(
+            ingest_knowledge_document(
+                db_session,
+                project.id,
+                UploadFile(file=BytesIO(content), filename="retry.txt"),
+                "manual_note",
+            )
+        )
+
+    failed = db_session.query(KnowledgeDocument).one()
+    assert failed.document_status == "failed"
+    recovered = asyncio.run(
+        ingest_knowledge_document(
+            db_session,
+            project.id,
+            UploadFile(file=BytesIO(content), filename="retry.txt"),
+            "manual_note",
+        )
+    )
+
+    assert recovered.document_status == "indexed"
+    assert recovered.current_version_no == 2
+    assert attempts == 2
+
+
+def test_version_switch_keeps_old_vectors_when_database_commit_fails(
+    db_session,
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path))
+    get_storage_service.cache_clear()
+    get_embedding_service.cache_clear()
+    project = Project(name="知识换版事务")
+    db_session.add(project)
+    db_session.commit()
+    db_session.refresh(project)
+    store = MockVectorStore()
+    monkeypatch.setattr(
+        "app.services.knowledge_ingestion.ingestion_service.get_vector_store",
+        lambda: store,
+    )
+    first = asyncio.run(
+        ingest_knowledge_document(
+            db_session,
+            project.id,
+            UploadFile(file=BytesIO(b"first version"), filename="versioned.txt"),
+            "manual_note",
+        )
+    )
+    old_vector_id = f"knowledge-unit-{next(iter(store._records.values())).metadata['knowledge_unit_id']}"
+    original_commit = db_session.commit
+    commit_calls = 0
+
+    def fail_final_commit():
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 3:
+            raise RuntimeError("final database commit failed")
+        return original_commit()
+
+    monkeypatch.setattr(db_session, "commit", fail_final_commit)
+    with pytest.raises(RuntimeError, match="final database commit failed"):
+        asyncio.run(
+            ingest_knowledge_document(
+                db_session,
+                project.id,
+                UploadFile(file=BytesIO(b"second version"), filename="versioned.txt"),
+                "manual_note",
+            )
+        )
+
+    db_session.refresh(first)
+    assert first.document_status == "failed"
+    assert old_vector_id in store._records
+
+
+def test_knowledge_upload_returns_accepted_background_job_for_async_queue(tmp_path: Path, monkeypatch):
+    class AsyncQueue:
+        def enqueue(self, db, **kwargs):
+            job = BackgroundJob(
+                institution_id=kwargs["institution_id"],
+                project_id=kwargs["project_id"],
+                idempotency_key="async-knowledge-upload",
+                job_type=kwargs["job_type"],
+                status="queued",
+                progress=0,
+                payload_summary_json=kwargs["payload_summary"],
+                result_summary_json={},
+                created_by=kwargs["created_by"],
+            )
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+            return job
+
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path))
+    monkeypatch.setattr("app.services.task_queue.submission.get_task_queue", lambda: AsyncQueue())
+    get_storage_service.cache_clear()
+    with _client() as client:
+        project = _post(client, "/api/projects", {"name": "异步知识上传"})
+        response = client.post(
+            f"/api/projects/{project['id']}/knowledge/documents/upload",
+            data={
+                "knowledge_type": "manual_note",
+                "knowledge_scope": "project",
+                "confidentiality_level": "internal",
+            },
+            files={"file": ("异步知识.txt", b"asynchronous knowledge", "text/plain")},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["job_type"] == "knowledge_ingestion"
+    assert response.json()["status"] == "queued"
+
 
 def test_knowledge_versions_hybrid_search_grounded_answer_and_evaluation(tmp_path:Path,monkeypatch):
     monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()

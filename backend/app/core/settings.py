@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     lineage_script_max_bytes: int = 10 * 1024 * 1024
     lineage_repository_max_bytes: int = 500 * 1024 * 1024
     lineage_repository_max_file_count: int = 10000
+    knowledge_ingestion_batch_size: int = 200
     lineage_git_allowed_hosts: str = "github.com,gitee.com"
     lineage_git_allowed_local_roots: str = ""
     lineage_git_enabled: bool = True
@@ -161,6 +162,8 @@ class Settings(BaseSettings):
         add("info", "proxy_headers_explicit", "Trusted proxy headers are enabled." if self.trust_proxy_headers else "Trusted proxy headers are disabled.")
         if self.max_upload_bytes < 1024 or self.max_upload_bytes > 500 * 1024 * 1024:
             add("error", "upload_limit_unreasonable", "MAX_UPLOAD_BYTES must be between 1 KiB and 500 MiB.")
+        if self.knowledge_ingestion_batch_size < 10 or self.knowledge_ingestion_batch_size > 2000:
+            add("error", "knowledge_batch_size_invalid", "KNOWLEDGE_INGESTION_BATCH_SIZE must be between 10 and 2000.")
         if self.lineage_git_enabled and not self.lineage_git_allowed_host_list and not self.lineage_git_allowed_local_root_list:
             add("error", "git_allowlist_empty", "Git ingestion requires an allowed host or local root; otherwise disable Git ingestion.")
         if production and self.debug:

@@ -6,6 +6,7 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from app.models import CatalogColumn, DataSource, KnowledgeDocument, Project, RagEvaluationRun, StoredFile
+from app.core.settings import get_settings
 from app.schemas import ColumnProfileRequest
 from app.services.evaluation import run_evaluation
 from app.services.governance.audit import record_audit
@@ -20,6 +21,11 @@ def knowledge_ingestion_handler(db: Session, job) -> dict:
     payload = job.payload_summary_json
     data = get_storage_service().read(payload["storage_key"])
     upload = UploadFile(file=BytesIO(data), filename=payload["file_name"])
+    def report_progress(completed: int, total: int) -> None:
+        job.progress = 95 if total == 0 else min(95, 5 + int((completed / total) * 90))
+        job.current_step = f"知识索引 {completed}/{total}"
+        db.commit()
+
     document = _run_async(ingest_knowledge_document(
         db,
         job.project_id,
@@ -30,6 +36,8 @@ def knowledge_ingestion_handler(db: Session, job) -> dict:
         payload.get("confidentiality_level", "internal"),
         created_by=job.created_by,
         change_note=payload.get("change_note"),
+        batch_size=get_settings().knowledge_ingestion_batch_size,
+        progress=report_progress,
     ))
     _complete(db, job, "upload", "knowledge_document", document.id, "knowledge_parsed", "知识解析完成")
     return {"success_count": 1, "failed_count": 0, "document_id": document.id}

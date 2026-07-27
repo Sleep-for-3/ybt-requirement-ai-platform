@@ -1,4 +1,4 @@
-from fastapi import APIRouter,Depends,File,Form,HTTPException,UploadFile
+from fastapi import APIRouter,Depends,File,Form,HTTPException,Response,UploadFile
 from pydantic import BaseModel,Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";qu
 class EvaluationRunCreate(BaseModel):run_name:str;model_profile_id:int|None=None;retrieval_config_json:dict=Field(default_factory=dict)
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
-async def upload(project_id:int,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
+async def upload(project_id:int,response:Response,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
     if knowledge_type not in KNOWLEDGE_TYPES:raise HTTPException(400,"Invalid knowledge type")
     if knowledge_scope not in KNOWLEDGE_SCOPES:raise HTTPException(400,"Invalid knowledge scope")
     if confidentiality_level not in CONFIDENTIALITY_LEVELS:raise HTTPException(400,"Invalid confidentiality level")
@@ -35,6 +35,8 @@ async def upload(project_id:int,principal:CurrentPrincipal,file:UploadFile=File(
     saved=get_storage_service().save(content,file_name=file_name,project_id=project_id)
     job=submit_project_job(db,project,principal,job_type="knowledge_ingestion",payload={"storage_key":saved.storage_key,"file_name":file_name,"knowledge_type":knowledge_type,"knowledge_scope":knowledge_scope,"institution_name":institution_name,"confidentiality_level":confidentiality_level,"change_note":change_note},handler=knowledge_ingestion_handler)
     document_id=(job.result_summary_json or {}).get("document_id")
+    if not document_id:
+        response.status_code=202
     return _document(db.get(KnowledgeDocument,int(document_id))) if document_id else _job(job)
 @router.get("/projects/{project_id}/knowledge/documents")
 def documents(project_id:int,db:Session=Depends(get_db)):return [_document(item) for item in db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.project_id==project_id).order_by(KnowledgeDocument.id.desc())).all()]

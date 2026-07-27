@@ -2,11 +2,12 @@
 
 import { FileText, Upload } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { KnowledgeRagDocument, apiGet, uploadForm } from "@/lib/api";
+import { BackgroundJobSummary, KnowledgeRagDocument, apiGet, uploadForm } from "@/lib/api";
+import { describeKnowledgeJob, isTerminalJob } from "@/lib/background-job.mjs";
 
 const STATUS_BADGE: Record<string, string> = {
   indexed: "badge-success",
@@ -23,23 +24,69 @@ export default function Page() {
   const { projectId } = useProjectWorkspace();
   const [items, setItems] = useState<KnowledgeRagDocument[]>([]);
   const [message, setMessage] = useState("");
+  const [activeJob, setActiveJob] = useState<BackgroundJobSummary | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     if (projectId) setItems(await apiGet(`/projects/${projectId}/knowledge/documents`));
-  }
+  }, [projectId]);
 
   useEffect(() => {
     void load();
-  }, [projectId]);
+  }, [load]);
+
+  useEffect(() => {
+    if (!activeJob || isTerminalJob(activeJob)) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const next = await apiGet<BackgroundJobSummary>(`/jobs/${activeJob.id}`);
+        if (cancelled) return;
+        setActiveJob(next);
+        setMessage(describeKnowledgeJob(next));
+        if (isTerminalJob(next)) {
+          setBusy(false);
+          if (next.status === "completed" || next.status === "partially_completed") {
+            await load();
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBusy(false);
+          setMessage(error instanceof Error ? error.message : "读取索引进度失败");
+        }
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeJob, load]);
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!projectId) return;
+    const formElement = event.currentTarget;
+    const formData = new FormData(formElement);
+    setBusy(true);
+    setActiveJob(null);
+    setMessage("正在上传文件...");
     try {
-      await uploadForm(`/projects/${projectId}/knowledge/documents/upload`, new FormData(event.currentTarget));
-      setMessage("解析和索引完成");
-      await load();
+      const result = await uploadForm<KnowledgeRagDocument | BackgroundJobSummary>(
+        `/projects/${projectId}/knowledge/documents/upload`,
+        formData
+      );
+      formElement.reset();
+      if ("job_type" in result) {
+        setActiveJob(result);
+        setMessage(describeKnowledgeJob(result));
+      } else {
+        setBusy(false);
+        setMessage("解析和索引完成");
+        await load();
+      }
     } catch (error) {
+      setBusy(false);
       setMessage(error instanceof Error ? error.message : "上传失败");
     }
   }
@@ -80,15 +127,25 @@ export default function Page() {
               <option value="restricted">受限</option>
             </select>
             <input className="control" name="institution_name" placeholder="银行名称（银行作用域）" />
-            <button className="button-primary">
+            <button className="button-primary" disabled={busy} type="submit">
               <Upload size={16} />
-              上传并索引
+              {busy ? "正在处理..." : "上传并索引"}
             </button>
           </div>
         </form>
 
         {message ? (
-          <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
+          <div aria-live="polite" className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">
+            <p>{message}</p>
+            {activeJob && !isTerminalJob(activeJob) ? (
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-teal-600 transition-all"
+                  style={{ width: `${Math.max(2, activeJob.progress || 0)}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {items.length ? (
