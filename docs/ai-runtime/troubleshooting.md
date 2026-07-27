@@ -4,6 +4,10 @@
 
 先运行 `docker version`、`docker compose version` 和 `python scripts/check_local_setup.py`。确认 Docker Desktop/daemon 正在运行，3000、8000 端口未被占用，并检查 `docker compose config`。
 
+如果 Windows PowerShell 找不到 `docker`，继续运行 `wsl docker version`。若 WSL
+中的 Client 与 Server 均可用，说明 Docker Engine 只安装在 WSL；应在 WSL 中进入
+仓库后运行 `python scripts/check_local_setup.py` 和全部 Compose 命令。
+
 ## `.env` 未加载
 
 Compose 只读取 `backend/.env`，不会读取 `.env.example`。确认文件名没有被 Windows 保存成 `.env.txt`，修改后重建后端和 worker 容器。

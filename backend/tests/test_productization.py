@@ -9,7 +9,7 @@ from app.services.uat.packs import _read_zip
 
 
 ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY_ROOT = ROOT.parent
+REPOSITORY_ROOT = ROOT
 
 
 def test_uat_zip_file_count_limit_is_enforced_before_extraction() -> None:
@@ -43,6 +43,11 @@ def test_performance_baseline_declares_required_full_and_ci_scales() -> None:
     assert "_render_formal_workbook" in source
     assert "InlineTaskQueue().enqueue" in source
     assert "peak_memory_bytes" in source
+
+
+def test_smoke_enables_governance_workflow_explicitly() -> None:
+    smoke_source = (ROOT / "scripts" / "smoke_test.py").read_text(encoding="utf-8")
+    assert '"governance_workflow_enabled": True' in smoke_source
 
 
 def test_full_smoke_workflow_is_manual_scheduled_and_uploads_sanitized_evidence() -> None:

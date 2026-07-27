@@ -393,6 +393,22 @@ def test_compose_uses_private_env_not_public_template() -> None:
     assert compose.count("./backend/.env") >= 2
 
 
+def test_docker_contexts_exclude_host_build_artifacts() -> None:
+    root = Path(__file__).parents[2]
+    frontend = root / "frontend"
+    dockerignore = (frontend / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    dockerfile = (frontend / "Dockerfile").read_text(encoding="utf-8")
+    backend_dockerignore = (root / "backend" / ".dockerignore").read_text(encoding="utf-8").splitlines()
+
+    assert "node_modules/" in dockerignore
+    assert ".next/" in dockerignore
+    assert ".env.*" in dockerignore
+    assert "RUN npm ci" in dockerfile
+    assert ".venv/" in backend_dockerignore
+    assert "dev_storage*/" in backend_dockerignore
+    assert "/backend/dev_storage*/" in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
 def test_local_setup_check_never_prints_secret_value() -> None:
     root = Path(__file__).parents[2]
     environment = {**os.environ, "OPENAI_API_KEY": "literal-secret-must-not-appear"}

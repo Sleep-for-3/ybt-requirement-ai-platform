@@ -38,6 +38,7 @@ def main() -> None:
             "institution_id": bank["id"],
             "bank_name": "示例银行",
             "description": "验证模板、数据源、自然语言任务和口径生成",
+            "governance_workflow_enabled": True,
         },
     )
     project_id = project["id"]

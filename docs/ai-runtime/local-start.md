@@ -26,6 +26,20 @@ python scripts/check_local_setup.py
 docker compose up --build
 ```
 
+## Windows 上 Docker 仅安装在 WSL 时
+
+如果 PowerShell 提示找不到 `docker`，但 `wsl docker version` 能正常返回 Server 信息，
+请在 WSL 终端中进入仓库的 `/mnt/<盘符>/...` 路径，并执行上面的 Linux 命令。
+也可以先在 PowerShell 中确认：
+
+```powershell
+wsl docker version
+wsl docker compose version
+```
+
+不要在 PowerShell 与 WSL 中交叉执行同一组 Compose 命令；选择实际能够连接 Docker
+Engine 的一侧完成预检、构建、启动和停止。
+
 检查脚本输出 `PASS`、`WARN` 和 `FAIL`，不会打印 API Key。存在 `FAIL` 时退出码为 1；只有警告时仍为 0。
 
 启动后访问：

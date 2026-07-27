@@ -3,5 +3,9 @@
 !.env.example
 __pycache__/
 .pytest_cache/
+.venv/
+venv/
 *.db
+dev_storage*/
 smoke_storage_*/
+uat_local_packs/
