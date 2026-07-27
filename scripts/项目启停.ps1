@@ -305,6 +305,10 @@ try {
         "start" { Start-Project }
         "stop" { Stop-Project }
         "restart" {
+            if (-not $PSBoundParameters.ContainsKey("DatabaseFile") -and (Test-Path -LiteralPath $statePath)) {
+                $restartState = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+                $DatabaseFile = [string]$restartState.databaseFile
+            }
             Stop-Project
             Start-Project
         }
