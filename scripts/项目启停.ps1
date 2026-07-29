@@ -19,6 +19,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$actionWasSpecified = $PSBoundParameters.ContainsKey("Action")
+$modeWasSpecified = $PSBoundParameters.ContainsKey("Mode")
+$databaseFileWasSpecified = $PSBoundParameters.ContainsKey("DatabaseFile")
+$databaseNameWasSpecified = $PSBoundParameters.ContainsKey("DatabaseName")
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendRoot = Join-Path $repoRoot "backend"
@@ -694,62 +698,180 @@ function Stop-Project {
 }
 
 function Show-ProjectStatus {
-    $resolvedBackendPort = Get-ConfiguredBackendPort
-    foreach ($service in @(
-        [PSCustomObject]@{ Name = "前端"; Port = $FrontendPort },
-        [PSCustomObject]@{ Name = "后端"; Port = $resolvedBackendPort }
-    )) {
-        $owner = Get-PortOwner -Port $service.Port
-        if ($null -eq $owner) {
-            Write-Host "$($service.Name)端口 $($service.Port)：未运行"
-        } else {
-            Write-Host "$($service.Name)端口 $($service.Port)：运行中（PID $owner）"
+    $state = $null
+    $hasManagedState = Test-Path -LiteralPath $statePath
+    if ($hasManagedState) {
+        $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+    }
+
+    $statusFrontendPort = if ($null -ne $state) { [int]$state.frontendPort } else { $FrontendPort }
+    $statusBackendPort = if ($null -ne $state) { [int]$state.backendPort } else { Get-ConfiguredBackendPort }
+    $frontendOwner = Get-PortOwner -Port $statusFrontendPort
+    $backendOwner = Get-PortOwner -Port $statusBackendPort
+    $backendHealthy = $false
+    if ($null -ne $backendOwner) {
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$statusBackendPort/health/ready" -TimeoutSec 3
+            $backendHealthy = [string]$health.status -eq "ready"
+        } catch {
+            $backendHealthy = $false
         }
     }
-    if (Test-Path -LiteralPath $statePath) {
-        $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+
+    $isProduction = $null -ne $state -and [string]$state.mode -eq "production"
+    $postgresOwner = $null
+    $redisOwner = $null
+    $worker = $null
+    if ($isProduction) {
+        $postgresOwner = Get-PortOwner -Port ([int]$state.postgresPort)
+        $redisOwner = Get-PortOwner -Port ([int]$state.redisPort)
+        $worker = Get-Process -Id ([int]$state.workerPid) -ErrorAction SilentlyContinue
+    }
+    $fullyRunning = $hasManagedState -and
+        $null -ne $frontendOwner -and
+        $null -ne $backendOwner -and
+        $backendHealthy -and
+        (-not $isProduction -or (
+            $null -ne $postgresOwner -and
+            $null -ne $redisOwner -and
+            $null -ne $worker
+        ))
+
+    Write-Host ""
+    Write-Host "================ 项目运行状态 ================" -ForegroundColor Cyan
+    if ($fullyRunning) {
+        Write-Host "总体状态：完整运行" -ForegroundColor Green
+    } else {
+        Write-Host "总体状态：未完整启动" -ForegroundColor Yellow
+    }
+    Write-Host "前端服务：$(if ($null -ne $frontendOwner) { "运行中（PID $frontendOwner）" } else { "未运行" })"
+    Write-Host "前端地址：http://127.0.0.1:$statusFrontendPort"
+    Write-Host "后端服务：$(if ($null -ne $backendOwner) { "运行中（PID $backendOwner）" } else { "未运行" })"
+    Write-Host "接口文档：http://127.0.0.1:$statusBackendPort/docs"
+    Write-Host "健康检查：http://127.0.0.1:$statusBackendPort/health/ready（$(if ($backendHealthy) { "正常" } else { "不可用" })）"
+    if ($null -ne $state) {
         Write-Host "运行模式：$($state.mode)"
         Write-Host "启动时间：$($state.startedAt)"
-        if ([string]$state.mode -eq "production") {
-            $postgresOwner = Get-PortOwner -Port ([int]$state.postgresPort)
-            $redisOwner = Get-PortOwner -Port ([int]$state.redisPort)
-            $worker = Get-Process -Id ([int]$state.workerPid) -ErrorAction SilentlyContinue
+        if ($isProduction) {
             Write-Host "PostgreSQL：$(if ($null -ne $postgresOwner) { "运行中（PID $postgresOwner）" } else { "未运行" })"
+            Write-Host "数据库地址：127.0.0.1:$($state.postgresPort)/$($state.databaseName)"
             Write-Host "Redis：$(if ($null -ne $redisOwner) { "运行中（PID $redisOwner）" } else { "未运行" })"
+            Write-Host "Redis 地址：127.0.0.1:$($state.redisPort)"
             Write-Host "Celery Worker：$(if ($null -ne $worker) { "运行中（PID $($worker.Id)）" } else { "未运行" })"
-            Write-Host "数据库：PostgreSQL/$($state.databaseName)"
         } else {
             Write-Host "数据库：backend\$($state.databaseFile)"
         }
-        Write-Host "日志目录：$logRoot"
     } else {
-        Write-Host "当前没有启停脚本管理的运行状态。"
+        Write-Host "运行记录：未找到；如需启动，请选择“启动项目”。"
+    }
+    Write-Host "日志目录：$logRoot"
+    Write-Host "==============================================" -ForegroundColor Cyan
+}
+
+function Show-RecentErrorLogs {
+    if (-not (Test-Path -LiteralPath $logRoot)) {
+        return
+    }
+    $logs = @(Get-ChildItem -LiteralPath $logRoot -Filter "*.stderr.log" -File |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 3)
+    if ($logs.Count -eq 0) {
+        return
+    }
+    Write-Host ""
+    Write-Host "最近错误日志（每个文件末尾 12 行）：" -ForegroundColor Yellow
+    foreach ($log in $logs) {
+        Write-Host "--- $($log.Name) ---" -ForegroundColor DarkYellow
+        Get-Content -LiteralPath $log.FullName -Tail 12
     }
 }
 
-try {
-    switch ($Action) {
-        "start" { Start-Project }
+function Invoke-ProjectAction {
+    param(
+        [ValidateSet("start", "stop", "restart", "status")]
+        [string]$RequestedAction
+    )
+    switch ($RequestedAction) {
+        "start" {
+            Start-Project
+            Show-ProjectStatus
+        }
         "stop" { Stop-Project }
         "restart" {
             if (Test-Path -LiteralPath $statePath) {
                 $restartState = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
-                if (-not $PSBoundParameters.ContainsKey("Mode")) {
+                if (-not $modeWasSpecified) {
                     $Mode = [string]$restartState.mode
                 }
-                if (-not $PSBoundParameters.ContainsKey("DatabaseFile")) {
+                if (-not $databaseFileWasSpecified) {
                     $DatabaseFile = [string]$restartState.databaseFile
                 }
-                if (-not $PSBoundParameters.ContainsKey("DatabaseName")) {
+                if (-not $databaseNameWasSpecified) {
                     $DatabaseName = [string]$restartState.databaseName
                 }
             }
             Stop-Project
             Start-Project
+            Show-ProjectStatus
         }
         "status" { Show-ProjectStatus }
     }
+}
+
+function Start-InteractiveConsole {
+    try {
+        [Console]::Title = "一表通口径平台 - 项目启停"
+    } catch {
+        # 输出被重定向时可能没有可设置标题的控制台。
+    }
+    while ($true) {
+        Show-ProjectStatus
+        Write-Host ""
+        Write-Host "操作菜单：" -ForegroundColor Cyan
+        Write-Host "  [1] 启动项目（直接按 Enter）"
+        Write-Host "  [2] 刷新状态"
+        Write-Host "  [3] 重启项目"
+        Write-Host "  [4] 停止项目"
+        Write-Host "  [0] 退出窗口（不会停止已运行的项目）"
+        $choice = Read-Host "请选择"
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = "1"
+        }
+        if ($choice -eq "0") {
+            return
+        }
+        $requestedAction = switch ($choice) {
+            "1" { "start" }
+            "2" { "status" }
+            "3" { "restart" }
+            "4" { "stop" }
+            default { $null }
+        }
+        if ($null -eq $requestedAction) {
+            Write-Host "无法识别的选项：$choice" -ForegroundColor Yellow
+            continue
+        }
+        try {
+            Invoke-ProjectAction -RequestedAction $requestedAction
+        } catch {
+            Write-Host ""
+            Write-Host "操作失败：$($_.Exception.Message)" -ForegroundColor Red
+            Show-RecentErrorLogs
+        }
+        Write-Host ""
+        Read-Host "按 Enter 返回操作菜单" | Out-Null
+    }
+}
+
+if (-not $actionWasSpecified) {
+    Start-InteractiveConsole
+    exit 0
+}
+
+try {
+    Invoke-ProjectAction -RequestedAction $Action
 } catch {
     Write-Error $_
+    Show-RecentErrorLogs
     exit 1
 }

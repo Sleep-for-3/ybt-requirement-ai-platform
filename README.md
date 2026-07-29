@@ -57,7 +57,9 @@ docker compose --profile milvus up --build
 
 ## Windows 本地一键启停
 
-已安装 `backend/.venv` 和 `frontend/node_modules` 后，可在仓库根目录执行：
+已安装 `backend/.venv` 和 `frontend/node_modules` 后，可以直接右键 `scripts/项目启停.ps1` 选择“使用 PowerShell 运行”。无参数运行会打开常驻控制台，不会闪退；控制台会显示总体状态、各服务 PID、访问地址、健康检查和日志目录，并提供启动、刷新、重启、停止和退出菜单。关闭控制台窗口不会停止已启动的服务。
+
+也可以在仓库根目录使用带参数命令，带参数执行完成后会正常返回终端：
 
 ```powershell
 .\scripts\项目启停.ps1 start

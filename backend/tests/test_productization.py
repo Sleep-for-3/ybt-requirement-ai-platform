@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import zipfile
 
 import pytest
@@ -77,6 +78,11 @@ def test_windows_lifecycle_script_and_chinese_document_index_are_present() -> No
         "alembic upgrade head",
         "Test-ManagedOwner",
         "health/ready",
+        "Start-InteractiveConsole",
+        "总体状态：完整运行",
+        "操作菜单：",
+        "退出窗口（不会停止已运行的项目）",
+        "Show-RecentErrorLogs",
         ".local-run",
         "sqlite-migration-complete",
     ):
@@ -163,6 +169,35 @@ def test_windows_secret_acl_commands_remove_explicit_extra_access_and_are_idempo
         "Type": "Allow",
         "Inherited": False,
     }
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows interactive launcher behavior")
+def test_windows_lifecycle_script_without_action_keeps_control_console_open() -> None:
+    process = subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "项目启停.ps1"),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        time.sleep(4)
+        assert process.poll() is None, "bare script invocation exited instead of waiting for a menu choice"
+        assert process.stdin is not None
+        process.stdin.write(b"0\r\n")
+        process.stdin.flush()
+        _, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, stderr.decode(errors="replace")
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def test_full_smoke_workflow_is_manual_scheduled_and_uploads_sanitized_evidence() -> None:
