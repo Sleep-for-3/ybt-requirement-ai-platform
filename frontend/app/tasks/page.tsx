@@ -20,6 +20,7 @@ export default function Page() {
   const { projectId } = useProjectWorkspace();
   const [items, setItems] = useState<NaturalLanguageTask[]>([]);
   const [message, setMessage] = useState("");
+  const [creating, setCreating] = useState(false);
   const [reviewTasks, setReviewTasks] = useState<Array<{ id: number; step_key: string; status: string; due_at?: string | null }>>([]);
 
   async function reload() {
@@ -37,15 +38,19 @@ export default function Page() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!projectId) return;
-    const form = new FormData(event.currentTarget);
+    if (!projectId || creating) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    setCreating(true);
     try {
       const result = await apiPost<NaturalLanguageTaskCreateResponse>("/nl-tasks", { project_id: projectId, text: form.get("text") });
-      event.currentTarget.reset();
+      formElement.reset();
       setMessage(result.message);
       await reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "创建失败");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -106,10 +111,17 @@ export default function Page() {
               <h2 className="text-[15px] font-semibold text-ink">自然语言安全查询</h2>
             </div>
             <div className="panel-body space-y-3">
+              <p className="text-sm leading-relaxed text-slate-500">
+                此处仅对已配置的数据源执行受限 SQL 查询，不会检索知识库。制度、口径和监管答疑请使用
+                <Link className="ml-1 font-medium text-pine-600 hover:text-pine-700" href="/knowledge/ask">
+                  有证据问答
+                </Link>
+                。
+              </p>
               <textarea className="control min-h-28" name="text" placeholder="例如：使用脱敏测试数据源查询客户表证件类型字段的空值率" required />
-              <button className="button-primary w-full">
+              <button className="button-primary w-full" disabled={creating}>
                 <Send size={16} />
-                创建任务
+                {creating ? "正在创建…" : "创建任务"}
               </button>
               {message ? (
                 <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
@@ -130,6 +142,7 @@ export default function Page() {
                       <span className={statusBadge(item.status)}>{item.status}</span>
                       <span className="text-sm text-slate-500">{item.datasource_name || "数据源待识别"}</span>
                     </div>
+                    {item.error_message ? <p className="mt-1.5 text-sm text-slate-500">{item.error_message}</p> : null}
                   </div>
                   <button className="button-secondary" disabled={item.status === "completed"} onClick={() => run(item.id)}>
                     <Play size={16} />
