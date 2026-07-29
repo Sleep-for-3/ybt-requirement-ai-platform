@@ -1,5 +1,4 @@
 from functools import lru_cache
-import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -7,6 +6,7 @@ from app.services.llm.providers import (
     is_local_provider,
     normalize_provider_type,
     provider_requires_api_key,
+    resolve_api_key,
 )
 
 
@@ -78,11 +78,11 @@ class Settings(BaseSettings):
 
     @property
     def resolved_llm_api_key(self) -> str:
-        return os.getenv(self.llm_api_key_env_name, self.llm_api_key)
+        return resolve_api_key(self.llm_api_key_env_name, self.llm_api_key)
 
     @property
     def resolved_embedding_api_key(self) -> str:
-        return os.getenv(self.embedding_api_key_env_name, "")
+        return resolve_api_key(self.embedding_api_key_env_name)
 
     vector_store_provider: str = "mock"
     milvus_uri: str = "http://localhost:19530"

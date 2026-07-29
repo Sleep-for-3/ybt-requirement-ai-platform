@@ -1,11 +1,15 @@
-import os
 import time
 
 import httpx
 
 from app.services.llm.base import LLMProviderError, LLMResponseError, ModelCallMetadata
 from app.services.llm.openai_compatible import RETRYABLE_STATUS_CODES, _http_error, _usage
-from app.services.llm.providers import ProviderRuntimeConfig, is_local_provider, normalize_provider_type
+from app.services.llm.providers import (
+    ProviderRuntimeConfig,
+    is_local_provider,
+    normalize_provider_type,
+    resolve_api_key,
+)
 
 
 class OpenAICompatibleEmbeddingService:
@@ -35,7 +39,7 @@ class OpenAICompatibleEmbeddingService:
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        api_key = os.getenv(self.api_key_env_name, "")
+        api_key = resolve_api_key(self.api_key_env_name)
         ProviderRuntimeConfig(
             provider=self.provider,
             base_url=self.base_url,

@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -20,6 +19,7 @@ from app.services.llm.providers import (
     is_local_provider,
     normalize_provider_type,
     provider_requires_api_key,
+    resolve_api_key,
     sanitize_base_url,
     validate_env_name,
     validate_model_identifier,
@@ -351,7 +351,7 @@ def _llm_status(profile: ModelProfile | None) -> dict[str, Any]:
     model = profile.model_name if profile else settings.llm_model
     env_name = profile.api_key_env_name if profile else settings.llm_api_key_env_name
     local = bool(profile.local_only) if profile else is_local_provider(provider)
-    present = False if provider == "mock" else bool(os.getenv(env_name or "", settings.llm_api_key))
+    present = False if provider == "mock" else bool(resolve_api_key(env_name, settings.llm_api_key))
     configured = (
         provider == "mock"
         or bool(base_url and model and (present or not provider_requires_api_key(provider)))
@@ -468,7 +468,9 @@ def _profile_response(item: ModelProfile) -> dict[str, Any]:
         "model_name": item.model_name,
         "embedding_model_name": item.embedding_model_name,
         "api_key_env_name": item.api_key_env_name,
-        "api_key_present": False if normalize_provider_type(item.provider_type) == "mock" else bool(os.getenv(item.api_key_env_name or "")),
+        "api_key_present": False
+        if normalize_provider_type(item.provider_type) == "mock"
+        else bool(resolve_api_key(item.api_key_env_name)),
         "local_only": item.local_only,
         "enabled": item.enabled,
         "config_json": item.config_json,
@@ -511,7 +513,7 @@ def _validate_activation(item: ModelProfile) -> None:
         return
     if not item.base_url or not item.model_name:
         raise HTTPException(status_code=422, detail="Base URL and model name are required before activation")
-    if provider_requires_api_key(provider) and not os.getenv(item.api_key_env_name or ""):
+    if provider_requires_api_key(provider) and not resolve_api_key(item.api_key_env_name):
         raise HTTPException(status_code=422, detail=f"API key environment variable {item.api_key_env_name or '(missing)'} is not configured")
     try:
         validate_env_name(item.api_key_env_name)

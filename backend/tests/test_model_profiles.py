@@ -57,6 +57,7 @@ def test_model_profile_rejects_api_key_misplaced_as_model_name() -> None:
         "file:///etc/passwd",
         "http://169.254.169.254/latest/meta-data",
         "http://127.0.0.1:8000/v1",
+        "https://198.18.0.215/v1",
         "https://user:password@provider.example.com/v1",
     ],
 )
@@ -100,6 +101,23 @@ def test_runtime_rejects_cloud_hostname_resolving_to_private_address(monkeypatch
 
     with pytest.raises(LLMConfigurationError, match="non-public"):
         runtime.validate()
+
+
+def test_runtime_allows_transparent_proxy_fake_ip_benchmark_range(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.llm.providers.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("198.18.0.215", 443))],
+    )
+    runtime = ProviderRuntimeConfig(
+        provider="openai_compatible",
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        api_key_env_name="DEEPSEEK_API_KEY",
+        api_key="test-only",
+        local_only=False,
+    )
+
+    runtime.validate()
 
 
 def test_connection_test_schema_only_accepts_ok_status() -> None:

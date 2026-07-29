@@ -42,6 +42,21 @@ def test_provider_aliases_are_normalized_once() -> None:
     assert normalize_provider_type("ollama") == "local_ollama_compatible"
 
 
+def test_named_profile_api_key_loads_from_backend_dotenv(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PROFILE_DOTENV_KEY", raising=False)
+    (tmp_path / ".env").write_text("PROFILE_DOTENV_KEY=dotenv-test-value\n", encoding="utf-8")
+
+    service = get_llm_service(
+        provider="openai_compatible",
+        base_url="https://provider.example.com/v1",
+        api_key_env_name="PROFILE_DOTENV_KEY",
+        model="example-model",
+    )
+
+    assert service.api_key == "dotenv-test-value"
+
+
 @pytest.mark.asyncio
 async def test_real_provider_without_key_fails_without_mock_fallback(monkeypatch) -> None:
     monkeypatch.delenv("MISSING_LLM_KEY", raising=False)

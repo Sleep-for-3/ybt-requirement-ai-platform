@@ -1,11 +1,10 @@
-import os
 from typing import Any
 
 from app.core.settings import get_settings
 from app.services.llm.base import LLMService
 from app.services.llm.mock import MockLLMService
 from app.services.llm.openai_compatible import OpenAICompatibleLLMService
-from app.services.llm.providers import normalize_provider_type
+from app.services.llm.providers import normalize_provider_type, resolve_api_key
 
 
 def get_llm_service(
@@ -24,7 +23,7 @@ def get_llm_service(
     options = config or {}
     return OpenAICompatibleLLMService(
         base_url=base_url or settings.llm_base_url,
-        api_key=os.getenv(env_name, settings.llm_api_key),
+        api_key=resolve_api_key(env_name, settings.llm_api_key),
         api_key_env_name=env_name,
         model=model or settings.llm_model,
         provider=selected_provider,

@@ -1,8 +1,11 @@
 import ipaddress
+import os
 import re
 import socket
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
+
+from dotenv import dotenv_values
 
 from app.services.llm.base import LLMConfigurationError
 
@@ -34,6 +37,7 @@ METADATA_HOSTNAMES = {
     "metadata.azure.internal",
     "metadata.google.internal",
 }
+TRANSPARENT_PROXY_FAKE_IP_NETWORKS = (ipaddress.ip_network("198.18.0.0/15"),)
 
 
 def normalize_provider_type(provider: str) -> str:
@@ -64,6 +68,20 @@ def validate_model_identifier(value: str | None) -> str | None:
     return value
 
 
+def resolve_api_key(env_name: str | None, fallback: str = "") -> str:
+    if not env_name:
+        return fallback
+    validate_env_name(env_name)
+    process_value = os.getenv(env_name)
+    if process_value is not None:
+        return process_value
+    try:
+        dotenv_value = dotenv_values(".env", encoding="utf-8").get(env_name)
+    except OSError:
+        dotenv_value = None
+    return str(dotenv_value) if dotenv_value is not None else fallback
+
+
 def sanitize_base_url(value: str | None) -> str | None:
     if not value:
         return None
@@ -83,6 +101,11 @@ def _is_forbidden_external_address(value: str) -> bool:
         or address.is_unspecified
         or address.is_multicast
     )
+
+
+def _is_transparent_proxy_fake_address(value: str) -> bool:
+    address = ipaddress.ip_address(value)
+    return any(address in network for network in TRANSPARENT_PROXY_FAKE_IP_NETWORKS)
 
 
 def validate_provider_url(
@@ -125,7 +148,11 @@ def validate_provider_url(
             )
         except socket.gaierror:
             resolved = []
-        if any(_is_forbidden_external_address(item[4][0]) for item in resolved):
+        if any(
+            _is_forbidden_external_address(item[4][0])
+            and not _is_transparent_proxy_fake_address(item[4][0])
+            for item in resolved
+        ):
             raise ValueError("External provider hostname resolves to a non-public address")
     return value.rstrip("/")
 
