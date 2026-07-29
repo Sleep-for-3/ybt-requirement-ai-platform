@@ -49,3 +49,25 @@ test("login API 401 remains a normal error for the login form", async () => {
   );
   assert.deepEqual(redirects, []);
 });
+
+test("FastAPI validation details become readable text instead of React child objects", async () => {
+  const response = {
+    ok: false,
+    status: 422,
+    text: async () =>
+      JSON.stringify({
+        detail: [
+          {
+            type: "value_error",
+            loc: ["body", "api_key_env_name"],
+            msg: "Value error, API key environment variable name is invalid"
+          }
+        ]
+      })
+  };
+
+  await assert.rejects(
+    readApiResponse(response, "/model-profiles"),
+    /API Key 环境变量名：API key environment variable name is invalid/
+  );
+});

@@ -85,11 +85,17 @@ export default function Page() {
     setMessage("");
     const form = new FormData(event.currentTarget);
     const provider = String(form.get("provider_type"));
+    const modelName = String(form.get("model_name") || "") || null;
+    if (looksLikeApiKey(modelName)) {
+      setMessage("模型名称疑似填入了 API Key。请填写模型 ID，并把密钥放入 backend/.env。");
+      setBusy(null);
+      return;
+    }
     const payload = {
       profile_name: String(form.get("profile_name")),
       provider_type: provider,
       base_url: String(form.get("base_url") || "") || null,
-      model_name: String(form.get("model_name") || "") || null,
+      model_name: modelName,
       api_key_env_name: String(form.get("api_key_env_name") || "") || null,
       local_only: provider.startsWith("local_"),
       config_json: { json_mode: true, max_output_tokens: 2048, temperature: .2, timeout_seconds: 60, retry_count: 2 },
@@ -176,17 +182,35 @@ export default function Page() {
               <h2 className="text-[15px] font-semibold text-ink">{editing ? "编辑 Profile" : "新建 Profile"}</h2>
             </div>
             <div className="panel-body space-y-3">
-              <input className="control" name="profile_name" placeholder="Profile 名称" defaultValue={editing?.profile_name || ""} key={`name-${editing?.id || 0}`} required />
-              <select className="control" name="provider_type" defaultValue={editing?.provider_type || "mock"} key={`provider-${editing?.id || 0}`}>
-                {providers.map((item) => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-              <input className="control" name="base_url" placeholder="Base URL（仅 http/https）" defaultValue={editing?.base_url || ""} key={`url-${editing?.id || 0}`} />
-              <input className="control" name="model_name" placeholder="模型名称" defaultValue={editing?.model_name || ""} key={`model-${editing?.id || 0}`} />
-              <input className="control" name="api_key_env_name" placeholder="API Key 环境变量名，如 OPENAI_API_KEY" defaultValue={editing?.api_key_env_name || ""} key={`env-${editing?.id || 0}`} />
+              <Field label="Profile 名称">
+                <input className="control" name="profile_name" placeholder="例如：DeepSeek 正式模型" defaultValue={editing?.profile_name || ""} key={`name-${editing?.id || 0}`} required />
+              </Field>
+              <Field label="Provider 类型">
+                <select className="control" name="provider_type" defaultValue={editing?.provider_type || "mock"} key={`provider-${editing?.id || 0}`}>
+                  {providers.map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Base URL">
+                <input className="control" name="base_url" placeholder="例如：https://api.deepseek.com" defaultValue={editing?.base_url || ""} key={`url-${editing?.id || 0}`} />
+              </Field>
+              <Field label="模型名称（模型 ID，不是密钥）">
+                <input className="control" name="model_name" placeholder="例如：deepseek-chat" defaultValue={editing?.model_name || ""} key={`model-${editing?.id || 0}`} />
+              </Field>
+              <Field label="API Key 环境变量名（不是密钥）">
+                <input
+                  className="control"
+                  name="api_key_env_name"
+                  placeholder="例如：DEEPSEEK_API_KEY"
+                  defaultValue={editing?.api_key_env_name || ""}
+                  key={`env-${editing?.id || 0}`}
+                  pattern="[A-Z_][A-Z0-9_]*"
+                  title="只能使用大写英文字母、数字和下划线，且不能以数字开头"
+                />
+              </Field>
               <p className="text-xs text-slate-500">
-                API Key 不在页面录入或保存。请在 <code>backend/.env</code> 中设置上面的环境变量。
+                此处只填环境变量名，不能粘贴 API Key 本身。请在 <code>backend/.env</code> 中按“变量名=密钥”配置真实密钥。
               </p>
               <div className="flex gap-2">
                 <button className="button-primary flex-1" disabled={busy === "save"}>
@@ -343,6 +367,19 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-medium text-slate-600">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function looksLikeApiKey(value?: string | null) {
+  return Boolean(value && /^(?:sk-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|(?:ghp|github_pat|xox[baprs])[_-][A-Za-z0-9_-]{16,})$/.test(value.trim()));
+}
+
 function statusBadgeClass(status: string) {
   const value = status.toLowerCase();
   if (["success", "succeeded", "completed", "approved", "enabled"].includes(value)) return "badge-success";
@@ -361,10 +398,5 @@ function tokenText(usage: Record<string, unknown>) {
 
 function readError(error: unknown) {
   if (!(error instanceof Error)) return "操作失败";
-  try {
-    const body = JSON.parse(error.message);
-    return body.detail || error.message;
-  } catch {
-    return error.message;
-  }
+  return error.message;
 }

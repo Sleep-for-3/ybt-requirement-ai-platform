@@ -23,6 +23,11 @@ SUPPORTED_PROVIDERS = {
 LOCAL_PROVIDERS = {"local_vllm", "local_ollama_compatible"}
 CLOUD_PROVIDERS = {"openai", "openai_compatible"}
 ENV_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+SECRET_VALUE_PATTERNS = (
+    re.compile(r"^sk-[A-Za-z0-9_-]{16,}$"),
+    re.compile(r"^(?:ghp|github_pat|xox[baprs])[_-][A-Za-z0-9_-]{16,}$"),
+    re.compile(r"^AIza[A-Za-z0-9_-]{20,}$"),
+)
 METADATA_HOSTNAMES = {
     "metadata",
     "metadata.aws.internal",
@@ -50,6 +55,12 @@ def provider_requires_api_key(provider: str) -> bool:
 def validate_env_name(value: str | None) -> str | None:
     if value and not ENV_NAME_PATTERN.fullmatch(value):
         raise ValueError("API key environment variable name is invalid")
+    return value
+
+
+def validate_model_identifier(value: str | None) -> str | None:
+    if value and any(pattern.fullmatch(value.strip()) for pattern in SECRET_VALUE_PATTERNS):
+        raise ValueError("模型名称疑似填入了 API Key；请填写模型 ID，并把密钥放入 backend/.env")
     return value
 
 
@@ -141,6 +152,7 @@ class ProviderRuntimeConfig:
             raise LLMConfigurationError(f"Model API key environment variable {name} is not configured")
         try:
             validate_env_name(self.api_key_env_name)
+            validate_model_identifier(self.model)
             validate_provider_url(
                 self.base_url,
                 local_only=self.local_only,

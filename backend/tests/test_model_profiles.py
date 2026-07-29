@@ -40,6 +40,17 @@ def test_model_profile_validates_environment_variable_name() -> None:
         )
 
 
+def test_model_profile_rejects_api_key_misplaced_as_model_name() -> None:
+    with pytest.raises(ValidationError, match="疑似填入了 API Key"):
+        ModelProfileCreate(
+            profile_name="misplaced-secret",
+            provider_type="openai_compatible",
+            base_url="https://provider.example.com/v1",
+            model_name="sk-" + ("a" * 32),
+            api_key_env_name="MODEL_API_KEY",
+        )
+
+
 @pytest.mark.parametrize(
     "url",
     [

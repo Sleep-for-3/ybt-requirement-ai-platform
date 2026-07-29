@@ -22,6 +22,7 @@ from app.services.llm.providers import (
     provider_requires_api_key,
     sanitize_base_url,
     validate_env_name,
+    validate_model_identifier,
     validate_provider_url,
 )
 
@@ -62,6 +63,11 @@ class ModelProfileCreate(BaseModel):
     @classmethod
     def _env_name(cls, value: str | None) -> str | None:
         return validate_env_name(value)
+
+    @field_validator("model_name", "embedding_model_name")
+    @classmethod
+    def _model_identifier(cls, value: str | None) -> str | None:
+        return validate_model_identifier(value)
 
     @model_validator(mode="after")
     def _provider_config(self):
