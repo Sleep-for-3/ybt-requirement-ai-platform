@@ -15,6 +15,7 @@ from app.core.database import Base, get_db
 from app.core.settings import get_settings
 from app.main import app
 from app.services.auth.dependencies import Principal, get_current_principal
+from app.services.task_queue.inflight import InFlightOperationGuard
 
 
 def test_model_profile_rejects_api_key_fields() -> None:
@@ -123,6 +124,16 @@ def test_runtime_allows_transparent_proxy_fake_ip_benchmark_range(monkeypatch) -
 def test_connection_test_schema_only_accepts_ok_status() -> None:
     with pytest.raises(ValidationError):
         ConnectionTestOutput.model_validate({"status": "mock", "message": "not connected"})
+
+
+def test_model_connection_guard_rejects_duplicate_until_first_finishes() -> None:
+    guard = InFlightOperationGuard()
+
+    assert guard.try_start(("model_profile_test", 7)) is True
+    assert guard.try_start(("model_profile_test", 7)) is False
+    assert guard.try_start(("model_profile_test", 8)) is True
+    guard.finish(("model_profile_test", 7))
+    assert guard.try_start(("model_profile_test", 7)) is True
 
 
 def test_status_url_sanitizer_removes_query_and_userinfo() -> None:

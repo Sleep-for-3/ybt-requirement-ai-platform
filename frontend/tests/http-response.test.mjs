@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readApiResponse } from "../lib/http-response.mjs";
+import {
+  formatApiErrorText,
+  normalizeRequestError,
+  readApiResponse
+} from "../lib/http-response.mjs";
 
 const ACCESS_TOKEN_KEY = "ybt:access-token";
 const REFRESH_TOKEN_KEY = "ybt:refresh-token";
@@ -69,5 +73,53 @@ test("FastAPI validation details become readable text instead of React child obj
   await assert.rejects(
     readApiResponse(response, "/model-profiles"),
     /API Key 环境变量名：API key environment variable name is invalid/
+  );
+});
+
+test("HTTP conflicts without a safe backend detail use a clear Chinese message", () => {
+  assert.equal(
+    formatApiErrorText("", 409),
+    "相同操作正在执行或资源状态冲突"
+  );
+});
+
+test("common HTTP statuses have stable Chinese fallbacks", () => {
+  const expectations = new Map([
+    [401, "登录状态已失效"],
+    [403, "没有操作权限"],
+    [409, "相同操作正在执行或资源状态冲突"],
+    [422, "输入数据不完整或格式不正确"],
+    [429, "请求过于频繁，请稍后重试"],
+    [503, "模型、向量服务或外部依赖暂不可用"]
+  ]);
+
+  for (const [status, message] of expectations) {
+    assert.equal(formatApiErrorText("", status), message);
+  }
+});
+
+test("unsafe backend diagnostics are not exposed to users", () => {
+  const unsafe = [
+    "Traceback (most recent call last): File C:\\app\\main.py",
+    "sqlalchemy.exc.OperationalError postgresql://admin:secret@db/prod",
+    "Authorization: Bearer very-secret-token",
+    "API_KEY=sk-secret-value",
+    "完整 Prompt: system instructions"
+  ];
+
+  for (const detail of unsafe) {
+    const message = formatApiErrorText(JSON.stringify({ detail }), 500);
+    assert.equal(message, "服务器处理失败");
+    assert.doesNotMatch(message, /secret|traceback|sqlalchemy|prompt/i);
+  }
+});
+
+test("request transport failures become understandable Chinese messages", () => {
+  const timeout = new Error("aborted");
+  timeout.name = "AbortError";
+  assert.equal(normalizeRequestError(timeout).message, "请求超时，请稍后重试");
+  assert.equal(
+    normalizeRequestError(new TypeError("Failed to fetch")).message,
+    "无法连接服务器，请检查服务是否已启动"
   );
 });

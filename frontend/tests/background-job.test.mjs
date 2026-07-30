@@ -24,7 +24,7 @@ test("knowledge ingestion progress is visible until the job completes", () => {
   assert.equal(isTerminalJob({ status: "completed" }), true);
 });
 
-test("knowledge ingestion failure exposes the worker error", () => {
+test("knowledge ingestion failure exposes only a safe worker error", () => {
   assert.equal(
     describeKnowledgeJob({
       status: "failed",
@@ -32,5 +32,13 @@ test("knowledge ingestion failure exposes the worker error", () => {
       error_message: "Unsupported knowledge document format"
     }),
     "索引失败：Unsupported knowledge document format"
+  );
+  assert.equal(
+    describeKnowledgeJob({
+      status: "failed",
+      progress: 100,
+      error_message: "Traceback: sqlalchemy postgresql://admin:secret@db/prod"
+    }),
+    "索引失败：服务器处理失败"
   );
 });

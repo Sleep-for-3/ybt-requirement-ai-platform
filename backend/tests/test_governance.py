@@ -365,19 +365,36 @@ def test_inline_batch_job_is_queryable_and_idempotent(monkeypatch) -> None:
         admin_headers = _bootstrap_platform(client)
         bank = client.post("/api/admin/institutions", headers=admin_headers, json={"institution_code": "BANK_JOB", "institution_name": "任务示例银行", "institution_type": "bank"}).json()
         project = client.post("/api/projects", headers=admin_headers, json={"name": "异步任务项目", "institution_id": bank["id"]}).json()
-        headers = {**admin_headers, "Idempotency-Key": "business-draft-batch-001"}
         payload = {"field_ids": [], "password": "must-not-enter-job-payload", "knowledge_content": "must-not-enter-job-payload"}
 
-        first = client.post(f"/api/projects/{project['id']}/batch/generate-business-drafts", headers=headers, json=payload)
-        second = client.post(f"/api/projects/{project['id']}/batch/generate-business-drafts", headers=headers, json=payload)
+        first = client.post(f"/api/projects/{project['id']}/batch/generate-business-drafts", headers=admin_headers, json=payload)
+        second = client.post(f"/api/projects/{project['id']}/batch/generate-business-drafts", headers=admin_headers, json=payload)
 
         assert first.status_code == 202, first.text
         assert second.status_code == 202, second.text
         assert first.json()["id"] == second.json()["id"]
+        assert first.json()["job_id"] == second.json()["job_id"]
+        assert first.json()["deduplicated"] is False
+        assert second.json()["deduplicated"] is True
+        assert second.json()["message"] == "相同任务已存在，已返回当前任务"
+        assert second.json()["status_url"] == f"/api/jobs/{first.json()['id']}"
         job = client.get(f"/api/jobs/{first.json()['id']}", headers=admin_headers)
         assert job.status_code == 200, job.text
         assert job.json()["status"] == "completed"
         assert "must-not-enter-job-payload" not in str(job.json()["payload_summary_json"])
+        rerun = client.post(f"/api/jobs/{first.json()['id']}/rerun", headers=admin_headers, json={})
+        duplicate_rerun = client.post(f"/api/jobs/{first.json()['id']}/rerun", headers=admin_headers, json={})
+        assert rerun.status_code == 202, rerun.text
+        assert rerun.json()["id"] != first.json()["id"]
+        assert rerun.json()["deduplicated"] is False
+        assert duplicate_rerun.json()["id"] == rerun.json()["id"]
+        assert duplicate_rerun.json()["deduplicated"] is True
+
+        other_project = client.post("/api/projects", headers=admin_headers, json={"name": "另一异步任务项目", "institution_id": bank["id"]}).json()
+        other = client.post(f"/api/projects/{other_project['id']}/batch/generate-business-drafts", headers=admin_headers, json=payload)
+        assert other.status_code == 202, other.text
+        assert other.json()["id"] != first.json()["id"]
+        assert other.json()["deduplicated"] is False
 
 
 def test_restricted_file_download_is_authorized_and_path_safe(monkeypatch, tmp_path) -> None:
@@ -469,7 +486,10 @@ def test_task_queues_retry_cancel_and_celery_payload_safety(db_session) -> None:
 
     fake = FakeCelery(); celery = CeleryTaskQueue(fake)
     remote = celery.enqueue(db_session, job_type="metadata_sync", institution_id=1, project_id=1, created_by=1, idempotency_key="celery-safe", payload_summary={"password": "do-not-send", "knowledge_content": "do-not-send"})
+    duplicate_remote = celery.enqueue(db_session, job_type="metadata_sync", institution_id=1, project_id=1, created_by=1, idempotency_key="celery-safe", payload_summary={"password": "different-secret"})
     assert fake.calls == [("app.workers.execute_background_job", [remote.id])]
+    assert duplicate_remote.id == remote.id
+    assert duplicate_remote.submission_deduplicated is True
     assert remote.celery_task_id == "celery-1"
     assert "do-not-send" not in str(remote.payload_summary_json)
     cancelled = celery.cancel(db_session, remote)
@@ -480,6 +500,83 @@ def test_task_queues_retry_cancel_and_celery_payload_safety(db_session) -> None:
     assert retried_remote.celery_task_id == "celery-2"
     with pytest.raises(ValueError, match="Only failed"):
         celery.retry(db_session, retried_remote)
+
+
+def test_durable_job_handler_can_be_resolved_after_process_restart() -> None:
+    from app.services.task_queue.handlers import resolve_job_handler
+
+    assert callable(resolve_job_handler("project_backup"))
+    assert callable(resolve_job_handler("knowledge_ingestion"))
+    assert resolve_job_handler("unknown_job_type") is None
+
+
+def test_queue_recovers_when_a_competing_insert_wins(monkeypatch, db_session) -> None:
+    """Deterministically exercise the SELECT/INSERT race conflict path."""
+    from app.models import BackgroundJob
+
+    queue = InlineTaskQueue()
+    first = queue.enqueue(
+        db_session,
+        job_type="project_backup",
+        institution_id=None,
+        project_id=None,
+        created_by=1,
+        idempotency_key="concurrent-key",
+        payload_summary={},
+        handler=lambda db, job: {"success_count": 1, "failed_count": 0},
+    )
+    real_scalar = db_session.scalar
+    calls = {"count": 0}
+
+    def miss_the_competing_row_once(statement, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return None
+        return real_scalar(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "scalar", miss_the_competing_row_once)
+    second = queue.enqueue(
+        db_session,
+        job_type="project_backup",
+        institution_id=None,
+        project_id=None,
+        created_by=1,
+        idempotency_key="concurrent-key",
+        payload_summary={},
+        handler=lambda db, job: {"success_count": 1, "failed_count": 0},
+    )
+
+    assert second.id == first.id
+    assert second.submission_deduplicated is True
+    assert db_session.query(BackgroundJob).count() == 1
+
+
+def test_semantic_job_keys_exclude_secrets_and_separate_targets() -> None:
+    from app.services.task_queue.idempotency import semantic_idempotency_key
+
+    first = semantic_idempotency_key(
+        job_type="knowledge_reindex",
+        payload={"document_id": 7, "password": "first-secret", "prompt": "private prompt"},
+        target_resource_type="knowledge_document",
+        target_resource_id=7,
+    )
+    same_business_input = semantic_idempotency_key(
+        job_type="knowledge_reindex",
+        payload={"document_id": 7, "password": "second-secret", "prompt": "another private prompt"},
+        target_resource_type="knowledge_document",
+        target_resource_id=7,
+    )
+    other_target = semantic_idempotency_key(
+        job_type="knowledge_reindex",
+        payload={"document_id": 8},
+        target_resource_type="knowledge_document",
+        target_resource_id=8,
+    )
+
+    assert first == same_business_input
+    assert first != other_target
+    assert "secret" not in first
+    assert "prompt" not in first
 
 
 def test_running_batch_stops_before_next_item_when_cancelled(db_session) -> None:
