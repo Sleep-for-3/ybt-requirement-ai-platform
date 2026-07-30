@@ -25,9 +25,11 @@ from app.services.llm.providers import (
     validate_model_identifier,
     validate_provider_url,
 )
+from app.services.task_queue.inflight import InFlightOperationGuard
 
 
 router = APIRouter(tags=["AI runtime"])
+_profile_test_guard = InFlightOperationGuard()
 
 
 class ConnectionTestState(BaseModel):
@@ -275,7 +277,13 @@ async def test_model_profile(
     principal: CurrentPrincipal,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return await test_chat(RuntimeTestRequest(profile_id=profile_id), principal, db)
+    key = ("model_profile_test", profile_id)
+    if not _profile_test_guard.try_start(key):
+        raise HTTPException(status_code=409, detail="相同模型连接测试正在执行，请等待当前测试完成")
+    try:
+        return await test_chat(RuntimeTestRequest(profile_id=profile_id), principal, db)
+    finally:
+        _profile_test_guard.finish(key)
 
 
 @router.get("/projects/{project_id}/model-calls")

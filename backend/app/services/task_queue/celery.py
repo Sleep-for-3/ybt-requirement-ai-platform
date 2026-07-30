@@ -1,13 +1,10 @@
 from datetime import UTC, datetime
-import hashlib
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundJob
-from app.core.observability import current_request_id
-from app.services.governance.audit import redact_summary
+from app.services.task_queue.idempotency import create_or_get_job
 
 
 class CeleryTaskQueue:
@@ -20,12 +17,17 @@ class CeleryTaskQueue:
         self.celery_app = celery_app
 
     def enqueue(self, db: Session, *, job_type: str, institution_id: int | None, project_id: int | None, created_by: int, idempotency_key: str, payload_summary: dict[str, Any], handler=None) -> BackgroundJob:
-        scoped_key = hashlib.sha256(f"{institution_id or 0}:{project_id or 0}:{job_type}:{idempotency_key}".encode()).hexdigest()
-        existing = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == scoped_key))
-        if existing:
-            return existing
-        job = BackgroundJob(institution_id=institution_id, project_id=project_id, idempotency_key=scoped_key, job_type=job_type, correlation_id=current_request_id(), status="queued", progress=0, payload_summary_json=redact_summary(payload_summary), result_summary_json={}, created_by=created_by)
-        db.add(job); db.commit(); db.refresh(job)
+        job, deduplicated = create_or_get_job(
+            db,
+            job_type=job_type,
+            institution_id=institution_id,
+            project_id=project_id,
+            created_by=created_by,
+            idempotency_key=idempotency_key,
+            payload_summary=payload_summary,
+        )
+        if deduplicated:
+            return job
         result = self.celery_app.send_task("app.workers.execute_background_job", args=[job.id])
         job.celery_task_id = getattr(result, "id", None)
         db.commit()

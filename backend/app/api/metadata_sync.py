@@ -8,6 +8,7 @@ from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.task_queue.domain_handlers import metadata_sync_handler
 from app.services.task_queue.submission import submit_project_job
+from app.services.task_queue.presentation import job_submission_response
 
 router=APIRouter(tags=["metadata sync"])
 
@@ -30,4 +31,4 @@ def task(task_id:int,db:Session=Depends(get_db)):
     if item is None: raise HTTPException(404,"Metadata sync task not found")
     return item
 
-def _job(job):return {column.key:getattr(job,column.key) for column in job.__table__.columns}
+def _job(job):return job_submission_response(job)

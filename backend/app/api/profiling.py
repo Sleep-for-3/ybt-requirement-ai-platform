@@ -9,6 +9,7 @@ from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.task_queue.domain_handlers import column_profile_handler
 from app.services.task_queue.submission import submit_project_job
+from app.services.task_queue.presentation import job_submission_response
 router=APIRouter(tags=["column profiling"])
 @router.post("/catalog/columns/{column_id}/profile")
 def profile(column_id:int,payload:ColumnProfileRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
@@ -35,4 +36,4 @@ def bind_evidence(task_id:int,payload:ProfileEvidenceBindRequest,db:Session=Depe
     try:return bind_profile_evidence(db,task_id,payload.mapping_type,payload.mapping_id)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 
-def _job(job):return {column.key:getattr(job,column.key) for column in job.__table__.columns}
+def _job(job):return job_submission_response(job)

@@ -11,6 +11,7 @@ from app.services.retrieval import HybridRetriever
 from app.services.storage import get_storage_service
 from app.services.task_queue.domain_handlers import knowledge_ingestion_handler,knowledge_reindex_handler,rag_evaluation_handler
 from app.services.task_queue.submission import submit_project_job
+from app.services.task_queue.presentation import job_submission_response
 from app.services.governance.audit import record_audit
 from app.services.vector import get_vector_store
 from app.services.vector.knowledge_record import build_knowledge_vector_record
@@ -104,7 +105,7 @@ def prompt_versions(db:Session=Depends(get_db)):return [_row(item) for item in d
 def _row(item):return {key:value for key,value in item.__dict__.items() if not key.startswith("_")}
 def _document(item):return _row(item)
 def _unit(item):return _row(item)
-def _job(job):return {column.key:getattr(job,column.key) for column in job.__table__.columns}
+def _job(job):return job_submission_response(job)
 
 def _visible_document_or_404(db,document_id,project_id,require_owner=False):
     item=db.get(KnowledgeDocument,document_id)

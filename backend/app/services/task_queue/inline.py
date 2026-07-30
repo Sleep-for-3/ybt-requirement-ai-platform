@@ -1,14 +1,12 @@
 from datetime import UTC, datetime
-import hashlib
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundJob
-from app.core.observability import current_request_id
 from app.services.governance.audit import redact_summary
 from app.services.task_queue.base import JobHandler
+from app.services.task_queue.idempotency import create_or_get_job
 
 
 _handlers: dict[str, JobHandler] = {}
@@ -18,30 +16,35 @@ def register_job_handler(job_type: str, handler: JobHandler) -> None:
     _handlers[job_type] = handler
 
 
+def _resolve_handler(job_type: str, handler: JobHandler | None = None) -> JobHandler | None:
+    if handler is not None:
+        register_job_handler(job_type, handler)
+        return handler
+    registered = _handlers.get(job_type)
+    if registered is not None:
+        return registered
+    from app.services.task_queue.handlers import resolve_job_handler
+
+    resolved = resolve_job_handler(job_type)
+    if resolved is not None:
+        register_job_handler(job_type, resolved)
+    return resolved
+
+
 class InlineTaskQueue:
     def enqueue(self, db: Session, *, job_type: str, institution_id: int | None, project_id: int | None, created_by: int, idempotency_key: str, payload_summary: dict[str, Any], handler: JobHandler | None = None) -> BackgroundJob:
-        scoped_key = hashlib.sha256(f"{institution_id or 0}:{project_id or 0}:{job_type}:{idempotency_key}".encode()).hexdigest()
-        existing = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == scoped_key))
-        if existing:
-            return existing
-        job = BackgroundJob(
+        job, deduplicated = create_or_get_job(
+            db,
+            job_type=job_type,
             institution_id=institution_id,
             project_id=project_id,
-            idempotency_key=scoped_key,
-            job_type=job_type,
-            correlation_id=current_request_id(),
-            status="queued",
-            progress=0,
-            payload_summary_json=redact_summary(payload_summary),
-            result_summary_json={},
             created_by=created_by,
+            idempotency_key=idempotency_key,
+            payload_summary=payload_summary,
         )
-        db.add(job)
-        db.commit()
-        db.refresh(job)
-        if handler:
-            register_job_handler(job_type, handler)
-        return self._execute(db, job, handler or _handlers.get(job_type))
+        if deduplicated:
+            return job
+        return self._execute(db, job, _resolve_handler(job_type, handler))
 
     def get_status(self, db: Session, job_id: int) -> BackgroundJob | None:
         return db.get(BackgroundJob, job_id)
@@ -65,10 +68,10 @@ class InlineTaskQueue:
         job.error_message = None
         job.finished_at = None
         db.commit()
-        return self._execute(db, job, _handlers.get(job.job_type))
+        return self._execute(db, job, _resolve_handler(job.job_type))
 
     def execute_existing(self, db: Session, job: BackgroundJob, handler: JobHandler | None = None) -> BackgroundJob:
-        return self._execute(db, job, handler or _handlers.get(job.job_type))
+        return self._execute(db, job, _resolve_handler(job.job_type, handler))
 
     def _execute(self, db: Session, job: BackgroundJob, handler: JobHandler | None) -> BackgroundJob:
         if handler is None:

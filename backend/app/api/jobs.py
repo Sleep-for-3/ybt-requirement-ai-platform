@@ -1,5 +1,4 @@
 import asyncio
-import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
@@ -19,6 +18,8 @@ from app.services.export import export_traceability_workbook
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
 from app.services.task_queue.domain_handlers import project_backup_handler
+from app.services.task_queue.idempotency import semantic_idempotency_key
+from app.services.task_queue.presentation import job_submission_response
 
 
 router = APIRouter(tags=["background jobs"])
@@ -63,6 +64,38 @@ def retry_job(job_id: int, principal: RealPrincipal, db: Session = Depends(get_d
     except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/jobs/{job_id}/rerun", status_code=status.HTTP_202_ACCEPTED)
+def rerun_completed_job(job_id: int, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
+    original = _job_or_404(db, job_id)
+    if original.project_id is not None:
+        PermissionService(db, principal).require_project_permission(original.project_id, "task.manage")
+    if original.status not in {"completed", "partially_completed"}:
+        raise HTTPException(status_code=409, detail="Only completed jobs can be explicitly rerun")
+    rerun = get_task_queue().enqueue(
+        db,
+        job_type=original.job_type,
+        institution_id=original.institution_id,
+        project_id=original.project_id,
+        created_by=principal.user_id,
+        idempotency_key=f"rerun-of:{original.id}",
+        payload_summary={**(original.payload_summary_json or {}), "rerun_of_job_id": original.id},
+        handler=None,
+    )
+    if not getattr(rerun, "submission_deduplicated", False):
+        record_audit(
+            db,
+            action="rerun",
+            resource_type="background_job",
+            resource_id=rerun.id,
+            actor_user_id=principal.user_id,
+            institution_id=original.institution_id,
+            project_id=original.project_id,
+            after={"job_type": rerun.job_type, "rerun_of_job_id": original.id, "status": rerun.status},
+        )
+        db.commit()
+    return job_submission_response(rerun)
+
+
 @router.post("/projects/{project_id}/batch/generate-business-drafts", status_code=status.HTTP_202_ACCEPTED)
 def batch_business(project_id: int, payload: BatchOperationRequest, principal: RealPrincipal, db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
     return _enqueue(db, project_id, principal, "batch_ai_generation_business", payload.model_dump(mode="json"), idempotency_key, _business_handler)
@@ -91,10 +124,12 @@ def project_backup(project_id: int, principal: RealPrincipal, db: Session = Depe
 
 def _enqueue(db, project_id, principal, job_type, payload, idempotency_key, handler):
     project = PermissionService(db, principal).require_project_permission(project_id, "task.manage")
-    job = get_task_queue().enqueue(db, job_type=job_type, institution_id=project.institution_id, project_id=project.id, created_by=principal.user_id, idempotency_key=idempotency_key or uuid.uuid4().hex, payload_summary=payload, handler=handler)
-    record_audit(db, action="create", resource_type="background_job", resource_id=job.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project.id, after={"job_type": job_type, "status": job.status})
-    db.commit()
-    return _job_dict(job)
+    server_key = semantic_idempotency_key(job_type=job_type, payload=payload)
+    job = get_task_queue().enqueue(db, job_type=job_type, institution_id=project.institution_id, project_id=project.id, created_by=principal.user_id, idempotency_key=server_key, payload_summary=payload, handler=handler)
+    if not getattr(job, "submission_deduplicated", False):
+        record_audit(db, action="create", resource_type="background_job", resource_id=job.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project.id, after={"job_type": job_type, "status": job.status})
+        db.commit()
+    return _job_submission_dict(job)
 
 
 def _business_handler(db: Session, job: BackgroundJob) -> dict:
@@ -133,6 +168,8 @@ def _draft_handler(db, job, model, generator):
     field_ids = list(job.payload_summary_json.get("field_ids") or [])
     statement = select(model).where(model.project_id == job.project_id)
     if field_ids: statement = statement.where(model.target_field_id.in_(field_ids))
+    if job.payload_summary_json.get("scenario_id"):
+        statement = statement.where(model.scenario_id == int(job.payload_summary_json["scenario_id"]))
     rows = list(db.scalars(statement).all());success=0;failed=0
     for row in rows:
         if _job_cancelled(db, job): break
@@ -159,3 +196,7 @@ def _job_or_404(db, job_id):
 
 
 def _job_dict(job): return {column.key:getattr(job,column.key) for column in job.__table__.columns}
+
+
+def _job_submission_dict(job):
+    return job_submission_response(job)

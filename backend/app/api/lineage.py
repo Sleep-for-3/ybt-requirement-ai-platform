@@ -1,9 +1,8 @@
 import re
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -19,6 +18,8 @@ from app.services.lineage.jobs import lineage_export_handler, script_archive_ing
 from app.services.lineage.resolver import select_resolution_candidate, unbind_lineage_node
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
+from app.services.task_queue.idempotency import semantic_idempotency_key
+from app.services.task_queue.presentation import job_submission_response
 
 
 router = APIRouter(tags=["lineage"])
@@ -62,8 +63,13 @@ def sync_code_repository(repository_id: int, principal: CurrentPrincipal, db: Se
     job = get_task_queue().enqueue(
         db, job_type="script_repository_sync", institution_id=repository.institution_id,
         project_id=repository.project_id, created_by=actor_id,
-        idempotency_key=f"repository:{repository.id}:{uuid.uuid4().hex}",
-        payload_summary={"repository_id": repository.id, "branch": repository.default_branch},
+        idempotency_key=semantic_idempotency_key(
+            job_type="script_repository_sync",
+            target_resource_type="code_repository",
+            target_resource_id=repository.id,
+            payload={"repository_id": repository.id, "branch": repository.default_branch, "last_sync_commit": repository.last_sync_commit},
+        ),
+        payload_summary={"repository_id": repository.id, "branch": repository.default_branch, "last_sync_commit": repository.last_sync_commit},
         handler=script_repository_sync_handler,
     )
     return _job_dict(job, db)
@@ -316,14 +322,27 @@ def export_project_lineage(project_id: int, principal: CurrentPrincipal, db: Ses
 def enqueue_project_lineage_export(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     project = PermissionService(db, principal).require_project_permission(project_id, "export")
     actor_id = ensure_actor_user_id(db, principal.user_id)
+    node_count = db.scalar(select(func.count(LineageNode.id)).where(LineageNode.project_id == project.id)) or 0
+    edge_count = db.scalar(select(func.count(LineageEdge.id)).where(LineageEdge.project_id == project.id, LineageEdge.enabled.is_(True))) or 0
+    lineage_version = {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "latest_node_id": db.scalar(select(func.max(LineageNode.id)).where(LineageNode.project_id == project.id)),
+        "latest_edge_id": db.scalar(select(func.max(LineageEdge.id)).where(LineageEdge.project_id == project.id)),
+    }
     job = get_task_queue().enqueue(
         db,
         job_type="lineage_export",
         institution_id=project.institution_id,
         project_id=project.id,
         created_by=actor_id,
-        idempotency_key=f"project-lineage:{project.id}:{uuid.uuid4().hex}",
-        payload_summary={"file_name": f"project-{project.id}-lineage.xlsx"},
+        idempotency_key=semantic_idempotency_key(
+            job_type="lineage_export",
+            target_resource_type="project",
+            target_resource_id=project.id,
+            payload=lineage_version,
+        ),
+        payload_summary={"file_name": f"project-{project.id}-lineage.xlsx", "lineage_version": lineage_version},
         handler=lineage_export_handler,
     )
     return _job_dict(job, db)
@@ -356,7 +375,9 @@ def _edge_dict(row: LineageEdge) -> dict:
 
 def _job_dict(job: BackgroundJob, db: Session) -> dict:
     items = db.scalars(select(BackgroundJobItem).where(BackgroundJobItem.background_job_id == job.id).order_by(BackgroundJobItem.id)).all()
-    return {"job_id": job.id, "job_type": job.job_type, "status": job.status, "progress": job.progress, "result": job.result_summary_json, "items": [{"item_key": item.item_key, "status": item.status, "result": item.result_summary_json, "error_message": item.error_message} for item in items]}
+    result = job_submission_response(job)
+    result.update({"result": job.result_summary_json, "items": [{"item_key": item.item_key, "status": item.status, "result": item.result_summary_json, "error_message": item.error_message} for item in items]})
+    return result
 
 
 def _repository_dict(row: CodeRepository) -> dict:
