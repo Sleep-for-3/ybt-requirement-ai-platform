@@ -182,6 +182,8 @@ export type ValidationResult = { valid?:boolean;error_count:number;warning_count
 export type BackgroundJobSummary = {
   id:number;
   job_id?:number;
+  institution_id?:number|null;
+  project_id?:number|null;
   job_type:string;
   status:string;
   progress:number;
@@ -196,6 +198,17 @@ export type BackgroundJobSummary = {
   deduplicated?:boolean;
   message?:string;
   status_url?:string;
+  retry_count?:number;
+  max_retries?:number;
+  items?:BackgroundJobItemSummary[];
+};
+export type BackgroundJobItemSummary = {
+  id:number;
+  item_key:string;
+  status:string;
+  error_message?:string|null;
+  created_at?:string;
+  updated_at?:string;
 };
 export type DeliverableTemplate = { id:number;project_id:number;template_name:string;template_type:string;description?:string|null;enabled:boolean;is_default:boolean;current_version_no:number;current_version_id?:number|null;current_version_status?:string|null;validation_error_count?:number;validation_warning_count?:number };
 export type DeliverableTemplateVersion = { id:number;project_id:number;template_id:number;stored_file_id:number;version_no:number;file_hash:string;sheet_config_json:Array<{sheet_name:string}>;parse_status:string;warnings_json:RenderIssue[];created_at?:string;validation?:ValidationResult;sheet_mapping_count?:number;enabled_sheet_mapping_count?:number };

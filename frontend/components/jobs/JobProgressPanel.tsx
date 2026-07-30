@@ -3,6 +3,7 @@ import Link from "next/link";
 import { JobStatusBadge } from "@/components/jobs/JobStatusBadge";
 import { BackgroundJobSummary } from "@/lib/api";
 import { formatApiErrorText } from "@/lib/http-response.mjs";
+import { jobDetailsHref } from "@/lib/job-links.mjs";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   batch_ai_generation_business: "批量生成业务口径草稿",
@@ -43,11 +44,13 @@ export function jobTypeLabel(jobType: string) {
 export function JobProgressPanel({
   job,
   compact = false,
-  resultHref
+  resultHref,
+  showDetailsLink = true
 }: {
   job: BackgroundJobSummary;
   compact?: boolean;
   resultHref?: string;
+  showDetailsLink?: boolean;
 }) {
   const result = job.result_summary_json || {};
   const completed = Number(result.success_count ?? 0);
@@ -84,7 +87,7 @@ export function JobProgressPanel({
       )}
       {safeError ? <p className="mt-3 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{safeError}</p> : null}
       <div className="mt-3 flex gap-3 text-sm">
-        <Link className="font-medium text-pine-700 hover:underline" href={`/jobs?focus=${job.id}`}>查看任务详情</Link>
+        {showDetailsLink ? <Link className="font-medium text-pine-700 hover:underline" href={jobDetailsHref(job.id)}>查看任务详情</Link> : null}
         {resultHref && ["completed", "partially_completed"].includes(job.status) ? <Link className="font-medium text-pine-700 hover:underline" href={resultHref}>查看结果</Link> : null}
       </div>
     </section>
