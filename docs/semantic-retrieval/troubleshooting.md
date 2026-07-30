@@ -11,6 +11,7 @@
 - 429/5xx：系统会有限重试，持续失败时检查配额和服务容量。
 - 维度不一致：连接测试返回值与 `EMBEDDING_DIMENSION` 不同，修正配置并重新建新索引。
 - 本地服务不可达：宿主机与容器中的 `localhost` 含义不同。
+- FastEmbed 首次启动慢：检查 `.local-run/fastembed-cache/` 下载进度和 `embedding-*.stderr.log`；缓存完成后重启不再重复下载。
 
 ## Milvus 不可用
 
@@ -26,7 +27,11 @@
 
 ## 数量校验失败
 
-比较状态卡的有效 Chunk 数、版本的 `indexed_count` 和 Milvus count。检查失败批次、被禁用/归档文档和内容 Hash。不要手工把未验证版本改成 active。
+比较状态卡的有效 Chunk 数、版本的 `indexed_count` 和 Milvus 实时 `count(*)`。`get_collection_stats().row_count` 可能延迟，不应单独作为失败依据。检查失败批次、被禁用/归档文档和内容 Hash。不要手工把未验证版本改成 active。
+
+## Docker Hub 拉取慢
+
+先确认 Clash Verge 的 mixed-port 和 WSL 可达性，再为 WSL Docker daemon 配置独立 HTTP/HTTPS 代理。用 `systemctl show --property=Environment docker` 和 `docker info` 核验；不要把订阅、节点地址或认证信息写进仓库。Milvus 已拉取成功时不需要反复下载，普通启停会复用本地镜像和 named volume。
 
 ## 查询报没有 active 索引
 

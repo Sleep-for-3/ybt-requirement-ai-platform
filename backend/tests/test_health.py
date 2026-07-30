@@ -13,6 +13,7 @@ from app.core.settings import Settings, get_settings
 from app.main import app
 from app.services.storage import get_storage_service
 from app.services.health_checks import _check_task_queue
+from app.services.health_checks import readiness_summary
 
 
 def test_production_configuration_validation_is_structured_and_secret_safe() -> None:
@@ -100,6 +101,32 @@ def test_celery_health_requires_a_responding_worker(monkeypatch) -> None:
 
     assert result["status"] == "unhealthy"
     assert result["provider"] == "celery"
+
+
+def test_readiness_allows_first_semantic_index_bootstrap_but_not_dependency_failure() -> None:
+    bootstrap = readiness_summary(
+        {
+            "status": "degraded",
+            "checks": {
+                "application": {"status": "healthy"},
+                "vector_store": {"status": "healthy"},
+                "embedding_provider": {"status": "healthy"},
+                "semantic_index": {"status": "degraded"},
+            },
+        }
+    )
+    failed_dependency = readiness_summary(
+        {
+            "status": "unhealthy",
+            "checks": {
+                "vector_store": {"status": "unhealthy"},
+                "semantic_index": {"status": "degraded"},
+            },
+        }
+    )
+
+    assert bootstrap["status"] == "ready"
+    assert failed_dependency["status"] == "not_ready"
 
 
 @contextmanager

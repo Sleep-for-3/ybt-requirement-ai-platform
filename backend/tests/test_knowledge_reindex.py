@@ -231,3 +231,14 @@ def test_identical_formal_reindex_submission_reuses_one_job(db_session):
     assert first.id == second.id
     assert first_deduplicated is False
     assert second_deduplicated is True
+
+
+def test_formal_reindex_api_uses_terminal_safe_project_job_submission() -> None:
+    from inspect import getsource
+
+    from app.api.knowledge_rag import formal_reindex
+
+    source = getsource(formal_reindex)
+    assert "submit_project_job(" in source
+    assert "idempotency_key=idempotency_key" in source
+    assert "get_task_queue().enqueue(" not in source

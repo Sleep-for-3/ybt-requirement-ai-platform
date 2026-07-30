@@ -200,6 +200,110 @@ def test_windows_lifecycle_script_without_action_keeps_control_console_open() ->
             process.wait(timeout=5)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows lifecycle status behavior")
+def test_windows_lifecycle_status_reports_semantic_runtime_and_docker_engine() -> None:
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "scripts" / "项目启停.ps1"),
+            "status",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert "Docker 引擎：" in result.stdout
+    assert "Milvus：" in result.stdout
+    assert "Embedding：" in result.stdout
+
+
+def test_windows_lifecycle_production_does_not_force_ai_runtime_back_to_mock() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert '$env:LLM_PROVIDER = "mock"' not in lifecycle_source
+    assert '$env:EMBEDDING_PROVIDER = "mock"' not in lifecycle_source
+    assert '$env:VECTOR_STORE_PROVIDER = "mock"' not in lifecycle_source
+
+
+def test_windows_lifecycle_manages_persistent_milvus_without_deleting_volumes() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    for expected in (
+        "Start-SemanticInfrastructure",
+        "Stop-SemanticInfrastructure",
+        '"etcd", "milvus-minio", "milvus"',
+        "semantic-compose.env",
+        '$env:VECTOR_STORE_PROVIDER = "milvus"',
+        '$env:MILVUS_URI = "http://127.0.0.1:19530"',
+    ):
+        assert expected in lifecycle_source
+    for forbidden in ("docker compose down -v", "docker volume rm", "docker system prune"):
+        assert forbidden not in lifecycle_source.lower()
+
+
+def test_windows_lifecycle_provides_real_local_embedding_when_none_is_configured() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+    compose_source = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    requirements_source = (ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+
+    for expected in (
+        "Start-LocalEmbeddingInfrastructure",
+        '$env:EMBEDDING_PROVIDER = "local_vllm"',
+        '$env:EMBEDDING_BASE_URL = "http://127.0.0.1:11434/v1"',
+        '$env:EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"',
+        '$env:EMBEDDING_DIMENSION = "512"',
+        "app.local_embedding_server:app",
+        "FASTEMBED_CACHE_PATH",
+    ):
+        assert expected in lifecycle_source
+    assert "fastembed==0.8.0" in requirements_source
+    assert "\n  ollama:" not in compose_source
+    assert 'http://127.0.0.1:11434/v1/embeddings' in lifecycle_source
+    assert "Embedding 向量生成自检失败" in lifecycle_source
+
+
+def test_windows_lifecycle_uses_bounded_retry_for_transient_docker_pulls() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "Invoke-DockerCommandWithRetry" in lifecycle_source
+    assert "[int]$Attempts = 5" in lifecycle_source
+    assert "Docker 命令连续失败" in lifecycle_source
+
+
+def test_windows_lifecycle_failed_start_cleans_verified_listener_children() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "Stop-FailedLaunchPortOwner" in lifecycle_source
+    assert 'Stop-FailedLaunchPortOwner -Service "frontend"' in lifecycle_source
+    assert 'Stop-FailedLaunchPortOwner -Service "backend"' in lifecycle_source
+    assert "taskkill" not in lifecycle_source.lower()
+
+
+def test_windows_lifecycle_keeps_wsl_docker_alive_for_running_services() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "Start-DockerKeepAlive" in lifecycle_source
+    assert "Stop-DockerKeepAlive" in lifecycle_source
+    assert '"sleep", "infinity"' in lifecycle_source
+    assert "dockerKeepAlivePid" in lifecycle_source
+
+
+def test_windows_lifecycle_migration_marker_allows_new_postgres_projects_safely() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "$targetProjectCount -ge $markerSourceProjectCount" in lifecycle_source
+    assert "sourceProjectCount = $sourceProjectCount" in lifecycle_source
+    assert "sourceLength" in lifecycle_source
+    assert "sourceLastWriteTime" in lifecycle_source
+    assert "SQLite 源文件已变化" in lifecycle_source
+
+
 def test_full_smoke_workflow_is_manual_scheduled_and_uploads_sanitized_evidence() -> None:
     workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "smoke.yml").read_text(encoding="utf-8")
 

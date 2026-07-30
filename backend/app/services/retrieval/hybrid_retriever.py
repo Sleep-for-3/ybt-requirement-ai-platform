@@ -100,6 +100,7 @@ class HybridRetriever:
                 embedding,
                 [query],
                 ["internal"],
+                input_type="query",
             )[0]
             if settings.vector_store_provider == "milvus":
                 active_index = get_active_index_version(self.db, project_id)
@@ -271,8 +272,14 @@ def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:
 
 def _keyword_score(unit, tokens, target, scenario):
     text = f"{unit.title or ''} {unit.normalized_content}".lower()
-    hits = sum(1 for token in set(tokens) if token in text)
-    score = hits / max(len(set(tokens)), 1) * 0.7
+    unique_tokens = set(tokens)
+    total_weight = sum(_query_token_weight(token) for token in unique_tokens)
+    matched_weight = sum(
+        _query_token_weight(token)
+        for token in unique_tokens
+        if token in text
+    )
+    score = matched_weight / max(total_weight, 1.0) * 0.7
     if (
         target
         and unit.target_field_code
@@ -282,6 +289,14 @@ def _keyword_score(unit, tokens, target, scenario):
     if scenario and unit.scenario_id == scenario:
         score += 0.1
     return min(score, 1.0)
+
+
+def _query_token_weight(token: str) -> float:
+    if token.isascii():
+        return 4.0 if any(character in token for character in "_0123456789") else 2.0
+    if len(token) > 2:
+        return min(4.0, len(token) / 2)
+    return 1.0
 
 
 def _visible(unit, project_id, institution, knowledge_types=None, scenario_id=None):

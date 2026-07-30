@@ -45,6 +45,8 @@ def embed_with_observability(
     service,
     texts: list[str],
     confidentiality_levels: list[str] | None = None,
+    *,
+    input_type: str = "document",
 ) -> list[list[float]]:
     if not texts:
         return []
@@ -62,7 +64,14 @@ def embed_with_observability(
     outbound = texts if local_only else [redact_content(text) for text in texts]
     confidentiality = max(levels, key=lambda item: CLASSIFICATION_RANK.get(item, 1))
     try:
-        vectors = service.embed_texts(outbound)
+        if input_type == "query":
+            if len(outbound) != 1:
+                raise ValueError("Query embedding requires exactly one input")
+            vectors = [service.embed_query(outbound[0])]
+        elif input_type == "document":
+            vectors = service.embed_texts(outbound)
+        else:
+            raise ValueError("Embedding input_type must be document or query")
     except Exception as exc:
         metadata = service.last_call
         error_type = exc.error_type if isinstance(exc, LLMRuntimeError) else type(exc).__name__

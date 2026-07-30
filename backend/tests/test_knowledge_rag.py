@@ -2,6 +2,7 @@ import asyncio
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from docx import Document
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
@@ -16,17 +17,79 @@ from app.main import app
 from app.models import BackgroundJob,KnowledgeDocument,ModelCallLog,ModelProfile,Project,PromptTemplateVersion,RetrievalLog
 from app.services.db.dialect import qualify_table,quote_identifier
 from app.services.embeddings.factory import get_embedding_service
-from app.services.embeddings.openai_compatible import OpenAICompatibleEmbeddingService
+from app.services.embeddings.observability import embed_with_observability
+from app.services.embeddings.openai_compatible import LocalEmbeddingService,OpenAICompatibleEmbeddingService
 from app.services.rag.citation_validator import validate_citations
+from app.services.llm.base import ModelCallMetadata
 from app.services.llm.prompt_runtime import get_prompt_runtime,prepare_model_input,record_model_call
 from app.services.knowledge_ingestion import ingest_knowledge_document
 from app.services.security import ensure_external_allowed, redact_content
 from app.services.vector import VectorRecord
 from app.services.vector.factory import get_vector_store
 from app.services.vector.milvus import MilvusVectorStore
+from app.services.knowledge_ingestion.parsers import parse_document
 from app.services.vector.mock import MockVectorStore
 from app.services.storage.factory import get_storage_service
 from app.services.task_queue.factory import get_task_queue
+from app.services.retrieval.hybrid_retriever import _keyword_score
+from app.services.retrieval.keyword_index import tokenize
+
+
+def test_plain_text_parser_splits_windows_crlf_paragraphs() -> None:
+    units, warnings = parse_document(
+        "synthetic.md",
+        "第一段\r\n\r\n第二段\r\n\r\n第三段".encode("utf-8"),
+        "manual_note",
+    )
+
+    assert warnings == []
+    assert [unit.content for unit in units] == ["第一段", "第二段", "第三段"]
+
+
+def test_embedding_observability_uses_query_encoder_for_retrieval(db_session) -> None:
+    class QueryAwareEmbedding:
+        local_only = True
+        last_call = ModelCallMetadata(provider="local_vllm", model="fake-query")
+
+        def embed_query(self, text):
+            return [9.0, 0.0]
+
+        def embed_texts(self, texts):
+            raise AssertionError("retrieval query must not use document encoding")
+
+    vectors = embed_with_observability(
+        db_session,
+        1,
+        QueryAwareEmbedding(),
+        ["贷款余额如何计算"],
+        ["internal"],
+        input_type="query",
+    )
+
+    assert vectors == [[9.0, 0.0]]
+
+
+def test_keyword_score_prioritizes_exact_field_identifiers_over_generic_bigrams() -> None:
+    tokens = tokenize("LOAN_DTL.BALANCE_AMT 对应的业务含义是什么？")
+    exact = SimpleNamespace(
+        title=None,
+        normalized_content="贷款余额来自 LOAN_DTL.BALANCE_AMT",
+        target_field_code=None,
+        scenario_id=None,
+    )
+    generic = SimpleNamespace(
+        title=None,
+        normalized_content="数据日期的业务规则",
+        target_field_code=None,
+        scenario_id=None,
+    )
+
+    assert _keyword_score(exact, tokens, None, None) > _keyword_score(
+        generic,
+        tokens,
+        None,
+        None,
+    )
 
 
 def test_knowledge_ingestion_reports_progress_by_batch(db_session, tmp_path: Path, monkeypatch):
@@ -282,17 +345,21 @@ def test_redaction_external_policy_and_citation_validation(db_session):
 
 def test_openai_compatible_embedding_and_milvus_adapter(monkeypatch):
     class Response:
+        def __init__(self, count):
+            self.count = count
+
         def raise_for_status(self):
             return None
 
         def json(self):
-            return {"data": [{"embedding": [0.1, 0.2]}, {"embedding": [0.3, 0.4]}]}
+            values = [[0.1, 0.2], [0.3, 0.4]]
+            return {"data": [{"embedding": value} for value in values[: self.count]]}
 
     calls = []
 
     def fake_post(url, **kwargs):
         calls.append((url, kwargs))
-        return Response()
+        return Response(len(kwargs["json"]["input"]))
 
     monkeypatch.setenv("TEST_EMBEDDING_KEY", "not-a-real-secret")
     monkeypatch.setattr("app.services.embeddings.openai_compatible.httpx.post", fake_post)
@@ -300,6 +367,16 @@ def test_openai_compatible_embedding_and_milvus_adapter(monkeypatch):
     assert embedding.embed_texts(["a", "b"]) == [[0.1, 0.2], [0.3, 0.4]]
     assert calls[0][0] == "http://embedding.test/v1/embeddings"
     assert calls[0][1]["json"] == {"model": "demo-model", "input": ["a", "b"]}
+
+    calls.clear()
+    local_embedding = LocalEmbeddingService(
+        "http://127.0.0.1:11434/v1",
+        "BAAI/bge-small-zh-v1.5",
+        "",
+    )
+    assert local_embedding.embed_query("贷款余额") == [0.1, 0.2]
+    assert calls[0][1]["headers"]["X-YBT-Embedding-Input-Type"] == "query"
+    assert "input_type" not in calls[0][1]["json"]
 
     class FakeMilvusClient:
         def __init__(self):
@@ -353,6 +430,54 @@ def test_ingestion_and_reindex_never_store_raw_sensitive_content_in_milvus(tmp_p
         client.upserts.clear()
         _post(api,f"/api/knowledge/documents/{document['id']}/reindex?project_id={project['id']}",{})
         _assert_milvus_payload_redacted(client.upserts,raw)
+
+
+def test_milvus_count_prefers_live_aggregate_over_lagging_collection_stats():
+    class LaggingStatsClient:
+        def has_collection(self, name):
+            return True
+
+        def query(self, collection_name, filter, output_fields):
+            assert filter == ""
+            assert output_fields == ["count(*)"]
+            return [{"count(*)": 100}]
+
+        def get_collection_stats(self, collection_name):
+            return {"row_count": 0}
+
+    store = MilvusVectorStore(client=LaggingStatsClient(), collection_name="semantic_v1")
+
+    assert store.count() == 100
+
+
+def test_milvus_validation_flushes_pending_writes_before_counting():
+    class FlushAwareClient:
+        flushed = False
+
+        def has_collection(self, name):
+            return True
+
+        def flush(self, collection_name):
+            self.flushed = True
+
+        def query(self, collection_name, filter, output_fields):
+            return [{"count(*)": 100 if self.flushed else 0}]
+
+        def get_collection_stats(self, collection_name):
+            return {"row_count": 0}
+
+    client = FlushAwareClient()
+    store = MilvusVectorStore(
+        client=client,
+        collection_name="semantic_v1",
+        expected_dimension=512,
+    )
+
+    result = store.validate_index(expected_count=100, expected_dimension=512)
+
+    assert client.flushed is True
+    assert result["valid"] is True
+    assert result["actual_count"] == 100
 
 
 def test_hybrid_retriever_revalidates_database_scope_and_enabled_for_stale_vectors(tmp_path:Path,monkeypatch):

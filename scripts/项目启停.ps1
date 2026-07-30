@@ -31,9 +31,11 @@ $runtimeRoot = Join-Path $repoRoot ".local-run"
 $logRoot = Join-Path $runtimeRoot "logs"
 $statePath = Join-Path $runtimeRoot "processes.json"
 $secretsPath = Join-Path $runtimeRoot "local-secrets.json"
+$semanticComposeEnvPath = Join-Path $runtimeRoot "semantic-compose.env"
 $pgPassPath = Join-Path $runtimeRoot "postgres.pgpass"
 $postgresDataRoot = Join-Path $runtimeRoot "postgres-data"
 $redisDataRoot = Join-Path $runtimeRoot "redis-data"
+$fastEmbedCacheRoot = Join-Path $runtimeRoot "fastembed-cache"
 $backendPython = Join-Path $backendRoot ".venv\Scripts\python.exe"
 $migrationScript = Join-Path $PSScriptRoot "迁移SQLite到PostgreSQL.py"
 
@@ -114,6 +116,197 @@ function Resolve-Executable {
     throw "找不到 $Name。请先安装对应的本地依赖。"
 }
 
+function ConvertTo-WslPath {
+    param([string]$WindowsPath)
+    $resolved = [IO.Path]::GetFullPath($WindowsPath)
+    if ($resolved -notmatch "^([A-Za-z]):\\(.*)$") {
+        throw "WSL Docker 只支持当前项目位于 Windows 盘符路径下。"
+    }
+    $drive = $Matches[1].ToLowerInvariant()
+    $remainder = $Matches[2].Replace("\", "/")
+    return "/mnt/$drive/$remainder"
+}
+
+function Get-DockerRuntime {
+    $nativeDocker = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($null -ne $nativeDocker) {
+        & $nativeDocker.Source "info" "--format" "{{.ServerVersion}}" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return [PSCustomObject]@{
+                kind = "windows"
+                executable = $nativeDocker.Source
+                distribution = $null
+            }
+        }
+    }
+
+    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if ($null -eq $wsl) {
+        return $null
+    }
+    foreach ($distribution in @("Ubuntu")) {
+        & $wsl.Source "-d" $distribution "--" "docker" "info" "--format" "{{.ServerVersion}}" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return [PSCustomObject]@{
+                kind = "wsl"
+                executable = $wsl.Source
+                distribution = $distribution
+            }
+        }
+    }
+    return $null
+}
+
+function Invoke-DockerCommand {
+    param(
+        [object]$Runtime,
+        [string[]]$Arguments,
+        [switch]$AllowFailure
+    )
+    if ($null -eq $Runtime) {
+        throw "找不到可用 Docker Engine。已检查 Windows Docker CLI 和 WSL Ubuntu。"
+    }
+    if ([string]$Runtime.kind -eq "windows") {
+        $result = & ([string]$Runtime.executable) @Arguments
+    } else {
+        $result = & ([string]$Runtime.executable) "-d" ([string]$Runtime.distribution) "--" "docker" @Arguments
+    }
+    if ($LASTEXITCODE -ne 0 -and -not $AllowFailure) {
+        throw "Docker 命令执行失败，退出码：$LASTEXITCODE"
+    }
+    return $result
+}
+
+function Invoke-DockerCommandWithRetry {
+    param(
+        [object]$Runtime,
+        [string[]]$Arguments,
+        [int]$Attempts = 5
+    )
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return Invoke-DockerCommand -Runtime $Runtime -Arguments $Arguments
+        } catch {
+            if ($attempt -eq $Attempts) {
+                throw "Docker 命令连续失败 $Attempts 次：$($_.Exception.Message)"
+            }
+            Write-Host "Docker 镜像仓库连接失败，正在进行第 $($attempt + 1)/$Attempts 次重试..."
+            Start-Sleep -Seconds ([Math]::Min(3 * $attempt, 12))
+        }
+    }
+}
+
+function Start-DockerKeepAlive {
+    param([object]$Runtime)
+    if ($null -eq $Runtime -or [string]$Runtime.kind -ne "wsl") {
+        return $null
+    }
+    $process = Start-Process `
+        -FilePath ([string]$Runtime.executable) `
+        -ArgumentList @("-d", [string]$Runtime.distribution, "--", "sleep", "infinity") `
+        -WindowStyle Hidden `
+        -PassThru
+    Start-Sleep -Seconds 1
+    if ($process.HasExited) {
+        throw "无法保持 WSL Docker 运行；sleep infinity 已提前退出。"
+    }
+    return $process
+}
+
+function Stop-DockerKeepAlive {
+    param([int]$ProcessId)
+    if ($ProcessId -le 0) {
+        return
+    }
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        return
+    }
+    if (
+        $process.Name -eq "wsl.exe" -and
+        $process.CommandLine -like "*sleep*infinity*"
+    ) {
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-DockerRunningServices {
+    param([object]$Runtime)
+    $services = @{}
+    if ($null -eq $Runtime) {
+        return $services
+    }
+    $rows = Invoke-DockerCommand -Runtime $Runtime -AllowFailure -Arguments @(
+        "ps",
+        "--filter", "label=com.docker.compose.service",
+        "--format", "{{.Labels}}"
+    )
+    foreach ($row in @($rows)) {
+        if ([string]$row -match "(?:^|,)com\.docker\.compose\.service=([^,]+)") {
+            $services[$Matches[1]] = $true
+        }
+    }
+    return $services
+}
+
+function Get-DockerStatusSnapshot {
+    $nativeDocker = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($null -ne $nativeDocker) {
+        $runtime = Get-DockerRuntime
+        return [PSCustomObject]@{
+            runtime = $runtime
+            services = Get-DockerRunningServices -Runtime $runtime
+        }
+    }
+
+    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if ($null -eq $wsl) {
+        return [PSCustomObject]@{ runtime = $null; services = @{} }
+    }
+    # A normal call-operator invocation lets wsl.exe inherit the control
+    # console's stdin. When the menu is still refreshing, an early key press
+    # can then be consumed by WSL instead of Read-Host. Capture WSL with a
+    # deliberately closed stdin so the menu remains responsive.
+    $command = (
+        'docker info --format "ENGINE={{.ServerVersion}}" 2>/dev/null && ' +
+        'docker ps --filter label=com.docker.compose.service --format "LABELS={{.Labels}}"'
+    )
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $wsl.Source
+    $startInfo.Arguments = "-d Ubuntu -- sh -lc `"$command`""
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $probe = New-Object System.Diagnostics.Process
+    $probe.StartInfo = $startInfo
+    [void]$probe.Start()
+    $probe.StandardInput.Close()
+    $output = $probe.StandardOutput.ReadToEnd()
+    [void]$probe.StandardError.ReadToEnd()
+    $probe.WaitForExit()
+    $rows = @($output -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($probe.ExitCode -ne 0 -or @($rows | Where-Object { $_ -like "ENGINE=*" }).Count -eq 0) {
+        return [PSCustomObject]@{ runtime = $null; services = @{} }
+    }
+    $services = @{}
+    foreach ($row in @($rows | Where-Object { $_ -like "LABELS=*" })) {
+        $labelText = ([string]$row).Substring("LABELS=".Length)
+        if ($labelText -match "(?:^|,)com\.docker\.compose\.service=([^,]+)") {
+            $services[$Matches[1]] = $true
+        }
+    }
+    return [PSCustomObject]@{
+        runtime = [PSCustomObject]@{
+            kind = "wsl"
+            executable = $wsl.Source
+            distribution = "Ubuntu"
+        }
+        services = $services
+    }
+}
+
 function Assert-SafeIdentifier {
     param([string]$Value, [string]$Label)
     if ($Value -notmatch "^[a-z][a-z0-9_]{2,62}$") {
@@ -148,15 +341,144 @@ function Get-LocalSecrets {
     New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
     if (Test-Path -LiteralPath $secretsPath) {
         Protect-LocalSecretFile -Path $secretsPath
-        return Get-Content -Raw -LiteralPath $secretsPath | ConvertFrom-Json
+        $secrets = Get-Content -Raw -LiteralPath $secretsPath | ConvertFrom-Json
+        $updated = $false
+        if ($secrets.PSObject.Properties.Name -notcontains "milvusMinioUser") {
+            $secrets | Add-Member -NotePropertyName "milvusMinioUser" -NotePropertyValue "ybt_milvus"
+            $updated = $true
+        }
+        if ($secrets.PSObject.Properties.Name -notcontains "milvusMinioPassword") {
+            $secrets | Add-Member `
+                -NotePropertyName "milvusMinioPassword" `
+                -NotePropertyValue ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+            $updated = $true
+        }
+        if ($updated) {
+            $secrets | ConvertTo-Json | Set-Content -LiteralPath $secretsPath -Encoding UTF8
+            Protect-LocalSecretFile -Path $secretsPath
+        }
+        return $secrets
     }
     $secrets = [PSCustomObject]@{
         postgresSuperPassword = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
         databasePassword = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+        milvusMinioUser = "ybt_milvus"
+        milvusMinioPassword = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
     }
     $secrets | ConvertTo-Json | Set-Content -LiteralPath $secretsPath -Encoding UTF8
     Protect-LocalSecretFile -Path $secretsPath
     return $secrets
+}
+
+function Write-SemanticComposeEnvFile {
+    param([object]$Secrets)
+    @(
+        # Compose expands variables for every declared service even when only
+        # the Milvus profile is targeted. Explicit non-secret placeholders
+        # keep status/start/stop output free of unrelated warnings.
+        "POSTGRES_USER=not-used-by-semantic-profile",
+        "POSTGRES_PASSWORD=not-used-by-semantic-profile",
+        "POSTGRES_DB=not-used-by-semantic-profile",
+        "S3_ACCESS_KEY=not-used-by-semantic-profile",
+        "S3_SECRET_KEY=not-used-by-semantic-profile",
+        "MILVUS_MINIO_ROOT_USER=$([string]$Secrets.milvusMinioUser)",
+        "MILVUS_MINIO_ROOT_PASSWORD=$([string]$Secrets.milvusMinioPassword)"
+    ) | Set-Content -LiteralPath $semanticComposeEnvPath -Encoding ASCII
+    Protect-LocalSecretFile -Path $semanticComposeEnvPath
+}
+
+function Get-DockerComposeArguments {
+    param([object]$Runtime)
+    if ([string]$Runtime.kind -eq "wsl") {
+        return @(
+            "compose",
+            "--project-directory", (ConvertTo-WslPath -WindowsPath $repoRoot),
+            "--env-file", (ConvertTo-WslPath -WindowsPath $semanticComposeEnvPath)
+        )
+    }
+    return @(
+        "compose",
+        "--project-directory", $repoRoot,
+        "--env-file", $semanticComposeEnvPath
+    )
+}
+
+function Start-SemanticInfrastructure {
+    param([object]$Runtime, [object]$Secrets)
+    Write-SemanticComposeEnvFile -Secrets $Secrets
+    $arguments = @(
+        Get-DockerComposeArguments -Runtime $Runtime
+    ) + @(
+        "--profile", "milvus",
+        "up", "-d",
+        "etcd", "milvus-minio", "milvus"
+    )
+    Invoke-DockerCommandWithRetry -Runtime $Runtime -Arguments $arguments | Out-Host
+    if (-not (Wait-Port -Port 19530 -TimeoutSeconds 180)) {
+        throw "Milvus 未能在 180 秒内启动，请使用项目状态命令检查容器。"
+    }
+}
+
+function Stop-SemanticInfrastructure {
+    param([object]$Runtime)
+    if ($null -eq $Runtime -or -not (Test-Path -LiteralPath $semanticComposeEnvPath)) {
+        return
+    }
+    $arguments = @(
+        Get-DockerComposeArguments -Runtime $Runtime
+    ) + @(
+        "--profile", "milvus",
+        "stop",
+        "etcd", "milvus-minio", "milvus"
+    )
+    Invoke-DockerCommand -Runtime $Runtime -Arguments $arguments | Out-Host
+}
+
+function Start-LocalEmbeddingInfrastructure {
+    param([string]$OutLog, [string]$ErrorLog)
+    & $backendPython -c "import fastembed" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "缺少 FastEmbed 运行依赖。请在 backend 目录执行 .venv\Scripts\python.exe -m pip install -r requirements.txt。"
+    }
+    New-Item -ItemType Directory -Path $fastEmbedCacheRoot -Force | Out-Null
+    $env:FASTEMBED_CACHE_PATH = $fastEmbedCacheRoot
+    $env:FASTEMBED_THREADS = "2"
+    $process = Start-Process `
+        -FilePath $backendPython `
+        -ArgumentList @(
+            "-m", "uvicorn",
+            "app.local_embedding_server:app",
+            "--host", "127.0.0.1",
+            "--port", "11434"
+        ) `
+        -WorkingDirectory $backendRoot `
+        -RedirectStandardOutput $OutLog `
+        -RedirectStandardError $ErrorLog `
+        -WindowStyle Hidden `
+        -PassThru
+    if (-not (Wait-Port -Port 11434 -TimeoutSeconds 60)) {
+        throw "本地 FastEmbed 服务未能在 60 秒内启动。"
+    }
+    Write-Host "正在验证本地中文 Embedding 模型；首次运行会下载约 90 MB 的模型文件并持久缓存。"
+    try {
+        $selfCheckBody = @{
+            model = "BAAI/bge-small-zh-v1.5"
+            input = @("本地语义索引启动自检")
+        } | ConvertTo-Json -Compress
+        $selfCheck = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:11434/v1/embeddings" `
+            -Method Post `
+            -ContentType "application/json; charset=utf-8" `
+            -Body ([Text.Encoding]::UTF8.GetBytes($selfCheckBody)) `
+            -TimeoutSec 600
+        $selfCheckDimension = @($selfCheck.data[0].embedding).Count
+        if ($selfCheckDimension -ne 512) {
+            throw "返回维度 $selfCheckDimension，预期维度 512。"
+        }
+    } catch {
+        throw "Embedding 向量生成自检失败：$($_.Exception.Message)"
+    }
+    return $process
 }
 
 function Write-PostgresPassFile {
@@ -321,9 +643,6 @@ function Set-ProjectEnvironment {
     $env:DATABASE_URL = $DatabaseUrl
     $env:STORAGE_DIR = "./dev_storage_local"
     $env:AUTH_MODE = "optional"
-    $env:LLM_PROVIDER = "mock"
-    $env:EMBEDDING_PROVIDER = "mock"
-    $env:VECTOR_STORE_PROVIDER = "mock"
     $env:CORS_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
     $env:LOCAL_BACKEND_PORT = [string]$Port
     $env:KNOWLEDGE_INGESTION_BATCH_SIZE = "200"
@@ -337,6 +656,48 @@ function Set-ProjectEnvironment {
         $env:REDIS_URL = ""
         $env:CELERY_BROKER_URL = ""
         $env:CELERY_RESULT_BACKEND = ""
+    }
+}
+
+function Get-BackendEnvironmentValue {
+    param([string]$Name)
+    $processValue = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue
+    }
+    $line = Get-Content -LiteralPath (Join-Path $backendRoot ".env") -ErrorAction SilentlyContinue |
+        Where-Object { $_ -match "^\s*$([regex]::Escape($Name))\s*=" } |
+        Select-Object -First 1
+    if ($line -match "^\s*$([regex]::Escape($Name))\s*=\s*(.*)$") {
+        return $Matches[1].Trim().Trim('"').Trim("'")
+    }
+    return ""
+}
+
+function Set-SemanticEnvironment {
+    $configuredProvider = Get-BackendEnvironmentValue -Name "EMBEDDING_PROVIDER"
+
+    $env:VECTOR_STORE_PROVIDER = "milvus"
+    $env:MILVUS_URI = "http://127.0.0.1:19530"
+    if ([string]::IsNullOrWhiteSpace($configuredProvider) -or $configuredProvider -eq "mock") {
+        $env:EMBEDDING_PROVIDER = "local_vllm"
+        $env:EMBEDDING_BASE_URL = "http://127.0.0.1:11434/v1"
+        $env:EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
+        $env:EMBEDDING_DIMENSION = "512"
+        $env:EMBEDDING_API_KEY_ENV_NAME = "EMBEDDING_API_KEY"
+        return [PSCustomObject]@{
+            provider = $env:EMBEDDING_PROVIDER
+            model = $env:EMBEDDING_MODEL
+            dimension = [int]$env:EMBEDDING_DIMENSION
+            usesManagedFastEmbed = $true
+        }
+    }
+    $configuredDimension = Get-BackendEnvironmentValue -Name "EMBEDDING_DIMENSION"
+    return [PSCustomObject]@{
+        provider = $configuredProvider
+        model = Get-BackendEnvironmentValue -Name "EMBEDDING_MODEL"
+        dimension = if ($configuredDimension -match "^\d+$") { [int]$configuredDimension } else { 0 }
+        usesManagedFastEmbed = $false
     }
 }
 
@@ -393,10 +754,42 @@ function Invoke-SqliteDataMigration {
     $sourceProjectCount = Get-SqliteProjectCount -Source $source
     $targetProjectCount = Get-PostgresProjectCount
     if (Test-Path -LiteralPath $migrationMarker) {
-        if ($targetProjectCount -eq $sourceProjectCount) {
+        try {
+            $marker = Get-Content -Raw -LiteralPath $migrationMarker | ConvertFrom-Json
+        } catch {
+            throw "SQLite 迁移标记无法读取。为避免覆盖数据，请先备份并手工核验。"
+        }
+        $sourceItem = Get-Item -LiteralPath $source
+        $currentSourcePath = [IO.Path]::GetFullPath($source)
+        $markerSourcePath = [IO.Path]::GetFullPath([string]$marker.source)
+        $sourceIsUnchanged = $currentSourcePath.Equals(
+            $markerSourcePath,
+            [StringComparison]::OrdinalIgnoreCase
+        ) -and
+            [long]$marker.sourceLength -eq [long]$sourceItem.Length -and
+            [string]$marker.sourceLastWriteTime -eq $sourceItem.LastWriteTimeUtc.ToString("o") -and
+            [string]$marker.databaseName -eq $DatabaseName
+        if (-not $sourceIsUnchanged) {
+            throw "SQLite 源文件已变化，与迁移标记不一致。为避免覆盖数据，请先备份并手工核验。"
+        }
+        $markerSourceProjectCount = if ($marker.PSObject.Properties.Name -contains "sourceProjectCount") {
+            [int]$marker.sourceProjectCount
+        } else {
+            [int]$sourceProjectCount
+        }
+        if ($sourceProjectCount -ne $markerSourceProjectCount) {
+            throw "SQLite 源文件中的项目数已变化。为避免覆盖数据，请先备份并手工核验。"
+        }
+        if ($targetProjectCount -lt $markerSourceProjectCount) {
+            throw "PostgreSQL 项目数少于已迁移的 SQLite 项目数。为避免覆盖数据，请先备份并手工核验。"
+        }
+        if (-not ($marker.PSObject.Properties.Name -contains "sourceProjectCount")) {
+            $marker | Add-Member -NotePropertyName "sourceProjectCount" -NotePropertyValue $sourceProjectCount
+            $marker | ConvertTo-Json | Set-Content -LiteralPath $migrationMarker -Encoding UTF8
+        }
+        if ($targetProjectCount -ge $markerSourceProjectCount) {
             return
         }
-        throw "SQLite 迁移标记与 PostgreSQL 项目数不一致。为避免覆盖数据，请先备份并手工核验。"
     }
     if (-not $DatabaseCreatedNow) {
         $protectedTables = Get-PostgresProtectedDataTables
@@ -423,6 +816,7 @@ function Invoke-SqliteDataMigration {
             source = $source
             sourceLength = (Get-Item -LiteralPath $source).Length
             sourceLastWriteTime = (Get-Item -LiteralPath $source).LastWriteTimeUtc.ToString("o")
+            sourceProjectCount = $sourceProjectCount
             databaseName = $DatabaseName
         } | ConvertTo-Json | Set-Content -LiteralPath $migrationMarker -Encoding UTF8
     } finally {
@@ -460,6 +854,11 @@ function Test-ManagedOwner {
                 $process.CommandLine -like "*app.workers.celery_app*" -and
                 $process.CommandLine -like "*$backendPython*"
         }
+        "embedding" {
+            return $process.CommandLine -like "*uvicorn*" -and
+                $process.CommandLine -like "*app.local_embedding_server:app*" -and
+                $process.CommandLine -like "*--port 11434*"
+        }
         "redis" {
             return $process.CommandLine -like "*redis-server*" -and
                 $process.CommandLine -like "*$([int]$State.redisPort)*" -and
@@ -469,12 +868,50 @@ function Test-ManagedOwner {
     return $false
 }
 
+function Stop-FailedLaunchPortOwner {
+    param(
+        [ValidateSet("frontend", "backend", "embedding")]
+        [string]$Service,
+        [int]$Port
+    )
+    $owner = Get-PortOwner -Port $Port
+    if ($null -eq $owner) {
+        return
+    }
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $owner" -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        return
+    }
+    $owned = if ($Service -eq "frontend") {
+        $process.CommandLine -like "*$frontendRoot*" -and
+            $process.CommandLine -like "*next*"
+    } elseif ($Service -eq "backend") {
+        $process.CommandLine -like "*uvicorn*" -and
+            $process.CommandLine -like "*app.main:app*" -and
+            $process.CommandLine -like "*--port $Port*"
+    } else {
+        $process.CommandLine -like "*uvicorn*" -and
+            $process.CommandLine -like "*app.local_embedding_server:app*" -and
+            $process.CommandLine -like "*--port $Port*"
+    }
+    if ($owned) {
+        Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Start-Project {
     Assert-LocalPrerequisites
     $resolvedBackendPort = Get-ConfiguredBackendPort
     $ports = @($FrontendPort, $resolvedBackendPort)
     if ($Mode -eq "production") {
         $ports += @($PostgresPort, $RedisPort)
+        $configuredEmbeddingProvider = Get-BackendEnvironmentValue -Name "EMBEDDING_PROVIDER"
+        if (
+            [string]::IsNullOrWhiteSpace($configuredEmbeddingProvider) -or
+            $configuredEmbeddingProvider -eq "mock"
+        ) {
+            $ports += 11434
+        }
     }
     foreach ($port in $ports) {
         $owner = Get-PortOwner -Port $port
@@ -489,6 +926,8 @@ function Start-Project {
         postgres = Join-Path $logRoot "postgres-$timestamp.log"
         redisOut = Join-Path $logRoot "redis-$timestamp.stdout.log"
         redisErr = Join-Path $logRoot "redis-$timestamp.stderr.log"
+        embeddingOut = Join-Path $logRoot "embedding-$timestamp.stdout.log"
+        embeddingErr = Join-Path $logRoot "embedding-$timestamp.stderr.log"
         workerOut = Join-Path $logRoot "worker-$timestamp.stdout.log"
         workerErr = Join-Path $logRoot "worker-$timestamp.stderr.log"
         backendOut = Join-Path $logRoot "backend-$timestamp.stdout.log"
@@ -500,6 +939,9 @@ function Start-Project {
         "DATABASE_URL", "STORAGE_DIR", "AUTH_MODE", "TASK_QUEUE_PROVIDER",
         "REDIS_URL", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND",
         "LLM_PROVIDER", "EMBEDDING_PROVIDER", "VECTOR_STORE_PROVIDER",
+        "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION",
+        "EMBEDDING_API_KEY_ENV_NAME", "MILVUS_URI",
+        "FASTEMBED_CACHE_PATH", "FASTEMBED_THREADS",
         "CORS_ORIGINS", "LOCAL_BACKEND_PORT", "KNOWLEDGE_INGESTION_BATCH_SIZE",
         "PGPASSFILE"
     )
@@ -511,9 +953,15 @@ function Start-Project {
     $postgresTools = $null
     $redisStarter = $null
     $workerStarter = $null
+    $embeddingStarter = $null
     $backendStarter = $null
     $frontendStarter = $null
     $postgresStarted = $false
+    $semanticStarted = $false
+    $localEmbeddingStarted = $false
+    $dockerRuntime = $null
+    $dockerKeepAlive = $null
+    $semanticRuntime = $null
     $databaseCreatedNow = $false
     try {
         if ($Mode -eq "production") {
@@ -525,11 +973,24 @@ function Start-Project {
             $postgresStarted = $true
             $databaseCreatedNow = Initialize-PostgresApplicationDatabase -Tools $postgresTools -Secrets $secrets
             $redisStarter = Start-Redis -Executable (Get-RedisExecutable) -OutLog $logs.redisOut -ErrorLog $logs.redisErr
+            $dockerRuntime = Get-DockerRuntime
+            $dockerKeepAlive = Start-DockerKeepAlive -Runtime $dockerRuntime
+            Start-SemanticInfrastructure -Runtime $dockerRuntime -Secrets $secrets
+            $semanticStarted = $true
             $databaseUrl = "postgresql+psycopg://$DatabaseUser@127.0.0.1`:$PostgresPort/$DatabaseName"
         } else {
             $databaseUrl = "sqlite:///./$DatabaseFile"
         }
         Set-ProjectEnvironment -Port $resolvedBackendPort -DatabaseUrl $databaseUrl
+        if ($Mode -eq "production") {
+            $semanticRuntime = Set-SemanticEnvironment
+            if ($semanticRuntime.usesManagedFastEmbed) {
+                $embeddingStarter = Start-LocalEmbeddingInfrastructure `
+                    -OutLog $logs.embeddingOut `
+                    -ErrorLog $logs.embeddingErr
+                $localEmbeddingStarted = $true
+            }
+        }
         Invoke-DatabaseMigration
         if ($Mode -eq "production") {
             Invoke-SqliteDataMigration -DatabaseCreatedNow $databaseCreatedNow
@@ -598,9 +1059,21 @@ function Start-Project {
             redisPort = $RedisPort
             redisPid = if ($Mode -eq "production") { Get-PortOwner -Port $RedisPort } else { $null }
             workerPid = if ($null -ne $workerStarter) { $workerStarter.Id } else { $null }
+            dockerRuntime = if ($null -ne $dockerRuntime) { [string]$dockerRuntime.kind } else { $null }
+            dockerDistribution = if ($null -ne $dockerRuntime) { [string]$dockerRuntime.distribution } else { $null }
+            dockerKeepAlivePid = if ($null -ne $dockerKeepAlive) { $dockerKeepAlive.Id } else { $null }
+            embeddingPort = if ($localEmbeddingStarted) { 11434 } else { $null }
+            embeddingPid = if ($localEmbeddingStarted) { Get-PortOwner -Port 11434 } else { $null }
+            embeddingStarterPid = if ($null -ne $embeddingStarter) { $embeddingStarter.Id } else { $null }
+            embeddingProvider = if ($null -ne $semanticRuntime) { [string]$semanticRuntime.provider } else { "mock" }
+            embeddingModel = if ($null -ne $semanticRuntime) { [string]$semanticRuntime.model } else { "mock" }
+            embeddingDimension = if ($null -ne $semanticRuntime) { [int]$semanticRuntime.dimension } else { 0 }
+            localEmbeddingManaged = $localEmbeddingStarted
+            vectorStoreProvider = if ($Mode -eq "production") { "milvus" } else { "mock" }
             backendLog = $logs.backendErr
             frontendLog = $logs.frontendErr
             workerLog = $logs.workerErr
+            embeddingLog = $logs.embeddingErr
         }
         $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
         Write-Host "项目启动成功（$Mode 模式）。"
@@ -613,10 +1086,19 @@ function Start-Project {
         }
         Write-Host "日志目录：$logRoot"
     } catch {
-        foreach ($process in @($frontendStarter, $backendStarter, $workerStarter, $redisStarter)) {
+        foreach ($process in @($frontendStarter, $backendStarter, $workerStarter, $embeddingStarter, $redisStarter)) {
             if ($null -ne $process -and -not $process.HasExited) {
                 Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             }
+        }
+        Stop-FailedLaunchPortOwner -Service "frontend" -Port $FrontendPort
+        Stop-FailedLaunchPortOwner -Service "backend" -Port $resolvedBackendPort
+        Stop-FailedLaunchPortOwner -Service "embedding" -Port 11434
+        if ($semanticStarted) {
+            Stop-SemanticInfrastructure -Runtime $dockerRuntime
+        }
+        if ($null -ne $dockerKeepAlive) {
+            Stop-DockerKeepAlive -ProcessId $dockerKeepAlive.Id
         }
         if ($postgresStarted -and $null -ne $postgresTools) {
             & $postgresTools.pgCtl "-D" $postgresDataRoot "-m" "fast" "-w" "stop" | Out-Null
@@ -670,6 +1152,31 @@ function Stop-Project {
         } catch {
             $errors += $_.Exception.Message
         }
+        $stopDockerRuntime = Get-DockerRuntime
+        if (
+            $state.PSObject.Properties.Name -contains "localEmbeddingManaged" -and
+            [bool]$state.localEmbeddingManaged
+        ) {
+            try {
+                Stop-ManagedProcess `
+                    -Name "embedding" `
+                    -ProcessId ([int]$state.embeddingPid) `
+                    -Port ([int]$state.embeddingPort) `
+                    -State $state
+                Write-Host "本地 FastEmbed 服务已停止；模型缓存已保留。"
+            } catch {
+                $errors += $_.Exception.Message
+            }
+        }
+        try {
+            Stop-SemanticInfrastructure -Runtime $stopDockerRuntime
+            Write-Host "Milvus、etcd 和 Milvus MinIO 已停止；持久化 Volume 已保留。"
+        } catch {
+            $errors += $_.Exception.Message
+        }
+        if ($state.PSObject.Properties.Name -contains "dockerKeepAlivePid") {
+            Stop-DockerKeepAlive -ProcessId ([int]$state.dockerKeepAlivePid)
+        }
         try {
             Stop-ManagedProcess -Name "redis" -ProcessId ([int]$state.redisPid) -Port ([int]$state.redisPort) -State $state
         } catch {
@@ -718,6 +1225,27 @@ function Show-ProjectStatus {
         }
     }
 
+    $dockerSnapshot = Get-DockerStatusSnapshot
+    $dockerRuntime = $dockerSnapshot.runtime
+    $runningDockerServices = $dockerSnapshot.services
+    $milvusRunning = $runningDockerServices.ContainsKey("milvus")
+    $embeddingOwner = if (
+        $null -ne $state -and
+        $state.PSObject.Properties.Name -contains "embeddingPort" -and
+        $null -ne $state.embeddingPort
+    ) {
+        Get-PortOwner -Port ([int]$state.embeddingPort)
+    } else {
+        $null
+    }
+    $semanticProvider = if (
+        $null -ne $state -and
+        $state.PSObject.Properties.Name -contains "embeddingProvider"
+    ) {
+        [string]$state.embeddingProvider
+    } else {
+        "未由启停脚本配置"
+    }
     $isProduction = $null -ne $state -and [string]$state.mode -eq "production"
     $postgresOwner = $null
     $redisOwner = $null
@@ -734,7 +1262,13 @@ function Show-ProjectStatus {
         (-not $isProduction -or (
             $null -ne $postgresOwner -and
             $null -ne $redisOwner -and
-            $null -ne $worker
+            $null -ne $worker -and
+            $milvusRunning -and
+            (
+                $state.PSObject.Properties.Name -notcontains "localEmbeddingManaged" -or
+                -not [bool]$state.localEmbeddingManaged -or
+                $null -ne $embeddingOwner
+            )
         ))
 
     Write-Host ""
@@ -749,6 +1283,10 @@ function Show-ProjectStatus {
     Write-Host "后端服务：$(if ($null -ne $backendOwner) { "运行中（PID $backendOwner）" } else { "未运行" })"
     Write-Host "接口文档：http://127.0.0.1:$statusBackendPort/docs"
     Write-Host "健康检查：http://127.0.0.1:$statusBackendPort/health/ready（$(if ($backendHealthy) { "正常" } else { "不可用" })）"
+    Write-Host "Docker 引擎：$(if ($null -eq $dockerRuntime) { "不可用" } elseif ([string]$dockerRuntime.kind -eq "wsl") { "运行中（WSL $($dockerRuntime.distribution)）" } else { "运行中（Windows）" })"
+    Write-Host "Milvus：$(if ($milvusRunning) { "运行中（127.0.0.1:19530）" } else { "未运行" })"
+    $embeddingStatusSuffix = if ($null -ne $embeddingOwner) { "（本地 FastEmbed 运行中，PID $embeddingOwner）" } else { "" }
+    Write-Host "Embedding：${semanticProvider}${embeddingStatusSuffix}"
     if ($null -ne $state) {
         Write-Host "运行模式：$($state.mode)"
         Write-Host "启动时间：$($state.startedAt)"

@@ -12,7 +12,7 @@ def parse_document(file_name,content,knowledge_type):
     if suffix==".xlsx":return _excel(content,knowledge_type)
     if suffix==".docx":return _docx(content)
     if suffix==".pdf":return _pdf(content)
-    text=content.decode("utf-8",errors="replace")
+    text=content.decode("utf-8",errors="replace").replace("\r\n","\n").replace("\r","\n")
     if suffix==".sql":
         parsed=parse_sql(text);summary=f"来源表: {', '.join(parsed.source_tables)}\n来源字段: {', '.join(parsed.selected_fields)}\n关联条件: {'; '.join(parsed.joins)}\n过滤条件: {'; '.join(parsed.where_conditions)}"
         return [KnowledgeUnitDraft("sql_summary",file_name,summary,metadata={"raw_sql":text,"parsed_success":parsed.parsed_success})],[parsed.error_message] if parsed.error_message else []

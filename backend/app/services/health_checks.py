@@ -40,8 +40,14 @@ def run_health_checks(db: Session, settings: Settings) -> dict[str, Any]:
 
 
 def readiness_summary(result: dict[str, Any]) -> dict[str, Any]:
+    blocking = any(
+        item["status"] in {"unhealthy", "degraded"}
+        for name, item in result["checks"].items()
+        if name != "semantic_index"
+    )
+    semantic_unhealthy = result["checks"].get("semantic_index", {}).get("status") == "unhealthy"
     return {
-        "status": "ready" if result["status"] == "healthy" else "not_ready",
+        "status": "not_ready" if blocking or semantic_unhealthy else "ready",
         "checks": {name: item["status"] for name, item in result["checks"].items()},
     }
 

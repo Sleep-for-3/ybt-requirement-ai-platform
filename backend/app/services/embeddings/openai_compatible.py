@@ -39,6 +39,9 @@ class OpenAICompatibleEmbeddingService:
         self.last_call = ModelCallMetadata(provider=self.provider, model=self.model)
 
     def embed_documents(self, texts: list[str]) -> EmbeddingBatchResult:
+        return self._embed(texts, input_type="document")
+
+    def _embed(self, texts: list[str], *, input_type: str) -> EmbeddingBatchResult:
         if not texts:
             return EmbeddingBatchResult(
                 vectors=[],
@@ -64,7 +67,7 @@ class OpenAICompatibleEmbeddingService:
         batch_count = 0
         for offset in range(0, len(texts), self.batch_size):
             batch_texts = texts[offset : offset + self.batch_size]
-            response, batch_retries = self._post(batch_texts, api_key)
+            response, batch_retries = self._post(batch_texts, api_key, input_type=input_type)
             retries += batch_retries
             batch_count += 1
             try:
@@ -103,15 +106,27 @@ class OpenAICompatibleEmbeddingService:
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return self.embed_documents(texts).vectors
 
-    def _post(self, texts: list[str], key: str) -> tuple[httpx.Response, int]:
+    def _post(
+        self,
+        texts: list[str],
+        key: str,
+        *,
+        input_type: str,
+    ) -> tuple[httpx.Response, int]:
         headers = {"Authorization": f"Bearer {key}"} if key else {}
+        payload = {"model": self.model, "input": texts}
+        if self.local_only:
+            # Keep the JSON body compatible with standard local vLLM/Ollama
+            # endpoints. The bundled lightweight server reads this optional
+            # query/document hint, while other servers safely ignore it.
+            headers["X-YBT-Embedding-Input-Type"] = input_type
         attempts = 0
         while True:
             try:
                 if self.transport is None:
                     response = httpx.post(
                         f"{self.base_url}/embeddings",
-                        json={"model": self.model, "input": texts},
+                        json=payload,
                         headers=headers,
                         timeout=self.timeout_seconds,
                         follow_redirects=False,
@@ -120,7 +135,7 @@ class OpenAICompatibleEmbeddingService:
                     with httpx.Client(timeout=self.timeout_seconds, transport=self.transport, follow_redirects=False, trust_env=False) as client:
                         response = client.post(
                             f"{self.base_url}/embeddings",
-                            json={"model": self.model, "input": texts},
+                            json=payload,
                             headers=headers,
                         )
                 if not hasattr(response, "status_code"):
@@ -142,7 +157,7 @@ class OpenAICompatibleEmbeddingService:
                 ) from exc
 
     def embed_query(self, text: str) -> list[float]:
-        return self.embed_documents([text]).vectors[0]
+        return self._embed([text], input_type="query").vectors[0]
 
 
 class LocalEmbeddingService(OpenAICompatibleEmbeddingService):

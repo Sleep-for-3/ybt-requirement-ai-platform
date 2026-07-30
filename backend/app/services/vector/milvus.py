@@ -137,10 +137,10 @@ class MilvusVectorStore(VectorStore):
     def count(self, filters: dict[str, Any] | None = None) -> int:
         if not self.client.has_collection(self.collection_name):
             return 0
-        if filters and hasattr(self.client, "query"):
+        if hasattr(self.client, "query"):
             rows = self.client.query(
                 collection_name=self.collection_name,
-                filter=_filter_expression(filters),
+                filter=_filter_expression(filters or {}),
                 output_fields=["count(*)"],
             )
             if rows:
@@ -149,6 +149,8 @@ class MilvusVectorStore(VectorStore):
         return int(stats.get("row_count", 0))
 
     def validate_index(self, *, expected_count: int, expected_dimension: int) -> dict[str, Any]:
+        if hasattr(self.client, "flush"):
+            self.client.flush(collection_name=self.collection_name)
         dimension_valid = self.expected_dimension in {None, expected_dimension}
         actual_count = self.count()
         return {

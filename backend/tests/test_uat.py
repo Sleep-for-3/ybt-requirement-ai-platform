@@ -16,6 +16,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.core.settings import get_settings
 from app.main import app
+from app.models import RetrievalLog
+from app.services.uat.builtin_checks import _knowledge_evidence
 
 
 def test_builtin_uat_suites_are_initialized_idempotently_in_display_order() -> None:
@@ -59,6 +61,24 @@ def test_builtin_automatic_cases_execute_registered_checks_instead_of_blocking()
         assert executed["status"] == "failed"
         assert {item["status"] for item in executed["results"]} == {"failed"}
         assert all(item["evidence_json"]["check_key"].startswith("end_to_end_delivery:") for item in executed["results"])
+
+
+def test_builtin_knowledge_check_recognizes_formal_hybrid_strategy() -> None:
+    with _database() as db:
+        db.add(RetrievalLog(
+            project_id=1,
+            query_text="公开模拟问题",
+            query_type="hybrid",
+            filters_json={},
+            retrieval_strategy="hybrid",
+            result_ids_json=[],
+        ))
+        db.commit()
+
+        passed, evidence = _knowledge_evidence(db, 1, "混合检索")
+
+        assert passed is True
+        assert evidence == {"hybrid_retrievals": 1}
 
 
 def test_uat_run_executes_cases_independently_and_retry_reuses_results() -> None:
@@ -404,6 +424,19 @@ def _client() -> Iterator[TestClient]:
             yield client
     finally:
         app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+
+
+@contextmanager
+def _database() -> Iterator[Session]:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False)
+    session = factory()
+    try:
+        yield session
+    finally:
+        session.close()
         Base.metadata.drop_all(engine)
 
 

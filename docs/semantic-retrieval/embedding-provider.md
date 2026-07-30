@@ -10,6 +10,21 @@
 
 请求格式为 `POST {EMBEDDING_BASE_URL}/embeddings`，JSON 包含独立的 `model` 和 `input` 数组。系统按 `EMBEDDING_BATCH_SIZE` 分批，保留 Provider 返回的 `index` 顺序，并校验数量、有限数值和统一维度。
 
+## Windows 一键启动的默认正式配置
+
+`scripts/项目启停.ps1` 在未发现非 Mock Embedding 配置时启动仓库内的 OpenAI-compatible FastEmbed 服务：
+
+```dotenv
+EMBEDDING_PROVIDER=local_vllm
+EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1
+EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+EMBEDDING_DIMENSION=512
+VECTOR_STORE_PROVIDER=milvus
+MILVUS_URI=http://127.0.0.1:19530
+```
+
+服务只监听本机，使用 CPU ONNX Runtime，模型缓存位于 `.local-run/fastembed-cache/`。本地请求额外携带 `input_type=document|query`，查询使用模型的查询编码入口；外部 OpenAI-compatible 请求不会增加该扩展字段。
+
 ## 外部 OpenAI-compatible 示例
 
 ```dotenv

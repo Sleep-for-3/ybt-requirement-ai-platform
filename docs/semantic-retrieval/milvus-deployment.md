@@ -1,6 +1,6 @@
 # Milvus 部署与持久化
 
-项目复用根目录 `docker-compose.yml` 中已有的 etcd、`milvus-minio` 和 Milvus 2.5.4，不建立第二套 Compose，也不更换已验证镜像版本。
+项目复用根目录 `docker-compose.yml` 中的 etcd、`milvus-minio` 和 Milvus 2.5.4，不建立第二套 Compose。etcd 使用同版本的 `rancher/mirrored-coreos-etcd:v3.5.18` 镜像，以避开当前网络下 Quay CDN 的重复 EOF。
 
 ## 启动
 
@@ -48,4 +48,8 @@ docker compose restart milvus
 docker compose ps
 ```
 
-等待健康后重新读取 count 并执行一次 `vector_only` 查询。前后数量和查询结果必须一致。当前执行环境没有 Docker CLI 时，此项只能在安装 Docker Desktop 的人工验收机完成。
+等待健康后重新读取 count 并执行一次 `vector_only` 查询。前后数量和查询结果必须一致。如果 Windows 和 WSL 都没有可用的 Docker Engine，此项只能在具备 Docker 环境的验收机完成。
+
+`scripts/项目启停.ps1` 会优先使用 Windows Docker；如果只有 WSL 内的 Docker Engine，也会自动识别并从 WSL 启动上述服务。本机已经按这种方式完成持久化验收。
+
+Milvus 2.5 的 `get_collection_stats().row_count` 对刚写入的 growing segment 可能短暂返回旧值。正式校验会先 flush，再用实时 `count(*)` 聚合核对数量；不要因为统计延迟删除 Collection 或 volume。

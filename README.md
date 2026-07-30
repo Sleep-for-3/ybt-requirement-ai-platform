@@ -68,9 +68,9 @@ docker compose --profile milvus up --build
 .\scripts\项目启停.ps1 stop
 ```
 
-默认 `production` 模式会启动本机 PostgreSQL、Redis、Celery Worker、FastAPI 和 Next.js，自动执行 Alembic，并在首次成功启动时把 `backend/<DatabaseFile>` 中的 SQLite 历史数据完整迁入 PostgreSQL。迁移采用成功标记防止中断后误判完成，并在覆盖前保护项目数更多的正式库。
+默认 `production` 模式会启动本机 PostgreSQL、Redis、Celery Worker、FastAPI、Next.js 和本地 FastEmbed，同时通过 WSL/Windows Docker 启动持久化 Milvus。脚本自动执行 Alembic，并在首次成功启动时把 `backend/<DatabaseFile>` 中的 SQLite 历史数据完整迁入 PostgreSQL。迁移标记会核对 SQLite 源文件和原始项目数；迁移完成后允许 PostgreSQL 正常新增项目，但不会覆盖或回迁数据。
 
-本机脚本沿用元项目 MVP 的 `MockVectorStore`：结构化过滤和 PostgreSQL 持久关键词索引可跨进程使用，外部语义向量库在 `/health/ready` 中显示为 `disabled`。需要让 Worker 写入的语义向量也供 API 进程持久检索时，应按部署说明启用 Milvus；Redis 在此拓扑中负责任务 broker/result backend，不冒充向量数据库。
+没有显式配置正式 Embedding 时，脚本使用 `BAAI/bge-small-zh-v1.5` 生成真实 512 维中文向量，模型缓存位于 `.local-run/fastembed-cache/`；首次启动约下载 90 MB。Milvus、etcd 和 Milvus MinIO 使用 Docker named volume 持久化，普通停止或重启不会删除向量数据。Redis 只负责任务 broker/result backend，不冒充向量数据库。
 
 脚本会读取 `frontend/.env.local` 中的 API 地址确定后端端口，默认前端端口为 3000；可使用 `-BackendPort`、`-FrontendPort`、`-PostgresPort`、`-RedisPort` 和 `-DatabaseFile` 覆盖。日志、进程状态、本机随机数据库密码、受限 `pgpass` 文件和迁移成功标记均保存在已忽略的 `.local-run/`；SQLAlchemy URL 本身不携带密码。仅需临时兼容 SQLite 时显式使用：
 

@@ -12,7 +12,6 @@ from app.services.retrieval import HybridRetriever
 from app.services.storage import get_storage_service
 from app.services.task_queue.domain_handlers import knowledge_embedding_reindex_handler,knowledge_ingestion_handler,knowledge_reindex_handler,rag_evaluation_handler
 from app.services.task_queue.submission import submit_project_job
-from app.services.task_queue.factory import get_task_queue
 from app.services.task_queue.idempotency import semantic_idempotency_key
 from app.services.task_queue.presentation import job_submission_response
 from app.services.governance.audit import record_audit
@@ -153,9 +152,7 @@ def formal_reindex(project_id:int,payload:FormalReindexRequest,principal:Current
         "index_config_version":INDEX_CONFIG_VERSION,
         "generation":latest_id if payload.force else 0,
     })
-    job=get_task_queue().enqueue(db,job_type="knowledge_embedding_reindex",institution_id=project.institution_id,project_id=project.id,created_by=int(principal.user_id or 0),idempotency_key=idempotency_key,payload_summary=job_payload,handler=knowledge_embedding_reindex_handler)
-    if not getattr(job,"submission_deduplicated",False):
-        record_audit(db,action="create",resource_type="background_job",resource_id=job.id,actor_user_id=principal.user_id,institution_id=project.institution_id,project_id=project.id,after={"job_type":"knowledge_embedding_reindex","document_count":snapshot.document_count,"chunk_count":snapshot.chunk_count});db.commit()
+    job=submit_project_job(db,project,principal,job_type="knowledge_embedding_reindex",payload=job_payload,handler=knowledge_embedding_reindex_handler,idempotency_key=idempotency_key)
     return {"already_active":False,**job_submission_response(job)}
 @router.delete("/knowledge/documents/{document_id}")
 def delete_document(document_id:int,project_id:int,db:Session=Depends(get_db)):

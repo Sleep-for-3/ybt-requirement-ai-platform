@@ -125,6 +125,14 @@ def _delivery_evidence(db: Session, project_id: int, name: str) -> tuple[bool, d
 def _knowledge_evidence(db: Session, project_id: int, name: str) -> tuple[bool, dict]:
     documents = list(db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.project_id == project_id)))
     retrievals = list(db.scalars(select(RetrievalLog).where(RetrievalLog.project_id == project_id)))
+    hybrid_retrievals = sum(
+        item.retrieval_strategy == "hybrid"
+        or (
+            "keyword" in (item.retrieval_strategy or "")
+            and "vector" in (item.retrieval_strategy or "")
+        )
+        for item in retrievals
+    )
     no_evidence_answers = [
         item for item in db.scalars(select(AuditLog).where(AuditLog.project_id == project_id, AuditLog.action == "knowledge_ask"))
         if (item.after_summary_json or {}).get("answer_status") == "needs_confirmation"
@@ -139,7 +147,10 @@ def _knowledge_evidence(db: Session, project_id: int, name: str) -> tuple[bool, 
         "上传知识文件": (bool(documents), {"knowledge_documents": len(documents)}),
         "文件哈希去重": (bool(documents) and len({item.file_hash for item in documents if item.file_hash}) == len([item for item in documents if item.file_hash]), {"document_hash_count": len({item.file_hash for item in documents if item.file_hash})}),
         "知识版本": (_count(db, KnowledgeDocumentVersion, project_id) > 0, {"document_versions": _count(db, KnowledgeDocumentVersion, project_id)}),
-        "混合检索": (_count(db, RetrievalLog, project_id, RetrievalLog.retrieval_strategy.contains("keyword"), RetrievalLog.retrieval_strategy.contains("vector")) > 0, {"hybrid_retrievals": _count(db, RetrievalLog, project_id, RetrievalLog.retrieval_strategy.contains("keyword"), RetrievalLog.retrieval_strategy.contains("vector"))}),
+        "混合检索": (
+            hybrid_retrievals > 0,
+            {"hybrid_retrievals": hybrid_retrievals},
+        ),
         "有证据回答": (any(item.generated_answer for item in project_results), {"answers_with_content": sum(bool(item.generated_answer) for item in project_results)}),
         "citation_真实存在": (any(item.citations_json for item in project_results), {"results_with_citations": sum(bool(item.citations_json) for item in project_results)}),
         "无证据返回待确认": (
