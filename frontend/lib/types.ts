@@ -179,7 +179,24 @@ export type KnowledgeUnit = { id:number; document_id:number; knowledge_type:stri
 export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[] };
 export type RenderIssue = { severity:"error"|"warning"|"info";code:string;message:string;sheet_name?:string|null;cell?:string|null;business_section?:string|null;business_field?:string|null;target_field_id?:number|null };
 export type ValidationResult = { valid?:boolean;error_count:number;warning_count:number;info_count?:number;issues:RenderIssue[] };
-export type BackgroundJobSummary = { id:number;job_type:string;status:string;progress:number;current_step?:string|null;result_summary_json:Record<string,unknown>;error_message?:string|null;updated_at?:string };
+export type BackgroundJobSummary = {
+  id:number;
+  job_id?:number;
+  job_type:string;
+  status:string;
+  progress:number;
+  current_step?:string|null;
+  payload_summary_json?:Record<string,unknown>;
+  result_summary_json:Record<string,unknown>;
+  error_message?:string|null;
+  created_at?:string;
+  started_at?:string|null;
+  finished_at?:string|null;
+  updated_at?:string;
+  deduplicated?:boolean;
+  message?:string;
+  status_url?:string;
+};
 export type DeliverableTemplate = { id:number;project_id:number;template_name:string;template_type:string;description?:string|null;enabled:boolean;is_default:boolean;current_version_no:number;current_version_id?:number|null;current_version_status?:string|null;validation_error_count?:number;validation_warning_count?:number };
 export type DeliverableTemplateVersion = { id:number;project_id:number;template_id:number;stored_file_id:number;version_no:number;file_hash:string;sheet_config_json:Array<{sheet_name:string}>;parse_status:string;warnings_json:RenderIssue[];created_at?:string;validation?:ValidationResult;sheet_mapping_count?:number;enabled_sheet_mapping_count?:number };
 export type FieldReadiness = { target_field_id:number;status:string;source_to_mart_status:string;mart_to_ybt_status:string;evidence_completeness:number;open_question_count:number;blocking_reasons:Array<{code:string;message:string}>;evidence_dimensions:Record<string,string> };

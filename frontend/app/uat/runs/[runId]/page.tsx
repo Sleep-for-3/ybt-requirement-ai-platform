@@ -6,8 +6,13 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
 import { StructuredDetails, UatMetric, UatStatus, readError } from "@/components/uat/UatUi";
-import { UatCaseResult, UatFinding, UatRun, UatSignoff, apiDownload, apiGet, apiPost } from "@/lib/api";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useJobPolling } from "@/hooks/useJobPolling";
+import { BackgroundJobSummary, UatCaseResult, UatFinding, UatRun, UatSignoff, apiDownload, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
 
 export default function RunPage() {
@@ -16,7 +21,12 @@ export default function RunPage() {
   const [findings, setFindings] = useState<UatFinding[]>([]);
   const [signoffs, setSignoffs] = useState<UatSignoff[]>([]);
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [confirmation, setConfirmation] = useState<{ path: string; label: string; title: string; description: string; danger?: boolean } | null>(null);
+  const actionRunner = useAsyncAction<UatRun | { run: UatRun; job: BackgroundJobSummary }>({
+    successMessage: (result) => "job" in result
+      ? result.job.deduplicated ? "相同 UAT 任务正在执行，已打开当前任务" : "UAT 任务已提交"
+      : "UAT 状态已更新"
+  });
   const permissions = useProjectPermissions(run?.project_id);
 
   async function load() {
@@ -44,17 +54,14 @@ export default function RunPage() {
     const timer = window.setInterval(() => void load(), 3000);
     return () => window.clearInterval(timer);
   }, [run?.status, runId]);
+  const job = useJobPolling(run?.background_job_id, { onTerminal: load });
 
   async function action(path: string, label: string) {
-    setBusy(true);
-    try {
-      await apiPost(`/uat-runs/${runId}/${path}`, {});
+    const result = await actionRunner.run(() => apiPost<UatRun | { run: UatRun; job: BackgroundJobSummary }>(`/uat-runs/${runId}/${path}`, {}));
+    if (result) {
       setMessage(label);
+      setConfirmation(null);
       await load();
-    } catch (reason) {
-      setMessage(readError(reason));
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -96,6 +103,7 @@ export default function RunPage() {
         {message ? (
           <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
         ) : null}
+        {job ? <JobProgressPanel job={job} resultHref={`/uat/runs/${runId}`} /> : null}
         {run ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -115,22 +123,22 @@ export default function RunPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {permissions.can("uat.execute") && ["draft", "failed", "blocked"].includes(run.status) ? (
-                    <button className="button-primary" disabled={busy} onClick={() => action("execute", "已提交执行")}>
+                    <AsyncActionButton actionStatus={actionRunner.status} className="button-primary" onClick={() => setConfirmation({ path: "execute", label: "已提交执行", title: "确认执行 UAT？", description: "将运行本轮启用的自动和人工验收用例，并记录结果与审计。" })}>
                       <Play size={15} />
                       执行
-                    </button>
+                    </AsyncActionButton>
                   ) : null}
                   {permissions.can("uat.execute") && ["failed", "blocked", "cancelled"].includes(run.status) ? (
-                    <button className="button-secondary" disabled={busy} onClick={() => action("retry-failed", "已提交失败项重跑")}>
+                    <AsyncActionButton actionStatus={actionRunner.status} className="button-secondary" onClick={() => setConfirmation({ path: "retry-failed", label: "已提交失败项重跑", title: "确认重跑失败项？", description: "仅重新执行失败和阻断的验收项，不覆盖原有审计记录。" })}>
                       <RotateCcw size={15} />
                       重跑失败项
-                    </button>
+                    </AsyncActionButton>
                   ) : null}
                   {permissions.can("uat.execute") && ["draft", "queued", "running"].includes(run.status) ? (
-                    <button className="button-danger" disabled={busy} onClick={() => action("cancel", "已取消执行")}>
+                    <AsyncActionButton actionStatus={actionRunner.status} className="button-danger" onClick={() => setConfirmation({ path: "cancel", label: "已取消执行", title: "确认取消 UAT？", description: "正在排队或运行的任务将停止，已产生的结果和审计会保留。", danger: true })}>
                       <Square size={14} />
                       取消
-                    </button>
+                    </AsyncActionButton>
                   ) : null}
                   <button className="button-secondary" onClick={() => download("report", "uat-report.xlsx")}>
                     <Download size={15} />
@@ -146,6 +154,15 @@ export default function RunPage() {
                 <div className="h-2 rounded-full bg-pine transition-all" style={{ width: `${progress}%` }} />
               </div>
             </section>
+            <ConfirmDialog
+              busy={actionRunner.isRunning}
+              danger={confirmation?.danger}
+              description={confirmation?.description || ""}
+              onCancel={() => setConfirmation(null)}
+              onConfirm={() => confirmation ? action(confirmation.path, confirmation.label) : undefined}
+              open={Boolean(confirmation)}
+              title={confirmation?.title || "确认操作"}
+            />
 
             <section>
               <h2 className="mb-3 font-semibold text-ink">Case 结果</h2>

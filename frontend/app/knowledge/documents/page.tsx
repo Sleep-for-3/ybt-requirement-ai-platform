@@ -6,8 +6,11 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, KnowledgeRagDocument, apiGet, uploadForm } from "@/lib/api";
-import { describeKnowledgeJob, isTerminalJob } from "@/lib/background-job.mjs";
 
 const STATUS_BADGE: Record<string, string> = {
   indexed: "badge-success",
@@ -23,9 +26,12 @@ const GRID_COLS = "grid-cols-[minmax(0,1fr)_150px_90px_70px_110px]";
 export default function Page() {
   const { projectId } = useProjectWorkspace();
   const [items, setItems] = useState<KnowledgeRagDocument[]>([]);
-  const [message, setMessage] = useState("");
   const [activeJob, setActiveJob] = useState<BackgroundJobSummary | null>(null);
-  const [busy, setBusy] = useState(false);
+  const uploadAction = useAsyncAction<KnowledgeRagDocument | BackgroundJobSummary>({
+    successMessage: (result) => "job_type" in result
+      ? result.deduplicated ? "相同知识摄取任务已在执行，已打开当前任务" : "文件已上传，知识摄取任务已提交"
+      : "知识文档解析和索引完成"
+  });
 
   const load = useCallback(async () => {
     if (projectId) setItems(await apiGet(`/projects/${projectId}/knowledge/documents`));
@@ -35,59 +41,35 @@ export default function Page() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!activeJob || isTerminalJob(activeJob)) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      try {
-        const next = await apiGet<BackgroundJobSummary>(`/jobs/${activeJob.id}`);
-        if (cancelled) return;
-        setActiveJob(next);
-        setMessage(describeKnowledgeJob(next));
-        if (isTerminalJob(next)) {
-          setBusy(false);
-          if (next.status === "completed" || next.status === "partially_completed") {
-            await load();
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setBusy(false);
-          setMessage(error instanceof Error ? error.message : "读取索引进度失败");
-        }
-      }
-    }, 1000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeJob, load]);
+  const polledJob = useJobPolling(activeJob?.id, {
+    initialJob: activeJob,
+    onTerminal: async (job) => {
+      if (["completed", "partially_completed"].includes(job.status)) await load();
+    }
+  });
+  const uploadButtonStatus = polledJob && ["queued", "running"].includes(polledJob.status)
+    ? polledJob.status as "queued" | "running"
+    : uploadAction.status;
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!projectId) return;
     const formElement = event.currentTarget;
     const formData = new FormData(formElement);
-    setBusy(true);
     setActiveJob(null);
-    setMessage("正在上传文件...");
-    try {
-      const result = await uploadForm<KnowledgeRagDocument | BackgroundJobSummary>(
+    const result = await uploadAction.run(() =>
+      uploadForm<KnowledgeRagDocument | BackgroundJobSummary>(
         `/projects/${projectId}/knowledge/documents/upload`,
         formData
-      );
+      )
+    );
+    if (result) {
       formElement.reset();
       if ("job_type" in result) {
         setActiveJob(result);
-        setMessage(describeKnowledgeJob(result));
       } else {
-        setBusy(false);
-        setMessage("解析和索引完成");
         await load();
       }
-    } catch (error) {
-      setBusy(false);
-      setMessage(error instanceof Error ? error.message : "上传失败");
     }
   }
 
@@ -127,26 +109,14 @@ export default function Page() {
               <option value="restricted">受限</option>
             </select>
             <input className="control" name="institution_name" placeholder="银行名称（银行作用域）" />
-            <button className="button-primary" disabled={busy} type="submit">
+            <AsyncActionButton actionStatus={uploadButtonStatus} className="button-primary" loadingText="正在上传…" type="submit">
               <Upload size={16} />
-              {busy ? "正在处理..." : "上传并索引"}
-            </button>
+              上传并索引
+            </AsyncActionButton>
           </div>
         </form>
 
-        {message ? (
-          <div aria-live="polite" className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">
-            <p>{message}</p>
-            {activeJob && !isTerminalJob(activeJob) ? (
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-teal-600 transition-all"
-                  style={{ width: `${Math.max(2, activeJob.progress || 0)}%` }}
-                />
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        {polledJob ? <JobProgressPanel job={polledJob} resultHref="/knowledge/documents" /> : null}
 
         {items.length ? (
           <section className="panel overflow-hidden">

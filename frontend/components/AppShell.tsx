@@ -33,7 +33,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
-import { apiGet, clearSession } from "@/lib/api";
+import { BackgroundJobSummary, apiGet, clearSession } from "@/lib/api";
 
 type NavItem = {
   href: string;
@@ -113,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return <ProjectProvider><ShellContent>{children}</ShellContent></ProjectProvider>;
 }
 
-function SidebarNav({ pathname }: { pathname: string }) {
+function SidebarNav({ pathname, runningJobs = 0 }: { pathname: string; runningJobs?: number }) {
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
       {NAV_GROUPS.map((group) => (
@@ -133,6 +133,11 @@ function SidebarNav({ pathname }: { pathname: string }) {
                 >
                   <Icon className={active ? "text-pine-300" : "text-emerald-100/40 transition group-hover:text-emerald-100/75"} size={16} />
                   {item.label}
+                  {item.href === "/jobs" && runningJobs > 0 ? (
+                    <span className="ml-auto min-w-5 rounded-full bg-amber-300 px-1.5 text-center text-[10px] font-bold leading-5 text-amber-950" aria-label={`${runningJobs} 个活动任务`}>
+                      {runningJobs > 99 ? "99+" : runningJobs}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}
@@ -168,9 +173,10 @@ function SidebarFooter() {
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { selectedProject } = useProjectWorkspace();
+  const { projectId, selectedProject } = useProjectWorkspace();
   const [user, setUser] = useState<{ display_name?: string | null; username: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [runningJobs, setRunningJobs] = useState(0);
 
   useEffect(() => {
     apiGet<{ display_name?: string | null; username: string }>("/auth/me").then(setUser).catch(() => setUser(null));
@@ -179,6 +185,27 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+  useEffect(() => {
+    if (!projectId) {
+      setRunningJobs(0);
+      return;
+    }
+    let active = true;
+    async function loadJobCount() {
+      try {
+        const jobs = await apiGet<BackgroundJobSummary[]>(`/jobs?project_id=${projectId}`);
+        if (active) setRunningJobs(jobs.filter((job) => ["queued", "running"].includes(job.status)).length);
+      } catch {
+        // 导航计数失败不打断当前页面，任务中心仍可手工打开。
+      }
+    }
+    void loadJobCount();
+    const timer = window.setInterval(() => void loadJobCount(), 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [projectId]);
 
   const displayName = user?.display_name || user?.username || "未登录";
 
@@ -191,7 +218,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-mist">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-gradient-to-b from-[#102620] to-[#0a1b16] lg:flex">
         <SidebarBrand />
-        <SidebarNav pathname={pathname} />
+        <SidebarNav pathname={pathname} runningJobs={runningJobs} />
         <SidebarFooter />
       </aside>
 
@@ -205,7 +232,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
                 <X size={18} />
               </button>
             </div>
-            <SidebarNav pathname={pathname} />
+            <SidebarNav pathname={pathname} runningJobs={runningJobs} />
             <SidebarFooter />
           </aside>
         </div>

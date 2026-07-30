@@ -5,6 +5,9 @@ import { Activity, CheckCircle2, Cloud, Cpu, Inbox, Play, Power, PowerOff, Setti
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 
 type ProviderStatus = {
@@ -65,6 +68,8 @@ export default function Page() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<Profile | null>(null);
+  const [confirmation, setConfirmation] = useState<{ profile: Profile; kind: "activate" | "disable" } | null>(null);
+  const profileAction = useAsyncAction<Record<string, unknown>>({ successMessage: "模型配置操作已完成" });
 
   const reload = useCallback(async () => {
     const [status, items] = await Promise.all([apiGet<RuntimeStatus>("/ai-runtime/status"), apiGet<Profile[]>("/model-profiles")]);
@@ -115,16 +120,12 @@ export default function Page() {
   }
 
   async function action(profile: Profile, kind: "test" | "activate" | "disable") {
-    setBusy(`${kind}-${profile.id}`);
     setMessage("");
-    try {
-      const result = await apiPost<Record<string, unknown>>(`/model-profiles/${profile.id}/${kind}`, {});
+    const result = await profileAction.run(() => apiPost<Record<string, unknown>>(`/model-profiles/${profile.id}/${kind}`, {}));
+    if (result) {
       setMessage(kind === "test" ? `连接成功，耗时 ${result.latency_ms ?? "-"} ms` : `Profile 已${kind === "activate" ? "激活" : "停用"}`);
+      setConfirmation(null);
       await reload();
-    } catch (error) {
-      setMessage(readError(error));
-    } finally {
-      setBusy(null);
     }
   }
 
@@ -251,20 +252,20 @@ export default function Page() {
                       <button className="button-secondary" onClick={() => setEditing(profile)}>
                         编辑
                       </button>
-                      <button className="button-secondary" disabled={busy === `test-${profile.id}`} onClick={() => void action(profile, "test")}>
+                      <AsyncActionButton actionStatus={profileAction.status} className="button-secondary" loadingText="测试中…" onClick={() => void action(profile, "test")}>
                         <Play size={15} />
-                        {busy === `test-${profile.id}` ? "测试中…" : "测试连接"}
-                      </button>
+                        测试连接
+                      </AsyncActionButton>
                       {profile.enabled ? (
-                        <button className="button-danger" onClick={() => void action(profile, "disable")}>
+                        <AsyncActionButton actionStatus={profileAction.status} className="button-danger" onClick={() => setConfirmation({ profile, kind: "disable" })}>
                           <PowerOff size={15} />
                           停用
-                        </button>
+                        </AsyncActionButton>
                       ) : (
-                        <button className="button-primary" onClick={() => void action(profile, "activate")}>
+                        <AsyncActionButton actionStatus={profileAction.status} className="button-primary" onClick={() => setConfirmation({ profile, kind: "activate" })}>
                           <Power size={15} />
                           激活
-                        </button>
+                        </AsyncActionButton>
                       )}
                     </div>
                   </div>
@@ -278,6 +279,17 @@ export default function Page() {
             )}
           </div>
         </section>
+        <ConfirmDialog
+          busy={profileAction.isRunning}
+          danger={confirmation?.kind === "disable"}
+          description={confirmation?.kind === "disable"
+            ? `停用“${confirmation?.profile.profile_name || ""}”后，系统将不再使用该 Profile。`
+            : `激活“${confirmation?.profile.profile_name || ""}”会停用当前活动 Profile。`}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => confirmation ? action(confirmation.profile, confirmation.kind) : undefined}
+          open={Boolean(confirmation)}
+          title={confirmation?.kind === "disable" ? "确认停用模型 Profile？" : "确认激活模型 Profile？"}
+        />
 
         <section className="panel overflow-hidden">
           <div className="panel-header">

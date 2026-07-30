@@ -1,8 +1,11 @@
+import { formatApiErrorText } from "./http-response.mjs";
+
 const TERMINAL_STATUSES = new Set([
   "completed",
   "partially_completed",
   "failed",
-  "cancelled"
+  "cancelled",
+  "timed_out"
 ]);
 
 export function isTerminalJob(job) {
@@ -27,7 +30,10 @@ export function describeKnowledgeJob(job) {
     return "索引任务已取消";
   }
   if (job.status === "failed") {
-    return `索引失败：${job.error_message || "请查看后台任务日志"}`;
+    const error = job.error_message
+      ? formatApiErrorText(JSON.stringify({ detail: job.error_message }), 500)
+      : "请查看后台任务日志";
+    return `索引失败：${error}`;
   }
   return `索引状态：${job.status}`;
 }

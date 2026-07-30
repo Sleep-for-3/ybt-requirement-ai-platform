@@ -10,12 +10,13 @@ export type BrowserAuthEnvironment = {
   sessionStorage: { removeItem: (key: string) => void };
 };
 
-export function throwApiError(
+export function formatApiErrorText(text: string, status?: number): string;
+export function normalizeRequestError(error: unknown): Error;
+export function throwApiError<T = never>(
   response: ApiResponse,
   path: string,
   environment?: BrowserAuthEnvironment
-): Promise<never>;
-
+): Promise<T>;
 export function readApiResponse<T>(
   response: ApiResponse,
   path: string,

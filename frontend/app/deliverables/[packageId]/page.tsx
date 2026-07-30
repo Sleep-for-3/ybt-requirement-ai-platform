@@ -5,6 +5,11 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, Download, FileCheck2, GitCompare, MessageSquare, Play, RefreshCw, Send, Sheet } from "lucide-react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, DeliverablePackage, DeliverablePackageVersion, ValidationResult, apiDownload, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
 
@@ -15,8 +20,11 @@ export default function Page() {
   const [item, setItem] = useState<DeliverablePackage | null>(null);
   const permissions = useProjectPermissions(item?.project_id);
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState("");
   const [compareIds, setCompareIds] = useState<[string,string]>(["",""]);
+  const [activeJob, setActiveJob] = useState<BackgroundJobSummary | null>(null);
+  const [confirmation, setConfirmation] = useState<{ path: string; success: string; title: string; description: string } | null>(null);
+  const action = useAsyncAction<ActionResult>({ successMessage: "交付操作已完成" });
+  const polledJob = useJobPolling(activeJob?.id, { initialJob: activeJob, onTerminal: load });
 
   async function load() {
     try {
@@ -28,16 +36,13 @@ export default function Page() {
   useEffect(() => { if (packageId) void load(); }, [packageId]);
 
   async function act(path:string, success:string) {
-    setBusy(path);
-    try {
-      const result = await apiPost<ActionResult>(`/deliverables/${packageId}/${path}`, {});
+    const result = await action.run(() => apiPost<ActionResult>(`/deliverables/${packageId}/${path}`, {}));
+    if (result) {
       const suffix = result.job ? `任务 #${result.job.id}：${result.job.status}（${result.job.progress}%）` : result.version ? `正式版本 v${result.version.version_no}${result.idempotent ? "（幂等复用）" : ""}` : result.error_count !== undefined ? `${result.error_count} 个错误，${result.warning_count || 0} 个告警` : "";
       setMessage(`${success}${suffix ? `；${suffix}` : ""}`);
+      if (result.job) setActiveJob(result.job);
+      setConfirmation(null);
       await load();
-    } catch (error) {
-      setMessage(readError(error));
-    } finally {
-      setBusy("");
     }
   }
   async function download(path:string, fallback:string) {
@@ -78,38 +83,38 @@ export default function Page() {
       <div className="mx-auto max-w-7xl space-y-5 p-4 lg:p-6">
         <section className="panel flex flex-wrap gap-2 p-4">
           {canGenerate ? (
-            <button className="button-primary" disabled={Boolean(busy)} onClick={() => act("generate", "交付内容生产已完成")}>
+            <AsyncActionButton actionStatus={action.status} className="button-primary" onClick={() => setConfirmation({ path: "generate", success: "交付内容生产已完成", title: "确认生成交付内容？", description: `将为 ${item.field_count} 个字段生成正式交付内容，已有相同任务时会打开当前任务。` })}>
               <Play size={15} />
               生成交付内容
-            </button>
+            </AsyncActionButton>
           ) : null}
-          <button className="button-secondary" disabled={Boolean(busy)} onClick={load}>
+          <button className="button-secondary" disabled={action.isRunning} onClick={load}>
             <RefreshCw size={15} />
             重新计算准备度
           </button>
           {canGenerate ? (
-            <button className="button-secondary" disabled={Boolean(busy)} onClick={() => act("validate", "正式校验已执行")}>
+            <AsyncActionButton actionStatus={action.status} className="button-secondary" onClick={() => void act("validate", "正式校验已执行")}>
               <FileCheck2 size={15} />
               执行正式校验
-            </button>
+            </AsyncActionButton>
           ) : null}
           {canExport ? (
-            <button className="button-secondary" disabled={Boolean(busy) || item.status === "generating"} onClick={() => act("render", "正式 Excel 渲染已完成")}>
+            <AsyncActionButton actionStatus={action.status} className="button-secondary" disabled={item.status === "generating"} disabledReason={item.status === "generating" ? "交付内容仍在生成" : undefined} onClick={() => setConfirmation({ path: "render", success: "正式 Excel 渲染已完成", title: "确认渲染正式 Excel？", description: "将根据当前已校验内容生成正式交付文件；相同内容不会重复创建任务。" })}>
               <Sheet size={15} />
               渲染正式 Excel
-            </button>
+            </AsyncActionButton>
           ) : null}
           {canReview ? (
-            <button className="button-secondary" disabled={Boolean(busy) || item.status !== "generated"} onClick={() => act("submit-review", "已提交最终审核")}>
+            <AsyncActionButton actionStatus={action.status} className="button-secondary" disabled={item.status !== "generated"} disabledReason={item.status !== "generated" ? "请先完成正式文件渲染" : undefined} onClick={() => setConfirmation({ path: "submit-review", success: "已提交最终审核", title: "确认提交最终审核？", description: "提交后交付内容进入正式审核流程，普通编辑将受流程状态限制。" })}>
               <Send size={15} />
               提交最终审核
-            </button>
+            </AsyncActionButton>
           ) : null}
           {canReview ? (
-            <button className="button-primary" disabled={Boolean(busy) || item.status !== "pending_review"} onClick={() => act("approve", "批准完成")}>
+            <AsyncActionButton actionStatus={action.status} className="button-primary" disabled={item.status !== "pending_review"} disabledReason={item.status !== "pending_review" ? "仅待最终审核状态可批准" : undefined} onClick={() => setConfirmation({ path: "approve", success: "批准完成", title: "确认批准正式版本？", description: "批准后将形成正式交付版本并记录审批审计。" })}>
               <CheckCircle2 size={15} />
               批准正式版本
-            </button>
+            </AsyncActionButton>
           ) : null}
           {canExport && item.generated_file_id ? (
             <button className="button-secondary" onClick={() => download(`/deliverables/${packageId}/download`, "deliverable.xlsx")}>
@@ -122,6 +127,15 @@ export default function Page() {
         {message ? (
           <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
         ) : null}
+        {polledJob ? <JobProgressPanel job={polledJob} resultHref={`/deliverables/${packageId}`} /> : null}
+        <ConfirmDialog
+          busy={action.isRunning}
+          description={confirmation?.description || ""}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => confirmation ? act(confirmation.path, confirmation.success) : undefined}
+          open={Boolean(confirmation)}
+          title={confirmation?.title || "确认交付操作"}
+        />
 
         <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Stat label="当前状态" value={statusLabel(item.status)} />

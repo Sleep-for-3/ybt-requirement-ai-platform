@@ -6,7 +6,12 @@ import { useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { KnowledgeRagDocument, KnowledgeUnit, apiDelete, apiGet, apiPost } from "@/lib/api";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useJobPolling } from "@/hooks/useJobPolling";
+import { BackgroundJobSummary, KnowledgeRagDocument, KnowledgeUnit, apiDelete, apiGet, apiPost } from "@/lib/api";
 
 export default function Page() {
   const id = Number(useParams<{ documentId: string }>().documentId);
@@ -14,6 +19,15 @@ export default function Page() {
   const [doc, setDoc] = useState<KnowledgeRagDocument | null>(null);
   const [units, setUnits] = useState<KnowledgeUnit[]>([]);
   const [versions, setVersions] = useState<Record<string, unknown>[]>([]);
+  const [activeJob, setActiveJob] = useState<BackgroundJobSummary | null>(null);
+  const [confirmDisable, setConfirmDisable] = useState(false);
+  const reindexAction = useAsyncAction<KnowledgeRagDocument | BackgroundJobSummary>({
+    successMessage: (result) => "job_type" in result
+      ? result.deduplicated ? "相同重建任务已存在，已打开当前任务" : "索引重建任务已提交"
+      : "索引重建完成"
+  });
+  const disableAction = useAsyncAction<unknown>({ successMessage: "知识文档已禁用" });
+  const polledJob = useJobPolling(activeJob?.id, { initialJob: activeJob, onTerminal: load });
 
   async function load() {
     if (!projectId) return;
@@ -27,34 +41,58 @@ export default function Page() {
     if (id && projectId) void load();
   }, [id, projectId]);
 
+  async function reindex() {
+    const result = await reindexAction.run(() => apiPost<KnowledgeRagDocument | BackgroundJobSummary>(`/knowledge/documents/${id}/reindex?project_id=${projectId}`, {}));
+    if (!result) return;
+    if ("job_type" in result) setActiveJob(result);
+    else await load();
+  }
+
+  async function disableDocument() {
+    const result = await disableAction.run(() => apiDelete(`/knowledge/documents/${id}?project_id=${projectId}`));
+    if (result !== undefined) {
+      setConfirmDisable(false);
+      await load();
+    }
+  }
+
   return (
     <main>
       <WorkspaceHeader title={doc?.file_name || "知识文档"} meta={`${doc?.document_status || ""} / ${units.length} 个知识单元`} />
       <div className="mx-auto max-w-5xl space-y-4 p-4 lg:p-6">
         <div className="flex gap-2">
-          <button
+          <AsyncActionButton
+            actionStatus={polledJob && ["queued", "running"].includes(polledJob.status) ? polledJob.status as "queued" | "running" : reindexAction.status}
             className="button-primary"
             disabled={!projectId || doc?.document_status === "archived"}
-            onClick={async () => {
-              await apiPost(`/knowledge/documents/${id}/reindex?project_id=${projectId}`, {});
-              await load();
-            }}
+            disabledReason={!projectId ? "请先选择项目" : doc?.document_status === "archived" ? "已归档文档不能重建索引" : undefined}
+            onClick={() => void reindex()}
           >
             <RefreshCw size={15} />
             重建索引
-          </button>
-          <button
+          </AsyncActionButton>
+          <AsyncActionButton
+            actionStatus={disableAction.status}
             className="button-danger"
             disabled={!projectId || doc?.document_status === "archived"}
-            onClick={async () => {
-              await apiDelete(`/knowledge/documents/${id}?project_id=${projectId}`);
-              await load();
-            }}
+            disabledReason={!projectId ? "请先选择项目" : doc?.document_status === "archived" ? "该文档已经归档" : undefined}
+            onClick={() => setConfirmDisable(true)}
           >
             <Ban size={15} />
             禁用知识
-          </button>
+          </AsyncActionButton>
         </div>
+        {polledJob ? <JobProgressPanel job={polledJob} resultHref={`/knowledge/documents/${id}`} /> : null}
+        <ConfirmDialog
+          busy={disableAction.isRunning}
+          danger
+          description="禁用后，该文档的知识单元将不再参与检索。此操作会保留审计和历史版本。"
+          onCancel={() => setConfirmDisable(false)}
+          onConfirm={disableDocument}
+          open={confirmDisable}
+          title="确认禁用知识文档？"
+          confirmText="确认禁用"
+        />
 
         <section className="panel">
           <div className="panel-header">

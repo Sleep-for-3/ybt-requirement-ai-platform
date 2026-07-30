@@ -3,13 +3,14 @@
  * 领域类型定义见 lib/types.ts，从这里统一重导出。
  */
 
-import { BrowserAuthEnvironment, readApiResponse, throwApiError } from "./http-response.mjs";
+import { BrowserAuthEnvironment, normalizeRequestError, readApiResponse, throwApiError } from "./http-response.mjs";
 
 export * from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
 const ACCESS_TOKEN_KEY = "ybt:access-token";
 const REFRESH_TOKEN_KEY = "ybt:refresh-token";
+const REQUEST_TIMEOUT_MS = 60_000;
 
 export function saveSession(accessToken: string, refreshToken: string) {
   sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
@@ -36,8 +37,27 @@ function browserAuthEnvironment(): BrowserAuthEnvironment | undefined {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
-  return readApiResponse<T>(response, path, browserAuthEnvironment());
+  try {
+    const response = await fetchWithTimeout(`${API_BASE}${path}`, init);
+    return readApiResponse<T>(response, path, browserAuthEnvironment());
+  } catch (error) {
+    throw normalizeRequestError(error);
+  }
+}
+
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const externalSignal = init?.signal;
+  const forwardAbort = () => controller.abort();
+  externalSignal?.addEventListener("abort", forwardAbort, { once: true });
+  if (externalSignal?.aborted) controller.abort();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", forwardAbort);
+  }
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -77,21 +97,29 @@ export async function uploadForm<T>(path: string, formData: FormData): Promise<T
 }
 
 export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string }> {
-  const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
-  if (!response.ok) {
-    return throwApiError(response, path, browserAuthEnvironment());
+  try {
+    const response = await fetchWithTimeout(`${API_BASE}${path}`, { headers: authHeaders() });
+    if (!response.ok) {
+      return throwApiError(response, path, browserAuthEnvironment());
+    }
+    const disposition = response.headers.get("content-disposition") || "";
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    const fallback = response.headers.get("content-type")?.includes("application/zip") ? "uat-evidence.zip" : "业务口径及技术溯源表.xlsx";
+    return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : plainName || fallback };
+  } catch (error) {
+    throw normalizeRequestError(error);
   }
-  const disposition = response.headers.get("content-disposition") || "";
-  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
-  const fallback = response.headers.get("content-type")?.includes("application/zip") ? "uat-evidence.zip" : "业务口径及技术溯源表.xlsx";
-  return { blob: await response.blob(), fileName: encodedName ? decodeURIComponent(encodedName) : plainName || fallback };
 }
 
 export async function apiPostDownload(path: string, body: unknown = {}): Promise<{ blob: Blob; fileName: string }> {
-  const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) });
-  if (!response.ok) return throwApiError(response, path, browserAuthEnvironment());
-  const disposition = response.headers.get("content-disposition") || "";
-  const name = disposition.match(/filename=([^;]+)/i)?.[1] || "preview.xlsx";
-  return { blob: await response.blob(), fileName: name.replaceAll('"', "") };
+  try {
+    const response = await fetchWithTimeout(`${API_BASE}${path}`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) });
+    if (!response.ok) return throwApiError(response, path, browserAuthEnvironment());
+    const disposition = response.headers.get("content-disposition") || "";
+    const name = disposition.match(/filename=([^;]+)/i)?.[1] || "preview.xlsx";
+    return { blob: await response.blob(), fileName: name.replaceAll('"', "") };
+  } catch (error) {
+    throw normalizeRequestError(error);
+  }
 }

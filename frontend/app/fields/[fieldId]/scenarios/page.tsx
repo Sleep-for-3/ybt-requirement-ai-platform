@@ -6,8 +6,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useJobPolling } from "@/hooks/useJobPolling";
 import {
-  CandidateSourceRecommendation, ColumnProfileSnapshot, ColumnProfileTask, HybridKnowledgeItem, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
+  BackgroundJobSummary, CandidateSourceRecommendation, ColumnProfileSnapshot, ColumnProfileTask, HybridKnowledgeItem, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
   ScenarioReviewPackageView, ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
 } from "@/lib/api";
 
@@ -61,6 +65,27 @@ export default function FieldScenarioPage() {
   const [busy, setBusy] = useState(false);
   const [reviewTasks,setReviewTasks]=useState<Array<{id:number;step_key:string;status:string;target_type:string;target_id:number;assignee_user_id?:number|null;due_at?:string|null}>>([]);
   const [reviewPackage,setReviewPackage]=useState<ScenarioReviewPackageView|null>(null);
+  const [activeDraftJob, setActiveDraftJob] = useState<BackgroundJobSummary | null>(null);
+  const [activeProfileJob, setActiveProfileJob] = useState<BackgroundJobSummary | null>(null);
+  const draftAction = useAsyncAction<BackgroundJobSummary>({
+    successMessage: (job) => job.deduplicated ? "相同草稿任务已在执行，已打开当前任务" : "AI 草稿任务已提交"
+  });
+  const draftJob = useJobPolling(activeDraftJob?.id, {
+    initialJob: activeDraftJob,
+    onTerminal: async () => { await reload(); }
+  });
+  const profileAction = useAsyncAction<ColumnProfileTask | BackgroundJobSummary>({
+    successMessage: (result) => "job_type" in result
+      ? result.deduplicated ? "相同字段探查正在执行，已打开当前任务" : "字段探查任务已提交"
+      : "字段安全探查完成"
+  });
+  const profileJob = useJobPolling(activeProfileJob?.id, {
+    initialJob: activeProfileJob,
+    onTerminal: async (job) => {
+      const taskId = Number(job.result_summary_json?.profile_task_id || 0);
+      if (taskId) setProfileTask(await apiGet<ColumnProfileTask>(`/profile-tasks/${taskId}`));
+    }
+  });
 
   const business = useMemo(() => businesses.find((item) => item.scenario_id === scenarioId) || null, [businesses, scenarioId]);
   const lineage = useMemo(() => lineages.find((item) => item.scenario_id === scenarioId) || null, [lineages, scenarioId]);
@@ -155,6 +180,14 @@ export default function FieldScenarioPage() {
       "技术溯源已保存",
     );
   }
+  async function submitDraft(kind: "business" | "technical") {
+    if (!field || !scenarioId) return;
+    const job = await draftAction.run(() => apiPost<BackgroundJobSummary>(
+      `/projects/${field.project_id}/batch/generate-${kind}-drafts`,
+      { field_ids: [field.id], scenario_id: scenarioId }
+    ));
+    if (job) setActiveDraftJob(job);
+  }
   async function searchKnowledge() {
     if (!field || !scenarioId) return;
     const result = await apiPost<{ items: RegulatoryKnowledgeItem[] }>(`/projects/${field.project_id}/knowledge/search`, {
@@ -202,8 +235,15 @@ export default function FieldScenarioPage() {
   }
   async function profileCatalogCandidate(item: CandidateSourceRecommendation) {
     if (!field || !scenarioId || !item.catalog_column_id) return;
-    try { const task = await apiPost<ColumnProfileTask>(`/catalog/columns/${item.catalog_column_id}/profile`, { target_field_id: field.id, scenario_id: scenarioId, source_recommendation_id: item.id, metrics: ["null_rate", "distinct_count", "top_values", "min_max", "length_distribution"] }); setProfileTask(task); setMessage(`安全探查 ${task.status}`); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "探查失败"); }
+    const task = await profileAction.run(() => apiPost<ColumnProfileTask | BackgroundJobSummary>(`/catalog/columns/${item.catalog_column_id}/profile`, { target_field_id: field.id, scenario_id: scenarioId, source_recommendation_id: item.id, metrics: ["null_rate", "distinct_count", "top_values", "min_max", "length_distribution"] }));
+    if (!task) return;
+    if ("job_type" in task) {
+      setActiveProfileJob(task);
+      setMessage("字段探查任务已创建");
+    } else {
+      setProfileTask(task);
+      setMessage(`安全探查 ${task.status}`);
+    }
   }
   async function adoptCatalogCandidate(item: CandidateSourceRecommendation) {
     await run(() => apiPost(`/source-recommendations/${item.id}/adopt`, {}), "已采用目录候选作为技术来源");
@@ -343,6 +383,8 @@ export default function FieldScenarioPage() {
           </div>
         </section>
 
+        {draftJob ? <div className="mb-5"><JobProgressPanel job={draftJob} resultHref={`/fields/${fieldId}/scenarios`} /></div> : null}
+        {profileJob ? <div className="mb-5"><JobProgressPanel job={profileJob} resultHref={`/fields/${fieldId}/scenarios`} /></div> : null}
         <div className="grid gap-5 xl:grid-cols-2">
           <section className="panel overflow-hidden">
             <PanelTitle title="业务口径" status={business?.business_confirm_status || "未维护"} />
@@ -380,7 +422,7 @@ export default function FieldScenarioPage() {
               <button className="button-secondary" onClick={() => searchRagKnowledge(["historical_mapping", "historical_traceability"])}><Search size={16} />检索历史口径</button>
               <button className="button-secondary" onClick={explainField}><Sparkles size={16} />解释字段含义</button>
               <button className="button-secondary" onClick={recommend}><DatabaseZap size={16} />从数据目录搜索</button>
-              <button className="button-secondary" disabled={!business || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/generate-draft`, {}), "AI 业务草稿已生成")}><Sparkles size={16} />AI 草稿</button>
+              <AsyncActionButton actionStatus={draftAction.status} className="button-secondary" disabled={!business || busy} disabledReason={!business ? "请先保存业务口径" : undefined} loadingText="正在提交草稿任务…" onClick={() => void submitDraft("business")}><Sparkles size={16} />AI 草稿</AsyncActionButton>
               <button className="button-secondary" disabled={!business?.ai_generated_content || busy} onClick={() => run(() => apiPost(`/scenario-business-mappings/${business!.id}/adopt-ai-draft`, {}), "已采用 AI 草稿")}><Check size={16} />采用草稿</button>
               <button className="button-primary" disabled={busy} onClick={saveBusiness}><Save size={16} />保存</button>
               <button className="button-secondary" disabled={!business} onClick={() => setShowBusinessEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
@@ -437,7 +479,7 @@ export default function FieldScenarioPage() {
             </div>
             <div className="flex flex-wrap gap-2 border-t border-line px-5 py-4">
               <button className="button-secondary" onClick={recommend}><DatabaseZap size={16} />推荐来源字段</button>
-              <button className="button-secondary" disabled={!lineage || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/generate-draft`, {}), "AI 技术草稿已生成")}><Sparkles size={16} />AI 草稿</button>
+              <AsyncActionButton actionStatus={draftAction.status} className="button-secondary" disabled={!lineage || busy} disabledReason={!lineage ? "请先保存技术溯源" : undefined} loadingText="正在提交草稿任务…" onClick={() => void submitDraft("technical")}><Sparkles size={16} />AI 草稿</AsyncActionButton>
               <button className="button-secondary" disabled={!lineage?.ai_generated_content || busy} onClick={() => run(() => apiPost(`/scenario-technical-lineages/${lineage!.id}/adopt-ai-draft`, {}), "已采用 AI 草稿")}><Check size={16} />采用草稿</button>
               <button className="button-primary" disabled={busy} onClick={saveLineage}><Save size={16} />保存</button>
               <button className="button-secondary" disabled={!lineage} onClick={() => setShowEvidenceForm((value) => !value)}><Link2 size={16} />绑定证据</button>
@@ -510,7 +552,7 @@ export default function FieldScenarioPage() {
                               <button className="button-secondary" onClick={() => showProfileHistory(item)}><Clock3 size={16} />探查历史</button>
                             ) : null}
                             {item.catalog_column_id ? (
-                              <button className="button-secondary" disabled={selectedRecommendationId !== item.id} onClick={() => profileCatalogCandidate(item)}><DatabaseZap size={16} />执行安全探查</button>
+                              <AsyncActionButton actionStatus={profileAction.status} className="button-secondary" disabled={selectedRecommendationId !== item.id} disabledReason={selectedRecommendationId !== item.id ? "请先选择该候选字段" : undefined} onClick={() => void profileCatalogCandidate(item)}><DatabaseZap size={16} />执行安全探查</AsyncActionButton>
                             ) : null}
                             {item.catalog_column_id ? (
                               <button
