@@ -62,7 +62,8 @@ def test_health_endpoints_are_bounded_sanitized_and_revision_aware(monkeypatch, 
             details = client.get("/health/details")
             assert details.status_code == 200
             checks = details.json()["checks"]
-            assert set(checks) == {"application", "database", "alembic_revision", "storage", "redis", "task_queue", "vector_store", "llm_provider", "embedding_provider", "disk_space"}
+            assert set(checks) == {"application", "database", "alembic_revision", "storage", "redis", "task_queue", "vector_store", "llm_provider", "embedding_provider", "semantic_index", "disk_space"}
+            assert checks["semantic_index"]["status"] == "disabled"
             assert checks["storage"]["status"] == "healthy"
             assert checks["redis"]["status"] == "disabled"
             assert "redis://" not in details.text

@@ -222,7 +222,7 @@ def test_uat_pack_rejects_path_traversal_and_exports_sanitized_evidence(monkeypa
             assert not any(".env" in name or "token" in name.lower() or "database" in name.lower() for name in names)
             assert all(not name.startswith("/") and ".." not in name for name in names)
             version = json.loads(archive.read("version.json"))
-            assert version["alembic_head_revision"] == "202607270013"
+            assert version["alembic_head_revision"] == "202607300014"
             assert version["alembic_revision"] is None
 
 
