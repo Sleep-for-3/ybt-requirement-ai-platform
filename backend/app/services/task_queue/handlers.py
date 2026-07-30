@@ -13,6 +13,7 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
     from app.services.task_queue.domain_handlers import (
         column_profile_handler,
         knowledge_ingestion_handler,
+        knowledge_embedding_reindex_handler,
         knowledge_reindex_handler,
         metadata_sync_handler,
         project_backup_handler,
@@ -27,6 +28,7 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
         "excel_export": _export_handler,
         "knowledge_ingestion": knowledge_ingestion_handler,
         "knowledge_reindex": knowledge_reindex_handler,
+        "knowledge_embedding_reindex": knowledge_embedding_reindex_handler,
         "metadata_sync": metadata_sync_handler,
         "column_profile": column_profile_handler,
         "rag_evaluation": rag_evaluation_handler,

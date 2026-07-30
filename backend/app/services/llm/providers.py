@@ -15,6 +15,7 @@ PROVIDER_ALIASES = {
     "vllm": "local_vllm",
     "ollama": "local_ollama_compatible",
     "local": "local_vllm",
+    "local_openai_compatible": "local_vllm",
 }
 SUPPORTED_PROVIDERS = {
     "mock",

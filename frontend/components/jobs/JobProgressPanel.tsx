@@ -17,6 +17,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   knowledge_ingestion: "知识文件摄取",
   knowledge_document_ingest: "知识文件摄取",
   knowledge_reindex: "知识库重新索引",
+  knowledge_embedding_reindex: "正式语义索引重建",
   lineage_export: "血缘分析结果导出",
   metadata_sync: "元数据同步",
   project_backup: "项目备份",

@@ -1,3 +1,4 @@
+import math
 import time
 
 import httpx
@@ -10,6 +11,7 @@ from app.services.llm.providers import (
     normalize_provider_type,
     resolve_api_key,
 )
+from app.services.embeddings.base import EmbeddingBatchResult
 
 
 class OpenAICompatibleEmbeddingService:
@@ -36,9 +38,15 @@ class OpenAICompatibleEmbeddingService:
         self.transport = transport
         self.last_call = ModelCallMetadata(provider=self.provider, model=self.model)
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    def embed_documents(self, texts: list[str]) -> EmbeddingBatchResult:
         if not texts:
-            return []
+            return EmbeddingBatchResult(
+                vectors=[],
+                provider=self.provider,
+                model=self.model,
+                dimension=0,
+                latency_ms=0,
+            )
         api_key = resolve_api_key(self.api_key_env_name)
         ProviderRuntimeConfig(
             provider=self.provider,
@@ -53,18 +61,21 @@ class OpenAICompatibleEmbeddingService:
         usage_available = True
         started = time.perf_counter()
         retries = 0
+        batch_count = 0
         for offset in range(0, len(texts), self.batch_size):
-            response, batch_retries = self._post(texts[offset : offset + self.batch_size], api_key)
+            batch_texts = texts[offset : offset + self.batch_size]
+            response, batch_retries = self._post(batch_texts, api_key)
             retries += batch_retries
+            batch_count += 1
             try:
-                batch_vectors = [item["embedding"] for item in response.json()["data"]]
+                data = response.json()["data"]
+                ordered = sorted(data, key=lambda item: int(item.get("index", 0)))
+                batch_vectors = [item["embedding"] for item in ordered]
             except (ValueError, KeyError, TypeError) as exc:
                 raise LLMResponseError("Provider response did not contain embeddings") from exc
-            if not batch_vectors or not all(
-                vector and all(isinstance(value, (int, float)) for value in vector)
-                for vector in batch_vectors
-            ):
-                raise LLMResponseError("Provider returned an invalid embedding vector")
+            _validate_vectors(batch_vectors, expected_count=len(batch_texts))
+            if vectors and len(batch_vectors[0]) != len(vectors[0]):
+                raise LLMResponseError("Provider changed embedding dimension between batches")
             vectors.extend(batch_vectors)
             usage = _usage(response)
             usage_available = usage_available and bool(usage.get("usage_available"))
@@ -78,7 +89,19 @@ class OpenAICompatibleEmbeddingService:
             retry_count=retries,
             http_status=200,
         )
-        return vectors
+        return EmbeddingBatchResult(
+            vectors=vectors,
+            provider=self.provider,
+            model=self.model,
+            dimension=len(vectors[0]),
+            latency_ms=self.last_call.latency_ms,
+            token_usage=self.last_call.token_usage,
+            batch_count=batch_count,
+            retry_count=retries,
+        )
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_documents(texts).vectors
 
     def _post(self, texts: list[str], key: str) -> tuple[httpx.Response, int]:
         headers = {"Authorization": f"Bearer {key}"} if key else {}
@@ -119,10 +142,28 @@ class OpenAICompatibleEmbeddingService:
                 ) from exc
 
     def embed_query(self, text: str) -> list[float]:
-        return self.embed_texts([text])[0]
+        return self.embed_documents([text]).vectors[0]
 
 
 class LocalEmbeddingService(OpenAICompatibleEmbeddingService):
     def __init__(self, base_url: str, model: str, api_key_env_name: str, **kwargs) -> None:
         provider = kwargs.pop("provider", "local_vllm")
         super().__init__(base_url, model, api_key_env_name, provider=provider, **kwargs)
+
+
+def _validate_vectors(vectors: list[list[float]], *, expected_count: int) -> None:
+    if len(vectors) != expected_count or not vectors:
+        raise LLMResponseError("Provider returned a different number of embeddings than inputs")
+    dimension = len(vectors[0])
+    if dimension <= 0:
+        raise LLMResponseError("Provider returned an empty embedding vector")
+    for vector in vectors:
+        if len(vector) != dimension:
+            raise LLMResponseError("Provider returned inconsistent embedding dimensions")
+        if not all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            for value in vector
+        ):
+            raise LLMResponseError("Provider returned a non-numeric or non-finite embedding value")

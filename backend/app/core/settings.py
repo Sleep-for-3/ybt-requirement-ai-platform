@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     embedding_provider: str = "mock"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key_env_name: str = "EMBEDDING_API_KEY"
+    embedding_dimension: int = 0
+    embedding_batch_size: int = 64
+    embedding_timeout_seconds: float = 60
+    embedding_retry_count: int = 2
     llm_api_key_env_name: str = "OPENAI_API_KEY"
 
     @property
@@ -87,6 +91,15 @@ class Settings(BaseSettings):
     vector_store_provider: str = "mock"
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str = ""
+    milvus_collection_prefix: str = "ybt_semantic"
+    milvus_index_type: str = "AUTOINDEX"
+    milvus_metric_type: str = "COSINE"
+    milvus_connection_timeout_seconds: float = 5
+    vector_top_k: int = 30
+    keyword_top_k: int = 500
+    hybrid_final_top_k: int = 20
+    hybrid_vector_weight: float = 0.45
+    hybrid_keyword_weight: float = 0.55
 
     safe_sql_default_limit: int = 100
     safe_sql_max_limit: int = 1000
@@ -139,6 +152,18 @@ class Settings(BaseSettings):
             add("error", "vector_store_provider_invalid", "VECTOR_STORE_PROVIDER must be mock or milvus.")
         if self.vector_store_provider == "milvus" and not self.milvus_uri.strip():
             add("error", "milvus_uri_missing", "Milvus mode requires MILVUS_URI.")
+        if self.vector_store_provider == "milvus" and self.embedding_dimension <= 0:
+            add("warning", "embedding_dimension_missing", "Formal Milvus indexing requires EMBEDDING_DIMENSION.")
+        if not 1 <= self.embedding_batch_size <= 256:
+            add("error", "embedding_batch_size_invalid", "EMBEDDING_BATCH_SIZE must be between 1 and 256.")
+        if not 0 <= self.embedding_retry_count <= 2:
+            add("error", "embedding_retry_count_invalid", "EMBEDDING_RETRY_COUNT must be between 0 and 2.")
+        if self.hybrid_keyword_weight < 0 or self.hybrid_vector_weight < 0 or (
+            self.hybrid_keyword_weight + self.hybrid_vector_weight <= 0
+        ):
+            add("error", "hybrid_weights_invalid", "Hybrid retrieval weights must be non-negative and have a positive sum.")
+        if self.milvus_metric_type.upper() != "COSINE":
+            add("warning", "milvus_metric_non_default", "COSINE is the validated default metric for semantic retrieval.")
         try:
             llm_provider = normalize_provider_type(self.llm_provider)
             if llm_provider != "mock" and (not self.llm_base_url.strip() or not self.llm_model.strip()):

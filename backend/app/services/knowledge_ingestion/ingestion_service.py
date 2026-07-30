@@ -62,14 +62,17 @@ async def ingest_knowledge_document(
         raise ValueError("Knowledge ingestion batch size must be positive")
 
     content = await upload.read()
-    embedding = get_embedding_service()
-    ensure_embedding_external_allowed(
-        db,
-        project_id,
-        embedding,
-        [confidentiality_level],
-        persist_denial=True,
-    )
+    settings = get_settings()
+    formal_versioned_index = settings.vector_store_provider == "milvus"
+    embedding = None if formal_versioned_index else get_embedding_service()
+    if embedding is not None:
+        ensure_embedding_external_allowed(
+            db,
+            project_id,
+            embedding,
+            [confidentiality_level],
+            persist_denial=True,
+        )
     file_name = upload.filename or "knowledge.txt"
     digest = hashlib.sha256(content).hexdigest()
     document = db.scalar(
@@ -85,7 +88,12 @@ async def ingest_knowledge_document(
     if (
         document
         and document.file_hash == digest
-        and document.document_status in {"indexed", "partially_indexed"}
+        and document.document_status in {
+            "indexed",
+            "partially_indexed",
+            "parsed",
+            "parsed_with_warnings",
+        }
     ):
         return document
 
@@ -147,7 +155,7 @@ async def ingest_knowledge_document(
     db.add(task)
     db.commit()
 
-    vector_store = get_vector_store()
+    vector_store = None if formal_versioned_index else get_vector_store()
     new_vector_ids: list[str] = []
     try:
         drafts, warnings = parse_document(file_name, content, knowledge_type)
@@ -210,40 +218,45 @@ async def ingest_knowledge_document(
                     for unit in units
                     for link in resolver.links_for(unit)
                 ]
-                vectors = embed_with_observability(
-                    db,
-                    project_id,
-                    embedding,
-                    [unit.content for unit in units],
-                    [confidentiality_level] * len(units),
-                )
-                vector_records = [
-                    build_knowledge_vector_record(unit, vector)
-                    for unit, vector in zip(units, vectors, strict=True)
-                ]
-                embedding_rows = [
-                    EmbeddingRecord(
-                        project_id=project_id,
-                        knowledge_unit_id=unit.id,
-                        embedding_provider=get_settings().embedding_provider,
-                        embedding_model=get_settings().embedding_model,
-                        vector_store_provider=get_settings().vector_store_provider,
-                        vector_record_id=record.id,
-                        embedding_dimension=len(vector),
-                        content_hash=unit.content_hash,
-                        status="indexed",
+                vectors = []
+                vector_records = []
+                embedding_rows = []
+                if embedding is not None and vector_store is not None:
+                    vectors = embed_with_observability(
+                        db,
+                        project_id,
+                        embedding,
+                        [unit.content for unit in units],
+                        [confidentiality_level] * len(units),
                     )
-                    for unit, vector, record in zip(
-                        units,
-                        vectors,
-                        vector_records,
-                        strict=True,
-                    )
-                ]
+                    vector_records = [
+                        build_knowledge_vector_record(unit, vector)
+                        for unit, vector in zip(units, vectors, strict=True)
+                    ]
+                    embedding_rows = [
+                        EmbeddingRecord(
+                            project_id=project_id,
+                            knowledge_unit_id=unit.id,
+                            embedding_provider=settings.embedding_provider,
+                            embedding_model=settings.embedding_model,
+                            vector_store_provider=settings.vector_store_provider,
+                            vector_record_id=record.id,
+                            embedding_dimension=len(vector),
+                            content_hash=unit.content_hash,
+                            status="indexed",
+                        )
+                        for unit, vector, record in zip(
+                            units,
+                            vectors,
+                            vector_records,
+                            strict=True,
+                        )
+                    ]
                 db.add_all(keyword_rows)
                 db.add_all(entity_links)
                 db.add_all(embedding_rows)
-                vector_store.upsert(vector_records)
+                if vector_store is not None:
+                    vector_store.upsert(vector_records)
                 new_vector_ids.extend(record.id for record in vector_records)
                 created_count += len(units)
                 indexed_count += len(vector_records)
@@ -273,13 +286,18 @@ async def ingest_knowledge_document(
             .values(enabled=True)
         )
 
-        final_status = "indexed" if not warnings else "partially_indexed"
-        version.parse_status = "indexed"
+        final_status = (
+            ("parsed" if not warnings else "parsed_with_warnings")
+            if formal_versioned_index
+            else ("indexed" if not warnings else "partially_indexed")
+        )
+        version.parse_status = "parsed" if formal_versioned_index else "indexed"
         document.document_status = final_status
         document.parse_status = version.parse_status
         document.parse_summary_json = {
             "unit_count": created_count,
             "version_no": version.version_no,
+            "semantic_index_status": "pending_reindex" if formal_versioned_index else "indexed",
         }
         document.warnings_json = warnings
         task.status = final_status
@@ -288,7 +306,7 @@ async def ingest_knowledge_document(
         task.warnings_json = warnings
         task.finished_at = datetime.now(UTC)
         db.commit()
-        if old_vector_ids:
+        if old_vector_ids and vector_store is not None:
             try:
                 vector_store.delete(ids=old_vector_ids)
             except Exception as cleanup_error:
@@ -305,7 +323,7 @@ async def ingest_knowledge_document(
         return document
     except Exception as exc:
         db.rollback()
-        if new_vector_ids:
+        if new_vector_ids and vector_store is not None:
             vector_store.delete(ids=new_vector_ids)
         document = db.get(KnowledgeDocument, document.id)
         version = db.get(KnowledgeDocumentVersion, version.id)

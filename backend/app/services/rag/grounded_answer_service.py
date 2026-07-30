@@ -20,6 +20,7 @@ async def grounded_answer(db, project_id, query, **filters):
         filters.get("scenario_id"),
         filters.get("knowledge_types"),
         filters.get("top_k", 10),
+        retrieval_mode=filters.get("retrieval_mode", "hybrid"),
     )
     if not items:
         return {
@@ -39,6 +40,12 @@ async def grounded_answer(db, project_id, query, **filters):
             "source_sheet_name": item["source_sheet_name"],
             "source_cell_range": item["source_cell_range"],
             "source_page_no": item["source_page_no"],
+            "document_id": item["document_id"],
+            "document_version_id": item["document_version_id"],
+            "chunk_id": item["chunk_id"],
+            "content_hash": item["content_hash"],
+            "citation_id": item["citation_id"],
+            "embedding_index_version_id": item["embedding_index_version_id"],
             "quoted_content": item["content"][:500],
         }
         for item in items[:10]

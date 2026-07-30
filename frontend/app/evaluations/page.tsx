@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { apiGet, apiPost } from "@/lib/api";
 
 type EvaluationCase = {
@@ -24,6 +26,8 @@ export default function Page() {
   const { projectId } = useProjectWorkspace();
   const router = useRouter();
   const [cases, setCases] = useState<EvaluationCase[]>([]);
+  const [retrievalMode, setRetrievalMode] = useState("hybrid");
+  const runAction = useAsyncAction<{ id: number }>({ successMessage: "评测任务已创建" });
 
   useEffect(() => {
     if (projectId) void apiGet<EvaluationCase[]>(`/projects/${projectId}/evaluations/cases`).then(setCases);
@@ -34,8 +38,11 @@ export default function Page() {
 
   async function runAll() {
     if (!projectId) return;
-    const run = await apiPost<{ id: number }>(`/projects/${projectId}/evaluations/runs`, { run_name: `回归-${Date.now()}` });
-    router.push(`/evaluations/${run.id}`);
+    const run = await runAction.run(() => apiPost<{ id: number }>(`/projects/${projectId}/evaluations/runs`, {
+      run_name: `${retrievalMode}-${Date.now()}`,
+      retrieval_config_json: { retrieval_mode: retrievalMode, top_k: 10 }
+    }));
+    if (run) router.push(`/evaluations/${run.id}`);
   }
 
   return (
@@ -63,10 +70,16 @@ export default function Page() {
               <h2 className="text-[15px] font-semibold text-ink">评测案例</h2>
               <span className="badge-neutral">{cases.length} 条</span>
             </div>
-            <button className="button-primary" onClick={runAll} type="button">
-              <Play size={15} />
-              运行全部已启用案例
-            </button>
+            <div className="flex items-center gap-2">
+              <select className="control min-w-36" onChange={(event) => setRetrievalMode(event.target.value)} value={retrievalMode}>
+                <option value="keyword_only">仅关键词基线</option>
+                <option value="vector_only">仅正式向量</option>
+                <option value="hybrid">正式混合检索</option>
+              </select>
+              <AsyncActionButton actionStatus={runAction.status} className="button-primary" loadingText="正在创建评测…" onClick={() => void runAll()}>
+                <Play size={15} />运行全部已启用案例
+              </AsyncActionButton>
+            </div>
           </div>
           {cases.length ? (
             <div className="overflow-x-auto">

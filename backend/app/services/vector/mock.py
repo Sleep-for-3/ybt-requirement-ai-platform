@@ -10,7 +10,17 @@ class MockVectorStore(VectorStore):
 
     def upsert(self, records: list[VectorRecord]) -> None:
         for record in records:
+            if self._records and len(record.embedding) != len(next(iter(self._records.values())).embedding):
+                raise ValueError("Embedding dimension does not match the mock collection")
             self._records[record.id] = VectorRecord(record.id,record.embedding,"",dict(record.metadata))
+
+    def ensure_collection(self, dimension: int) -> None:
+        if self._records and len(next(iter(self._records.values())).embedding) != dimension:
+            raise ValueError("Embedding dimension does not match the mock collection")
+
+    def count(self, filters: dict[str, Any] | None = None) -> int:
+        filters = filters or {}
+        return sum(1 for record in self._records.values() if _matches_filters(record.metadata, filters))
 
     def search(
         self,
@@ -54,7 +64,9 @@ def _matches_filters(metadata: dict[str, Any], filters: dict[str, Any]) -> bool:
 def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if not left or not right:
         return 0.0
-    length = min(len(left), len(right))
+    if len(left) != len(right):
+        raise ValueError("Embedding dimension mismatch during vector search")
+    length = len(left)
     dot = sum(left[index] * right[index] for index in range(length))
     norm_left = math.sqrt(sum(left[index] ** 2 for index in range(length)))
     norm_right = math.sqrt(sum(right[index] ** 2 for index in range(length)))

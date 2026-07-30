@@ -19,4 +19,7 @@ def get_embedding_service():
         settings.embedding_model,
         settings.embedding_api_key_env_name,
         provider=provider,
+        timeout_seconds=settings.embedding_timeout_seconds,
+        retry_count=settings.embedding_retry_count,
+        batch_size=settings.embedding_batch_size,
     )

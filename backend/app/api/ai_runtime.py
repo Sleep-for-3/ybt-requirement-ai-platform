@@ -412,6 +412,7 @@ def _embedding_status() -> dict[str, Any]:
         "api_key_env_name": settings.embedding_api_key_env_name,
         "api_key_present": present,
         "configuration_status": "configured" if configured else "misconfigured",
+        "configured_dimension": settings.embedding_dimension or None,
     }
 
 
@@ -422,6 +423,7 @@ def _vector_status() -> dict[str, Any]:
         "provider": settings.vector_store_provider,
         "is_mock": settings.vector_store_provider == "mock",
         "configuration_status": "configured" if configured else "misconfigured",
+        "collection_prefix": settings.milvus_collection_prefix if settings.vector_store_provider == "milvus" else None,
     }
 
 

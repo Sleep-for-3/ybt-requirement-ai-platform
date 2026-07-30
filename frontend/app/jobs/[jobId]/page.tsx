@@ -12,14 +12,22 @@ import { apiGet, BackgroundJobSummary } from "@/lib/api";
 import { normalizeRequestError } from "@/lib/http-response.mjs";
 
 const RESULT_LABELS: Record<string, string> = {
+  chunk_count: "Chunk 总数",
+  collection: "Milvus Collection",
   document_id: "知识文档 ID",
+  document_count: "文档总数",
+  embedding_model: "Embedding 模型",
+  embedding_provider: "Embedding Provider",
   failed_count: "失败数量",
   file_id: "结果文件 ID",
+  index_version_id: "索引版本 ID",
+  indexed_count: "已写入向量",
   package_id: "交付包 ID",
   run_id: "运行 ID",
   stored_file_id: "存储文件 ID",
   success_count: "成功数量",
-  total_count: "总数量"
+  total_count: "总数量",
+  vector_dimension: "向量维度"
 };
 
 function dateText(value?: string | null) {

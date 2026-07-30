@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func, text as sql_text
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -515,8 +515,46 @@ class KnowledgeEntityLink(Base):
 class KnowledgeIngestionTask(Base):
     __tablename__="knowledge_ingestion_tasks";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);document_id:Mapped[int]=mapped_column(ForeignKey("knowledge_documents.id"),index=True);document_version_id:Mapped[int]=mapped_column(ForeignKey("knowledge_document_versions.id"));status:Mapped[str]=mapped_column(String(50),index=True);parser_name:Mapped[str]=mapped_column(String(100));started_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));finished_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));unit_count:Mapped[int]=mapped_column(Integer,default=0);indexed_count:Mapped[int]=mapped_column(Integer,default=0);failed_count:Mapped[int]=mapped_column(Integer,default=0);warnings_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);error_message:Mapped[str|None]=mapped_column(Text);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
 
+class EmbeddingIndexVersion(Base, TimestampMixin):
+    __tablename__ = "embedding_index_versions"
+    __table_args__ = (
+        Index("ix_embedding_index_project_status", "project_id", "status"),
+        Index(
+            "uq_embedding_index_one_active_project",
+            "project_id",
+            unique=True,
+            postgresql_where=sql_text("status = 'active'"),
+            sqlite_where=sql_text("status = 'active'"),
+        ),
+        UniqueConstraint("collection_name", name="uq_embedding_index_collection"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
+    background_job_id: Mapped[int | None] = mapped_column(ForeignKey("background_jobs.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(50), index=True)
+    model_name: Mapped[str] = mapped_column(String(255))
+    model_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    vector_dimension: Mapped[int] = mapped_column(Integer)
+    distance_metric: Mapped[str] = mapped_column(String(20), default="COSINE")
+    collection_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    corpus_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="preparing", index=True)
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    indexed_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    config_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    validation_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    failure_summary: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(100))
+    activated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
 class EmbeddingRecord(Base,TimestampMixin):
-    __tablename__="embedding_records";__table_args__=(UniqueConstraint("knowledge_unit_id","embedding_provider","embedding_model",name="uq_embedding_unit_provider_model"),);id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);embedding_provider:Mapped[str]=mapped_column(String(50));embedding_model:Mapped[str]=mapped_column(String(255));vector_store_provider:Mapped[str]=mapped_column(String(50));vector_record_id:Mapped[str]=mapped_column(String(255));embedding_dimension:Mapped[int]=mapped_column(Integer);content_hash:Mapped[str]=mapped_column(String(64));status:Mapped[str]=mapped_column(String(50))
+    __tablename__="embedding_records";__table_args__=(UniqueConstraint("embedding_index_version_id","knowledge_unit_id","content_hash",name="uq_embedding_index_unit_hash"),);id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);embedding_index_version_id:Mapped[int|None]=mapped_column(ForeignKey("embedding_index_versions.id"),index=True);embedding_provider:Mapped[str]=mapped_column(String(50));embedding_model:Mapped[str]=mapped_column(String(255));vector_store_provider:Mapped[str]=mapped_column(String(50));vector_record_id:Mapped[str]=mapped_column(String(255));embedding_dimension:Mapped[int]=mapped_column(Integer);content_hash:Mapped[str]=mapped_column(String(64));status:Mapped[str]=mapped_column(String(50))
 
 class RetrievalLog(Base):
     __tablename__="retrieval_logs";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);query_text:Mapped[str]=mapped_column(Text);query_type:Mapped[str]=mapped_column(String(50));target_field_id:Mapped[int|None]=mapped_column(ForeignKey("target_fields.id"));scenario_id:Mapped[int|None]=mapped_column(ForeignKey("product_scenarios.id"));filters_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);retrieval_strategy:Mapped[str]=mapped_column(String(50));keyword_result_count:Mapped[int]=mapped_column(Integer,default=0);vector_result_count:Mapped[int]=mapped_column(Integer,default=0);final_result_count:Mapped[int]=mapped_column(Integer,default=0);result_ids_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);latency_ms:Mapped[int]=mapped_column(Integer,default=0);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))

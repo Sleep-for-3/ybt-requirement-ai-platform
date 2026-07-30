@@ -53,6 +53,23 @@ def knowledge_reindex_handler(db: Session, job, vector_store=None) -> dict:
     return {"success_count": 1, "failed_count": 0, "document_id": document.id}
 
 
+def knowledge_embedding_reindex_handler(db: Session, job) -> dict:
+    from app.services.semantic_index.reindex import reindex_project_knowledge
+
+    result = reindex_project_knowledge(db, job)
+    if not result.get("cancelled"):
+        _complete(
+            db,
+            job,
+            "activate",
+            "embedding_index_version",
+            int(result["index_version_id"]),
+            "knowledge_index_completed",
+            "正式语义索引重建完成",
+        )
+    return result
+
+
 def metadata_sync_handler(db: Session, job) -> dict:
     payload = job.payload_summary_json
     datasource = db.get(DataSource, int(payload["datasource_id"]))

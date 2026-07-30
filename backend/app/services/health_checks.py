@@ -6,13 +6,14 @@ import uuid
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from sqlalchemy import text
+from sqlalchemy import func,select,text
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
 from app.services.deployment import database_revisions
 from app.services.llm.providers import normalize_provider_type, provider_requires_api_key, validate_provider_url
 from app.services.storage import get_storage_service
+from app.models import EmbeddingIndexVersion
 
 
 CheckResult = dict[str, Any]
@@ -30,6 +31,7 @@ def run_health_checks(db: Session, settings: Settings) -> dict[str, Any]:
         "vector_store": _timed(_check_vector_store, settings),
         "llm_provider": _timed(_check_llm_provider, settings),
         "embedding_provider": _timed(_check_embedding_provider, settings),
+        "semantic_index": _timed(_check_semantic_index, db, settings),
         "disk_space": _timed(_check_disk_space, settings),
     }
     active_statuses = [item["status"] for item in checks.values() if item["status"] != "disabled"]
@@ -158,11 +160,48 @@ def _check_llm_provider(settings: Settings) -> CheckResult:
 
 
 def _check_embedding_provider(settings: Settings) -> CheckResult:
-    return _provider_configuration(
+    result = _provider_configuration(
         settings.embedding_provider,
         settings.embedding_base_url,
         settings.embedding_model,
         settings.resolved_embedding_api_key,
+    )
+    result["configured_dimension"] = settings.embedding_dimension or None
+    if settings.vector_store_provider == "milvus" and settings.embedding_dimension <= 0:
+        return _result(
+            "unhealthy",
+            "Formal vector indexing requires a configured embedding dimension.",
+            provider=result.get("provider"),
+            configured_dimension=None,
+        )
+    return result
+
+
+def _check_semantic_index(db: Session, settings: Settings) -> CheckResult:
+    if settings.vector_store_provider == "mock":
+        return _result("disabled", "Formal semantic indexing is disabled in Mock vector mode.")
+    active_count = int(db.scalar(
+        select(func.count(EmbeddingIndexVersion.id)).where(
+            EmbeddingIndexVersion.status == "active"
+        )
+    ) or 0)
+    failed_count = int(db.scalar(
+        select(func.count(EmbeddingIndexVersion.id)).where(
+            EmbeddingIndexVersion.status == "failed"
+        )
+    ) or 0)
+    if active_count == 0:
+        return _result(
+            "degraded",
+            "Milvus is configured but no active semantic index exists yet.",
+            active_index_count=0,
+            failed_index_count=failed_count,
+        )
+    return _result(
+        "healthy",
+        "Validated active semantic indexes are available.",
+        active_index_count=active_count,
+        failed_index_count=failed_count,
     )
 
 
