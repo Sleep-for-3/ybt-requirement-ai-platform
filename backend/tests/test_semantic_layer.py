@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.api.semantic import router as semantic_router
 from app.main import app
 from app.models import (
     AuditLog,
@@ -451,6 +452,93 @@ def test_graph_visibility_mode_filters_concept_binding_and_relation_together() -
             candidate_depths, _, _ = service.traverse(confirmed.id, mode=SemanticVisibilityMode.CANDIDATE)
             assert set(trusted_depths) == {confirmed.id}
             assert set(candidate_depths) == {confirmed.id, draft.id}
+
+
+def test_additive_version_routes_preserve_concept_compatibility_and_static_precedence() -> None:
+    effective_path = "/projects/{project_id}/semantic-concepts/{concept_id}/versions/effective"
+    dynamic_path = "/projects/{project_id}/semantic-concepts/{concept_id}/versions/{version_id}"
+    paths = [route.path for route in semantic_router.routes]
+    assert paths.index(effective_path) < paths.index(dynamic_path)
+
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        concept = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+            "concept_type": "business_term", "concept_code": "VERSIONED",
+            "concept_name": "原始监管口径", "status": "ai_suggested",
+        })
+        versions_path = f"/api/projects/{project_id}/semantic-concepts/{concept['id']}/versions"
+        listed = client.get(versions_path)
+        assert listed.status_code == 200, listed.text
+        assert [item["version_no"] for item in listed.json()] == [1]
+
+        updated = client.patch(
+            f"/api/projects/{project_id}/semantic-concepts/{concept['id']}",
+            json={"definition": "同一事务更新 canonical version"},
+        )
+        assert updated.status_code == 200, updated.text
+        with sessions() as db:
+            versions = db.scalars(select(SemanticConceptVersion).where(
+                SemanticConceptVersion.semantic_concept_id == concept["id"],
+            ).order_by(SemanticConceptVersion.version_no)).all()
+            assert len(versions) == 1
+            assert versions[0].definition == "同一事务更新 canonical version"
+
+        confirmed = client.post(
+            f"/api/projects/{project_id}/semantic-concepts/{concept['id']}/status",
+            json={"status": "confirmed"},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        locked = client.patch(
+            f"/api/projects/{project_id}/semantic-concepts/{concept['id']}",
+            json={"definition": "不得覆盖已确认版本"},
+        )
+        assert locked.status_code == 409
+        assert locked.json()["detail"]["code"] == "SEMANTIC_VERSION_IMMUTABLE"
+
+        created = client.post(versions_path, json={
+            "concept_name": "下一年度监管口径",
+            "definition": "从 2027 年生效",
+            "status": "draft",
+            "effective_from": "2027-01-01",
+        })
+        assert created.status_code == 201, created.text
+        version = created.json()
+        detail = client.get(f"{versions_path}/{version['id']}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["version_no"] == 2
+        effective = client.get(f"{versions_path}/effective", params={"as_of": "2026-08-20"})
+        assert effective.status_code == 200, effective.text
+        assert effective.json()["version_no"] == 1
+
+
+def test_semantic_graph_api_accepts_explicit_candidate_mode_without_changing_default() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        confirmed = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+            "concept_type": "business_term", "concept_code": "ROOT_API", "concept_name": "根概念",
+        })
+        assert client.post(
+            f"/api/projects/{project_id}/semantic-concepts/{confirmed['id']}/status",
+            json={"status": "confirmed"},
+        ).status_code == 200
+        draft = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+            "concept_type": "business_term", "concept_code": "DRAFT_API", "concept_name": "候选概念",
+        })
+        _post(client, f"/api/projects/{project_id}/semantic-relations", {
+            "source_concept_id": confirmed["id"], "relation_type": "related_to",
+            "target_concept_id": draft["id"], "status": "draft",
+        })
+        trusted = client.get(
+            f"/api/projects/{project_id}/semantic-concepts/{confirmed['id']}/neighbors",
+        )
+        candidate = client.get(
+            f"/api/projects/{project_id}/semantic-concepts/{confirmed['id']}/neighbors",
+            params={"mode": "candidate"},
+        )
+        assert trusted.status_code == 200, trusted.text
+        assert candidate.status_code == 200, candidate.text
+        assert {item["concept"]["id"] for item in trusted.json()["nodes"]} == {confirmed["id"]}
+        assert {item["concept"]["id"] for item in candidate.json()["nodes"]} == {confirmed["id"], draft["id"]}
 
 
 def _concept(client: TestClient, project_id: int, code: str, name: str) -> int:
