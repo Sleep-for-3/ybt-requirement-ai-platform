@@ -277,10 +277,10 @@ def test_deterministic_resolver_prioritizes_code_name_alias_and_comment() -> Non
         })
 
         first = _post(client, f"/api/projects/{project_id}/semantic-resolve", {
-            "entity_type": "target_field", "entity_id": field_id,
+            "entity_type": "target_field", "entity_id": field_id, "mode": "candidate",
         })
         second = _post(client, f"/api/projects/{project_id}/semantic-resolve", {
-            "entity_type": "target_field", "entity_id": field_id,
+            "entity_type": "target_field", "entity_id": field_id, "mode": "candidate",
         })
         assert first == second
         assert first["candidates"][0]["semantic_concept_id"] == exact_code["id"]

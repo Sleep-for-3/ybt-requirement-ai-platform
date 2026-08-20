@@ -239,17 +239,44 @@ class SemanticResolveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     entity_type: EntityType
     entity_id: int
+    mode: Literal["trusted", "candidate"] = "trusted"
     query_code: str | None = None
     query_name: str | None = None
     comment: str | None = None
     limit: int = Field(default=10, ge=1, le=50)
 
 
+class SemanticMatchEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    match_reason: str = Field(min_length=1, max_length=80)
+    matched_field: str = Field(min_length=1, max_length=120)
+    excerpt: str = Field(min_length=1, max_length=500)
+    source_type: str = Field(min_length=1, max_length=100)
+    source_id: int | None = None
+    score: float = Field(ge=0, le=1)
+
+
+class SemanticCandidateProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: int
+    institution_id: int | None
+    entity_type: EntityType
+    entity_id: int
+    semantic_concept_id: int
+    resolver_rule: str = Field(min_length=1, max_length=120)
+    source_type: str | None = Field(default=None, max_length=100)
+    source_id: int | None = None
+    source_ids: list[int] = Field(default_factory=list, max_length=8)
+    evidence_ids: list[int] = Field(default_factory=list, max_length=8)
+    retrieval_metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=12)
+
+
 class SemanticResolveCandidate(BaseModel):
     semantic_concept_id: int
     score: float
     match_reason: str
-    evidence: dict[str, object]
+    evidence: list[SemanticMatchEvidence] = Field(default_factory=list, max_length=3)
+    provenance: SemanticCandidateProvenance
     status: Literal["ai_suggested"] = "ai_suggested"
 
 
