@@ -24,6 +24,7 @@ from app.models import (
     SemanticBinding,
     SemanticConcept,
     SemanticConceptVersion,
+    SemanticRelation,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
     SourceField,
@@ -145,6 +146,12 @@ def test_relations_graph_path_cycles_and_depth_bound() -> None:
                 "relation_type": relation_type,
                 "target_concept_id": target,
             }))
+        for relation in created:
+            confirmed = client.post(
+                f"/api/projects/{project_id}/semantic-relations/{relation['id']}/status",
+                json={"status": "confirmed"},
+            )
+            assert confirmed.status_code == 200, confirmed.text
 
         self_edge = client.post(f"/api/projects/{project_id}/semantic-relations", json={
             "source_concept_id": customer, "relation_type": "related_to", "target_concept_id": customer,
@@ -447,9 +454,15 @@ def test_graph_visibility_mode_filters_concept_binding_and_relation_together() -
 
 
 def _concept(client: TestClient, project_id: int, code: str, name: str) -> int:
-    return _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+    created = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
         "concept_type": "business_term", "concept_code": code, "concept_name": name,
-    })["id"]
+    })
+    confirmed = client.post(
+        f"/api/projects/{project_id}/semantic-concepts/{created['id']}/status",
+        json={"status": "confirmed"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    return created["id"]
 
 
 def _projects(sessions: sessionmaker) -> tuple[int, int]:

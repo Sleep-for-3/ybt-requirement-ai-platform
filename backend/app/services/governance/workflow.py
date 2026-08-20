@@ -24,6 +24,7 @@ from app.models import (
     WorkflowInstance,
     SemanticBinding,
     SemanticConcept,
+    SemanticConceptVersion,
     SemanticRelation,
 )
 from app.services.auth.dependencies import Principal
@@ -35,6 +36,7 @@ from app.services.governance.scenario_review import (
     snapshot_review_step,
     validate_review_package,
 )
+from app.services.semantic.version_service import transition_concept_status, transition_version_status
 
 
 DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
@@ -73,11 +75,12 @@ TARGET_MODELS = {
     "deliverable_package": DeliverablePackage,
     "impact_analysis": ImpactAnalysis,
     "semantic_concept": SemanticConcept,
+    "semantic_concept_version": SemanticConceptVersion,
     "semantic_binding": SemanticBinding,
     "semantic_relation": SemanticRelation,
 }
 
-SEMANTIC_TARGET_TYPES = {"semantic_concept", "semantic_binding", "semantic_relation"}
+SEMANTIC_TARGET_TYPES = {"semantic_concept", "semantic_concept_version", "semantic_binding", "semantic_relation"}
 
 
 def start_workflow(
@@ -432,16 +435,28 @@ def _finalize_lineage_impact(db: Session, impact_id: int) -> None:
 
 
 def _finalize_semantic_target(db: Session, target_type: str, target_id: int, reviewed_by: str) -> None:
-    model = {key: TARGET_MODELS[key] for key in SEMANTIC_TARGET_TYPES}.get(target_type)
+    model = TARGET_MODELS.get(target_type)
     target = db.get(model, target_id) if model is not None else None
     if target is None:
         raise HTTPException(status_code=404, detail="Semantic workflow target not found")
-    if target.status not in {"draft", "ai_suggested"}:
-        raise HTTPException(status_code=409, detail="Semantic target is not awaiting confirmation")
-    before_status = target.status
-    target.status = "confirmed"
-    target.confirmed_by = reviewed_by
-    target.confirmed_at = datetime.now(UTC)
+    before = {"status": target.status, "version_no": getattr(target, "version_no", None)}
+    if target_type == "semantic_concept":
+        transition_concept_status(
+            db,
+            project_id=target.project_id,
+            concept_id=target.id,
+            new_status="confirmed",
+            actor=reviewed_by,
+        )
+    elif target_type == "semantic_concept_version":
+        transition_version_status(db, target, "confirmed", reviewed_by, project_id=target.project_id)
+    else:
+        if target.status not in {"draft", "ai_suggested"}:
+            raise HTTPException(status_code=409, detail="Semantic target is not awaiting confirmation")
+        target.status = "confirmed"
+        target.confirmed_by = reviewed_by
+        target.confirmed_at = datetime.now(UTC)
+    after = {"status": target.status, "version_no": getattr(target, "version_no", None), "confirmed_by": reviewed_by, "workflow": "semantic_governance_review"}
     record_audit(
         db,
         action="semantic_status_transition",
@@ -449,8 +464,8 @@ def _finalize_semantic_target(db: Session, target_type: str, target_id: int, rev
         resource_id=target.id,
         institution_id=target.institution_id,
         project_id=target.project_id,
-        before={"status": before_status},
-        after={"status": "confirmed", "confirmed_by": reviewed_by, "workflow": "semantic_governance_review"},
+        before=before,
+        after=after,
     )
 
 
