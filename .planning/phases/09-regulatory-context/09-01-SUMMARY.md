@@ -20,7 +20,7 @@ affects: [09-02 regulatory-context builder, semantic governance, semantic graph 
 actuals:
   tokens: 32687
   tasks: 3
-  commits: 6
+  commits: 7
 
 # Tech tracking
 tech-stack:
@@ -53,7 +53,8 @@ key-decisions:
   - "The effective route is declared before the dynamic version-id route, and effective intervals use inclusive boundaries."
   - "Migration bootstrap creates exactly version_no=1 from legacy Concept created_at (fixed 2026-08-20 fallback) without manufacturing edit history."
 
-requirements-completed: [CTX-02, CTX-04]
+requirements-completed: []
+requirements-progressed: [CTX-02, CTX-04]
 
 coverage:
   - id: D1
@@ -104,7 +105,7 @@ status: complete
 - **Started:** 2026-08-20T18:20:00+08:00
 - **Completed:** 2026-08-20T18:59:00+08:00
 - **Tasks:** 3
-- **Files modified:** 15
+- **Files modified:** 17
 
 ## Accomplishments
 
@@ -119,8 +120,9 @@ Each TDD task was committed atomically as RED then GREEN:
 1. **Task 1: Trace confirmed semantic resolution through policy, adapters, and the existing API** - `bb31126` (test), `541ea1d` (feat)
 2. **Task 2: Add temporal versions, transactional Concept delegation, governance finalization, and complete graph policy coverage** - `3a0bf32` (test), `0092b1f` (feat)
 3. **Task 3: Expose additive version API and ship the reversible 202608200016 bootstrap migration** - `9718845` (test), `ae41592` (feat)
+4. **Independent review remediation: close concurrency, canonical projection, provenance, permission, graph-bound, index, and UAT gaps** - `9e24e2e` (fix)
 
-**Plan metadata:** pending final state-tracking commit.
+**Plan metadata:** finalized in the subsequent state-tracking commit.
 
 ## Files Created/Modified
 
@@ -143,7 +145,8 @@ Each TDD task was committed atomically as RED then GREEN:
 
 ## Deviations from Plan
 
-None - plan executed exactly as written. The migration additionally handles an already-present empty version table so retry/bootstrap remains safe when runtime metadata has pre-created the table.
+- Independent review found and fixed a SQLite overlap-confirmation race, stale legacy projection behavior, incorrect binding provenance, restricted KnowledgeUnit exposure, a graph node-limit off-by-one, missing single-column migration indexes, and the stale UAT migration-head expectation.
+- The migration additionally handles an already-present empty version table so retry/bootstrap remains safe when runtime metadata has pre-created the table.
 
 ## Issues Encountered
 
@@ -160,10 +163,11 @@ The semantic policy, adapter boundary, canonical temporal version service, gover
 
 ## Verification
 
-- `python -m pytest -q tests/test_semantic_layer.py tests/test_governance.py tests/test_semantic_migration.py` — **46 passed, 4 warnings**.
+- `python -m pytest -q tests/test_semantic_layer.py tests/test_governance.py tests/test_semantic_migration.py tests/test_uat.py` — **63 passed, 4 warnings**.
+- `python -m pytest -q` — **269 passed, 2 pre-existing Windows-only failures, 5 warnings**.
 - `python -m alembic heads` — **202608200016 (head)**.
 - `python -m compileall -q app` — **passed**.
-- `git diff --name-only 4f84faa..HEAD` — only the 15 plan-owned semantic/model/service/API/migration/test files.
+- `git diff --name-only 4f84faa..HEAD -- backend` — only the 17 plan-owned semantic/model/service/API/auth/migration/test files; user frontend changes remain outside the plan diff.
 
 ## Self-Check: PASSED
 

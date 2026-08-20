@@ -18,9 +18,9 @@
 ### Regulatory Context
 
 - [ ] **CTX-01**: 调用方可按 project 与可选 target table/field、scenario、mart field、semantic concept 构建稳定的 Pydantic RegulatoryContext。
-- [x] **CTX-02**: Context 明确区分 confirmed、regulatory、approved mapping、verified lineage、metadata、historical、retrieved 与 inferred 权威等级。
+- [ ] **CTX-02**: Context 明确区分 confirmed、regulatory、approved mapping、verified lineage、metadata、historical、retrieved 与 inferred 权威等级。
 - [ ] **CTX-03**: Context 聚合语义、映射、技术血缘、知识证据、历史口径、冲突和待确认问题，但不复制现有事实模型。
-- [x] **CTX-04**: Context 对缺失知识、缺失血缘、冲突事实和证据不足有确定性输出与测试。
+- [ ] **CTX-04**: Context 对缺失知识、缺失血缘、冲突事实和证据不足有确定性输出与测试。
 
 ### Generator Migration
 
