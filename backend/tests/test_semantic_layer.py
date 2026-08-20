@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -22,6 +23,7 @@ from app.models import (
     ReviewTask,
     SemanticBinding,
     SemanticConcept,
+    SemanticConceptVersion,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
     SourceField,
@@ -36,12 +38,19 @@ from app.models import (
 from app.services.auth.dependencies import Principal
 from app.services.governance.workflow import decide_task, start_workflow
 from app.services.semantic.entity_adapter import SemanticEntityAdapter
+from app.services.semantic.graph_service import SemanticGraphService
 from app.services.semantic.status_policy import (
     SemanticVisibilityMode,
     audit_only_statuses,
     candidate_statuses,
     is_visible,
     trusted_statuses,
+)
+from app.services.semantic.version_service import (
+    _assert_confirmed_interval_available,
+    create_concept_version,
+    resolve_effective_version,
+    sync_legacy_concept_projection,
 )
 
 
@@ -380,6 +389,61 @@ def test_visibility_policy_and_candidate_mode_never_admit_audit_statuses() -> No
         assert concepts["draft"]["id"] in candidate_ids
         assert concepts["ai_suggested"]["id"] in candidate_ids
         assert all(item["status"] == "ai_suggested" for item in candidate["candidates"])
+
+
+def test_temporal_version_resolution_is_inclusive_and_overlap_is_atomic() -> None:
+    with _semantic_client() as (_, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            concept = SemanticConcept(
+                project_id=project_id, concept_type="business_term", concept_code="TEMPORAL",
+                concept_name="客户口径", status="confirmed", version=1,
+            )
+            db.add(concept)
+            db.flush()
+            v1 = create_concept_version(
+                db, project_id=project_id, concept_id=concept.id, version_no=1,
+                values={"concept_name": "2026客户口径", "status": "confirmed", "effective_from": date(2026, 1, 1), "effective_to": date(2026, 12, 31)},
+            )
+            v2 = create_concept_version(
+                db, project_id=project_id, concept_id=concept.id, version_no=2,
+                values={"concept_name": "2027客户口径", "status": "confirmed", "effective_from": date(2027, 1, 1)},
+            )
+            db.commit()
+            assert resolve_effective_version(db, concept.id, date(2026, 12, 31)).id == v1.id
+            assert resolve_effective_version(db, concept.id, date(2027, 1, 1)).id == v2.id
+            before = db.query(SemanticConceptVersion).count()
+            try:
+                _assert_confirmed_interval_available(db, concept.id, date(2026, 6, 1), date(2027, 2, 1))
+            except Exception as error:
+                assert getattr(error, "status_code", None) == 409
+            else:
+                raise AssertionError("overlap should be rejected")
+            assert db.query(SemanticConceptVersion).count() == before
+
+
+def test_graph_visibility_mode_filters_concept_binding_and_relation_together() -> None:
+    with _semantic_client() as (_, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            confirmed = SemanticConcept(project_id=project_id, concept_type="business_term", concept_code="CONF", concept_name="确认", status="confirmed")
+            draft = SemanticConcept(project_id=project_id, concept_type="business_term", concept_code="DRAFT", concept_name="草稿", status="draft")
+            rejected = SemanticConcept(project_id=project_id, concept_type="business_term", concept_code="REJECT", concept_name="拒绝", status="rejected")
+            db.add_all([confirmed, draft, rejected]); db.flush()
+            db.add_all([
+                SemanticRelation(project_id=project_id, source_concept_id=confirmed.id, relation_type="related_to", target_concept_id=draft.id, status="draft"),
+                SemanticRelation(project_id=project_id, source_concept_id=confirmed.id, relation_type="is_a", target_concept_id=rejected.id, status="confirmed"),
+            ])
+            db.commit()
+            service = SemanticGraphService(db, project_id)
+            trusted_nodes = service.concepts({confirmed.id, draft.id, rejected.id})
+            candidate_nodes = service.concepts({confirmed.id, draft.id, rejected.id}, mode=SemanticVisibilityMode.CANDIDATE)
+            assert {item.id for item in trusted_nodes} == {confirmed.id}
+            assert {item.id for item in candidate_nodes} == {confirmed.id, draft.id}
+            trusted_depths, _, _ = service.traverse(confirmed.id)
+            candidate_depths, _, _ = service.traverse(confirmed.id, mode=SemanticVisibilityMode.CANDIDATE)
+            assert set(trusted_depths) == {confirmed.id}
+            assert set(candidate_depths) == {confirmed.id, draft.id}
 
 
 def _concept(client: TestClient, project_id: int, code: str, name: str) -> int:

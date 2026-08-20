@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 
 import pytest
 from fastapi import HTTPException
@@ -9,14 +10,47 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import models  # noqa: F401
+from app.models import Institution, Project, SemanticConcept, SemanticConceptVersion
 from app.core.database import Base, get_db
 from app.core.settings import get_settings
 from app.services.auth.password import hash_password, verify_password
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import redact_summary
+from app.services.governance.workflow import _finalize_semantic_target
 from app.services.task_queue.celery import CeleryTaskQueue
 from app.services.task_queue.inline import InlineTaskQueue
+
+
+def test_semantic_concept_version_is_a_governance_target_and_audited(db_session) -> None:
+    institution = Institution(institution_code="BANK_SEMANTIC_VERSION", institution_name="语义版本银行", institution_type="bank")
+    db_session.add(institution)
+    db_session.flush()
+    project = Project(name="语义版本治理项目", institution_id=institution.id)
+    db_session.add(project)
+    db_session.flush()
+    concept = SemanticConcept(
+        project_id=project.id, institution_id=institution.id, concept_type="business_term",
+        concept_code="VERSIONED", concept_name="待治理口径", status="ai_suggested",
+    )
+    db_session.add(concept)
+    db_session.flush()
+    version = SemanticConceptVersion(
+        semantic_concept_id=concept.id, project_id=project.id, institution_id=institution.id,
+        version_no=1, concept_name="待治理口径", status="ai_suggested", effective_from=date(2026, 1, 1),
+    )
+    db_session.add(version)
+    db_session.flush()
+
+    _finalize_semantic_target(db_session, "semantic_concept_version", version.id, "final-reviewer")
+    db_session.commit()
+
+    assert version.status == "confirmed"
+    assert concept.status == "confirmed"
+    audit = db_session.query(models.AuditLog).filter_by(
+        action="semantic_status_transition", resource_type="semantic_concept_version", resource_id=str(version.id),
+    ).one()
+    assert audit.after_summary_json["status"] == "confirmed"
 
 
 def test_password_is_stored_as_a_secure_hash() -> None:
