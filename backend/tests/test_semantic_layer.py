@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
+import threading
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -38,6 +39,7 @@ from app.models import (
     User,
 )
 from app.services.auth.dependencies import Principal
+from app.services.auth.dependencies import get_current_principal
 from app.services.governance.workflow import decide_task, start_workflow
 from app.services.semantic.entity_adapter import SemanticEntityAdapter
 from app.services.semantic.graph_service import SemanticGraphService
@@ -53,6 +55,7 @@ from app.services.semantic.version_service import (
     create_concept_version,
     resolve_effective_version,
     sync_legacy_concept_projection,
+    transition_version_status,
 )
 
 
@@ -85,7 +88,7 @@ def test_semantic_concept_crud_duplicate_and_project_institution_isolation() -> 
             json={"definition": "全行客户唯一标识", "confidence_level": "high"},
         )
         assert updated.status_code == 200
-        assert updated.json()["version"] == 2
+        assert updated.json()["version"] == 1
 
 
 def test_bindings_validate_targets_and_connect_required_entity_families() -> None:
@@ -339,6 +342,7 @@ def test_resolver_confirmed_binding_precedes_text_and_is_bounded() -> None:
         assert first["candidates"][0]["status"] == "ai_suggested"
         assert len(first["candidates"][0]["evidence"]) <= 3
         assert first["candidates"][0]["provenance"]["project_id"] == project_id
+        assert first["candidates"][0]["evidence"][0]["source_id"] == binding["id"]
 
 
 def test_semantic_entity_adapter_describes_all_allow_listed_types() -> None:
@@ -415,7 +419,7 @@ def test_temporal_version_resolution_is_inclusive_and_overlap_is_atomic() -> Non
             )
             v2 = create_concept_version(
                 db, project_id=project_id, concept_id=concept.id, version_no=2,
-                values={"concept_name": "2027客户口径", "status": "confirmed", "effective_from": date(2027, 1, 1)},
+                values={"concept_name": "2027客户口径", "status": "confirmed", "effective_from": date(2027, 1, 1), "effective_to": date(2027, 12, 31)},
             )
             db.commit()
             assert resolve_effective_version(db, concept.id, date(2026, 12, 31)).id == v1.id
@@ -428,6 +432,255 @@ def test_temporal_version_resolution_is_inclusive_and_overlap_is_atomic() -> Non
             else:
                 raise AssertionError("overlap should be rejected")
             assert db.query(SemanticConceptVersion).count() == before
+
+
+def test_sqlite_confirmed_interval_is_serialized_across_sessions() -> None:
+    """Two concurrent SQLite writers cannot both confirm an overlapping interval."""
+
+    from tempfile import TemporaryDirectory
+
+    from sqlalchemy import create_engine
+
+    with TemporaryDirectory() as directory:
+        engine = create_engine(
+            f"sqlite:///{directory}/semantic-concurrency.db",
+            connect_args={"check_same_thread": False, "timeout": 0},
+        )
+        Base.metadata.create_all(engine)
+        sessions = sessionmaker(bind=engine)
+        with sessions() as db:
+            institution = Institution(institution_code="LOCK_BANK", institution_name="锁测试机构")
+            db.add(institution)
+            db.flush()
+            project = Project(name="锁测试项目", institution_id=institution.id)
+            db.add(project)
+            db.flush()
+            concept = SemanticConcept(
+                project_id=project.id, institution_id=institution.id,
+                concept_type="business_term", concept_code="LOCKED", concept_name="并发口径",
+            )
+            db.add(concept)
+            db.commit()
+            concept_id = concept.id
+            project_id = project.id
+
+        start = threading.Barrier(2)
+        first_writer_ready = threading.Event()
+        release_first_writer = threading.Event()
+        outcomes: list[str] = []
+        errors: list[Exception] = []
+
+        def writer(number: int) -> None:
+            try:
+                with sessions() as db:
+                    start.wait(timeout=10)
+                    if number == 0:
+                        create_concept_version(
+                            db, project_id=project_id, concept_id=concept_id,
+                            values={
+                                "status": "confirmed", "effective_from": date(2026, 1, 1),
+                                "effective_to": date(2026, 12, 31),
+                            },
+                        )
+                        first_writer_ready.set()
+                        release_first_writer.wait(timeout=10)
+                        db.commit()
+                        outcomes.append("confirmed")
+                        return
+                    first_writer_ready.wait(timeout=10)
+                    try:
+                        create_concept_version(
+                            db, project_id=project_id, concept_id=concept_id,
+                            values={
+                                "status": "confirmed", "effective_from": date(2026, 6, 1),
+                                "effective_to": date(2027, 6, 30),
+                            },
+                        )
+                    except Exception as exc:  # lock conflict is the expected concurrent outcome
+                        db.rollback()
+                        errors.append(exc)
+                        return
+                    db.commit()
+                    outcomes.append("unexpected_second_confirmation")
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                if number == 0:
+                    release_first_writer.set()
+
+        first = threading.Thread(target=writer, args=(0,))
+        second = threading.Thread(target=writer, args=(1,))
+        first.start()
+        second.start()
+        first.join(timeout=20)
+        second.join(timeout=20)
+
+        assert not first.is_alive() and not second.is_alive()
+        assert outcomes == ["confirmed"]
+        assert errors
+        assert any(getattr(error, "status_code", None) == 409 for error in errors)
+        with sessions() as db:
+            assert db.scalar(select(SemanticConceptVersion.status).where(
+                SemanticConceptVersion.semantic_concept_id == concept_id,
+                SemanticConceptVersion.status == "confirmed",
+            )) == "confirmed"
+            assert db.query(SemanticConceptVersion).filter_by(
+                semantic_concept_id=concept_id, status="confirmed",
+            ).count() == 1
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_version_inheritance_and_legacy_projection_preserve_confirmed_meaning() -> None:
+    with _semantic_client() as (_, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            concept = SemanticConcept(
+                project_id=project_id, concept_type="business_term", concept_code="INHERIT",
+                concept_name="legacy name", definition="legacy definition", status="draft",
+            )
+            db.add(concept)
+            db.flush()
+            v1 = create_concept_version(
+                db, project_id=project_id, concept_id=concept.id, version_no=1,
+                values={
+                    "concept_name": "v1 confirmed", "definition": "v1 definition",
+                    "description": "v1 description", "aliases_json": ["v1 alias"],
+                    "status": "confirmed", "effective_from": date(2026, 1, 1),
+                    "effective_to": date(2026, 12, 31),
+                }, created_by="reviewer",
+            )
+            db.commit()
+            assert concept.concept_name == "v1 confirmed"
+            assert concept.status == "confirmed"
+
+            v2 = create_concept_version(
+                db, project_id=project_id, concept_id=concept.id, version_no=2,
+                values={
+                    "concept_name": "v2 draft", "definition": "v2 definition",
+                    "status": "draft", "effective_from": date(2027, 1, 1),
+                    "effective_to": date(2027, 12, 31),
+                }, created_by="author",
+            )
+            db.commit()
+            assert concept.concept_name == "v1 confirmed"
+            assert concept.definition == "v1 definition"
+            assert concept.status == "confirmed"
+            assert concept.version == 2
+
+            v3 = create_concept_version(
+                db, project_id=project_id, concept_id=concept.id, version_no=3,
+                values={"description": "v3 description", "status": "draft"},
+            )
+            assert v3.concept_name == "v2 draft"
+            assert v3.definition == "v2 definition"
+            assert v3.aliases_json == ["v1 alias"]
+            db.commit()
+            assert concept.concept_name == "v1 confirmed"
+            assert concept.description == "v1 description"
+            assert concept.version == 3
+
+            transition_version_status(db, v3, "rejected", "reviewer", project_id=project_id)
+            db.commit()
+            assert concept.concept_name == "v1 confirmed"
+            assert concept.status == "confirmed"
+            assert resolve_effective_version(db, concept.id, date(2026, 6, 1), project_id=project_id).id == v1.id
+
+            v4 = create_concept_version(
+                db, project_id=project_id, concept_id=concept.id, version_no=4,
+                values={"description": "v4 description", "status": "draft"},
+            )
+            transition_version_status(db, v4, "deprecated", "reviewer", project_id=project_id)
+            db.commit()
+            assert concept.concept_name == "v1 confirmed"
+            assert concept.status == "confirmed"
+            assert concept.version == 4
+
+
+def test_patch_latest_draft_is_allowed_after_prior_confirmed_projection() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        concept = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+            "concept_type": "business_term", "concept_code": "PATCH_DRAFT",
+            "concept_name": "已确认名称",
+        })
+        assert client.post(
+            f"/api/projects/{project_id}/semantic-concepts/{concept['id']}/status",
+            json={"status": "confirmed"},
+        ).status_code == 200
+        created = client.post(
+            f"/api/projects/{project_id}/semantic-concepts/{concept['id']}/versions",
+            json={"concept_name": "待编辑草稿", "status": "draft", "effective_from": "2027-01-01"},
+        )
+        assert created.status_code == 201, created.text
+        updated = client.patch(
+            f"/api/projects/{project_id}/semantic-concepts/{concept['id']}",
+            json={"description": "草稿更新"},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["concept_name"] == "已确认名称"
+        with sessions() as db:
+            latest = db.scalar(select(SemanticConceptVersion).where(
+                SemanticConceptVersion.semantic_concept_id == concept["id"],
+                SemanticConceptVersion.version_no == 2,
+            ))
+            assert latest is not None
+            assert latest.description == "草稿更新"
+            assert db.get(SemanticConcept, concept["id"]).status == "confirmed"
+
+
+def test_shortest_path_respects_max_nodes_before_returning_neighbor() -> None:
+    with _semantic_client() as (_, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            source = SemanticConcept(project_id=project_id, concept_type="business_term", concept_code="PATH_A", concept_name="A", status="confirmed")
+            middle = SemanticConcept(project_id=project_id, concept_type="business_term", concept_code="PATH_B", concept_name="B", status="confirmed")
+            target = SemanticConcept(project_id=project_id, concept_type="business_term", concept_code="PATH_C", concept_name="C", status="confirmed")
+            db.add_all([source, middle, target])
+            db.flush()
+            db.add_all([
+                SemanticRelation(project_id=project_id, source_concept_id=source.id, relation_type="related_to", target_concept_id=middle.id, status="confirmed"),
+                SemanticRelation(project_id=project_id, source_concept_id=middle.id, relation_type="related_to", target_concept_id=target.id, status="confirmed"),
+            ])
+            db.commit()
+            service = SemanticGraphService(db, project_id)
+            assert service.shortest_path(source.id, target.id, max_nodes=2) == ([], [])
+            assert service.shortest_path(source.id, target.id, max_nodes=3)[0] == [source.id, middle.id, target.id]
+
+
+def test_knowledge_resolution_requires_manage_permission_and_hides_content_from_viewer() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        entities = _required_binding_entities(sessions, project_id)
+        secret = "RESTRICTED_KNOWLEDGE_RAW_TEXT"
+        with sessions() as db:
+            unit = db.get(KnowledgeUnit, entities["knowledge_unit"])
+            unit.content = secret
+            unit.normalized_content = secret
+            viewer = User(username="semantic_viewer")
+            manager = User(username="semantic_knowledge_manager")
+            db.add_all([viewer, manager])
+            db.flush()
+            db.add_all([
+                ProjectMembership(project_id=project_id, user_id=viewer.id, project_role="viewer"),
+                ProjectMembership(project_id=project_id, user_id=manager.id, project_role="knowledge_manager"),
+            ])
+            db.commit()
+            viewer_id, viewer_username = viewer.id, viewer.username
+            manager_id, manager_username = manager.id, manager.username
+
+        app.dependency_overrides[get_current_principal] = lambda: Principal(viewer_id, viewer_username, None)
+        denied = client.post(f"/api/projects/{project_id}/semantic-resolve", json={
+            "entity_type": "knowledge_unit", "entity_id": entities["knowledge_unit"],
+        })
+        assert denied.status_code == 403
+        assert secret not in denied.text
+
+        app.dependency_overrides[get_current_principal] = lambda: Principal(manager_id, manager_username, None)
+        allowed = client.post(f"/api/projects/{project_id}/semantic-resolve", json={
+            "entity_type": "knowledge_unit", "entity_id": entities["knowledge_unit"],
+        })
+        assert allowed.status_code == 200, allowed.text
 
 
 def test_graph_visibility_mode_filters_concept_binding_and_relation_together() -> None:

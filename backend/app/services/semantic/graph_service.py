@@ -110,13 +110,17 @@ class SemanticGraphService:
 
         queue = deque([(source_concept_id, [source_concept_id], [])])
         visited = {source_concept_id}
-        while queue and len(visited) <= max_nodes:
+        while queue and len(visited) < max_nodes:
             current, concept_path, relation_path = queue.popleft()
             if len(relation_path) >= max_depth:
                 continue
             rows = self._adjacent(current, direction, mode=selected_mode)
             for relation, neighbor in rows:
                 if neighbor in visited:
+                    continue
+                # ``max_nodes`` includes the source node.  Check the bound
+                # before either adding or returning a newly discovered node.
+                if len(visited) >= max_nodes:
                     continue
                 next_concepts = [*concept_path, neighbor]
                 next_relations = [*relation_path, relation.id]

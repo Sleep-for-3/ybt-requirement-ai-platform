@@ -98,6 +98,17 @@ def _run_alembic(database_path: Path, *arguments: str) -> None:
 def _assert_semantic_schema(database_path: Path) -> None:
     inspector = sa.inspect(sa.create_engine(f"sqlite:///{database_path.as_posix()}"))
     assert {"semantic_concepts", "semantic_bindings", "semantic_relations"} <= set(inspector.get_table_names())
+    version_indexes = {item["name"] for item in inspector.get_indexes("semantic_concept_versions")}
+    assert {
+        "ix_semantic_concept_versions_semantic_concept_id",
+        "ix_semantic_concept_versions_institution_id",
+        "ix_semantic_concept_versions_project_id",
+        "ix_semantic_concept_versions_business_domain",
+        "ix_semantic_concept_versions_status",
+        "ix_semantic_concept_version_project_status",
+        "ix_semantic_concept_version_concept_status",
+        "ix_semantic_concept_version_project_effective",
+    } <= version_indexes
     concept_uniques = {item["name"] for item in inspector.get_unique_constraints("semantic_concepts")}
     relation_uniques = {item["name"] for item in inspector.get_unique_constraints("semantic_relations")}
     assert "uq_semantic_concept_project_type_code" in concept_uniques

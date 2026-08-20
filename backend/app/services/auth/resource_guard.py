@@ -56,6 +56,11 @@ async def guard_project_resource(
 def _permission(method: str, path: str) -> str:
     if "export" in path:
         return "export"
+    if "/semantic" in path:
+        # Semantic endpoints enforce their fine-grained business/review/knowledge
+        # permissions themselves.  The shared resource guard only establishes
+        # project membership so it must not pre-empt those endpoint checks.
+        return "project.view"
     if "/lineage" in path or "/scripts" in path:
         if "resolution-candidates" in path or path.endswith("/unbind"):
             return "lineage.manage"

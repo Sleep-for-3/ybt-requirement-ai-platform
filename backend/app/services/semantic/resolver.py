@@ -1,5 +1,7 @@
 """Deterministic semantic concept resolver over bounded entity descriptors."""
 
+from collections.abc import Mapping
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -43,12 +45,17 @@ class SemanticResolver:
                 status_predicate(SemanticConcept.status, selected_mode),
             ).order_by(SemanticConcept.id)
         ).all())
-        confirmed_ids = set(self.db.scalars(select(SemanticBinding.semantic_concept_id).where(
+        confirmed_bindings: dict[int, int] = {}
+        binding_rows = self.db.scalars(select(SemanticBinding).where(
             SemanticBinding.project_id == self.project_id,
             SemanticBinding.entity_type == entity_type,
             SemanticBinding.entity_id == entity_id,
             status_predicate(SemanticBinding.status, SemanticVisibilityMode.TRUSTED),
-        )).all())
+        ).order_by(SemanticBinding.semantic_concept_id, SemanticBinding.id)).all()
+        for binding in binding_rows:
+            # Multiple confirmed binding types are possible; choose the
+            # lowest stable row id so evidence is deterministic.
+            confirmed_bindings.setdefault(binding.semantic_concept_id, binding.id)
 
         code = self._first(query_code, descriptor.code)
         name = self._first(query_name, descriptor.name)
@@ -61,7 +68,7 @@ class SemanticResolver:
                 code=code,
                 name=name,
                 comment=description,
-                confirmed_ids=confirmed_ids,
+                confirmed_bindings=confirmed_bindings,
             )
             if score <= 0:
                 continue
@@ -106,16 +113,21 @@ class SemanticResolver:
         code: str | None,
         name: str | None,
         comment: str | None,
-        confirmed_ids: set[int],
+        confirmed_bindings: Mapping[int, int] | set[int],
     ) -> tuple[float, int, str, list[SemanticMatchEvidence]]:
         matches: list[tuple[int, float, str, SemanticMatchEvidence]] = []
-        if concept.id in confirmed_ids:
+        binding_id = (
+            confirmed_bindings.get(concept.id)
+            if isinstance(confirmed_bindings, Mapping)
+            else concept.id if concept.id in confirmed_bindings else None
+        )
+        if binding_id is not None:
             matches.append((0, 1.0, "confirmed_binding", SemanticMatchEvidence(
                 match_reason="confirmed_binding",
                 matched_field="semantic_binding.status",
                 excerpt="confirmed binding",
                 source_type="semantic_binding",
-                source_id=concept.id,
+                source_id=binding_id,
                 score=1.0,
             )))
 

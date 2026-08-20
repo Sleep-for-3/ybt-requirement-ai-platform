@@ -180,15 +180,13 @@ def create_version(
 ) -> SemanticConceptVersion:
     project = PermissionService(db, principal).require_project_permission(project_id, "business.edit")
     concept = get_project_semantic_resource(db, project_id, "semantic_concept", concept_id)
-    values = payload.model_dump(exclude_none=True)
+    values = payload.model_dump(exclude_unset=True)
     version = create_concept_version(
         db,
         concept=concept,
         project_id=project_id,
         values=values,
         created_by=principal.username,
-        effective_from=values.pop("effective_from", None),
-        effective_to=values.pop("effective_to", None),
         status=values.get("status"),
     )
     _audit_create(db, principal, version, "semantic_concept_version")
@@ -545,7 +543,10 @@ def resolve_semantics(
     principal: CurrentPrincipal,
     db: Session = Depends(get_db),
 ) -> dict:
-    PermissionService(db, principal).require_project_permission(project_id, "project.view")
+    permissions = PermissionService(db, principal)
+    permissions.require_project_permission(project_id, "project.view")
+    if payload.entity_type == "knowledge_unit":
+        permissions.require_project_permission(project_id, "knowledge.manage")
     return {"candidates": SemanticResolver(db, project_id).resolve(**payload.model_dump())}
 
 

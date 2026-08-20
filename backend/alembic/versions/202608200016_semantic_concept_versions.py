@@ -18,6 +18,13 @@ branch_labels = None
 depends_on = None
 
 BOOTSTRAP_FALLBACK_DATE = date(2026, 8, 20)
+SINGLE_COLUMN_INDEXES = (
+    ("ix_semantic_concept_versions_semantic_concept_id", ["semantic_concept_id"]),
+    ("ix_semantic_concept_versions_institution_id", ["institution_id"]),
+    ("ix_semantic_concept_versions_project_id", ["project_id"]),
+    ("ix_semantic_concept_versions_business_domain", ["business_domain"]),
+    ("ix_semantic_concept_versions_status", ["status"]),
+)
 
 
 def _version_table() -> sa.Table:
@@ -108,6 +115,8 @@ def _create_version_table() -> None:
         "semantic_concept_versions",
         ["project_id", "effective_from", "effective_to"],
     )
+    for index_name, columns in SINGLE_COLUMN_INDEXES:
+        op.create_index(index_name, "semantic_concept_versions", columns)
 
 
 def _bootstrap_legacy_concepts(bind) -> None:
@@ -189,8 +198,14 @@ def _bootstrap_date(value) -> tuple[date, bool]:
 
 def downgrade() -> None:
     if op.get_context().as_sql:
+        for index_name, _ in reversed(SINGLE_COLUMN_INDEXES):
+            op.drop_index(index_name, table_name="semantic_concept_versions")
         op.drop_table("semantic_concept_versions")
         return
     inspector = sa.inspect(op.get_bind())
     if inspector.has_table("semantic_concept_versions"):
+        existing_indexes = {item["name"] for item in inspector.get_indexes("semantic_concept_versions")}
+        for index_name, _ in reversed(SINGLE_COLUMN_INDEXES):
+            if index_name in existing_indexes:
+                op.drop_index(index_name, table_name="semantic_concept_versions")
         op.drop_table("semantic_concept_versions")

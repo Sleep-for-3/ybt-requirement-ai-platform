@@ -3,13 +3,18 @@
 from datetime import UTC, date, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.models import Project, SemanticConcept, SemanticConceptVersion
 from app.services.semantic.binding_service import apply_status_transition
-from app.services.semantic.status_policy import SemanticVisibilityMode, status_predicate, trusted_statuses
+from app.services.semantic.status_policy import (
+    SemanticVisibilityMode,
+    audit_only_statuses,
+    candidate_statuses,
+    status_predicate,
+)
 
 
 _VERSION_FIELDS = {
@@ -70,10 +75,29 @@ def _latest_version(db: Session, concept: SemanticConcept) -> SemanticConceptVer
 
 
 def _lock_stable_concept(db: Session, concept_id: int) -> SemanticConcept | None:
+    """Serialize interval writers on the stable identity row.
+
+    PostgreSQL's row lock is explicit.  SQLite has no ``FOR UPDATE`` support,
+    so a no-op update starts a write transaction and acquires SQLite's
+    database-level writer lock before the overlap query.  A busy SQLite
+    database is a domain conflict, not an empty overlap result.
+    """
+
     bind = db.get_bind()
-    if bind is not None and bind.dialect.name == "postgresql":
-        return db.scalar(select(SemanticConcept).where(SemanticConcept.id == concept_id).with_for_update())
-    return db.get(SemanticConcept, concept_id)
+    try:
+        if bind is not None and bind.dialect.name == "postgresql":
+            return db.scalar(select(SemanticConcept).where(SemanticConcept.id == concept_id).with_for_update())
+        if bind is not None and bind.dialect.name == "sqlite":
+            db.execute(update(SemanticConcept).where(
+                SemanticConcept.id == concept_id,
+            ).values(id=SemanticConcept.id))
+        return db.get(SemanticConcept, concept_id)
+    except OperationalError as exc:
+        raise _error(
+            "SEMANTIC_VERSION_LOCKED",
+            "Semantic concept is locked by another version confirmation; retry the operation",
+            semantic_concept_id=concept_id,
+        ) from exc
 
 
 def _assert_confirmed_interval_available(
@@ -100,7 +124,14 @@ def _assert_confirmed_interval_available(
     )
     if exclude_version_id is not None:
         statement = statement.where(SemanticConceptVersion.id != exclude_version_id)
-    existing = list(db.scalars(statement.order_by(SemanticConceptVersion.version_no)).all())
+    try:
+        existing = list(db.scalars(statement.order_by(SemanticConceptVersion.version_no)).all())
+    except OperationalError as exc:
+        raise _error(
+            "SEMANTIC_VERSION_LOCKED",
+            "Semantic concept is locked by another version confirmation; retry the operation",
+            semantic_concept_id=concept_id,
+        ) from exc
     for row in existing:
         existing_end = row.effective_to
         starts_before_end = end is None or row.effective_from <= end
@@ -115,25 +146,51 @@ def _assert_confirmed_interval_available(
 
 
 def sync_legacy_concept_projection(
+    db: Session,
     concept: SemanticConcept,
-    version: SemanticConceptVersion,
 ) -> SemanticConcept:
-    """Project canonical version meaning onto the legacy Concept row in-place."""
+    """Project the governed canonical meaning onto the legacy Concept row.
 
-    concept.concept_name = version.concept_name
-    concept.definition = version.definition
-    concept.description = version.description
-    concept.aliases_json = list(version.aliases_json or [])
-    concept.business_domain = version.business_domain
-    concept.owner_department = version.owner_department
-    concept.status = version.status
-    concept.confidence_level = version.confidence_level
-    concept.source_type = version.source_type
-    concept.source_id = version.source_id
-    concept.confirmed_by = version.confirmed_by
-    concept.confirmed_at = version.confirmed_at
-    if concept.version < version.version_no:
-        concept.version = version.version_no
+    A newer working or audit row must not hide an already confirmed meaning.
+    If no confirmed row exists, the latest working candidate is the useful
+    compatibility projection; audit rows are used only as a final fallback.
+    ``Concept.version`` always tracks the greatest canonical version number,
+    independently of which row supplies the compatibility projection.
+    """
+
+    rows = list(db.scalars(select(SemanticConceptVersion).where(
+        SemanticConceptVersion.semantic_concept_id == concept.id,
+        SemanticConceptVersion.project_id == concept.project_id,
+    ).order_by(
+        SemanticConceptVersion.version_no.desc(),
+        SemanticConceptVersion.id.desc(),
+    )).all())
+    if not rows:
+        return concept
+
+    concept.version = max(row.version_no for row in rows)
+    projected = next((row for row in rows if row.status in {"confirmed"}), None)
+    if projected is None:
+        projected = next((row for row in rows if row.status in candidate_statuses()), None)
+    if projected is None:
+        projected = next((row for row in rows if row.status in audit_only_statuses()), rows[0])
+
+    concept.concept_name = projected.concept_name
+    concept.definition = projected.definition
+    concept.description = projected.description
+    concept.aliases_json = list(projected.aliases_json or [])
+    concept.business_domain = projected.business_domain
+    concept.owner_department = projected.owner_department
+    concept.status = projected.status
+    concept.confidence_level = projected.confidence_level
+    concept.source_type = projected.source_type
+    concept.source_id = projected.source_id
+    if projected.status == "confirmed":
+        concept.confirmed_by = projected.confirmed_by
+        concept.confirmed_at = projected.confirmed_at
+    else:
+        concept.confirmed_by = None
+        concept.confirmed_at = None
     return concept
 
 
@@ -207,34 +264,46 @@ def create_concept_version(
         project_id = concept.project_id
     if concept.project_id != project_id:
         raise HTTPException(status_code=404, detail="SemanticConcept not found")
+    latest = _latest_version(db, concept)
     if version_no is None:
-        latest = _latest_version(db, concept)
         version_no = (latest.version_no + 1) if latest is not None else 1
-    resolved_status = str(payload.get("status", status or "draft"))
-    start = _as_date(payload.get("effective_from", effective_from), default=date.today())
-    end_value = payload.get("effective_to", effective_to)
+    inherited = latest if latest is not None else concept
+    raw_status = payload.get("status") if payload.get("status") is not None else status
+    resolved_status = str(raw_status or "draft")
+    start_value = payload["effective_from"] if "effective_from" in payload else effective_from
+    if start_value is None and latest is not None:
+        start_value = inherited.effective_from
+    start = _as_date(start_value, default=date.today())
+    if "effective_to" in payload:
+        end_value = payload["effective_to"]
+    elif effective_to is not None:
+        end_value = effective_to
+    elif latest is not None:
+        end_value = inherited.effective_to
+    else:
+        end_value = None
     end = _as_date(end_value) if end_value is not None else None
     if resolved_status == "confirmed":
         _assert_confirmed_interval_available(db, concept.id, start, end)
     canonical = {
         "semantic_concept_id": concept.id,
         "project_id": project_id,
-        "institution_id": concept.institution_id,
+        "institution_id": inherited.institution_id,
         "version_no": version_no,
-        "concept_name": payload.get("concept_name", concept.concept_name),
-        "definition": payload.get("definition", concept.definition),
-        "description": payload.get("description", concept.description),
-        "aliases_json": list(payload.get("aliases_json", concept.aliases_json or [])),
-        "business_domain": payload.get("business_domain", concept.business_domain),
-        "owner_department": payload.get("owner_department", concept.owner_department),
-        "provenance_json": dict(payload.get("provenance_json", {})),
+        "concept_name": payload.get("concept_name", inherited.concept_name),
+        "definition": payload.get("definition", inherited.definition),
+        "description": payload.get("description", inherited.description),
+        "aliases_json": list(payload.get("aliases_json", inherited.aliases_json or []) or []),
+        "business_domain": payload.get("business_domain", inherited.business_domain),
+        "owner_department": payload.get("owner_department", inherited.owner_department),
+        "provenance_json": dict(payload.get("provenance_json", getattr(inherited, "provenance_json", {}) or {}) or {}),
         "status": resolved_status,
-        "confidence_level": payload.get("confidence_level", concept.confidence_level),
-        "source_type": payload.get("source_type", concept.source_type),
-        "source_id": payload.get("source_id", concept.source_id),
-        "created_by": payload.get("created_by", created_by or concept.created_by),
-        "confirmed_by": payload.get("confirmed_by", concept.confirmed_by if resolved_status == "confirmed" else None),
-        "confirmed_at": payload.get("confirmed_at", concept.confirmed_at if resolved_status == "confirmed" else None),
+        "confidence_level": payload.get("confidence_level", inherited.confidence_level),
+        "source_type": payload.get("source_type", inherited.source_type),
+        "source_id": payload.get("source_id", inherited.source_id),
+        "created_by": payload.get("created_by", created_by or inherited.created_by),
+        "confirmed_by": payload.get("confirmed_by", getattr(inherited, "confirmed_by", None)) if resolved_status == "confirmed" else None,
+        "confirmed_at": payload.get("confirmed_at", getattr(inherited, "confirmed_at", None)) if resolved_status == "confirmed" else None,
         "effective_from": start,
         "effective_to": end,
     }
@@ -246,8 +315,7 @@ def create_concept_version(
         db.flush()
     except IntegrityError as exc:
         raise _error("SEMANTIC_VERSION_DUPLICATE", "Semantic concept version already exists") from exc
-    if resolved_status == "confirmed":
-        sync_legacy_concept_projection(concept, version)
+    sync_legacy_concept_projection(db, concept)
     return version
 
 
@@ -262,7 +330,7 @@ def patch_concept_via_version_service(
     version = _latest_version(db, concept)
     if version is None:
         version = create_concept_version(db, concept=concept, project_id=project_id, version_no=1, values={"status": concept.status})
-    if concept.status == "confirmed" or version.status == "confirmed":
+    if version.status == "confirmed":
         raise _error(
             "SEMANTIC_VERSION_IMMUTABLE",
             "Confirmed semantic version is immutable; create a new version for changed meaning",
@@ -277,9 +345,9 @@ def patch_concept_via_version_service(
     for key, value in payload.items():
         if key in _VERSION_FIELDS and key not in {"status", "effective_from", "effective_to", "confirmed_by", "confirmed_at", "created_by"}:
             setattr(version, key, value)
-    concept.version += 1
-    sync_legacy_concept_projection(concept, version)
     try:
+        db.flush()
+        sync_legacy_concept_projection(db, concept)
         db.flush()
     except IntegrityError as exc:
         raise _error("SEMANTIC_CONCEPT_DUPLICATE", "Semantic concept code already exists in this project and type") from exc
@@ -294,8 +362,13 @@ def resolve_effective_version(
     project_id: int | None = None,
 ) -> SemanticConceptVersion | None:
     target_date = _as_date(as_of)
-    statement = select(SemanticConceptVersion).where(
+    statement = select(SemanticConceptVersion).join(
+        SemanticConcept,
+        SemanticConcept.id == SemanticConceptVersion.semantic_concept_id,
+    ).where(
         SemanticConceptVersion.semantic_concept_id == concept_id,
+        SemanticConcept.project_id == SemanticConceptVersion.project_id,
+        status_predicate(SemanticConcept.status, SemanticVisibilityMode.TRUSTED),
         status_predicate(SemanticConceptVersion.status, SemanticVisibilityMode.TRUSTED),
         SemanticConceptVersion.effective_from <= target_date,
         or_(SemanticConceptVersion.effective_to.is_(None), SemanticConceptVersion.effective_to >= target_date),
@@ -328,7 +401,7 @@ def transition_version_status(
     if new_status == "confirmed":
         _assert_confirmed_interval_available(db, row.semantic_concept_id, row.effective_from, row.effective_to, exclude_version_id=row.id)
     apply_status_transition(row, new_status, actor)
-    sync_legacy_concept_projection(concept, row)
+    sync_legacy_concept_projection(db, concept)
     db.flush()
     return row
 
@@ -349,7 +422,7 @@ def transition_concept_status(
             values={"status": concept.status}, effective_from=date.today(),
         )
     transition_version_status(db, version, new_status, actor, project_id=project_id)
-    return sync_legacy_concept_projection(concept, version)
+    return concept
 
 
 __all__ = [
