@@ -18,11 +18,16 @@ from app.models import (
     MartTable,
     Project,
     ProjectMembership,
+    ProductScenario,
     ReviewTask,
     SemanticBinding,
     SemanticConcept,
+    ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
     SourceField,
     SourceTable,
+    SourceToMartMapping,
+    MartToYbtMapping,
     BusinessSystem,
     TargetField,
     TargetTable,
@@ -30,6 +35,14 @@ from app.models import (
 )
 from app.services.auth.dependencies import Principal
 from app.services.governance.workflow import decide_task, start_workflow
+from app.services.semantic.entity_adapter import SemanticEntityAdapter
+from app.services.semantic.status_policy import (
+    SemanticVisibilityMode,
+    audit_only_statuses,
+    candidate_statuses,
+    is_visible,
+    trusted_statuses,
+)
 
 
 def test_semantic_concept_crud_duplicate_and_project_institution_isolation() -> None:
@@ -277,6 +290,98 @@ def test_deterministic_resolver_prioritizes_code_name_alias_and_comment() -> Non
         )
 
 
+def test_resolver_confirmed_binding_precedes_text_and_is_bounded() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        field_id = _target_field(sessions, project_id, "CUST_NO", name="客户编号", comment="统一客户编号")
+        binding_concept = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+            "concept_type": "business_term", "concept_code": "BOUND", "concept_name": "绑定概念",
+        })
+        exact_code = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+            "concept_type": "business_term", "concept_code": "CUST_NO", "concept_name": "客户编号",
+        })
+        binding = _post(client, f"/api/projects/{project_id}/semantic-bindings", {
+            "semantic_concept_id": binding_concept["id"], "entity_type": "target_field",
+            "entity_id": field_id, "status": "draft",
+        })
+        with sessions() as db:
+            db.get(SemanticConcept, binding_concept["id"]).status = "confirmed"
+            db.get(SemanticConcept, exact_code["id"]).status = "confirmed"
+            db.get(SemanticBinding, binding["id"]).status = "confirmed"
+            db.commit()
+
+        first = _post(client, f"/api/projects/{project_id}/semantic-resolve", {
+            "entity_type": "target_field", "entity_id": field_id,
+        })
+        second = _post(client, f"/api/projects/{project_id}/semantic-resolve", {
+            "entity_type": "target_field", "entity_id": field_id,
+        })
+        assert first == second
+        assert first["candidates"][0]["semantic_concept_id"] == binding_concept["id"]
+        assert first["candidates"][0]["match_reason"] == "confirmed_binding"
+        assert first["candidates"][0]["status"] == "ai_suggested"
+        assert len(first["candidates"][0]["evidence"]) <= 3
+        assert first["candidates"][0]["provenance"]["project_id"] == project_id
+
+
+def test_semantic_entity_adapter_describes_all_allow_listed_types() -> None:
+    with _semantic_client() as (_, sessions):
+        project_id, _ = _projects(sessions)
+        entities = _required_binding_entities(sessions, project_id)
+        with sessions() as db:
+            descriptors = [
+                SemanticEntityAdapter.describe(db, project_id, entity_type, entity_id)
+                for entity_type, entity_id in entities.items()
+            ]
+        assert set(entities) == {
+            "target_table", "target_field", "mart_table", "mart_field", "source_table", "source_field",
+            "scenario", "knowledge_unit", "source_to_mart_mapping", "mart_to_ybt_mapping",
+            "scenario_business_mapping", "scenario_technical_lineage",
+        }
+        assert all(item.project_id == project_id for item in descriptors)
+        assert all(item.semantic_text and len(item.semantic_text) <= 4000 for item in descriptors)
+        assert all(len(item.source_refs) <= 8 for item in descriptors)
+        assert all("__dict__" not in item.semantic_text for item in descriptors)
+
+
+def test_visibility_policy_and_candidate_mode_never_admit_audit_statuses() -> None:
+    assert trusted_statuses() == ("confirmed",)
+    assert candidate_statuses() == ("confirmed", "draft", "ai_suggested")
+    assert audit_only_statuses() == ("rejected", "deprecated")
+    assert is_visible("confirmed", SemanticVisibilityMode.TRUSTED)
+    assert is_visible("draft", SemanticVisibilityMode.CANDIDATE)
+    assert not is_visible("rejected", SemanticVisibilityMode.CANDIDATE)
+
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        field_id = _target_field(sessions, project_id, "MATCH", name="匹配字段", comment="监管匹配")
+        concepts = {}
+        for status in ("draft", "ai_suggested", "rejected", "deprecated"):
+            concepts[status] = _post(client, f"/api/projects/{project_id}/semantic-concepts", {
+                "concept_type": "business_term", "concept_code": f"{status.upper()}_MATCH",
+                "concept_name": "匹配字段", "status": status if status in {"draft", "ai_suggested"} else "draft",
+            })
+        with sessions() as db:
+            db.get(SemanticConcept, concepts["rejected"]["id"]).status = "rejected"
+            db.get(SemanticConcept, concepts["deprecated"]["id"]).status = "deprecated"
+            db.commit()
+
+        trusted = _post(client, f"/api/projects/{project_id}/semantic-resolve", {
+            "entity_type": "target_field", "entity_id": field_id,
+        })
+        candidate = _post(client, f"/api/projects/{project_id}/semantic-resolve", {
+            "entity_type": "target_field", "entity_id": field_id, "mode": "candidate",
+        })
+        trusted_ids = {item["semantic_concept_id"] for item in trusted["candidates"]}
+        candidate_ids = {item["semantic_concept_id"] for item in candidate["candidates"]}
+        assert concepts["rejected"]["id"] not in trusted_ids | candidate_ids
+        assert concepts["deprecated"]["id"] not in trusted_ids | candidate_ids
+        assert concepts["draft"]["id"] not in trusted_ids
+        assert concepts["draft"]["id"] in candidate_ids
+        assert concepts["ai_suggested"]["id"] in candidate_ids
+        assert all(item["status"] == "ai_suggested" for item in candidate["candidates"])
+
+
 def _concept(client: TestClient, project_id: int, code: str, name: str) -> int:
     return _post(client, f"/api/projects/{project_id}/semantic-concepts", {
         "concept_type": "business_term", "concept_code": code, "concept_name": name,
@@ -315,7 +420,11 @@ def _required_binding_entities(sessions: sessionmaker, project_id: int) -> dict[
         target_table = TargetTable(project_id=project_id, table_code="YBT_CUST", table_name="客户表")
         mart_table = MartTable(project_id=project_id, table_code="MART_CUST", table_name="客户集市")
         system = BusinessSystem(project_id=project_id, system_code="ECIF", system_name="客户系统")
-        db.add_all([target_table, mart_table, system])
+        scenario = ProductScenario(
+            project_id=project_id, scenario_code="CUSTOMER", scenario_name="客户场景",
+            description="客户监管报送场景", business_owner="业务团队", tech_owner="技术团队",
+        )
+        db.add_all([target_table, mart_table, system, scenario])
         db.flush()
         source_table = SourceTable(project_id=project_id, business_system_id=system.id, table_code="CUST", table_name="客户主表")
         db.add(source_table)
@@ -342,12 +451,40 @@ def _required_binding_entities(sessions: sessionmaker, project_id: int) -> dict[
             content_hash="b" * 64,
         )
         db.add(unit)
+        db.flush()
+        source_to_mart = SourceToMartMapping(
+            project_id=project_id, mart_field_id=mart_field.id, mapping_name="客户源到集市",
+            business_rule="保留有效客户", final_content="源字段直接映射到集市字段",
+        )
+        mart_to_ybt = MartToYbtMapping(
+            project_id=project_id, target_field_id=target_field.id, mart_field_id=mart_field.id,
+            mapping_name="客户集市到报送", business_rule="按监管口径映射", final_content="集市字段映射到报送字段",
+        )
+        business_mapping = ScenarioBusinessMapping(
+            project_id=project_id, target_field_id=target_field.id, scenario_id=scenario.id,
+            business_definition="客户统一编号业务口径", final_content="客户唯一识别",
+        )
+        technical_lineage = ScenarioTechnicalLineage(
+            project_id=project_id, target_field_id=target_field.id, scenario_id=scenario.id,
+            source_system_name="ECIF", source_table_chinese_name="客户主表",
+            source_field_chinese_name="客户编号", processing_logic="清洗后取客户编号",
+            final_content="客户编号血缘", lineage_status="linked",
+        )
+        db.add_all([source_to_mart, mart_to_ybt, business_mapping, technical_lineage])
         db.commit()
         return {
+            "target_table": target_table.id,
             "target_field": target_field.id,
+            "mart_table": mart_table.id,
             "mart_field": mart_field.id,
+            "source_table": source_table.id,
             "source_field": source_field.id,
+            "scenario": scenario.id,
             "knowledge_unit": unit.id,
+            "source_to_mart_mapping": source_to_mart.id,
+            "mart_to_ybt_mapping": mart_to_ybt.id,
+            "scenario_business_mapping": business_mapping.id,
+            "scenario_technical_lineage": technical_lineage.id,
         }
 
 
