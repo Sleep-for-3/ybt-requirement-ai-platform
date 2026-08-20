@@ -31,7 +31,7 @@ def test_semantic_migration_upgrade_downgrade_cycle(tmp_path: Path) -> None:
 
 
 def test_semantic_revision_is_additive_and_runtime_model_free() -> None:
-    migration = (BACKEND_DIR / "alembic" / "versions" / f"{SEMANTIC_REVISION}_regulatory_semantic_layer.py").read_text(encoding="utf-8")
+    migration = (BACKEND_DIR / "alembic" / "versions" / f"{SEMANTIC_REVISION}_semantic_concept_versions.py").read_text(encoding="utf-8")
     assert "Base.metadata" not in migration
     assert "from app" not in migration
     assert "drop_table(\"embedding_index_versions\")" not in migration

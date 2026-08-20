@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ConceptType = Literal["business_term", "metric", "dimension", "code_set", "business_rule", "regulatory_rule"]
@@ -120,6 +120,93 @@ class SemanticConceptRead(OrmModel):
     confirmed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # Additive projection fields.  Legacy Concept rows remain valid when the
+    # version table has not been bootstrapped yet.
+    current_version_no: int | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+
+class SemanticConceptVersionCreate(BaseModel):
+    """Bounded candidate content for a new canonical semantic version."""
+
+    model_config = ConfigDict(extra="forbid")
+    concept_name: str | None = Field(default=None, min_length=1, max_length=255)
+    definition: str | None = Field(default=None, max_length=12000)
+    description: str | None = Field(default=None, max_length=12000)
+    aliases_json: list[str] | None = Field(default=None, max_length=100)
+    business_domain: str | None = Field(default=None, max_length=200)
+    owner_department: str | None = Field(default=None, max_length=200)
+    provenance_json: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=12)
+    status: Literal["draft", "ai_suggested"] = "draft"
+    confidence_level: ConfidenceLevel = "medium"
+    source_type: str | None = Field(default=None, min_length=1, max_length=50)
+    source_id: int | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+    @field_validator("concept_name")
+    @classmethod
+    def strip_optional_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("concept_name must not be blank")
+        return stripped
+
+    @field_validator("aliases_json")
+    @classmethod
+    def normalize_version_aliases(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            alias = value.strip()
+            key = alias.casefold()
+            if alias and key not in seen:
+                seen.add(key)
+                result.append(alias)
+        return result
+
+    @model_validator(mode="after")
+    def validate_effective_interval(self):
+        if self.effective_from is not None and self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must be on or after effective_from")
+        return self
+
+
+class SemanticConceptVersionRead(OrmModel):
+    id: int
+    semantic_concept_id: int
+    institution_id: int | None
+    project_id: int
+    version_no: int
+    concept_name: str
+    definition: str | None
+    description: str | None
+    aliases_json: list[str]
+    business_domain: str | None
+    owner_department: str | None
+    provenance_json: dict
+    status: str
+    confidence_level: str
+    source_type: str
+    source_id: int | None
+    created_by: str | None
+    confirmed_by: str | None
+    confirmed_at: datetime | None
+    effective_from: date
+    effective_to: date | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SemanticConceptVersionStatusTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: SemanticStatus
+    comment: str | None = Field(default=None, max_length=1000)
 
 
 class SemanticBindingCreate(BaseModel):
