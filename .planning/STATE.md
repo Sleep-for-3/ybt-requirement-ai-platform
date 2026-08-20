@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 09
 current_phase_name: Regulatory Context
 status: executing
-stopped_at: Phase 9 plans verified; 09-01 Semantic Hardening is ready to execute
-last_updated: "2026-08-20T10:22:44.525Z"
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-08-20T11:02:40.053Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 9 research and planning completed; 09-01 ready to execute
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 09 (Regulatory Context) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 09
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-08-20 — Phase 09 execution started
 
-Progress: [█░░░░░░░░░] 13%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
@@ -41,6 +41,12 @@ Progress: [█░░░░░░░░░] 13%
 - Total plans completed: 3
 - Average duration: —
 - Total execution time: 0 hours
+
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 09 P01 | 40m | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -53,6 +59,10 @@ Progress: [█░░░░░░░░░] 13%
 - [Phase 9]: Rejected/deprecated semantic rows are audit-only and never trusted or candidate business facts.
 - [Phase 9]: SemanticConcept is stable identity; SemanticConceptVersion is canonical governed temporal meaning, with legacy Concept fields as a same-transaction compatibility projection.
 - [Phase 9]: RegulatoryContext is a projection-only contract with separate authority/state/provenance and deterministic conflicts/open questions.
+- [Phase 9]: Trusted semantic reads remain confirmed-only; candidate mode explicitly adds draft and ai_suggested while rejected/deprecated remain audit-only.
+- [Phase 9]: SemanticConceptVersion is canonical temporal meaning and legacy Concept fields are a same-transaction compatibility projection.
+- [Phase 9]: The additive effective version route is declared before the dynamic version-id route and uses inclusive date intervals.
+- [Phase 9]: Migration 202608200016 bootstraps one version_no=1 per legacy Concept using created_at or fixed 2026-08-20 fallback without fabricated history.
 
 ### Pending Todos
 
@@ -73,6 +83,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-20
-Stopped at: Phase 9 plans verified; 09-01 Semantic Hardening is ready to execute
+Last session: 2026-08-20T11:02:40.022Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
