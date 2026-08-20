@@ -7,13 +7,13 @@
 
 ### Semantic Foundation
 
-- [ ] **SEM-01**: 授权用户可在项目内创建、查看、编辑和停用带类型、版本、置信度与治理状态的 SemanticConcept。
-- [ ] **SEM-02**: 授权用户可将概念绑定到 Target/Source/Mart 表字段、Scenario、KnowledgeUnit 和三类 Mapping/Lineage 实体，且服务验证实体真实存在并属于同一项目/机构。
-- [ ] **SEM-03**: 授权用户可建立受控类型的概念关系并进行有限深度邻居、上下游和路径查询。
-- [ ] **SEM-04**: AI 创建的概念、绑定与关系只能进入 `ai_suggested`，人工确认、拒绝和废弃转换受权限、证据和审计约束。
-- [ ] **SEM-05**: PostgreSQL 与 SQLite 均可无损升级/降级语义表，现有 formal semantic index、业务表和数据不被修改。
-- [ ] **SEM-06**: 语义 API 在 list/detail/create/update/status/graph 查询中强制 project 与 institution isolation，并对重复对象返回稳定冲突错误。
-- [ ] **SEM-07**: 系统可用 deterministic resolver 按 code/name/alias/comment/confirmed binding 等优先级返回候选与 provenance，LLM inference 仅为最后一级建议。
+- [x] **SEM-01**: 授权用户可在项目内创建、查看、编辑和停用带类型、版本、置信度与治理状态的 SemanticConcept。
+- [x] **SEM-02**: 授权用户可将概念绑定到 Target/Source/Mart 表字段、Scenario、KnowledgeUnit 和三类 Mapping/Lineage 实体，且服务验证实体真实存在并属于同一项目/机构。
+- [x] **SEM-03**: 授权用户可建立受控类型的概念关系并进行有限深度邻居、上下游和路径查询。
+- [x] **SEM-04**: AI 创建的概念、绑定与关系只能进入 `ai_suggested`，人工确认、拒绝和废弃转换受权限、证据和审计约束。
+- [x] **SEM-05**: PostgreSQL 与 SQLite 均可无损升级/降级语义表，现有 formal semantic index、业务表和数据不被修改。
+- [x] **SEM-06**: 语义 API 在 list/detail/create/update/status/graph 查询中强制 project 与 institution isolation，并对重复对象返回稳定冲突错误。
+- [x] **SEM-07**: 系统可用 deterministic resolver 按 code/name/alias/comment/confirmed binding 等优先级返回候选与 provenance，LLM inference 仅为最后一级建议。
 
 ### Regulatory Context
 
@@ -69,7 +69,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07 | Phase 8 | Pending |
+| SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07 | Phase 8 | Complete |
 | CTX-01, CTX-02, CTX-03, CTX-04 | Phase 9 | Pending |
 | GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Pending |
 | SUI-01, SUI-02 | Phase 11 | Pending |
@@ -82,4 +82,3 @@
 
 ---
 *Requirements defined: 2026-08-20*
-

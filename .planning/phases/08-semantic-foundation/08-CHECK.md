@@ -24,6 +24,6 @@
 
 - Frontend tests: 26 passed; TypeScript passed.
 - Backend: 247 passed with 2 pre-existing Windows-only productization failures.
-- Alembic: `202607300014` is the single pre-change head.
+- Alembic: `202607300014` was the single pre-change head.
 
-The plans are safe to execute without breaking the existing architecture, subject to preserving the stated baseline failures rather than misclassifying them as Phase 8 regressions.
+The plans were safe to execute without breaking the existing architecture, subject to preserving the stated baseline failures rather than misclassifying them as Phase 8 regressions.

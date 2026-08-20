@@ -8,6 +8,7 @@
 **Goal:** 建立可治理、可查询、隔离安全的 Regulatory Semantic Layer。
 **Requirements:** SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07
 **Plans:** 3 plans
+**Status:** Complete (2026-08-20)
 **Success Criteria:**
 1. 可创建“客户、同业客户、客户统一编号、客户类型”并绑定 TargetField、MartField、SourceField、KnowledgeUnit。
 2. AI suggestion 不能直接 confirmed，状态转换和所有写操作可审计。
@@ -76,4 +77,3 @@ Semantic Foundation 是所有后续事实连接的先决条件；Context 在语�
 
 ---
 *Created: 2026-08-20*
-
