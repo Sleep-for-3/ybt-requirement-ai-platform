@@ -51,6 +51,7 @@ from app.api import (
     lineage,
     deliverables,
     uat,
+    semantic,
 )
 from app.core.database import engine
 from app.core.settings import get_settings
@@ -178,3 +179,4 @@ app.include_router(profiling.router, prefix=settings.api_prefix, dependencies=se
 app.include_router(lineage.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(deliverables.router, prefix=settings.api_prefix)
 app.include_router(uat.router, prefix=settings.api_prefix)
+app.include_router(semantic.router, prefix=settings.api_prefix, dependencies=secured)

@@ -22,6 +22,9 @@ from app.models import (
     SourceToMartMapping,
     WorkflowDefinition,
     WorkflowInstance,
+    SemanticBinding,
+    SemanticConcept,
+    SemanticRelation,
 )
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
@@ -54,6 +57,10 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
         {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
         {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
     ]),
+    "semantic_governance_review": ("监管语义治理审核", [
+        {"step_key": "business_review", "task_type": "review", "assignee_role": "business_reviewer"},
+        {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
+    ]),
 }
 
 TARGET_MODELS = {
@@ -65,7 +72,12 @@ TARGET_MODELS = {
     "scenario_review_package": ScenarioReviewPackage,
     "deliverable_package": DeliverablePackage,
     "impact_analysis": ImpactAnalysis,
+    "semantic_concept": SemanticConcept,
+    "semantic_binding": SemanticBinding,
+    "semantic_relation": SemanticRelation,
 }
+
+SEMANTIC_TARGET_TYPES = {"semantic_concept", "semantic_binding", "semantic_relation"}
 
 
 def start_workflow(
@@ -91,6 +103,10 @@ def start_workflow(
         raise HTTPException(status_code=400, detail="Impact analyses require lineage_change_review")
     if workflow_key != "scenario_mapping_review" and target_type == "scenario_review_package":
         raise HTTPException(status_code=400, detail="Scenario review packages require scenario_mapping_review")
+    if workflow_key == "semantic_governance_review" and target_type not in SEMANTIC_TARGET_TYPES:
+        raise HTTPException(status_code=400, detail="Semantic governance review requires a semantic target")
+    if workflow_key != "semantic_governance_review" and target_type in SEMANTIC_TARGET_TYPES:
+        raise HTTPException(status_code=400, detail="Semantic targets require semantic_governance_review")
     package = validate_review_package(db, project_id, target_id) if target_type == "scenario_review_package" else None
     if package is None:
         _snapshot_target(db, project_id, target_type, target_id)
@@ -233,6 +249,8 @@ def decide_task(
                 _finalize_double_layer_target(db, task.target_type, task.target_id, principal.username)
             elif instance.workflow_key == "lineage_change_review":
                 _finalize_lineage_impact(db, task.target_id)
+            elif instance.workflow_key == "semantic_governance_review":
+                _finalize_semantic_target(db, task.target_type, task.target_id, principal.username)
         else:
             next_step = steps[position + 1]["step_key"]
             instance.status = "in_progress"
@@ -411,6 +429,29 @@ def _finalize_lineage_impact(db: Session, impact_id: int) -> None:
             mapping.lineage_status = "verified"
             mapping.lineage_last_verified_at = verified_at
     impact.status = "reviewed"
+
+
+def _finalize_semantic_target(db: Session, target_type: str, target_id: int, reviewed_by: str) -> None:
+    model = {key: TARGET_MODELS[key] for key in SEMANTIC_TARGET_TYPES}.get(target_type)
+    target = db.get(model, target_id) if model is not None else None
+    if target is None:
+        raise HTTPException(status_code=404, detail="Semantic workflow target not found")
+    if target.status not in {"draft", "ai_suggested"}:
+        raise HTTPException(status_code=409, detail="Semantic target is not awaiting confirmation")
+    before_status = target.status
+    target.status = "confirmed"
+    target.confirmed_by = reviewed_by
+    target.confirmed_at = datetime.now(UTC)
+    record_audit(
+        db,
+        action="semantic_status_transition",
+        resource_type=target_type,
+        resource_id=target.id,
+        institution_id=target.institution_id,
+        project_id=target.project_id,
+        before={"status": before_status},
+        after={"status": "confirmed", "confirmed_by": reviewed_by, "workflow": "semantic_governance_review"},
+    )
 
 
 def _record_impact_review_decision(

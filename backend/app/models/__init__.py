@@ -87,6 +87,7 @@ from app.models.deliverables import (
 from app.models.uat import (
     UatCase, UatCaseResult, UatFinding, UatPack, UatPackItem, UatRun, UatSignoff, UatSuite,
 )
+from app.models.semantic import SemanticBinding, SemanticConcept, SemanticRelation
 
 __all__ = [
     "AuditLog",
@@ -180,6 +181,9 @@ __all__ = [
     "ScriptFileVersion",
     "SqlStatement",
     "TemplateVariable",
+    "SemanticBinding",
+    "SemanticConcept",
+    "SemanticRelation",
     "CaliberComparison",
     "DeliverableEvidenceItem",
     "DeliverableFieldItem",
