@@ -60,4 +60,15 @@ __all__ = [
     "sync_legacy_concept_projection",
     "transition_concept_status",
     "transition_version_status",
+    "RegulatoryContextBuilder",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose builder services without cycling through schema imports."""
+
+    if name == "RegulatoryContextBuilder":
+        from app.services.semantic.context_builder import RegulatoryContextBuilder
+
+        return RegulatoryContextBuilder
+    raise AttributeError(name)
