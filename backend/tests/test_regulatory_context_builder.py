@@ -242,6 +242,40 @@ def test_oversized_orm_text_and_aliases_are_compacted_at_contract_boundaries(
     assert oversized.semantic[0].value.aliases == exact.semantic[0].value.aliases
 
 
+def test_contract_text_compaction_preserves_multiline_sql_and_markdown_whitespace(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="PRESERVE_WHITESPACE")
+    version = db_session.get(SemanticConceptVersion, fixture["semantic_version_id"])
+    multiline_definition = (
+        "# Calculation rule\n\n"
+        "```sql\n"
+        "SELECT\n"
+        "    customer_id,\n"
+        "    CASE WHEN note = 'A  B' THEN 'keep   literal spacing' END AS status\n"
+        "FROM source_table;\n"
+        "```\n\n"
+        "- Validation\n"
+        "  - Preserve Markdown indentation"
+    )
+    version.definition = f"\n\t{multiline_definition}  \n"
+    db_session.commit()
+
+    within_limit = _build_context(db_session, fixture)
+    assert within_limit.semantic[0].value.definition == multiline_definition
+
+    prefix = f"{multiline_definition}\n"
+    padding = "x" * (11998 - len(prefix))
+    oversized_definition = f"{prefix}{padding}\nTAIL"
+    version.definition = f"\n{oversized_definition}  \n"
+    db_session.commit()
+
+    oversized = _build_context(db_session, fixture)
+    expected = f"{oversized_definition[:11999]}…"
+    assert oversized.semantic[0].value.definition == expected
+    assert oversized.semantic[0].value.definition.endswith("\n…")
+
+
 def test_mapping_lineage_evidence_history_and_knowledge_families_are_aggregated(
     db_session: Session,
 ) -> None:
