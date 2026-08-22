@@ -949,6 +949,117 @@ def test_query_count_is_measured_bounded_and_retriever_get_boundary_is_qualified
     assert knowledge_gets == [fixture["knowledge_unit_id"]]
 
 
+def test_effective_versions_are_batched_without_changing_temporal_visibility(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="VERSION_BATCH")
+    project = db_session.get(Project, fixture["project_id"])
+    target_field_id = fixture["target_field_id"]
+    request = RegulatoryContextRequest(
+        project_id=project.id,
+        target_field_id=target_field_id,
+        as_of=AS_OF,
+    )
+    engine = db_session.get_bind()
+
+    def measured_build() -> tuple[int, RegulatoryContext]:
+        db_session.expire_all()
+        authorized_project = _authorized_project(db_session, project.id)
+        statement_count = 0
+
+        def before_cursor_execute(*args: object) -> None:
+            nonlocal statement_count
+            statement_count += 1
+
+        event.listen(engine, "before_cursor_execute", before_cursor_execute)
+        try:
+            context = RegulatoryContextBuilder(db_session).build(
+                request,
+                authorized_project=authorized_project,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", before_cursor_execute)
+        return statement_count, context
+
+    baseline_count, baseline = measured_build()
+    expected_concept_ids = {
+        fact.value.semantic_concept_id for fact in baseline.semantic
+    }
+    excluded_concept_ids: set[int] = set()
+
+    def add_versioned_concept(
+        index: int,
+        *,
+        status: str = "confirmed",
+        effective_from: date = date(2026, 1, 1),
+        effective_to: date | None = date(2026, 12, 31),
+    ) -> int:
+        concept = SemanticConcept(
+            project_id=project.id,
+            institution_id=project.institution_id,
+            concept_type="business_term",
+            concept_code=f"BATCH_CONCEPT_{index:03d}",
+            concept_name=f"批量语义概念 {index}",
+            definition=f"批量语义定义 {index}",
+            status="confirmed",
+            confidence_level="high",
+            confirmed_by="batch-reviewer",
+            confirmed_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        db_session.add(concept)
+        db_session.flush()
+        db_session.add_all([
+            SemanticConceptVersion(
+                semantic_concept_id=concept.id,
+                project_id=project.id,
+                institution_id=project.institution_id,
+                version_no=1,
+                concept_name=concept.concept_name,
+                definition=concept.definition,
+                aliases_json=[],
+                status=status,
+                confidence_level="high",
+                effective_from=effective_from,
+                effective_to=effective_to,
+            ),
+            SemanticBinding(
+                project_id=project.id,
+                institution_id=project.institution_id,
+                semantic_concept_id=concept.id,
+                entity_type="target_field",
+                entity_id=target_field_id,
+                binding_type="represents",
+                confidence_level="high",
+                confidence_score=1.0,
+                status="confirmed",
+                confirmed_by="batch-reviewer",
+                confirmed_at=datetime(2026, 1, 1, tzinfo=UTC),
+            ),
+        ])
+        return int(concept.id)
+
+    for index in range(24):
+        expected_concept_ids.add(add_versioned_concept(index))
+    excluded_concept_ids.update({
+        add_versioned_concept(100, effective_from=date(2027, 1, 1), effective_to=None),
+        add_versioned_concept(101, effective_from=date(2025, 1, 1), effective_to=date(2025, 12, 31)),
+        add_versioned_concept(102, status="draft"),
+        add_versioned_concept(103, status="ai_suggested"),
+        add_versioned_concept(104, status="rejected"),
+        add_versioned_concept(105, status="deprecated"),
+    })
+    db_session.commit()
+
+    growth_count, growth = measured_build()
+    actual_concept_ids = {
+        fact.value.semantic_concept_id for fact in growth.semantic
+    }
+
+    assert growth_count == baseline_count
+    assert actual_concept_ids == expected_concept_ids
+    assert actual_concept_ids.isdisjoint(excluded_concept_ids)
+
+
 def test_confidential_deterministic_builds_normalize_only_valid_volatile_metadata(
     db_session: Session,
 ) -> None:
