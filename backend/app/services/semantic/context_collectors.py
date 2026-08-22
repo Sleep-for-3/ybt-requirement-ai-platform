@@ -128,16 +128,24 @@ def collect_base_context(
         target_field_id=target_field.id if target_field is not None else request.target_field_id,
         mart_field_id=mart_field.id if mart_field is not None else request.mart_field_id,
         semantic_concept_id=request.semantic_concept_id,
-        target_table_code=target_table.table_code if target_table is not None else None,
-        target_table_name=target_table.table_name if target_table is not None else None,
-        target_field_code=target_field.field_code if target_field is not None else None,
-        target_field_name=target_field.field_name if target_field is not None else None,
+        target_table_code=(
+            _bounded(target_table.table_code, 500) if target_table is not None else None
+        ),
+        target_table_name=(
+            _bounded(target_table.table_name, 500) if target_table is not None else None
+        ),
+        target_field_code=(
+            _bounded(target_field.field_code, 500) if target_field is not None else None
+        ),
+        target_field_name=(
+            _bounded(target_field.field_name, 500) if target_field is not None else None
+        ),
     )
     context_scenario = None if scenario is None else ContextScenario(
         scenario_id=scenario.id,
-        scenario_code=scenario.scenario_code,
-        scenario_name=scenario.scenario_name,
-        scenario_type=scenario.scenario_type,
+        scenario_code=_bounded(scenario.scenario_code, 150),
+        scenario_name=_bounded(scenario.scenario_name, 500),
+        scenario_type=_bounded(scenario.scenario_type, 80),
     )
     bindings, concepts = _semantic_inputs(
         db,
@@ -1595,10 +1603,46 @@ def _source_location(
 
 
 def _bounded(value: object | None, limit: int) -> str | None:
+    return _compact_text(value, limit)
+
+
+def _compact_text(value: object | None, limit: int) -> str | None:
+    """Normalize whitespace and deterministically signal Contract truncation."""
+
+    if limit < 1:
+        raise ValueError("text limit must be positive")
     if value is None:
         return None
-    normalized = str(value).strip()
-    return normalized[:limit] if normalized else None
+    normalized = " ".join(str(value).split())
+    if not normalized:
+        return None
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 1].rstrip()}…"
+
+
+def _compact_aliases(
+    values: object | None,
+    *,
+    item_limit: int = 500,
+    max_items: int = 100,
+) -> list[str]:
+    """Bound alias items before Pydantic while preserving stable first occurrence."""
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in list(values or []):
+        alias = _compact_text(raw, item_limit)
+        if alias is None:
+            continue
+        key = alias.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(alias)
+        if len(result) == max_items:
+            break
+    return result
 
 
 def _confidentiality(project: Project) -> str:
@@ -1643,9 +1687,9 @@ def _semantic_fact(
             concept_type=concept.concept_type,
             concept_code=concept.concept_code,
             concept_name=version.concept_name,
-            definition=version.definition,
-            aliases=list(version.aliases_json or []),
-            business_domain=version.business_domain,
+            definition=_bounded(version.definition, 12000),
+            aliases=_compact_aliases(version.aliases_json),
+            business_domain=_bounded(version.business_domain, 500),
         ),
         authority=authority_for_source(source_type),
         state=FactState.CONFIRMED,
@@ -1686,8 +1730,8 @@ def _semantic_candidate_fact(
         value=CandidateContextValue(
             candidate_type="semantic_concept",
             candidate_id=concept.id,
-            code=concept.concept_code,
-            name=concept.concept_name,
+            code=_bounded(concept.concept_code, 500),
+            name=_bounded(concept.concept_name, 500),
             match_reason="explicit_candidate_mode",
             score=_confidence(concept.confidence_level),
             rank_tier=(
@@ -1695,7 +1739,7 @@ def _semantic_candidate_fact(
                 if binding is not None and binding.status == "confirmed"
                 else CANDIDATE_TIER_SEMANTIC_EVIDENCE
             ),
-            evidence_excerpt=concept.definition,
+            evidence_excerpt=_bounded(concept.definition, 1000),
         ),
         authority=authority_for_source(source_type),
         state=FactState.AI_SUGGESTED,
@@ -1724,15 +1768,21 @@ def _target_field_fact(project: Project, field: TargetField) -> ContextFact:
         ContextAttribute(name="required_flag", value=field.required_flag),
     ]
     if field.field_type:
-        attributes.append(ContextAttribute(name="field_type", value=field.field_type))
+        attributes.append(ContextAttribute(
+            name="field_type",
+            value=_bounded(field.field_type, 2000),
+        ))
     return ContextFact(
         fact_type="target_field_metadata",
         value=MetadataContextValue(
             entity_type="target_field",
             entity_id=field.id,
-            code=field.field_code,
-            name=field.field_name,
-            description=field.regulatory_description or field.field_definition,
+            code=_bounded(field.field_code, 500),
+            name=_bounded(field.field_name, 500),
+            description=_bounded(
+                field.regulatory_description or field.field_definition,
+                4000,
+            ),
             attributes=attributes,
         ),
         authority=authority_for_source(source_type),
