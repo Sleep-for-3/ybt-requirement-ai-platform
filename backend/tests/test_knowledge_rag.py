@@ -317,7 +317,8 @@ def test_scope_reuse_isolation_and_no_evidence_answer(tmp_path: Path, monkeypatc
         _upload(client, owner["id"], "甲行口径.txt", "甲银行内部证件类型规则".encode(), "historical_mapping", "institution", "甲银行")
 
         same_result = _post(client, f"/api/projects/{same_bank['id']}/knowledge/hybrid-search", {"query": "证件类型规则", "top_k": 10})
-        assert {item["knowledge_type"] for item in same_result["items"]} == {"regulatory_policy", "historical_mapping"}
+        # bank_name is descriptive text, not an institution authorization key.
+        assert {item["knowledge_type"] for item in same_result["items"]} == {"regulatory_policy"}
         assert all(item["vector_score"] > 0 for item in same_result["items"])
 
         other_result = _post(client, f"/api/projects/{other_bank['id']}/knowledge/hybrid-search", {"query": "证件类型规则", "top_k": 10})
