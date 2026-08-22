@@ -3,12 +3,14 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, date, datetime
 import json
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    BusinessSystem,
     HistoricalCaliberImport,
     HistoricalCaliberItem,
     Institution,
@@ -32,6 +34,8 @@ from app.models import (
     SemanticBinding,
     SemanticConcept,
     SemanticConceptVersion,
+    SourceField,
+    SourceTable,
     SourceToMartMapping,
     TargetField,
     TargetTable,
@@ -40,12 +44,23 @@ from app.schemas.regulatory_context import ContextMode, RegulatoryContext, Regul
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.semantic import context_builder as context_builder_module
-from app.services.semantic.context_authority import FactState, authority_for_source
+from app.services.semantic.context_authority import AuthorityRank, FactState, authority_for_source
 from app.services.semantic.context_builder import RegulatoryContextBuilder
+from app.services.embeddings.mock import MockEmbeddingService
+from app.services.retrieval.hybrid_retriever import HybridRetriever
 from app.services.retrieval.keyword_index import index_knowledge_unit
+from app.services.vector.knowledge_record import build_knowledge_vector_record
+from app.services.vector.mock import MockVectorStore
 
 
 AS_OF = date(2026, 6, 30)
+ACCEPTANCE_QUERY_BUDGET = 21
+SPEC_LESS_REQUIREMENT_METADATA = (
+    {"id": "CTX-01", "classification": "unclassified", "resolution": "unresolved"},
+    {"id": "CTX-02", "classification": "unclassified", "resolution": "unresolved"},
+    {"id": "CTX-03", "classification": "unclassified", "resolution": "unresolved"},
+    {"id": "CTX-04", "classification": "unclassified", "resolution": "unresolved"},
+)
 
 
 def test_acceptance_context_build_returns_typed_project_scoped_date_effective_facts(
@@ -524,6 +539,239 @@ def test_two_project_two_institution_isolation_preserves_authoritative_rows(
     assert other["project_id"] != fixture["project_id"]
 
 
+def test_candidate_ranking_uses_explicit_tiers_and_caps_only_after_full_sort(
+    db_session: Session,
+) -> None:
+    fixture = _seed_candidate_context(db_session)
+    expected_tiers = fixture.pop("candidate_tiers")
+
+    full = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+        candidate_limit=100,
+    )
+    source_and_mart = [
+        fact for fact in full.candidates
+        if fact.value.candidate_type in {"source_field", "mart_field"}
+    ]
+    actual_tiers = {
+        (fact.value.candidate_type, fact.value.candidate_id): fact.value.rank_tier
+        for fact in source_and_mart
+    }
+
+    assert actual_tiers == expected_tiers
+    assert {fact.value.rank_tier for fact in source_and_mart} == set(range(1, 8))
+    assert [
+        (fact.value.rank_tier, fact.value.candidate_type, fact.value.candidate_id)
+        for fact in source_and_mart
+    ] == sorted(
+        (
+            fact.value.rank_tier,
+            fact.value.candidate_type,
+            fact.value.candidate_id,
+        )
+        for fact in source_and_mart
+    )
+
+    capped = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+        candidate_limit=3,
+    )
+    assert [
+        (fact.value.candidate_type, fact.value.candidate_id)
+        for fact in capped.candidates
+    ] == [
+        (fact.value.candidate_type, fact.value.candidate_id)
+        for fact in full.candidates[:3]
+    ]
+
+
+def test_spec_less_records_remain_test_metadata_and_never_enter_runtime_output(
+    db_session: Session,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="SPEC_LESS")
+    context = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+    )
+    serialized = json.dumps(context.model_dump(mode="json"), ensure_ascii=False)
+
+    assert len(SPEC_LESS_REQUIREMENT_METADATA) == 4
+    assert {item["id"] for item in SPEC_LESS_REQUIREMENT_METADATA} == {
+        "CTX-01",
+        "CTX-02",
+        "CTX-03",
+        "CTX-04",
+    }
+    assert all(
+        item["classification"] == "unclassified" and item["resolution"] == "unresolved"
+        for item in SPEC_LESS_REQUIREMENT_METADATA
+    )
+    assert all(item["id"] not in serialized for item in SPEC_LESS_REQUIREMENT_METADATA)
+    assert all(
+        question.question_code not in {item["id"] for item in SPEC_LESS_REQUIREMENT_METADATA}
+        for question in context.open_questions
+    )
+    trusted_states = {FactState.CONFIRMED, FactState.APPROVED, FactState.VERIFIED}
+    assert all(
+        fact.state not in trusted_states
+        for fact in _all_facts(context)
+        if fact.authority in {AuthorityRank.RETRIEVED, AuthorityRank.INFERRED}
+    )
+
+
+def test_query_count_is_measured_bounded_and_retriever_get_boundary_is_qualified(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="QUERY_COUNT")
+    engine = db_session.get_bind()
+
+    def measured_build() -> tuple[int, RegulatoryContext]:
+        db_session.expire_all()
+        project = _authorized_project(db_session, fixture["project_id"])
+        request = _request_for_fixture(fixture)
+        statement_count = 0
+
+        def before_cursor_execute(*args: object) -> None:
+            nonlocal statement_count
+            statement_count += 1
+
+        event.listen(engine, "before_cursor_execute", before_cursor_execute)
+        try:
+            context = RegulatoryContextBuilder(db_session).build(
+                request,
+                authorized_project=project,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", before_cursor_execute)
+        return statement_count, context
+
+    baseline_count, baseline = measured_build()
+    project = db_session.get(Project, fixture["project_id"])
+    for index in range(6):
+        db_session.add(SourceToMartMapping(
+            project_id=project.id,
+            mart_field_id=fixture["mart_field_id"],
+            mapping_name=f"等价来源映射 {index}",
+            mapping_status="draft",
+            final_content=f"等价来源映射内容 {index}",
+            lineage_status="linked",
+        ))
+        _seed_raw_lineage_case(
+            db_session,
+            project,
+            fixture["target_field_id"],
+            suffix=f"QUERY_GROWTH_{index}",
+        )
+        _seed_knowledge_unit(
+            db_session,
+            owner_project=project,
+            scope="project",
+            institution_name=None,
+            content=f"客户统一编号 CUST_UNIFIED_NO 等价知识 {index}",
+            confidentiality="internal",
+            suffix=f"QUERY_GROWTH_{index}",
+            scenario_id=fixture["scenario_id"],
+        )
+    db_session.commit()
+    authoritative_before_growth_build = _expanded_authoritative_snapshot(db_session)
+    growth_count, growth = measured_build()
+
+    assert baseline_count == ACCEPTANCE_QUERY_BUDGET
+    assert growth_count <= ACCEPTANCE_QUERY_BUDGET
+    assert growth.build_metadata.fact_count > baseline.build_metadata.fact_count
+    assert _expanded_authoritative_snapshot(db_session) == authoritative_before_growth_build
+
+    original_get = db_session.get
+    knowledge_gets: list[int] = []
+
+    def tracked_get(entity: object, identifier: object, *args: object, **kwargs: object):
+        if entity is KnowledgeUnit:
+            knowledge_gets.append(int(identifier))
+        return original_get(entity, identifier, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", tracked_get)
+    _build_context(db_session, fixture)
+    assert knowledge_gets == []
+
+    unit = original_get(KnowledgeUnit, fixture["knowledge_unit_id"])
+    embedding = MockEmbeddingService()
+    vector_store = MockVectorStore()
+    vector_store.upsert([build_knowledge_vector_record(unit, embedding.embed_query(unit.content))])
+    settings = SimpleNamespace(
+        keyword_top_k=500,
+        vector_top_k=30,
+        hybrid_keyword_weight=0.55,
+        hybrid_vector_weight=0.45,
+        vector_store_provider="mock",
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.hybrid_retriever.get_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.hybrid_retriever.get_embedding_service",
+        lambda: embedding,
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.hybrid_retriever.get_vector_store",
+        lambda *args: vector_store,
+    )
+    knowledge_gets.clear()
+    HybridRetriever(db_session).search(
+        fixture["project_id"],
+        "客户统一编号",
+        target_field_id=fixture["target_field_id"],
+        scenario_id=fixture["scenario_id"],
+        top_k=5,
+        retrieval_mode="vector_only",
+    )
+    assert knowledge_gets == [fixture["knowledge_unit_id"]]
+
+
+def test_confidential_deterministic_builds_normalize_only_valid_volatile_metadata(
+    db_session: Session,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="DETERMINISTIC")
+
+    first = _build_context(db_session, fixture)
+    second = _build_context(db_session, fixture)
+
+    assert _stable_projection(first) == _stable_projection(second)
+    assert first.build_metadata.retrieval_log_ids != second.build_metadata.retrieval_log_ids
+    for context in (first, second):
+        assert context.build_metadata.built_at.tzinfo is not None
+        assert context.build_metadata.built_at.utcoffset() is not None
+        expected_log_ids = sorted({
+            fact.provenance.retrieval_log_id
+            for fact in _all_facts(context)
+            if fact.provenance.retrieval_log_id is not None
+        })
+        assert context.build_metadata.retrieval_log_ids == expected_log_ids
+        assert all(
+            db_session.get(RetrievalLog, log_id).project_id == fixture["project_id"]
+            for log_id in expected_log_ids
+        )
+        retrieved = [
+            fact for fact in context.knowledge_evidence
+            if fact.source_type == "retrieved_knowledge"
+        ]
+        assert retrieved
+        assert all(
+            fact.source_id == fact.provenance.source_id == fact.value.knowledge_unit_id
+            for fact in retrieved
+        )
+        assert all(
+            fact.provenance.confidentiality_level == fact.value.confidentiality_level
+            for fact in retrieved
+        )
+
+
 def _seed_acceptance_target(db: Session, *, suffix: str = "A") -> dict[str, int]:
     project = _seed_project(
         db,
@@ -777,6 +1025,106 @@ def _seed_populated_context(db: Session, *, suffix: str) -> dict[str, int]:
     return fixture
 
 
+def _seed_candidate_context(db: Session) -> dict:
+    fixture = _seed_populated_context(db, suffix="CANDIDATE")
+    project = db.get(Project, fixture["project_id"])
+    system = BusinessSystem(
+        project_id=project.id,
+        system_code="CANDIDATE_SYS",
+        system_name="候选来源系统",
+        enabled=True,
+    )
+    db.add(system)
+    db.flush()
+    source_table = SourceTable(
+        project_id=project.id,
+        business_system_id=system.id,
+        table_code="CANDIDATE_TABLE",
+        table_name="候选来源表",
+    )
+    db.add(source_table)
+    db.flush()
+
+    def source_field(code: str, name: str, comment: str | None = None) -> SourceField:
+        row = SourceField(
+            project_id=project.id,
+            source_table_id=source_table.id,
+            field_code=code,
+            field_name=name,
+            field_comment=comment,
+        )
+        db.add(row)
+        db.flush()
+        return row
+
+    bound = source_field("BOUND_ONLY", "绑定候选")
+    exact = source_field("CUST_UNIFIED_NO", "代码精确候选")
+    semantic_evidence = source_field("SEMANTIC_EVIDENCE_ONLY", "语义证据候选")
+    metadata_keyword = source_field(
+        "METADATA_ONLY",
+        "元数据候选",
+        "客户唯一标识补充来源",
+    )
+    historical = source_field("HISTORY_ONLY", "历史候选")
+    lineage = source_field("LINEAGE_ONLY", "血缘候选")
+    retrieval = source_field("RETRIEVAL_ONLY", "检索候选")
+    db.add(SemanticBinding(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        semantic_concept_id=fixture["semantic_concept_id"],
+        entity_type="source_field",
+        entity_id=bound.id,
+        binding_type="represents",
+        confidence_level="high",
+        confidence_score=1.0,
+        status="confirmed",
+        confirmed_by="candidate-reviewer",
+        confirmed_at=datetime(2026, 1, 1, tzinfo=UTC),
+    ))
+    db.add(MappingEvidenceReference(
+        project_id=project.id,
+        mapping_type="source_to_mart",
+        mapping_id=fixture["source_mapping_id"],
+        evidence_type="source_field",
+        evidence_id=semantic_evidence.id,
+        source_name="候选字段语义评审",
+        location_text="candidate/source-field",
+        evidence_summary="字段被映射证据引用",
+    ))
+    historical_item = db.get(HistoricalCaliberItem, fixture["historical_item_id"])
+    historical_item.source_field_name = historical.field_code
+    lineage_edge = _seed_raw_lineage_case(
+        db,
+        project,
+        fixture["target_field_id"],
+        suffix="CANDIDATE_NEIGHBOR",
+    )
+    edge = db.get(LineageEdge, lineage_edge)
+    db.get(LineageNode, edge.source_node_id).source_field_id = lineage.id
+    _seed_knowledge_unit(
+        db,
+        owner_project=project,
+        scope="project",
+        institution_name=None,
+        content="客户统一编号 CUST_UNIFIED_NO 检索证据 RETRIEVAL_ONLY",
+        confidentiality="internal",
+        suffix="CANDIDATE_RETRIEVAL",
+        scenario_id=fixture["scenario_id"],
+    )
+    db.commit()
+    fixture["candidate_tiers"] = {
+        ("mart_field", fixture["mart_field_id"]): 1,
+        ("source_field", bound.id): 1,
+        ("source_field", exact.id): 2,
+        ("source_field", semantic_evidence.id): 3,
+        ("source_field", metadata_keyword.id): 4,
+        ("source_field", historical.id): 5,
+        ("source_field", lineage.id): 6,
+        ("source_field", retrieval.id): 7,
+    }
+    return fixture
+
+
 def _seed_gap_context(db: Session, *, suffix: str) -> dict[str, int]:
     project = _seed_project(db, f"CTX_{suffix}", f"缺口银行 {suffix}", f"缺口项目 {suffix}")
     target_table = TargetTable(
@@ -971,18 +1319,38 @@ def _seed_raw_lineage_case(
     return edge.id
 
 
-def _build_context(db: Session, fixture: dict[str, int]) -> RegulatoryContext:
+def _request_for_fixture(
+    fixture: dict,
+    *,
+    mode: ContextMode = ContextMode.TRUSTED,
+    candidate_limit: int = 50,
+) -> RegulatoryContextRequest:
+    return RegulatoryContextRequest(
+        project_id=fixture["project_id"],
+        target_table_id=fixture.get("target_table_id"),
+        target_field_id=fixture.get("target_field_id"),
+        mart_field_id=fixture.get("mart_field_id"),
+        semantic_concept_id=fixture.get("semantic_concept_id"),
+        scenario_id=fixture.get("scenario_id"),
+        as_of=AS_OF,
+        mode=mode,
+        candidate_limit=candidate_limit,
+    )
+
+
+def _build_context(
+    db: Session,
+    fixture: dict,
+    *,
+    mode: ContextMode = ContextMode.TRUSTED,
+    candidate_limit: int = 50,
+) -> RegulatoryContext:
     project = _authorized_project(db, fixture["project_id"])
     return RegulatoryContextBuilder(db).build(
-        RegulatoryContextRequest(
-            project_id=project.id,
-            target_table_id=fixture.get("target_table_id"),
-            target_field_id=fixture.get("target_field_id"),
-            mart_field_id=fixture.get("mart_field_id"),
-            semantic_concept_id=fixture.get("semantic_concept_id"),
-            scenario_id=fixture.get("scenario_id"),
-            as_of=AS_OF,
-            mode=ContextMode.TRUSTED,
+        _request_for_fixture(
+            fixture,
+            mode=mode,
+            candidate_limit=candidate_limit,
         ),
         authorized_project=project,
     )
