@@ -81,6 +81,7 @@ MAPPING_TRUSTED_STATUSES = {
     "scenario_technical": frozenset({"confirmed"}),
 }
 MAPPING_CANDIDATE_STATUSES = frozenset({"draft", "ai_suggested"})
+EVIDENCE_REFERENCE_LIMIT = 50
 
 
 @dataclass
@@ -98,6 +99,8 @@ class CollectedContext:
     quality: list[ContextFact] = field(default_factory=list)
     collector_names: list[str] = field(default_factory=list)
     signals: dict[str, object] = field(default_factory=dict)
+    truncated: bool = False
+    warnings: list[str] = field(default_factory=list)
 
     def all_facts(self) -> list[ContextFact]:
         return [
@@ -350,6 +353,10 @@ def collect_base_context(
                 if fact.value.definition
             ],
         },
+        truncated=any(
+            len(rows) > EVIDENCE_REFERENCE_LIMIT
+            for rows in evidence_by_mapping.values()
+        ),
     )
 
 
@@ -1602,7 +1609,7 @@ def _mapping_evidence_refs(
         evidence_id=(int(row.evidence_id) if row.evidence_id and row.evidence_id > 0 else None),
         citation=_bounded(row.source_name, 1000),
         source_location=_bounded(row.location_text, 1000),
-    ) for row in rows]
+    ) for row in rows[:EVIDENCE_REFERENCE_LIMIT]]
 
 
 def _source_type_for_mapping_type(mapping_type: str) -> str:

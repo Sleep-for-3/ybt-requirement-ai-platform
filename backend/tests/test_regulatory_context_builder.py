@@ -40,7 +40,12 @@ from app.models import (
     TargetField,
     TargetTable,
 )
-from app.schemas.regulatory_context import ContextMode, RegulatoryContext, RegulatoryContextRequest
+from app.schemas.regulatory_context import (
+    ContextFact,
+    ContextMode,
+    RegulatoryContext,
+    RegulatoryContextRequest,
+)
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.semantic import context_builder as context_builder_module
@@ -49,6 +54,7 @@ from app.services.semantic.context_builder import RegulatoryContextBuilder
 from app.services.embeddings.mock import MockEmbeddingService
 from app.services.retrieval.hybrid_retriever import HybridRetriever
 from app.services.retrieval.keyword_index import index_knowledge_unit
+from app.services.semantic.context_collectors import CollectedContext
 from app.services.vector.knowledge_record import build_knowledge_vector_record
 from app.services.vector.mock import MockVectorStore
 
@@ -274,6 +280,119 @@ def test_contract_text_compaction_preserves_multiline_sql_and_markdown_whitespac
     expected = f"{oversized_definition[:11999]}…"
     assert oversized.semantic[0].value.definition == expected
     assert oversized.semantic[0].value.definition.endswith("\n…")
+
+
+def test_mapping_evidence_budget_caps_51_references_and_marks_truncation(
+    db_session: Session,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="EVIDENCE_BUDGET")
+    for index in range(50):
+        db_session.add(MappingEvidenceReference(
+            project_id=fixture["project_id"],
+            mapping_type="mart_to_ybt",
+            mapping_id=fixture["mart_mapping_id"],
+            evidence_type="manual_note",
+            source_name=f"额外证据 {index:02d}",
+            location_text=f"evidence-budget:{index:02d}",
+            evidence_summary="用于验证每事实证据上限",
+        ))
+    db_session.commit()
+
+    context = _build_context(db_session, fixture)
+
+    mapping = next(
+        fact for fact in context.mappings
+        if fact.source_id == fixture["mart_mapping_id"]
+        and fact.value.mapping_type == "mart_to_ybt"
+    )
+    assert len(mapping.evidence_references) == 50
+    assert mapping.evidence_references == mapping.provenance.evidence_references
+    assert mapping.evidence_references[-1].source_location == "evidence-budget:48"
+    assert context.build_metadata.truncated is True
+    assert context.build_metadata.warnings == [
+        "Regulatory context output was deterministically truncated to Contract limits."
+    ]
+    assert context.build_metadata.fact_count == len(_all_facts(context))
+
+
+@pytest.mark.parametrize(
+    ("input_count", "expected_count", "expected_truncated"),
+    [(500, 500, False), (501, 500, True)],
+)
+def test_fact_section_budget_is_deterministic_at_500_and_501(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    input_count: int,
+    expected_count: int,
+    expected_truncated: bool,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix=f"SECTION_{input_count}")
+    project = _authorized_project(db_session, fixture["project_id"])
+    baseline = _build_context(db_session, fixture)
+    semantic = [
+        _copy_fact_with_source_id(baseline.semantic[0], source_id)
+        for source_id in range(1, input_count + 1)
+    ]
+    collected = CollectedContext(
+        target=baseline.target,
+        semantic=semantic,
+        collector_names=["section_budget_test"],
+        signals={"has_semantic_binding": True, "has_semantic_version": True},
+    )
+    monkeypatch.setattr(context_builder_module, "collect_base_context", lambda *args: collected)
+
+    context = RegulatoryContextBuilder(db_session).build(
+        _request_for_fixture(fixture),
+        authorized_project=project,
+    )
+
+    assert len(context.semantic) == expected_count
+    assert [fact.source_id for fact in context.semantic] == list(
+        range(1, expected_count + 1)
+    )
+    assert context.build_metadata.fact_count == expected_count
+    assert context.build_metadata.truncated is expected_truncated
+    assert bool(context.build_metadata.warnings) is expected_truncated
+
+
+def test_global_fact_budget_allocates_1000_in_stable_section_order(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="GLOBAL_BUDGET")
+    project = _authorized_project(db_session, fixture["project_id"])
+    baseline = _build_context(db_session, fixture)
+    collected = CollectedContext(
+        target=baseline.target,
+        scenario=baseline.scenario,
+        semantic=[
+            _copy_fact_with_source_id(baseline.semantic[0], source_id)
+            for source_id in range(1, 501)
+        ],
+        regulatory=[
+            _copy_fact_with_source_id(baseline.regulatory[0], source_id)
+            for source_id in range(1001, 1501)
+        ],
+        metadata=[baseline.metadata[0]],
+        collector_names=["global_budget_test"],
+        signals={"has_semantic_binding": True, "has_semantic_version": True},
+    )
+    monkeypatch.setattr(context_builder_module, "collect_base_context", lambda *args: collected)
+
+    context = RegulatoryContextBuilder(db_session).build(
+        _request_for_fixture(fixture),
+        authorized_project=project,
+    )
+
+    assert len(context.semantic) == 500
+    assert len(context.regulatory) == 500
+    assert context.metadata == []
+    assert context.build_metadata.fact_count == 1000
+    assert context.build_metadata.source_count == 1000
+    assert context.build_metadata.truncated is True
+    assert context.build_metadata.warnings == [
+        "Regulatory context output was deterministically truncated to Contract limits."
+    ]
 
 
 def test_mapping_lineage_evidence_history_and_knowledge_families_are_aggregated(
@@ -1920,6 +2039,11 @@ def _all_facts(context: RegulatoryContext) -> list:
         *context.historical,
         *context.quality,
     ]
+
+
+def _copy_fact_with_source_id(fact: ContextFact, source_id: int) -> ContextFact:
+    provenance = fact.provenance.model_copy(update={"source_id": source_id})
+    return fact.model_copy(update={"source_id": source_id, "provenance": provenance})
 
 
 def _authoritative_snapshot(db: Session, project_id: int) -> tuple[tuple[str, int], ...]:

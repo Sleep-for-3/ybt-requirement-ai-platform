@@ -21,8 +21,10 @@ from app.models import (
     KnowledgeDocument,
     KnowledgeDocumentVersion,
     KnowledgeUnit,
+    MappingEvidenceReference,
     MartField,
     MartTable,
+    MartToYbtMapping,
     ProductScenario,
     Project,
     ProjectMembership,
@@ -124,6 +126,54 @@ def test_endpoint_uses_locked_authorization_and_builder_handoff(
         "build_metadata",
     }
     assert not _contains_planning_requirement_ids(response.json())
+
+
+def test_large_persisted_mapping_evidence_is_truncated_instead_of_returning_400() -> None:
+    with _regulatory_client() as (client, sessions):
+        fixture = _seed_acceptance_target(sessions, suffix="EVIDENCE_BUDGET")
+        with sessions() as db:
+            mapping = MartToYbtMapping(
+                project_id=fixture["project_id"],
+                target_field_id=fixture["target_field_id"],
+                mapping_name="HTTP 大证据映射",
+                mapping_status="approved",
+                business_rule="直接映射",
+                lineage_status="linked",
+            )
+            db.add(mapping)
+            db.flush()
+            mapping_id = int(mapping.id)
+            db.add_all([
+                MappingEvidenceReference(
+                    project_id=fixture["project_id"],
+                    mapping_type="mart_to_ybt",
+                    mapping_id=mapping_id,
+                    evidence_type="manual_note",
+                    source_name=f"HTTP 证据 {index:02d}",
+                    location_text=f"http-evidence:{index:02d}",
+                    evidence_summary="验证有效持久化数据不会触发 400",
+                )
+                for index in range(51)
+            ])
+            db.commit()
+
+        response = client.get(
+            f"/api/projects/{fixture['project_id']}/regulatory-context",
+            params={
+                "target_field_id": fixture["target_field_id"],
+                "as_of": AS_OF.isoformat(),
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    mapping_payload = next(
+        fact for fact in payload["mappings"]
+        if fact["source_id"] == mapping_id
+    )
+    assert len(mapping_payload["evidence_references"]) == 50
+    assert payload["build_metadata"]["truncated"] is True
+    assert len(payload["build_metadata"]["warnings"]) == 1
 
 
 def test_unauthorized_request_never_invokes_builder(
