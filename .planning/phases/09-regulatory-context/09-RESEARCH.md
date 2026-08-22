@@ -491,7 +491,7 @@ Plan 09-01 must be independently executable and summarizable: it must not depend
 | A2 | Bootstrap `effective_from` should derive from legacy `created_at` with a fixed-date fallback. [ASSUMED] | `202608200016` migration | Wrong date semantics can hide or expose a Concept for historical `as_of` queries; requires a locked decision before implementation. |
 | A3 | Confirmed interval overlap will be enforced in a transaction at the service layer, with only portable date checks in the schema and optional PostgreSQL-specific strengthening. [ASSUMED] | Temporal model | Concurrency behavior differs by dialect; staging must qualify it. |
 | A4 | Exact additive version/context endpoint paths and response field names are recommendations, not existing contracts. [ASSUMED] | API / four plans | Incorrect naming could break clients or require plan adjustment. |
-| A5 | Authority/state enum member names and exact conflict/open-question code catalog beyond `MISSING_SOURCE_MAPPING` remain to be chosen. [ASSUMED] | Contract / builder | Unstable serialization would break CTX-02/CTX-04 tests. |
+| A5 | Authority/state/source vocabulary is fixed by the implemented 09-02 Contract: `AuthorityRank`, `FactState`, registered source types in `context_authority.py`, and `authority_for_source()` are the only builder vocabulary; every ContextFact fails closed on an unknown or mismatched source authority. Conflict/open-question codes remain the builder catalog required by D-18. [RESOLVED/VERIFIED: backend/app/services/semantic/context_authority.py; backend/app/schemas/regulatory_context.py; backend/tests/test_regulatory_context_contract.py] | Contract / builder | Executors must consume the Contract rather than create parallel enum or source vocabularies. |
 | A6 | A representative Context build can be held to a bounded query-count budget after measurement; the numeric budget is not yet known. [ASSUMED] | Validation / performance | An arbitrary threshold could hide N+1 or over-constrain valid collector joins. |
 | A7 | Live deployment state outside this checkout has no semantic scheduled task, secret, or context cache. [ASSUMED/LOW] | Runtime State Inventory | Production systems may require a separate migration/config audit. |
 
@@ -506,6 +506,8 @@ Plan 09-01 must be independently executable and summarizable: it must not depend
 4. **`reporting_period` semantics — RESOLVED.** It is an optional normalized label carried in scope/build metadata only. `as_of` remains the sole effective-date selector. Phase 9 adds no reporting-period table and never infers an authoritative date from the label. [VERIFIED: .planning/phases/09-regulatory-context/09-CONTEXT.md:19; backend/app/models/entities.py:336-395; backend/app/models/deliverables.py:171-236]
 
 5. **PostgreSQL qualification — RESOLVED.** Local execution must prove SQLite online lifecycle and isolated PostgreSQL SQL/dialect compatibility. Confirmed-interval creation locks the stable Concept row on PostgreSQL before the portable overlap check; SQLite relies on its serialized write transaction plus the same check. A live staging PostgreSQL migration and concurrent-overlap test is a documented pre-release gate, not a hidden local pass condition. [VERIFIED: environment probe 2026-08-20; .planning/STATE.md:52-56; ASSUMED: staging gate]
+
+6. **Authority/state/source vocabulary — RESOLVED.** The completed 09-02 Contract is the sole authority: builders import its `AuthorityRank` and `FactState`, use only source types registered by `context_authority.py`, and derive each fact's authority with `authority_for_source(source_type)`. `RegulatoryKnowledgeItem` is source type `regulatory_knowledge_item` with regulatory authority and a non-confirmed state because its model has no governance status; HybridRetriever facts use source type `retrieved_knowledge`, retrieved authority/state, and RetrievalLog provenance. No parallel authority label or lifecycle state is introduced. [VERIFIED: backend/app/services/semantic/context_authority.py; backend/app/schemas/regulatory_context.py; backend/tests/test_regulatory_context_contract.py]
 
 ## Environment Availability
 
@@ -652,9 +654,9 @@ Security enforcement is enabled because `.planning/config.json` does not set `se
 | Architecture | MEDIUM/HIGH | Current ownership and locked decisions are directly evidenced; new module/file names and temporal bootstrap implementation are recommendations. [VERIFIED: source files and 09-CONTEXT.md; ASSUMED] |
 | Pitfalls | HIGH | Status contamination, resolver ordering/reflection, version edit counter, migration lifecycle, scope/confidentiality, and baseline failures are directly reproducible or documented. [VERIFIED: source files, targeted tests, Phase 8 verification] |
 
-### Open Questions
+### Open Questions (RESOLVED)
 
-Authority/state enum spellings and a measured query-count budget remain implementation choices. Bootstrap effective date, additive endpoint shapes, identity-level Binding, reporting-period semantics, and the local/staging PostgreSQL qualification split are resolved planning decisions. [ASSUMED: see resolved decisions above]
+No design or architecture questions remain. Authority/state/source vocabulary, bootstrap effective date, additive endpoint shapes, identity-level Binding, reporting-period semantics, and the local/staging PostgreSQL qualification split are resolved decisions. The numeric query-count budget is an execution-time measurement against the canonical fixture, not an open design question. [VERIFIED: backend/app/services/semantic/context_authority.py; backend/app/schemas/regulatory_context.py; see resolved decisions above]
 
 ### Ready for Planning
 
