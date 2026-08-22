@@ -196,10 +196,10 @@ def collect_base_context(
         if request.mode is ContextMode.CANDIDATE:
             concept_candidate_bindings = candidate_by_concept.get(concept_id, [])
             candidates.extend(
-                _semantic_candidate_fact(authorized_project, concept, binding)
+                _semantic_binding_candidate_fact(authorized_project, concept, binding)
                 for binding in concept_candidate_bindings
             )
-            if version is None and not concept_candidate_bindings:
+            if version is None:
                 candidates.append(_semantic_candidate_fact(
                     authorized_project,
                     concept,
@@ -1878,6 +1878,55 @@ def _semantic_candidate_fact(
         evidence_references=evidence,
         observed_at=observed_at,
         confidence=_confidence(concept.confidence_level),
+        provenance=provenance,
+    )
+
+
+def _semantic_binding_candidate_fact(
+    project: Project,
+    concept: SemanticConcept,
+    binding: SemanticBinding,
+) -> ContextFact:
+    observed_at = _aware_datetime(binding.updated_at or binding.created_at)
+    source_type = "resolver_candidate"
+    score = (
+        min(max(float(binding.confidence_score), 0.0), 1.0)
+        if binding.confidence_score is not None
+        else _confidence(binding.confidence_level)
+    )
+    evidence = [ContextEvidenceReference(
+        evidence_type="semantic_binding",
+        evidence_id=binding.id,
+        citation=f"{binding.entity_type}:{binding.entity_id}",
+    )]
+    provenance = ContextProvenance(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        source_model="SemanticBinding",
+        source_type=source_type,
+        source_id=binding.id,
+        evidence_references=evidence,
+        observed_at=observed_at,
+    )
+    return ContextFact(
+        fact_type="semantic_binding_candidate",
+        value=CandidateContextValue(
+            candidate_type="semantic_binding",
+            candidate_id=binding.id,
+            code=_bounded(f"{binding.entity_type}:{binding.entity_id}", 500),
+            name=_bounded(binding.binding_type, 500),
+            match_reason=f"{binding.status} semantic binding requires explicit review",
+            score=score,
+            rank_tier=CANDIDATE_TIER_SEMANTIC_EVIDENCE,
+            evidence_excerpt=_bounded(concept.definition, 1000),
+        ),
+        authority=authority_for_source(source_type),
+        state=FactState(binding.status),
+        source_type=source_type,
+        source_id=binding.id,
+        evidence_references=evidence,
+        observed_at=observed_at,
+        confidence=score,
         provenance=provenance,
     )
 

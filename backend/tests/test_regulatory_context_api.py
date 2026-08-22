@@ -408,11 +408,26 @@ def test_trusted_and_candidate_modes_preserve_lifecycle_and_provenance() -> None
     assert lifecycle["rejected"] not in candidate_ids
     assert lifecycle["deprecated"] not in candidate_ids
     for fact in candidate_payload["candidates"]:
-        if fact["value"]["candidate_id"] in candidate_ids:
+        if (
+            fact["value"]["candidate_type"] == "semantic_concept"
+            and fact["value"]["candidate_id"] in candidate_ids
+        ):
             assert fact["state"] != "confirmed"
             assert fact["source_type"] == "resolver_candidate"
             assert fact["provenance"]["source_model"] == "SemanticConcept"
             assert fact["provenance"]["project_id"] == fixture["project_id"]
+    binding_candidates = [
+        fact for fact in candidate_payload["candidates"]
+        if fact["value"]["candidate_type"] == "semantic_binding"
+    ]
+    assert {fact["state"] for fact in binding_candidates} == {"draft", "ai_suggested"}
+    assert all(
+        fact["fact_type"] == "semantic_binding_candidate"
+        and fact["source_id"] == fact["value"]["candidate_id"]
+        and fact["provenance"]["source_model"] == "SemanticBinding"
+        and fact["provenance"]["source_id"] == fact["source_id"]
+        for fact in binding_candidates
+    )
 
 
 def test_inclusive_temporal_selection_and_overlap_are_stable_over_http() -> None:

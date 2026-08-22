@@ -445,10 +445,18 @@ def test_candidate_binding_does_not_contaminate_confirmed_semantic_provenance_or
     candidate = next(
         fact
         for fact in context.candidates
-        if fact.value.candidate_type == "semantic_concept"
-        and fact.value.candidate_id == fixture["semantic_concept_id"]
+        if fact.value.candidate_type == "semantic_binding"
+        and fact.value.candidate_id == binding.id
     )
-    assert candidate.state is FactState.AI_SUGGESTED
+    assert candidate.fact_type == "semantic_binding_candidate"
+    assert candidate.state is FactState.DRAFT
+    assert candidate.source_id == binding.id
+    binding_observed_at = binding.updated_at
+    if binding_observed_at.tzinfo is None or binding_observed_at.utcoffset() is None:
+        binding_observed_at = binding_observed_at.replace(tzinfo=UTC)
+    assert candidate.observed_at == binding_observed_at.astimezone(UTC)
+    assert candidate.provenance.source_model == "SemanticBinding"
+    assert candidate.provenance.source_id == binding.id
     assert [reference.evidence_id for reference in candidate.evidence_references] == [binding.id]
     assert "MISSING_CONFIRMED_SEMANTIC_BINDING" in {
         question.question_code for question in context.open_questions
@@ -525,6 +533,57 @@ def test_explicit_concept_filters_bindings_to_requested_target_identities(
         reference.evidence_id
         for reference in concept_only.semantic[0].evidence_references
     ] == [unrelated_confirmed.id]
+
+
+def test_candidate_bindings_keep_distinct_stable_identities_and_lifecycles(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="BINDING_IDENTITIES")
+    first = db_session.scalar(select(SemanticBinding).where(
+        SemanticBinding.semantic_concept_id == fixture["semantic_concept_id"],
+    ))
+    first.status = "draft"
+    first.confirmed_by = None
+    first.confirmed_at = None
+    second = SemanticBinding(
+        project_id=fixture["project_id"],
+        institution_id=db_session.get(Project, fixture["project_id"]).institution_id,
+        semantic_concept_id=fixture["semantic_concept_id"],
+        entity_type="target_table",
+        entity_id=fixture["target_table_id"],
+        binding_type="candidate_table_scope",
+        confidence_level="medium",
+        confidence_score=0.7,
+        status="ai_suggested",
+    )
+    db_session.add(second)
+    db_session.commit()
+
+    context = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+    )
+
+    binding_candidates = [
+        candidate
+        for candidate in context.candidates
+        if candidate.value.candidate_type == "semantic_binding"
+    ]
+    assert [candidate.value.candidate_id for candidate in binding_candidates] == [
+        first.id,
+        second.id,
+    ]
+    assert [candidate.source_id for candidate in binding_candidates] == [first.id, second.id]
+    assert [candidate.state for candidate in binding_candidates] == [
+        FactState.DRAFT,
+        FactState.AI_SUGGESTED,
+    ]
+    assert all(
+        candidate.provenance.source_model == "SemanticBinding"
+        and candidate.provenance.source_id == candidate.source_id
+        for candidate in binding_candidates
+    )
 
 
 def test_candidate_mapping_evidence_does_not_suppress_trusted_evidence_gap(
