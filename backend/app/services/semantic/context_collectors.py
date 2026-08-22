@@ -1637,18 +1637,18 @@ def _bounded(value: object | None, limit: int) -> str | None:
 
 
 def _compact_text(value: object | None, limit: int) -> str | None:
-    """Normalize whitespace and deterministically signal Contract truncation."""
+    """Trim edges and deterministically signal Contract truncation."""
 
     if limit < 1:
         raise ValueError("text limit must be positive")
     if value is None:
         return None
-    normalized = " ".join(str(value).split())
-    if not normalized:
+    trimmed = str(value).strip()
+    if not trimmed:
         return None
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[: limit - 1].rstrip()}…"
+    if len(trimmed) <= limit:
+        return trimmed
+    return f"{trimmed[: limit - 1]}…"
 
 
 def _compact_aliases(
