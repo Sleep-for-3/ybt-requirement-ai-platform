@@ -21,14 +21,14 @@
 
 **Goal:** 建立统一、版本明确、带权威等级和 provenance 的 RegulatoryContext Contract。
 **Requirements:** CTX-01, CTX-02, CTX-03, CTX-04
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 - [x] 09-01-PLAN.md
 - [x] 09-02-PLAN.md
-- [ ] 09-03-PLAN.md
+- [x] 09-03-PLAN.md
 - [ ] 09-04-PLAN.md
 
-**Status:** In progress — 09-01 and 09-02 complete; 09-03 next
+**Status:** In progress — 09-01 through 09-03 complete; 09-04 next
 **Success Criteria:**
 
 1. 指定 project/target_field/scenario 可得到稳定结构化 Context。

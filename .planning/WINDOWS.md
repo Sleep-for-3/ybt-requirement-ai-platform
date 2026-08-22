@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 1
 waived_count: 0
-fixed_count: 0
-total_count: 1
-last_updated: 2026-08-20T10:59:28.682Z
+fixed_count: 1
+total_count: 2
+last_updated: 2026-08-22T16:56:02.619Z
 ---
 
 # Broken Windows Ledger
@@ -16,6 +16,7 @@ last_updated: 2026-08-20T10:59:28.682Z
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 09 | unrun-verify | backend/app/services/semantic/version_service.py |  | PostgreSQL row-lock concurrent confirmation staging qualification was not run; SQLite and portable-query tests passed | open |  | 2026-08-20T10:59:28.682Z |  |
+| 2 | 09 | deviation | backend/app/services/semantic/__init__.py |  | Lazy builder export was required to preserve the existing semantic package import graph | fixed |  | 2026-08-22T16:55:16.015Z | 2026-08-22T16:56:02.619Z |
 
 ````json
 [
@@ -30,6 +31,18 @@ last_updated: 2026-08-20T10:59:28.682Z
     "reason": "",
     "recorded_at": "2026-08-20T10:59:28.682Z",
     "resolved_at": null
+  },
+  {
+    "id": 2,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "backend/app/services/semantic/__init__.py",
+    "line": null,
+    "description": "Lazy builder export was required to preserve the existing semantic package import graph",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-22T16:55:16.015Z",
+    "resolved_at": "2026-08-22T16:56:02.619Z"
   }
 ]
 ````
