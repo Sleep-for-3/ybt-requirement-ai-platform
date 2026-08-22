@@ -153,9 +153,22 @@ def collect_base_context(
         request,
         target,
     )
-    binding_by_concept: dict[int, SemanticBinding] = {}
-    for binding in bindings:
-        binding_by_concept.setdefault(int(binding.semantic_concept_id), binding)
+    confirmed_bindings = [binding for binding in bindings if binding.status == "confirmed"]
+    candidate_bindings = [
+        binding for binding in bindings if binding.status in {"draft", "ai_suggested"}
+    ]
+    confirmed_by_concept: dict[int, SemanticBinding] = {}
+    candidate_by_concept: dict[int, list[SemanticBinding]] = {}
+    for binding in sorted(
+        confirmed_bindings,
+        key=lambda item: _semantic_binding_sort_key(item, request, target),
+    ):
+        confirmed_by_concept.setdefault(int(binding.semantic_concept_id), binding)
+    for binding in sorted(
+        candidate_bindings,
+        key=lambda item: _semantic_binding_sort_key(item, request, target),
+    ):
+        candidate_by_concept.setdefault(int(binding.semantic_concept_id), []).append(binding)
 
     semantic: list[ContextFact] = []
     candidates: list[ContextFact] = []
@@ -166,12 +179,28 @@ def collect_base_context(
         project_id=project_id,
     )
     for concept in concepts:
-        binding = binding_by_concept.get(int(concept.id))
+        concept_id = int(concept.id)
+        confirmed_binding = confirmed_by_concept.get(concept_id)
         version = versions_by_concept.get(int(concept.id))
         if version is not None:
-            semantic.append(_semantic_fact(authorized_project, concept, version, binding))
-        elif request.mode is ContextMode.CANDIDATE:
-            candidates.append(_semantic_candidate_fact(authorized_project, concept, binding))
+            semantic.append(_semantic_fact(
+                authorized_project,
+                concept,
+                version,
+                confirmed_binding,
+            ))
+        if request.mode is ContextMode.CANDIDATE:
+            concept_candidate_bindings = candidate_by_concept.get(concept_id, [])
+            candidates.extend(
+                _semantic_candidate_fact(authorized_project, concept, binding)
+                for binding in concept_candidate_bindings
+            )
+            if version is None and not concept_candidate_bindings:
+                candidates.append(_semantic_candidate_fact(
+                    authorized_project,
+                    concept,
+                    confirmed_binding,
+                ))
 
     metadata: list[ContextFact] = []
     if target_field is not None:
@@ -286,7 +315,7 @@ def collect_base_context(
             "historical_caliber",
         ],
         signals={
-            "has_semantic_binding": bool(bindings),
+            "has_semantic_binding": bool(confirmed_bindings),
             "has_semantic_version": bool(semantic),
             "source_mapping_count": len(source_mappings),
             "mart_mapping_count": len(mart_mappings),
@@ -446,6 +475,45 @@ def _semantic_inputs(
         bindings.append(binding)
         concepts_by_id.setdefault(int(concept.id), concept)
     return bindings, list(concepts_by_id.values())
+
+
+def _semantic_binding_sort_key(
+    binding: SemanticBinding,
+    request: RegulatoryContextRequest,
+    target: ContextTarget,
+) -> tuple[int, int]:
+    """Prefer the explicitly requested target identity, then stable binding id."""
+
+    requested_identities = [
+        (entity_type, int(identifier))
+        for entity_type, identifier in (
+            ("target_field", request.target_field_id),
+            ("mart_field", request.mart_field_id),
+            ("target_table", request.target_table_id),
+            ("scenario", request.scenario_id),
+        )
+        if identifier is not None
+    ]
+    scoped_identities = [
+        (entity_type, int(identifier))
+        for entity_type, identifier in (
+            ("target_field", target.target_field_id),
+            ("mart_field", target.mart_field_id),
+            ("target_table", target.target_table_id),
+            ("scenario", request.scenario_id),
+        )
+        if identifier is not None
+    ]
+    ordered_identities = [
+        *requested_identities,
+        *(identity for identity in scoped_identities if identity not in requested_identities),
+    ]
+    identity = (str(binding.entity_type), int(binding.entity_id))
+    try:
+        target_rank = ordered_identities.index(identity)
+    except ValueError:
+        target_rank = len(ordered_identities)
+    return target_rank, int(binding.id)
 
 
 def collect_mapping_rows(

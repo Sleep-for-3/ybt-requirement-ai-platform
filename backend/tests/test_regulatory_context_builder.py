@@ -302,6 +302,40 @@ def test_mapping_lineage_evidence_history_and_knowledge_families_are_aggregated(
     assert context.build_metadata.retrieval_log_ids
 
 
+def test_candidate_binding_does_not_contaminate_confirmed_semantic_provenance_or_gap(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="DRAFT_BINDING_ONLY")
+    binding = db_session.scalar(select(SemanticBinding).where(
+        SemanticBinding.semantic_concept_id == fixture["semantic_concept_id"],
+    ))
+    binding.status = "draft"
+    binding.confirmed_by = None
+    binding.confirmed_at = None
+    db_session.commit()
+
+    context = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+    )
+
+    assert len(context.semantic) == 1
+    assert context.semantic[0].evidence_references == []
+    assert context.semantic[0].provenance.evidence_references == []
+    candidate = next(
+        fact
+        for fact in context.candidates
+        if fact.value.candidate_type == "semantic_concept"
+        and fact.value.candidate_id == fixture["semantic_concept_id"]
+    )
+    assert candidate.state is FactState.AI_SUGGESTED
+    assert [reference.evidence_id for reference in candidate.evidence_references] == [binding.id]
+    assert "MISSING_CONFIRMED_SEMANTIC_BINDING" in {
+        question.question_code for question in context.open_questions
+    }
+
+
 def test_missing_stale_history_knowledge_evidence_and_conflict_codes_are_deterministic(
     db_session: Session,
 ) -> None:
