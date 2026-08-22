@@ -42,16 +42,16 @@ key-decisions:
 patterns-established:
   - Every emitted fact has a registered source_type and authority_for_source-derived authority.
   - Volatile retrieval metadata is normalized separately from deterministic domain content comparisons.
-  - ORM text and aliases are compacted deterministically before strict Contract validation.
+  - ORM text and aliases are compacted deterministically before strict Contract validation without mutating internal whitespace.
 requirements-completed: []
 status: complete
 metrics:
-  duration: 1h 2m
+  duration: 1h 26m
   completed: 2026-08-23
 actuals:
-  tokens: 41134
+  tokens: 42531
   tasks: 3
-  commits: 20
+  commits: 22
 ---
 
 # Phase 9 Plan 03: Regulatory Context Builder Summary
@@ -60,12 +60,12 @@ An authorized, projection-only RegulatoryContextBuilder now aggregates governed 
 
 ## Performance
 
-- **Duration:** 1 hour 2 minutes (initial execution plus supplemental remediation)
+- **Duration:** 1 hour 26 minutes (initial execution plus supplemental remediation)
 - **Started:** 2026-08-22T16:14:17Z
-- **Completed:** 2026-08-22T17:28:05Z
+- **Completed:** 2026-08-22T17:40:41Z
 - **Tasks:** 3
 - **Files changed:** 9
-- **Realized diff estimate:** 41,134 tokens (164,535 characters / 4)
+- **Realized diff estimate:** 42,531 tokens (170,121 characters / 4)
 
 ## Accomplishments
 
@@ -122,10 +122,9 @@ Keyword-only knowledge retrieval performs zero `Session.get` calls; the separate
 
 ## Verification
 
-- `python -m pytest -q tests/test_regulatory_context_builder.py` — **35 passed in 11.39s**
-- `python -m pytest -q tests/test_regulatory_context_contract.py tests/test_semantic_layer.py tests/test_regulatory_context_builder.py` — **62 passed in 35.19s**
-- Contract + semantic + builder + HybridRetriever regression — **64 passed in 35.07s**
-- `python -m pytest -q tests/test_knowledge_rag.py` — **20 passed in 8.78s**
+- `python -m pytest -q tests/test_regulatory_context_builder.py` — **36 passed in 11.60s**
+- Contract + semantic + builder + HybridRetriever regression — **65 passed in 35.34s**
+- `python -m pytest -q tests/test_knowledge_rag.py` — **20 passed in 8.99s**
 - `python -m compileall -q app` — **passed**
 - Query measurement probe — **BASELINE=21, GROWTH=21, FACTS=41**
 - Base-to-HEAD scope audit — only the nine permitted backend/test files changed; immutable contract and authority modules have no diff.
@@ -147,7 +146,7 @@ Keyword-only knowledge retrieval performs zero `Session.get` calls; the separate
 | Same-name institution isolation | `KnowledgeUnit` has `project_id` but no immutable `institution_id`; therefore institution-scoped rows and cross-project `restricted` rows fail closed to the owner project. Non-restricted global knowledge remains reusable. Foreign sensitive rows never become facts or RetrievalLog result ids, so their ownership is never rewritten as request provenance. | `887c6c5` / `34fdbf4`; related RAG expectation `84720c1` |
 | Mapping lifecycle | All four mapping queries use explicit trusted/candidate status sets. Approved/confirmed rows feed mapping, lineage, evidence, and gap counts; draft/ai_suggested rows become `resolver_candidate` facts with their exact `FactState`; rejected/deprecated rows are audit-only and absent. | `d973609` / `10ee9ca`; 16 family/status cases |
 | Empty retrieval traceability | A zero-result search emits a `KnowledgeEvidenceContextValue` with `evidence_reference_id=RetrievalLog.id`, `knowledge_type=retrieval_attempt`, registered `knowledge_retrieval` source type, and mirrored provenance. It carries the log id without pretending that a KnowledgeUnit matched, while `MISSING_KNOWLEDGE` remains open. | `40b1f2c` / `38b500a` |
-| Contract-safe compaction | `_compact_text` normalizes whitespace and uses a visible ellipsis inside the maximum length; `_compact_aliases` deduplicates, bounds each alias to 500, and caps the stable first 100 entries before Pydantic validation. | `9cd794b` / `37dfcc0` |
+| Contract-safe compaction | `_compact_text` trims only leading/trailing whitespace, preserves internal SQL/Markdown newlines, indentation, and string-literal spacing, and truncates the exact retained prefix plus a visible ellipsis. `_compact_aliases` deduplicates, bounds each alias to 500, and caps the stable first 100 entries before Pydantic validation. | `9cd794b` / `37dfcc0`; whitespace regression `fbe0d6c` / `170de84` |
 | Batched effective versions | `resolve_effective_versions` applies the same confirmed concept/version, inclusive `as_of`, project, and period predicates as the single resolver; the single resolver delegates to it. Ambiguity behavior is retained per concept. | `bad06ca` / `eb8e7b7`; RED 14→44 SQL, GREEN 14→14 |
 | Rank before cap | All matching RegulatoryKnowledgeItems are relevance-ranked by exact field code/name, table code, scenario, then id before the 200-row cap. Source/Mart candidates already rank their complete project-scoped set before `candidate_limit`; the regression seeds 200 broad rows followed by a late exact row for both paths. | `defd692` / `e258878` |
 
@@ -177,7 +176,7 @@ No architectural or scope deviations were made.
 - Task 2 RED produced 5 expected aggregation failures with 1 passing guard; GREEN passed the 6 selected aggregation tests and all 10 builder tests then present.
 - Task 3 RED produced 2 expected failures (missing ranked candidates and 24 statements over the 21-statement budget); GREEN passed all 5 selected tests and all 14 builder tests.
 - RED commits precede their corresponding GREEN commits for every behavior-adding task.
-- Six supplemental behaviors each have an independent failing RED commit before their GREEN implementation commit: tenant isolation, mapping lifecycle, empty retrieval provenance, value compaction, effective-version batching, and relevance-before-cap.
+- Seven supplemental behaviors each have an independent failing RED commit before their GREEN implementation commit: tenant isolation, mapping lifecycle, empty retrieval provenance, value compaction, effective-version batching, relevance-before-cap, and internal-whitespace preservation.
 
 ## Known Stubs
 
@@ -189,4 +188,4 @@ Plan 09-03 intentionally stops at the builder/service boundary. Plan 09-04 remai
 
 ## Self-Check: PASSED
 
-All four created files, all twenty implementation/TDD commits, and the prior summary commit were found. Verification, scope, immutability, persistence, query-budget, and prohibition claims were reconfirmed after supplemental remediation.
+All four created files, all twenty-two implementation/TDD commits, and the prior summary commits were found. Verification, scope, immutability, persistence, query-budget, and prohibition claims were reconfirmed after supplemental remediation.
