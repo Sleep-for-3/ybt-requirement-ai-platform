@@ -354,6 +354,54 @@ def patch_concept_via_version_service(
     return concept
 
 
+def resolve_effective_versions(
+    db: Session,
+    concept_ids: list[int] | tuple[int, ...] | set[int],
+    as_of: date | datetime | str,
+    *,
+    project_id: int | None = None,
+) -> dict[int, SemanticConceptVersion]:
+    """Resolve many concepts with the exact trusted inclusive-date policy."""
+
+    target_date = _as_date(as_of)
+    normalized_ids = sorted({int(concept_id) for concept_id in concept_ids})
+    if not normalized_ids:
+        return {}
+    statement = select(SemanticConceptVersion).join(
+        SemanticConcept,
+        SemanticConcept.id == SemanticConceptVersion.semantic_concept_id,
+    ).where(
+        SemanticConceptVersion.semantic_concept_id.in_(normalized_ids),
+        SemanticConcept.project_id == SemanticConceptVersion.project_id,
+        status_predicate(SemanticConcept.status, SemanticVisibilityMode.TRUSTED),
+        status_predicate(SemanticConceptVersion.status, SemanticVisibilityMode.TRUSTED),
+        SemanticConceptVersion.effective_from <= target_date,
+        or_(SemanticConceptVersion.effective_to.is_(None), SemanticConceptVersion.effective_to >= target_date),
+    ).order_by(
+        SemanticConceptVersion.semantic_concept_id,
+        SemanticConceptVersion.version_no,
+    )
+    if project_id is not None:
+        statement = statement.where(SemanticConceptVersion.project_id == project_id)
+    matches_by_concept: dict[int, list[SemanticConceptVersion]] = {}
+    for version in db.scalars(statement).all():
+        matches_by_concept.setdefault(int(version.semantic_concept_id), []).append(version)
+
+    resolved: dict[int, SemanticConceptVersion] = {}
+    for concept_id in normalized_ids:
+        matches = matches_by_concept.get(concept_id, [])
+        if len(matches) > 1:
+            raise _error(
+                "SEMANTIC_VERSION_AMBIGUOUS",
+                "Multiple confirmed semantic versions match the effective date",
+                semantic_concept_id=concept_id,
+                as_of=target_date.isoformat(),
+            )
+        if matches:
+            resolved[concept_id] = matches[0]
+    return resolved
+
+
 def resolve_effective_version(
     db: Session,
     concept_id: int,
@@ -361,29 +409,12 @@ def resolve_effective_version(
     *,
     project_id: int | None = None,
 ) -> SemanticConceptVersion | None:
-    target_date = _as_date(as_of)
-    statement = select(SemanticConceptVersion).join(
-        SemanticConcept,
-        SemanticConcept.id == SemanticConceptVersion.semantic_concept_id,
-    ).where(
-        SemanticConceptVersion.semantic_concept_id == concept_id,
-        SemanticConcept.project_id == SemanticConceptVersion.project_id,
-        status_predicate(SemanticConcept.status, SemanticVisibilityMode.TRUSTED),
-        status_predicate(SemanticConceptVersion.status, SemanticVisibilityMode.TRUSTED),
-        SemanticConceptVersion.effective_from <= target_date,
-        or_(SemanticConceptVersion.effective_to.is_(None), SemanticConceptVersion.effective_to >= target_date),
-    ).order_by(SemanticConceptVersion.version_no)
-    if project_id is not None:
-        statement = statement.where(SemanticConceptVersion.project_id == project_id)
-    matches = list(db.scalars(statement).all())
-    if len(matches) > 1:
-        raise _error(
-            "SEMANTIC_VERSION_AMBIGUOUS",
-            "Multiple confirmed semantic versions match the effective date",
-            semantic_concept_id=concept_id,
-            as_of=target_date.isoformat(),
-        )
-    return matches[0] if matches else None
+    return resolve_effective_versions(
+        db,
+        [concept_id],
+        as_of,
+        project_id=project_id,
+    ).get(int(concept_id))
 
 
 def transition_version_status(
@@ -431,6 +462,7 @@ __all__ = [
     "create_concept_version",
     "patch_concept_via_version_service",
     "resolve_effective_version",
+    "resolve_effective_versions",
     "sync_legacy_concept_projection",
     "transition_concept_status",
     "transition_version_status",

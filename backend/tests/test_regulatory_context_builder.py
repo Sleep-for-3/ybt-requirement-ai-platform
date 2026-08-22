@@ -55,6 +55,7 @@ from app.services.vector.mock import MockVectorStore
 
 AS_OF = date(2026, 6, 30)
 ACCEPTANCE_QUERY_BUDGET = 21
+EFFECTIVE_VERSION_BATCH_QUERY_BUDGET = 14
 SPEC_LESS_REQUIREMENT_METADATA = (
     {"id": "CTX-01", "classification": "unclassified", "resolution": "unresolved"},
     {"id": "CTX-02", "classification": "unclassified", "resolution": "unresolved"},
@@ -1055,6 +1056,7 @@ def test_effective_versions_are_batched_without_changing_temporal_visibility(
         fact.value.semantic_concept_id for fact in growth.semantic
     }
 
+    assert baseline_count == EFFECTIVE_VERSION_BATCH_QUERY_BUDGET
     assert growth_count == baseline_count
     assert actual_concept_ids == expected_concept_ids
     assert actual_concept_ids.isdisjoint(excluded_concept_ids)

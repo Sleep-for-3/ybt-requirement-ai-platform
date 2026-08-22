@@ -57,7 +57,7 @@ from app.schemas.regulatory_context import (
 from app.services.retrieval.hybrid_retriever import HybridRetriever
 from app.services.semantic.context_authority import FactState, authority_for_source
 from app.services.semantic.status_policy import SemanticVisibilityMode, status_predicate
-from app.services.semantic.version_service import resolve_effective_version
+from app.services.semantic.version_service import resolve_effective_versions
 
 
 CANDIDATE_TIER_CONFIRMED_BINDING_OR_MAPPING = 1
@@ -159,14 +159,15 @@ def collect_base_context(
 
     semantic: list[ContextFact] = []
     candidates: list[ContextFact] = []
+    versions_by_concept = resolve_effective_versions(
+        db,
+        [int(concept.id) for concept in concepts],
+        request.as_of,
+        project_id=project_id,
+    )
     for concept in concepts:
         binding = binding_by_concept.get(int(concept.id))
-        version = resolve_effective_version(
-            db,
-            int(concept.id),
-            request.as_of,
-            project_id=project_id,
-        )
+        version = versions_by_concept.get(int(concept.id))
         if version is not None:
             semantic.append(_semantic_fact(authorized_project, concept, version, binding))
         elif request.mode is ContextMode.CANDIDATE:
