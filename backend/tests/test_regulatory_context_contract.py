@@ -783,7 +783,7 @@ def test_build_metadata_is_typed_complete_and_bound_to_context_inputs_and_retrie
         metadata.model_copy(
             update={
                 "input_scope": metadata.input_scope.model_copy(
-                    update={"mode": ContextMode.EXPLORATORY}
+                    update={"mode": ContextMode.CANDIDATE}
                 )
             }
         ),
