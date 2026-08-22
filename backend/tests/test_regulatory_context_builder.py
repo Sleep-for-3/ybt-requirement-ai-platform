@@ -586,6 +586,84 @@ def test_mapping_and_scenario_lineage_use_persisted_status_fields(
     assert "STALE_LINEAGE" in {item.code for item in context.conflicts}
 
 
+@pytest.mark.parametrize(
+    ("mapping_family", "status"),
+    [
+        (mapping_family, status)
+        for mapping_family in (
+            "source_to_mart",
+            "mart_to_ybt",
+            "scenario_business",
+            "scenario_technical",
+        )
+        for status in ("draft", "ai_suggested", "rejected", "deprecated")
+    ],
+)
+def test_mapping_lifecycle_never_promotes_audit_rows_or_candidates_to_trusted(
+    db_session: Session,
+    mapping_family: str,
+    status: str,
+) -> None:
+    fixture = _seed_populated_context(
+        db_session,
+        suffix=f"STATUS_{mapping_family}_{status}",
+    )
+    model, fixture_key, status_field = {
+        "source_to_mart": (SourceToMartMapping, "source_mapping_id", "mapping_status"),
+        "mart_to_ybt": (MartToYbtMapping, "mart_mapping_id", "mapping_status"),
+        "scenario_business": (
+            ScenarioBusinessMapping,
+            "business_mapping_id",
+            "business_confirm_status",
+        ),
+        "scenario_technical": (
+            ScenarioTechnicalLineage,
+            "technical_mapping_id",
+            "tech_confirm_status",
+        ),
+    }[mapping_family]
+    row = db_session.get(model, fixture[fixture_key])
+    setattr(row, status_field, status)
+    db_session.commit()
+
+    trusted = _build_context(db_session, fixture)
+    assert not any(
+        fact.provenance.source_model == model.__name__
+        and fact.provenance.source_id == row.id
+        for fact in _all_facts(trusted)
+    )
+
+    candidate = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+        candidate_limit=100,
+    )
+    matches = [
+        fact
+        for fact in candidate.candidates
+        if fact.value.candidate_type == mapping_family
+        and fact.value.candidate_id == row.id
+    ]
+    assert not any(
+        fact.provenance.source_model == model.__name__
+        and fact.provenance.source_id == row.id
+        for fact in [
+            *candidate.mappings,
+            *candidate.lineage,
+            *candidate.knowledge_evidence,
+        ]
+    )
+    if status in {"rejected", "deprecated"}:
+        assert matches == []
+    else:
+        assert len(matches) == 1
+        assert matches[0].state is (
+            FactState.DRAFT if status == "draft" else FactState.AI_SUGGESTED
+        )
+        assert status in matches[0].value.match_reason
+
+
 def test_two_project_two_institution_isolation_preserves_authoritative_rows(
     db_session: Session,
 ) -> None:
