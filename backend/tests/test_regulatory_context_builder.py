@@ -347,6 +347,76 @@ def test_source_type_authority_and_knowledge_scope_are_contract_driven(
     } == {project.id}
 
 
+def test_sensitive_knowledge_does_not_cross_same_name_institution_boundary(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="SAME_NAME_SCOPE")
+    project = db_session.get(Project, fixture["project_id"])
+    other = _seed_project(
+        db_session,
+        "CTX_SAME_NAME_OTHER",
+        project.bank_name,
+        "同名但不同机构项目",
+    )
+    own_unit = _seed_knowledge_unit(
+        db_session,
+        owner_project=project,
+        scope="institution",
+        institution_name=project.bank_name,
+        content="客户统一编号 OWN_INSTITUTION_VISIBLE",
+        confidentiality="restricted",
+        suffix="OWN_INSTITUTION",
+    )
+    foreign_institution = _seed_knowledge_unit(
+        db_session,
+        owner_project=other,
+        scope="institution",
+        institution_name=project.bank_name,
+        content="客户统一编号 CROSS_TENANT_INSTITUTION_SECRET",
+        confidentiality="confidential",
+        suffix="FOREIGN_INSTITUTION",
+    )
+    foreign_restricted = _seed_knowledge_unit(
+        db_session,
+        owner_project=other,
+        scope="global",
+        institution_name=None,
+        content="客户统一编号 CROSS_TENANT_RESTRICTED_SECRET",
+        confidentiality="restricted",
+        suffix="FOREIGN_RESTRICTED",
+    )
+    db_session.commit()
+
+    context = _build_context(db_session, fixture)
+    payload = json.dumps(context.model_dump(mode="json"), ensure_ascii=False)
+    retrieved_ids = {
+        int(fact.source_id)
+        for fact in context.knowledge_evidence
+        if fact.source_type == "retrieved_knowledge"
+    }
+    logged_ids = {
+        int(unit_id)
+        for log_id in context.build_metadata.retrieval_log_ids
+        for unit_id in db_session.get(RetrievalLog, log_id).result_ids_json
+    }
+
+    assert own_unit.id in retrieved_ids
+    assert foreign_institution.id not in retrieved_ids | logged_ids
+    assert foreign_restricted.id not in retrieved_ids | logged_ids
+    assert "OWN_INSTITUTION_VISIBLE" in payload
+    assert "CROSS_TENANT_INSTITUTION_SECRET" not in payload
+    assert "CROSS_TENANT_RESTRICTED_SECRET" not in payload
+    for fact in context.knowledge_evidence:
+        if fact.source_type != "retrieved_knowledge":
+            continue
+        unit = db_session.get(KnowledgeUnit, fact.source_id)
+        owner = db_session.get(Project, unit.project_id)
+        if unit.knowledge_scope == "institution" or unit.confidentiality_level == "restricted":
+            assert unit.project_id == project.id
+            assert fact.provenance.project_id == owner.id == project.id
+            assert fact.provenance.institution_id == owner.institution_id == project.institution_id
+
+
 def test_raw_lineage_verification_uses_only_real_model_predicates(
     db_session: Session,
 ) -> None:
