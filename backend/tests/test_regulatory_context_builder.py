@@ -336,6 +336,64 @@ def test_candidate_binding_does_not_contaminate_confirmed_semantic_provenance_or
     }
 
 
+def test_candidate_mapping_evidence_does_not_suppress_trusted_evidence_gap(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="CANDIDATE_EVIDENCE")
+    approved = MartToYbtMapping(
+        project_id=fixture["project_id"],
+        target_field_id=fixture["target_field_id"],
+        mapping_name="无证据已审批映射",
+        mapping_status="approved",
+        business_rule="直接映射",
+        lineage_status="not_linked",
+    )
+    draft = MartToYbtMapping(
+        project_id=fixture["project_id"],
+        target_field_id=fixture["target_field_id"],
+        mapping_name="有证据草稿映射",
+        mapping_status="draft",
+        business_rule="候选映射",
+        lineage_status="not_linked",
+    )
+    db_session.add_all([approved, draft])
+    db_session.flush()
+    candidate_evidence = MappingEvidenceReference(
+        project_id=fixture["project_id"],
+        mapping_type="mart_to_ybt",
+        mapping_id=draft.id,
+        evidence_type="manual_note",
+        source_name="仅候选可见的证据",
+        location_text="candidate-evidence:A1",
+        evidence_summary="该证据不能支撑已审批映射",
+    )
+    db_session.add(candidate_evidence)
+    db_session.commit()
+
+    context = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+    )
+
+    assert [fact.source_id for fact in context.mappings] == [approved.id]
+    assert context.mappings[0].evidence_references == []
+    assert all(
+        fact.source_id != candidate_evidence.id
+        for fact in context.knowledge_evidence
+        if fact.fact_type == "mapping_evidence"
+    )
+    assert any(
+        candidate.value.candidate_type == "mart_to_ybt"
+        and candidate.value.candidate_id == draft.id
+        and candidate.evidence_references[0].evidence_id is None
+        for candidate in context.candidates
+    )
+    assert "MISSING_EVIDENCE" in {
+        question.question_code for question in context.open_questions
+    }
+
+
 def test_missing_stale_history_knowledge_evidence_and_conflict_codes_are_deterministic(
     db_session: Session,
 ) -> None:

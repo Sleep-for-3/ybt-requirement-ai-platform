@@ -230,13 +230,14 @@ def collect_base_context(
         for mapping_type, rows in zip(MAPPING_FAMILIES, trusted_mapping_rows, strict=True)
         for row in rows
     }
+    trusted_evidence_rows = [
+        row
+        for row in evidence_rows
+        if (row.mapping_type, int(row.mapping_id)) in trusted_mapping_keys
+    ]
     evidence_facts = collect_mapping_evidence_facts(
         authorized_project,
-        [
-            row
-            for row in evidence_rows
-            if (row.mapping_type, int(row.mapping_id)) in trusted_mapping_keys
-        ],
+        trusted_evidence_rows,
     )
     source_mappings, mart_mappings, business_mappings, technical_mappings = trusted_mapping_rows
     stale_lineage = sorted(
@@ -330,10 +331,10 @@ def collect_base_context(
             "retrieved_knowledge_count": sum(
                 fact.fact_type == "retrieved_knowledge" for fact in retrieved
             ),
-            "evidence_count": len(evidence_rows),
+            "evidence_count": len(trusted_evidence_rows),
             "evidence_required": bool(mappings or regulatory),
             "supporting_evidence_count": (
-                len(evidence_rows)
+                len(trusted_evidence_rows)
                 + sum(bool(fact.evidence_references) for fact in regulatory)
                 + sum(fact.fact_type == "retrieved_knowledge" for fact in retrieved)
             ),
