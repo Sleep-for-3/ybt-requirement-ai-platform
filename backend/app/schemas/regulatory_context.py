@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
-from app.services.semantic.context_authority import AuthorityRank, FactState
+from app.services.semantic.context_authority import AuthorityRank, FactState, authority_for_source
 
 
 Code50 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
@@ -311,7 +311,7 @@ class ContextFact(_StrictModel):
     def validate_state_and_provenance(self) -> "ContextFact":
         trusted_states = {FactState.CONFIRMED, FactState.APPROVED, FactState.VERIFIED}
         if self.authority in {AuthorityRank.RETRIEVED, AuthorityRank.INFERRED} and self.state in trusted_states:
-            raise ValueError("retrieved or inferred authority cannot carry a trusted lifecycle state")
+            raise ValueError("retrieved or inferred facts cannot use trusted states")
         if self.state is FactState.RETRIEVED and self.authority is not AuthorityRank.RETRIEVED:
             raise ValueError("retrieved state requires retrieved authority")
         if self.state is FactState.INFERRED and self.authority is not AuthorityRank.INFERRED:
@@ -337,6 +337,16 @@ class ContextFact(_StrictModel):
         for field_name, fact_value, provenance_value in mirrored:
             if fact_value != provenance_value:
                 raise ValueError(f"{field_name} must match provenance.{field_name}")
+
+        try:
+            expected_authority = authority_for_source(self.source_type)
+        except ValueError as exc:
+            raise ValueError(f"unknown context source_type: {self.source_type}") from exc
+        if self.authority is not expected_authority:
+            raise ValueError(
+                "authority must match source_type policy: "
+                f"{self.source_type} requires {expected_authority.value}"
+            )
         return self
 
 
@@ -374,6 +384,23 @@ class ContextScenario(_StrictModel):
     scenario_code: Code150 | None = None
     scenario_name: Code500 | None = None
     scenario_type: Code80 | None = None
+
+
+class ContextInputScope(_StrictModel):
+    """Typed caller-controlled inputs recorded for reproducible context builds."""
+
+    reporting_period: Code120 | None = None
+    mode: ContextMode
+    target_table_id: int | None = Field(default=None, gt=0)
+    target_field_id: int | None = Field(default=None, gt=0)
+    mart_field_id: int | None = Field(default=None, gt=0)
+    semantic_concept_id: int | None = Field(default=None, gt=0)
+    scenario_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("reporting_period", mode="before")
+    @classmethod
+    def normalize_period(cls, value: str | None) -> str | None:
+        return normalize_reporting_period(value)
 
 
 class ContextConflict(_StrictModel):
@@ -422,8 +449,15 @@ class ContextOpenQuestion(_StrictModel):
 
 
 class ContextBuildMetadata(_StrictModel):
+    context_version: Literal["1.0"] = "1.0"
     builder_version: Literal["1.0"] = "1.0"
     built_at: datetime
+    project_id: int = Field(gt=0)
+    as_of: date
+    input_scope: ContextInputScope
+    semantic_policy_version: Code120
+    authority_policy_version: Code120
+    retrieval_log_ids: list[int] = Field(default_factory=list, max_length=100)
     mode: ContextMode
     fact_count: int = Field(ge=0, le=10000)
     conflict_count: int = Field(ge=0, le=1000)
@@ -437,6 +471,18 @@ class ContextBuildMetadata(_StrictModel):
     @classmethod
     def validate_built_at(cls, value: datetime) -> datetime:
         return _require_aware_datetime(value, "built_at")
+
+    @field_validator("as_of", mode="before")
+    @classmethod
+    def normalize_as_of(cls, value: date | datetime | str) -> date:
+        return normalize_context_date(value)
+
+    @field_validator("retrieval_log_ids")
+    @classmethod
+    def normalize_retrieval_log_ids(cls, value: list[int]) -> list[int]:
+        if any(retrieval_log_id <= 0 for retrieval_log_id in value):
+            raise ValueError("retrieval_log_ids must contain only positive integers")
+        return sorted(set(value))
 
 
 class RegulatoryContext(_StrictModel):
@@ -484,6 +530,37 @@ class RegulatoryContext(_StrictModel):
 
         if len(all_facts) > 1000:
             raise ValueError("RegulatoryContext contains more than 1000 facts")
+        if self.build_metadata.context_version != self.context_schema_version:
+            raise ValueError("build_metadata.context_version must match context_schema_version")
+        if self.build_metadata.project_id != self.scope.project_id:
+            raise ValueError("build_metadata.project_id must match scope.project_id")
+        if self.build_metadata.as_of != self.scope.as_of:
+            raise ValueError("build_metadata.as_of must match scope.as_of")
+
+        input_scope = self.build_metadata.input_scope
+        input_scope_bindings = (
+            ("reporting_period", input_scope.reporting_period, self.scope.reporting_period),
+            ("mode", input_scope.mode, self.scope.mode),
+            ("target_table_id", input_scope.target_table_id, self.target.target_table_id),
+            ("target_field_id", input_scope.target_field_id, self.target.target_field_id),
+            ("mart_field_id", input_scope.mart_field_id, self.target.mart_field_id),
+            (
+                "semantic_concept_id",
+                input_scope.semantic_concept_id,
+                self.target.semantic_concept_id,
+            ),
+            (
+                "scenario_id",
+                input_scope.scenario_id,
+                self.scenario.scenario_id if self.scenario is not None else None,
+            ),
+        )
+        for field_name, metadata_value, context_value in input_scope_bindings:
+            if metadata_value != context_value:
+                raise ValueError(
+                    f"build_metadata.input_scope.{field_name} must match context {field_name}"
+                )
+
         if self.scope.mode is not self.build_metadata.mode:
             raise ValueError("build metadata mode must match context scope mode")
         if self.build_metadata.fact_count != len(all_facts):
@@ -492,6 +569,18 @@ class RegulatoryContext(_StrictModel):
             raise ValueError("build metadata conflict_count does not match conflicts")
         if self.build_metadata.open_question_count != len(self.open_questions):
             raise ValueError("build metadata open_question_count does not match open_questions")
+
+        actual_retrieval_log_ids = sorted(
+            {
+                fact.provenance.retrieval_log_id
+                for fact in all_facts
+                if fact.provenance.retrieval_log_id is not None
+            }
+        )
+        if self.build_metadata.retrieval_log_ids != actual_retrieval_log_ids:
+            raise ValueError(
+                "build_metadata.retrieval_log_ids must match fact provenance retrieval_log_ids"
+            )
 
         self.conflicts = sorted(self.conflicts, key=lambda item: item.deterministic_sort_key())
         self.open_questions = sorted(self.open_questions, key=lambda item: item.deterministic_sort_key())
