@@ -26,10 +26,10 @@ The historical full-chain `alembic --sql` limitation at revision `202607070002` 
 | Formal index preservation | Same migration command | PASS — `embedding_index_versions` and all formal semantic version indexes remain present after round trips |
 | PostgreSQL direct/offline revision compilation | `test_revision_016_compiles_portable_postgresql_upgrade_and_downgrade_sql` in the same command | PASS — PostgreSQL DDL contains all three foreign keys, the effective-date CHECK, formal indexes, and downgrade; no `PRAGMA`, `AUTOINCREMENT`, or `sqlite` token |
 | SQLite serialized confirmed interval | `cd backend; python -m pytest -q tests/test_semantic_layer.py::test_sqlite_confirmed_interval_is_serialized_across_sessions` | PASS — 1 passed in 19.36s |
-| Context/API/semantic/migration core | `cd backend; python -m pytest -q tests/test_regulatory_context_api.py tests/test_regulatory_context_contract.py tests/test_regulatory_context_builder.py tests/test_semantic_layer.py tests/test_semantic_migration.py` | PASS — 79 passed, 4 warnings in 64.65s |
+| Context/API/semantic/migration core | `cd backend; python -m pytest -q tests/test_regulatory_context_api.py tests/test_regulatory_context_contract.py tests/test_regulatory_context_builder.py tests/test_semantic_layer.py tests/test_semantic_migration.py` | PASS — 89 passed, 4 pre-existing SQLite datetime-adapter warnings |
 | Knowledge/governance/lineage adjacency | `cd backend; python -m pytest -q tests/test_hybrid_retriever.py tests/test_knowledge_rag.py tests/test_knowledge_reindex.py tests/test_semantic_retrieval_security.py tests/test_rag_evaluation_semantic.py tests/test_governance.py tests/test_sql_lineage.py` | PASS — 86 passed in 26.54s |
 | Python compilation | `cd backend; python -m compileall -q app` | PASS — exit 0, no output |
-| Full backend regression | `cd backend; python -m pytest -q` | QUALIFIED — 327 passed, 2 pre-existing failures, 5 warnings in 216.28s |
+| Full backend regression at final reviewed HEAD | `cd backend; python -m pytest -q` | QUALIFIED — 337 passed, 2 pre-existing failures, 5 warnings in 220.19s |
 
 The migration warnings are Python 3.12's deprecated default SQLite datetime adapter. The full-suite warning set also includes the existing development-only temporary `APP_SECRET_KEY` warning. Neither warning changes the migration or API verdict.
 
@@ -78,7 +78,7 @@ This failure occurs before revisions 015 and 016. It does not contradict the dir
 
 ## Regression Classification
 
-Phase 8's delivered baseline was 255 passed and the same two Windows failures. The current suite is 327 passed and those same two failures; Phase 9 added 72 passing tests without adding a failure.
+Phase 8's delivered baseline was 255 passed and the same two Windows failures. The final reviewed Phase 9 suite is 337 passed with those same two failures; Phase 9 added 82 passing tests without adding a failure.
 
 | Failure identity | Current signature | Classification |
 | --- | --- | --- |

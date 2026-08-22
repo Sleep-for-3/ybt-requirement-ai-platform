@@ -131,7 +131,7 @@ Each task was committed atomically:
 
 - `backend/app/api/regulatory_context.py` — bounded read/debug endpoint with explicit permission and canonical builder handoff.
 - `backend/app/main.py` — registers the new router behind `guard_project_resource`.
-- `backend/tests/test_regulatory_context_api.py` — 12 HTTP integration tests covering authorization, isolation, lifecycle, time, provenance, gaps, payload bounds, and query count.
+- `backend/tests/test_regulatory_context_api.py` — 13 HTTP integration tests covering authorization, isolation, lifecycle, time, provenance, gaps, payload bounds, and query count.
 - `backend/tests/test_semantic_migration.py` — direct offline PostgreSQL compilation assertions for revision 016.
 - `.planning/phases/09-regulatory-context/09-04-POSTGRES-QUALIFICATION.md` — reproducible evidence, baseline classification, and live staging checklist.
 
@@ -140,11 +140,11 @@ Each task was committed atomically:
 | Scope | Result |
 | --- | --- |
 | API + Phase 8 semantic routes | 30 passed in 28.33s |
-| Context contract/builder/API + semantic + migration | 79 passed, 4 warnings in 64.65s |
+| Context contract/builder/API + semantic + migration | 89 passed, 4 pre-existing SQLite datetime-adapter warnings |
 | Hybrid retrieval + knowledge + governance + lineage | 86 passed in 26.54s |
 | SQLite concurrent confirmed interval | 1 passed in 19.36s |
 | Migration-focused SQLite/PostgreSQL offline | 4 passed, 4 warnings in 26.79s |
-| Full backend | 327 passed, 2 pre-existing failures, 5 warnings in 216.28s |
+| Full backend at final reviewed HEAD | 337 passed, 2 pre-existing failures, 5 warnings in 220.19s |
 | `python -m compileall -q app` | PASS, exit 0 |
 
 The two full-suite failures are unchanged from Phase 8 and 09-01:
@@ -152,7 +152,7 @@ The two full-suite failures are unchanged from Phase 8 and 09-01:
 - `test_windows_secret_acl_commands_remove_explicit_extra_access_and_are_idempotent`: Windows reports ACL `Protected=None` instead of `True`.
 - `test_windows_lifecycle_script_without_action_keeps_control_console_open`: the interactive `项目启停.ps1` process does not exit within the test's 10-second timeout.
 
-No new Phase 9 failure was observed. Phase 8 delivered 255 passing tests with these same two failures; the current suite has 327 passing tests with the same failure identities and signatures.
+No new Phase 9 failure was observed. Phase 8 delivered 255 passing tests with these same two failures; the final reviewed Phase 9 suite has 337 passing tests with the same failure identities and signatures, for 82 additional passing tests.
 
 ## PostgreSQL Qualification
 
