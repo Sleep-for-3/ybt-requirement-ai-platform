@@ -30,6 +30,7 @@ from app.models import (
     ScriptFileVersion,
     SemanticBinding,
     SemanticConcept,
+    SourceField,
     SourceToMartMapping,
     TargetField,
     TargetTable,
@@ -57,6 +58,15 @@ from app.services.retrieval.hybrid_retriever import HybridRetriever
 from app.services.semantic.context_authority import FactState, authority_for_source
 from app.services.semantic.status_policy import SemanticVisibilityMode, status_predicate
 from app.services.semantic.version_service import resolve_effective_version
+
+
+CANDIDATE_TIER_CONFIRMED_BINDING_OR_MAPPING = 1
+CANDIDATE_TIER_EXACT_CODE_OR_NAME = 2
+CANDIDATE_TIER_SEMANTIC_EVIDENCE = 3
+CANDIDATE_TIER_METADATA_KEYWORD = 4
+CANDIDATE_TIER_HISTORICAL_MAPPING = 5
+CANDIDATE_TIER_LINEAGE_NEIGHBORHOOD = 6
+CANDIDATE_TIER_RETRIEVAL_EVIDENCE = 7
 
 
 @dataclass
@@ -161,6 +171,17 @@ def collect_base_context(
         authorized_project,
         evidence_rows,
     )
+    source_mappings, mart_mappings, business_mappings, technical_mappings = mapping_rows
+    stale_lineage = sorted(
+        (source_type, int(row.id))
+        for source_type, rows in (
+            ("source_to_mart_mapping", source_mappings),
+            ("mart_to_ybt_mapping", mart_mappings),
+            ("scenario_technical_lineage", technical_mappings),
+        )
+        for row in rows
+        if row.lineage_status == "stale"
+    )
     raw_lineage = collect_raw_lineage(
         db,
         authorized_project,
@@ -186,33 +207,32 @@ def collect_base_context(
         target,
         context_scenario,
     )
+    if request.mode is ContextMode.CANDIDATE:
+        candidates.extend(collect_source_mart_candidates(
+            db,
+            authorized_project,
+            target,
+            target_field,
+            mappings,
+            raw_lineage,
+            retrieved,
+        ))
 
     semantic.sort(key=_fact_sort_key)
-    candidates.sort(key=_fact_sort_key)
+    candidates = sorted(candidates, key=_candidate_sort_key)[: request.candidate_limit]
     metadata.sort(key=_fact_sort_key)
     mappings.sort(key=_fact_sort_key)
     lineage = sorted([*raw_lineage, *mapping_lineage], key=_fact_sort_key)
     knowledge_evidence = sorted([*evidence_facts, *retrieved], key=_fact_sort_key)
     regulatory.sort(key=_fact_sort_key)
     historical.sort(key=_fact_sort_key)
-    source_mappings, mart_mappings, business_mappings, technical_mappings = mapping_rows
-    stale_lineage = sorted(
-        (source_type, row.id)
-        for source_type, rows in (
-            ("source_to_mart_mapping", source_mappings),
-            ("mart_to_ybt_mapping", mart_mappings),
-            ("scenario_technical_lineage", technical_mappings),
-        )
-        for row in rows
-        if row.lineage_status == "stale"
-    )
     return CollectedContext(
         target=target,
         scenario=context_scenario,
         semantic=semantic,
         regulatory=regulatory,
         metadata=metadata,
-        candidates=candidates[: request.candidate_limit],
+        candidates=candidates,
         mappings=mappings,
         lineage=lineage,
         knowledge_evidence=knowledge_evidence,
@@ -1013,6 +1033,209 @@ def collect_historical_context(
     return facts
 
 
+def collect_source_mart_candidates(
+    db: Session,
+    authorized_project: Project,
+    target: ContextTarget,
+    target_field: TargetField | None,
+    mappings: list[ContextFact],
+    raw_lineage: list[ContextFact],
+    retrieved: list[ContextFact],
+) -> list[ContextFact]:
+    """Rank every matching Source/Mart candidate before applying output caps."""
+
+    project_id = int(authorized_project.id)
+    source_fields = list(db.scalars(select(SourceField).where(
+        SourceField.project_id == project_id,
+    ).order_by(SourceField.id)).all())
+    mart_fields = list(db.scalars(select(MartField).where(
+        MartField.project_id == project_id,
+    ).order_by(MartField.id)).all())
+    binding_keys = {
+        (str(entity_type), int(entity_id))
+        for entity_type, entity_id in db.execute(select(
+            SemanticBinding.entity_type,
+            SemanticBinding.entity_id,
+        ).where(
+            SemanticBinding.project_id == project_id,
+            SemanticBinding.status == "confirmed",
+            SemanticBinding.entity_type.in_(("source_field", "mart_field")),
+        )).all()
+    }
+    mapped_mart_ids: set[int] = set()
+    evidence_keys: set[tuple[str, int]] = set()
+    for fact in mappings:
+        if fact.state is FactState.APPROVED:
+            if fact.value.mapping_type == "source_to_mart":
+                mapped_mart_ids.update(int(value) for value in fact.value.target_entity_ids)
+            elif fact.value.mapping_type == "mart_to_ybt":
+                mapped_mart_ids.update(int(value) for value in fact.value.source_entity_ids)
+        for reference in fact.evidence_references:
+            if reference.evidence_id is not None and reference.evidence_type in {
+                "source_field",
+                "mart_field",
+            }:
+                evidence_keys.add((reference.evidence_type, int(reference.evidence_id)))
+
+    lineage_keys: set[tuple[str, int]] = set()
+    for fact in raw_lineage:
+        for entity_type, entity_id in (
+            (fact.value.source_entity_type, fact.value.source_entity_id),
+            (fact.value.target_entity_type, fact.value.target_entity_id),
+        ):
+            if entity_type in {"source_field", "mart_field"}:
+                lineage_keys.add((entity_type, int(entity_id)))
+
+    historical_statement = select(HistoricalCaliberItem).where(
+        HistoricalCaliberItem.project_id == project_id,
+    )
+    historical_scope = []
+    if target.target_field_id is not None:
+        historical_scope.append(
+            HistoricalCaliberItem.matched_target_field_id == target.target_field_id
+        )
+    if target.target_field_code:
+        historical_scope.append(
+            HistoricalCaliberItem.target_field_code == target.target_field_code
+        )
+    if target.target_field_name:
+        historical_scope.append(
+            HistoricalCaliberItem.target_field_name == target.target_field_name
+        )
+    historical_rows = [] if not historical_scope else list(db.scalars(
+        historical_statement.where(or_(*historical_scope)).order_by(HistoricalCaliberItem.id)
+    ).all())
+    historical_source_names = {
+        _normalized_identifier(value)
+        for row in historical_rows
+        for value in (row.source_field_name, row.mart_field_name)
+        if value and _normalized_identifier(value)
+    }
+    retrieval_text = _normalized_identifier(" ".join(
+        " ".join(filter(None, [fact.value.title, fact.value.excerpt]))
+        for fact in retrieved
+    ))
+    target_code = _normalized_identifier(target.target_field_code)
+    target_name = _normalized_identifier(target.target_field_name)
+    target_metadata = [
+        value
+        for value in (
+            target.target_field_code,
+            target.target_field_name,
+            target_field.field_definition if target_field is not None else None,
+            target_field.regulatory_description if target_field is not None else None,
+            target_field.regulatory_original_definition if target_field is not None else None,
+            target_field.regulatory_refined_definition if target_field is not None else None,
+        )
+        if value
+    ]
+
+    facts: list[ContextFact] = []
+    for candidate_type, rows in (("source_field", source_fields), ("mart_field", mart_fields)):
+        for row in rows:
+            key = (candidate_type, int(row.id))
+            code = row.field_code
+            name = row.field_name
+            normalized_code = _normalized_identifier(code)
+            normalized_name = _normalized_identifier(name)
+            tier: int | None = None
+            reason: str | None = None
+            if key in binding_keys or (
+                candidate_type == "mart_field" and row.id in mapped_mart_ids
+            ):
+                tier = CANDIDATE_TIER_CONFIRMED_BINDING_OR_MAPPING
+                reason = "confirmed_binding_or_mapping"
+            elif (
+                normalized_code and normalized_code == target_code
+            ) or (
+                normalized_name and normalized_name == target_name
+            ):
+                tier = CANDIDATE_TIER_EXACT_CODE_OR_NAME
+                reason = "exact_code_or_name"
+            elif key in evidence_keys:
+                tier = CANDIDATE_TIER_SEMANTIC_EVIDENCE
+                reason = "semantic_evidence"
+            elif _metadata_keyword_match(
+                [code, name, getattr(row, "field_comment", None), getattr(row, "description", None)],
+                target_metadata,
+            ):
+                tier = CANDIDATE_TIER_METADATA_KEYWORD
+                reason = "metadata_keyword"
+            elif normalized_code in historical_source_names or normalized_name in historical_source_names:
+                tier = CANDIDATE_TIER_HISTORICAL_MAPPING
+                reason = "historical_mapping"
+            elif key in lineage_keys:
+                tier = CANDIDATE_TIER_LINEAGE_NEIGHBORHOOD
+                reason = "lineage_neighborhood"
+            elif retrieval_text and (
+                (normalized_code and normalized_code in retrieval_text)
+                or (normalized_name and normalized_name in retrieval_text)
+            ):
+                tier = CANDIDATE_TIER_RETRIEVAL_EVIDENCE
+                reason = "retrieval_evidence"
+            if tier is None or reason is None:
+                continue
+            facts.append(_source_mart_candidate_fact(
+                authorized_project,
+                row,
+                candidate_type=candidate_type,
+                tier=tier,
+                reason=reason,
+            ))
+    return sorted(facts, key=_candidate_sort_key)
+
+
+def _source_mart_candidate_fact(
+    project: Project,
+    row: SourceField | MartField,
+    *,
+    candidate_type: str,
+    tier: int,
+    reason: str,
+) -> ContextFact:
+    observed_at = _aware_datetime(row.updated_at or row.created_at)
+    source_type = "resolver_candidate"
+    score = {
+        CANDIDATE_TIER_CONFIRMED_BINDING_OR_MAPPING: 1.0,
+        CANDIDATE_TIER_EXACT_CODE_OR_NAME: 0.95,
+        CANDIDATE_TIER_SEMANTIC_EVIDENCE: 0.85,
+        CANDIDATE_TIER_METADATA_KEYWORD: 0.75,
+        CANDIDATE_TIER_HISTORICAL_MAPPING: 0.65,
+        CANDIDATE_TIER_LINEAGE_NEIGHBORHOOD: 0.55,
+        CANDIDATE_TIER_RETRIEVAL_EVIDENCE: 0.45,
+    }[tier]
+    description = getattr(row, "field_comment", None) or getattr(row, "description", None)
+    provenance = ContextProvenance(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        source_model=type(row).__name__,
+        source_type=source_type,
+        source_id=row.id,
+        observed_at=observed_at,
+        confidentiality_level=_confidentiality(project),
+    )
+    return ContextFact(
+        fact_type="source_mart_candidate",
+        value=CandidateContextValue(
+            candidate_type=candidate_type,
+            candidate_id=row.id,
+            code=_bounded(row.field_code, 500),
+            name=_bounded(row.field_name, 500),
+            match_reason=reason,
+            score=score,
+            rank_tier=tier,
+            evidence_excerpt=_bounded(description, 1000),
+        ),
+        authority=authority_for_source(source_type),
+        state=FactState.AI_SUGGESTED,
+        source_type=source_type,
+        source_id=row.id,
+        observed_at=observed_at,
+        confidence=score,
+        provenance=provenance,
+    )
+
+
 def _mapping_fact(
     project: Project,
     row: object,
@@ -1287,7 +1510,11 @@ def _semantic_candidate_fact(
             name=concept.concept_name,
             match_reason="explicit_candidate_mode",
             score=_confidence(concept.confidence_level),
-            rank_tier=1 if binding is not None and binding.status == "confirmed" else 2,
+            rank_tier=(
+                CANDIDATE_TIER_CONFIRMED_BINDING_OR_MAPPING
+                if binding is not None and binding.status == "confirmed"
+                else CANDIDATE_TIER_SEMANTIC_EVIDENCE
+            ),
             evidence_excerpt=concept.definition,
         ),
         authority=authority_for_source(source_type),
@@ -1342,6 +1569,49 @@ def _fact_sort_key(fact: ContextFact) -> tuple[str, str, int]:
     return fact.fact_type, fact.source_type, fact.source_id or 0
 
 
+def _candidate_sort_key(fact: ContextFact) -> tuple[int, str, int]:
+    value = fact.value
+    if not isinstance(value, CandidateContextValue):
+        return 100, fact.fact_type, fact.source_id or 0
+    return value.rank_tier, value.candidate_type, value.candidate_id
+
+
+def _metadata_keyword_match(
+    candidate_values: list[object | None],
+    target_values: list[object | None],
+) -> bool:
+    candidate_texts = [
+        _normalized_identifier(value)
+        for value in candidate_values
+        if value and _normalized_identifier(value)
+    ]
+    target_texts = [
+        _normalized_identifier(value)
+        for value in target_values
+        if value and _normalized_identifier(value)
+    ]
+    for candidate_text in candidate_texts:
+        candidate_grams = {
+            candidate_text[index:index + 4]
+            for index in range(max(len(candidate_text) - 3, 0))
+        }
+        for target_text in target_texts:
+            if candidate_grams & {
+                target_text[index:index + 4]
+                for index in range(max(len(target_text) - 3, 0))
+            }:
+                return True
+    return False
+
+
+def _normalized_identifier(value: object | None) -> str:
+    return "".join(
+        character
+        for character in str(value or "").casefold()
+        if character.isalnum()
+    )
+
+
 def _confidence(value: str | None) -> float:
     return {"low": 0.4, "medium": 0.7, "high": 1.0}.get(str(value or "").lower(), 0.5)
 
@@ -1354,4 +1624,14 @@ def _aware_datetime(value: object | None) -> datetime:
     return value.astimezone(UTC)
 
 
-__all__ = ["CollectedContext", "collect_base_context"]
+__all__ = [
+    "CANDIDATE_TIER_CONFIRMED_BINDING_OR_MAPPING",
+    "CANDIDATE_TIER_EXACT_CODE_OR_NAME",
+    "CANDIDATE_TIER_HISTORICAL_MAPPING",
+    "CANDIDATE_TIER_LINEAGE_NEIGHBORHOOD",
+    "CANDIDATE_TIER_METADATA_KEYWORD",
+    "CANDIDATE_TIER_RETRIEVAL_EVIDENCE",
+    "CANDIDATE_TIER_SEMANTIC_EVIDENCE",
+    "CollectedContext",
+    "collect_base_context",
+]
