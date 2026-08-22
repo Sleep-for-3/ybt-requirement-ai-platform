@@ -6,9 +6,9 @@ current_phase: 09
 current_phase_name: Regulatory Context
 status: executing
 stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-08-22T16:55:36.725Z"
+last_updated: "2026-08-22T17:28:05.000Z"
 last_activity: 2026-08-23
-last_activity_desc: 09-03 RegulatoryContextBuilder completed; 09-04 next
+last_activity_desc: 09-03 supplemental remediation completed; 09-04 next
 progress:
   total_phases: 8
   completed_phases: 1
@@ -30,7 +30,7 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 Phase: 09 (Regulatory Context) — EXECUTING
 Plan: 4 of 4
 Status: Ready for 09-04
-Last activity: 2026-08-23 — 09-03 RegulatoryContextBuilder completed; 09-04 next
+Last activity: 2026-08-23 — 09-03 supplemental remediation completed; 09-04 next
 
 Progress: [████████░░] 75% of Phase 9 plans
 
@@ -39,8 +39,8 @@ Progress: [████████░░] 75% of Phase 9 plans
 **Velocity:**
 
 - Total plans completed: 6
-- Average duration: 34m
-- Total execution time: 1h 42m
+- Average duration: 42m
+- Total execution time: 2h 5m
 
 **Per-Plan Metrics:**
 
@@ -48,7 +48,7 @@ Progress: [████████░░] 75% of Phase 9 plans
 |------|----------|-------|-------|
 | Phase 09 P01 | 40m | 3 tasks | 15 files |
 | Phase 09 P02 | 23m | 2 tasks | 4 files |
-| Phase 09 P03 | 39m | 3 tasks | 6 files |
+| Phase 09 P03 | 1h 2m | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -72,6 +72,9 @@ Progress: [████████░░] 75% of Phase 9 plans
 - [Phase 9]: RegulatoryContextBuilder accepts only a PermissionService-authorized Project and derives institution scope only from it.
 - [Phase 9]: Raw lineage and persisted mapping/scenario lineage use distinct verification predicates based only on real model fields.
 - [Phase 9]: Context candidates use seven explicit ranking tiers with caps after stable full sorting; the acceptance collector budget is 21 SQL statements.
+- [Phase 9]: Institution-scoped and restricted knowledge fail closed to their owner project; bank_name is never an authorization identity.
+- [Phase 9]: Mapping audit rows stay absent, while draft and ai_suggested rows remain explicit state-preserving candidates only.
+- [Phase 9]: Effective semantic versions resolve in one batched query using the same inclusive trusted policy as the single resolver.
 
 ### Pending Todos
 
@@ -92,6 +95,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-22T16:55:36.687Z
+Last session: 2026-08-22T17:28:05.000Z
 Stopped at: Completed 09-03-PLAN.md
 Resume file: None
