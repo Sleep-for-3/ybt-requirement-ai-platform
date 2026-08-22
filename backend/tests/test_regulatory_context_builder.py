@@ -455,6 +455,78 @@ def test_candidate_binding_does_not_contaminate_confirmed_semantic_provenance_or
     }
 
 
+def test_explicit_concept_filters_bindings_to_requested_target_identities(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="EXPLICIT_TARGET_FILTER")
+    project = db_session.get(Project, fixture["project_id"])
+    unrelated_confirmed = db_session.scalar(select(SemanticBinding).where(
+        SemanticBinding.semantic_concept_id == fixture["semantic_concept_id"],
+    ))
+    unrelated_table = db_session.get(TargetTable, fixture["target_table_id"])
+    unrelated_candidate = SemanticBinding(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        semantic_concept_id=fixture["semantic_concept_id"],
+        entity_type="target_table",
+        entity_id=unrelated_table.id,
+        binding_type="candidate_scope",
+        confidence_level="medium",
+        confidence_score=0.6,
+        status="draft",
+    )
+    requested_table = TargetTable(
+        project_id=project.id,
+        table_code="EXPLICIT_FILTER_TABLE",
+        table_name="显式过滤目标表",
+    )
+    db_session.add_all([unrelated_candidate, requested_table])
+    db_session.flush()
+    requested_field = TargetField(
+        project_id=project.id,
+        target_table_id=requested_table.id,
+        field_code="EXPLICIT_FILTER_FIELD",
+        field_name="显式过滤目标字段",
+        field_type="VARCHAR(64)",
+    )
+    db_session.add(requested_field)
+    db_session.commit()
+    scoped_fixture = {
+        **fixture,
+        "target_table_id": requested_table.id,
+        "target_field_id": requested_field.id,
+    }
+
+    scoped = _build_context(
+        db_session,
+        scoped_fixture,
+        mode=ContextMode.CANDIDATE,
+    )
+    concept_only = RegulatoryContextBuilder(db_session).build(
+        RegulatoryContextRequest(
+            project_id=project.id,
+            semantic_concept_id=fixture["semantic_concept_id"],
+            as_of=AS_OF,
+            mode=ContextMode.CANDIDATE,
+        ),
+        authorized_project=_authorized_project(db_session, project.id),
+    )
+
+    assert scoped.semantic[0].evidence_references == []
+    assert all(
+        reference.evidence_id not in {unrelated_confirmed.id, unrelated_candidate.id}
+        for candidate in scoped.candidates
+        for reference in candidate.evidence_references
+    )
+    assert "MISSING_CONFIRMED_SEMANTIC_BINDING" in {
+        question.question_code for question in scoped.open_questions
+    }
+    assert [
+        reference.evidence_id
+        for reference in concept_only.semantic[0].evidence_references
+    ] == [unrelated_confirmed.id]
+
+
 def test_candidate_mapping_evidence_does_not_suppress_trusted_evidence_gap(
     db_session: Session,
 ) -> None:

@@ -443,6 +443,13 @@ def _semantic_inputs(
             SemanticBinding.semantic_concept_id == concept.id,
             status_predicate(SemanticBinding.status, mode),
         ).order_by(SemanticBinding.id)).all())
+        target_identities = set(_semantic_binding_target_identities(request, target))
+        if target_identities:
+            bindings = [
+                binding
+                for binding in bindings
+                if (str(binding.entity_type), int(binding.entity_id)) in target_identities
+            ]
         return bindings, [concept]
 
     clauses = []
@@ -499,6 +506,21 @@ def _semantic_binding_sort_key(
 ) -> tuple[int, int]:
     """Prefer the explicitly requested target identity, then stable binding id."""
 
+    ordered_identities = _semantic_binding_target_identities(request, target)
+    identity = (str(binding.entity_type), int(binding.entity_id))
+    try:
+        target_rank = ordered_identities.index(identity)
+    except ValueError:
+        target_rank = len(ordered_identities)
+    return target_rank, int(binding.id)
+
+
+def _semantic_binding_target_identities(
+    request: RegulatoryContextRequest,
+    target: ContextTarget,
+) -> list[tuple[str, int]]:
+    """Return requested and derived target identities in deterministic priority order."""
+
     requested_identities = [
         (entity_type, int(identifier))
         for entity_type, identifier in (
@@ -523,12 +545,7 @@ def _semantic_binding_sort_key(
         *requested_identities,
         *(identity for identity in scoped_identities if identity not in requested_identities),
     ]
-    identity = (str(binding.entity_type), int(binding.entity_id))
-    try:
-        target_rank = ordered_identities.index(identity)
-    except ValueError:
-        target_rank = len(ordered_identities)
-    return target_rank, int(binding.id)
+    return ordered_identities
 
 
 def collect_mapping_rows(
