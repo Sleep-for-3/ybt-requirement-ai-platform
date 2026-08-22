@@ -240,8 +240,8 @@ def test_fact_serializes_typed_value_authority_state_and_provenance_fields() -> 
 
 
 def test_authority_order_is_code_defined_without_mutating_fact_state() -> None:
+    assert compare_authority(AuthorityRank.FORMAL, AuthorityRank.HUMAN_CONFIRMED) == 0
     expected_order = (
-        AuthorityRank.FORMAL,
         AuthorityRank.HUMAN_CONFIRMED,
         AuthorityRank.REGULATORY,
         AuthorityRank.SEMANTIC,
@@ -255,8 +255,6 @@ def test_authority_order_is_code_defined_without_mutating_fact_state() -> None:
     for higher, lower in zip(expected_order, expected_order[1:]):
         assert compare_authority(higher, lower) == 1
         assert compare_authority(lower, higher) == -1
-    assert compare_authority(AuthorityRank.FORMAL, AuthorityRank.HUMAN_CONFIRMED) == 0
-
     assert authority_for_source("formal_regulation") is AuthorityRank.FORMAL
     assert authority_for_source("semantic_concept_version") is AuthorityRank.SEMANTIC
     assert authority_for_source("approved_mapping") is AuthorityRank.MAPPING
