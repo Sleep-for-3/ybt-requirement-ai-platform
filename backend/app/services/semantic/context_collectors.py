@@ -941,7 +941,10 @@ def collect_regulatory_knowledge(
             RegulatoryKnowledgeItem.scenario_id.is_(None),
             RegulatoryKnowledgeItem.scenario_id == scenario.scenario_id,
         ))
-    rows = list(db.scalars(statement.order_by(RegulatoryKnowledgeItem.id).limit(200)).all())
+    rows = sorted(
+        db.scalars(statement.order_by(RegulatoryKnowledgeItem.id)).all(),
+        key=lambda row: _regulatory_relevance_sort_key(row, target, scenario),
+    )[:200]
     facts: list[ContextFact] = []
     for row in rows:
         requirement_text = next((
@@ -1601,6 +1604,32 @@ def _source_location(
     if page_no is not None:
         parts.append(f"page:{page_no}")
     return ":".join(part for part in parts if part) or None
+
+
+def _regulatory_relevance_sort_key(
+    row: RegulatoryKnowledgeItem,
+    target: ContextTarget,
+    scenario: ContextScenario | None,
+) -> tuple[int, int, int]:
+    """Rank all matching regulatory rows before the bounded projection cap."""
+
+    row_field_code = _normalized_identifier(row.target_field_code)
+    row_field_name = _normalized_identifier(row.target_field_name)
+    row_table_code = _normalized_identifier(row.target_table_code)
+    if row_field_code and row_field_code == _normalized_identifier(target.target_field_code):
+        tier = 1
+    elif row_field_name and row_field_name == _normalized_identifier(target.target_field_name):
+        tier = 2
+    elif row_table_code and row_table_code == _normalized_identifier(target.target_table_code):
+        tier = 3
+    else:
+        tier = 4
+    scenario_rank = (
+        0
+        if scenario is not None and row.scenario_id == scenario.scenario_id
+        else 1
+    )
+    return tier, scenario_rank, int(row.id)
 
 
 def _bounded(value: object | None, limit: int) -> str | None:
