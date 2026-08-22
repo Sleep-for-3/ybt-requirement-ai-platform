@@ -6,6 +6,14 @@ from app.services.semantic.binding_service import (
 )
 from app.services.semantic.graph_service import SemanticGraphService
 from app.services.semantic.resolver import SemanticResolver
+from app.services.semantic.context_authority import (
+    AUTHORITY_RANKS,
+    AuthorityRank,
+    FactState,
+    authority_for_source,
+    compare_authority,
+    is_confirmed_state,
+)
 from app.services.semantic.status_policy import (
     SemanticVisibilityMode,
     audit_only_statuses,
@@ -29,6 +37,12 @@ __all__ = [
     "ENTITY_MODELS",
     "SemanticGraphService",
     "SemanticResolver",
+    "AUTHORITY_RANKS",
+    "AuthorityRank",
+    "FactState",
+    "authority_for_source",
+    "compare_authority",
+    "is_confirmed_state",
     "apply_status_transition",
     "get_project_entity",
     "get_project_semantic_resource",
