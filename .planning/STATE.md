@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
-current_phase: 09
-current_phase_name: Regulatory Context
-status: ready_for_verification
-stopped_at: Completed 09-04-PLAN.md; awaiting Phase 9 verification
-last_updated: "2026-08-22T18:42:45.128Z"
+current_phase: 10
+current_phase_name: Generator Refactor
+status: planning
+stopped_at: Phase 09 verified complete; stopped at Phase 10 planning boundary
+last_updated: "2026-08-23T04:13:27.951+08:00"
 last_activity: 2026-08-23
-last_activity_desc: 09-04 execution completed; Phase 9 verification next
+last_activity_desc: Phase 09 verified complete; Phase 10 planning not started
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
   completed_plans: 7
 ---
@@ -23,22 +23,22 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 **Core value:** 监管语义、口径、证据、血缘和治理关系是核心资产，AI 不能越过人工确认。
-**Current focus:** Phase 09 — Regulatory Context
+**Current focus:** Phase 10 — Generator Refactor planning boundary
 
 ## Current Position
 
-Phase: 09 (Regulatory Context) — AWAITING VERIFICATION
-Plan: 4 of 4
-Status: Ready for Phase 9 verification
-Last activity: 2026-08-23 — 09-04 execution completed; orchestrator verification next
+Phase: 10 — Generator Refactor
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-23 — Phase 09 complete, transitioned to Phase 10
 
-Progress: [██████████] 100% of Phase 9 plans
+Progress: [███░░░░░░░] 2/8 milestone phases complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: 42m
 - Total execution time: 2h 5m
 
@@ -88,7 +88,7 @@ None.
 
 - v1.0 frontend changes are still uncommitted and must be preserved during backend work.
 - No PostgreSQL service is guaranteed locally; dialect correctness must be covered by migration construction and SQLite execution, with PostgreSQL runtime verification documented if unavailable.
-- Baseline backend suite has two pre-existing Windows-only failures: ACL inspection and interactive lifecycle-script timeout; 269 other tests pass after 09-01.
+- Baseline backend suite still has the same two pre-existing Windows-only failures: ACL inspection and interactive lifecycle-script timeout; final Phase 9 HEAD has 337 passing tests and no new failure.
 
 ## Deferred Items
 
@@ -99,6 +99,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-22T18:42:45.106Z
-Stopped at: Completed 09-04-PLAN.md; awaiting Phase 9 verification
+Last session: 2026-08-23T04:13:27.951+08:00
+Stopped at: Phase 09 verified complete; Phase 10 planning boundary
 Resume file: None

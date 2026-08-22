@@ -21,14 +21,14 @@
 
 **Goal:** 建立统一、版本明确、带权威等级和 provenance 的 RegulatoryContext Contract。
 **Requirements:** CTX-01, CTX-02, CTX-03, CTX-04
-**Plans:** 4/4 plans executed
+**Plans:** 4/4 plans complete
 
 - [x] 09-01-PLAN.md
 - [x] 09-02-PLAN.md
 - [x] 09-03-PLAN.md
 - [x] 09-04-PLAN.md
 
-**Status:** In progress — 4/4 plans executed; awaiting Phase 9 verification
+**Status:** Complete (2026-08-23) — 4/4 plans verified; CTX-01 through CTX-04 satisfied
 **Success Criteria:**
 
 1. 指定 project/target_field/scenario 可得到稳定结构化 Context。
@@ -39,6 +39,7 @@
 
 **Goal:** 让现有 Mapping/Scenario Generator 渐进消费统一 Context，保持旧 API 和治理边界。
 **Requirements:** GEN-01, GEN-02, GEN-03, GEN-04
+**Status:** Ready to plan — implementation not started
 **Success Criteria:**
 
 1. 两个 Mapping Generator 的共享事实查询从 ContextBuilder 获取。

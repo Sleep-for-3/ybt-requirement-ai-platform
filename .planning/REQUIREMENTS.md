@@ -17,10 +17,10 @@
 
 ### Regulatory Context
 
-- [ ] **CTX-01**: 调用方可按 project 与可选 target table/field、scenario、mart field、semantic concept 构建稳定的 Pydantic RegulatoryContext。
-- [ ] **CTX-02**: Context 明确区分 confirmed、regulatory、approved mapping、verified lineage、metadata、historical、retrieved 与 inferred 权威等级。
-- [ ] **CTX-03**: Context 聚合语义、映射、技术血缘、知识证据、历史口径、冲突和待确认问题，但不复制现有事实模型。
-- [ ] **CTX-04**: Context 对缺失知识、缺失血缘、冲突事实和证据不足有确定性输出与测试。
+- [x] **CTX-01**: 调用方可按 project 与可选 target table/field、scenario、mart field、semantic concept 构建稳定的 Pydantic RegulatoryContext。
+- [x] **CTX-02**: Context 明确区分 confirmed、regulatory、approved mapping、verified lineage、metadata、historical、retrieved 与 inferred 权威等级。
+- [x] **CTX-03**: Context 聚合语义、映射、技术血缘、知识证据、历史口径、冲突和待确认问题，但不复制现有事实模型。
+- [x] **CTX-04**: Context 对缺失知识、缺失血缘、冲突事实和证据不足有确定性输出与测试。
 
 ### Generator Migration
 
@@ -70,7 +70,7 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07 | Phase 8 | Complete |
-| CTX-01, CTX-02, CTX-03, CTX-04 | Phase 9 | Pending |
+| CTX-01, CTX-02, CTX-03, CTX-04 | Phase 9 | Complete |
 | GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Pending |
 | SUI-01, SUI-02 | Phase 11 | Pending |
 | WRK-01, WRK-02, WRK-03 | Phase 12 | Pending |
