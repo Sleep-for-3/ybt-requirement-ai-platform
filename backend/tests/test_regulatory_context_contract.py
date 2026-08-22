@@ -252,7 +252,7 @@ def test_authority_order_is_code_defined_without_mutating_fact_state() -> None:
         AuthorityRank.RETRIEVED,
         AuthorityRank.INFERRED,
     )
-    for higher, lower in zip(expected_order, expected_order[1:], strict=True):
+    for higher, lower in zip(expected_order, expected_order[1:]):
         assert compare_authority(higher, lower) == 1
         assert compare_authority(lower, higher) == -1
     assert compare_authority(AuthorityRank.FORMAL, AuthorityRank.HUMAN_CONFIRMED) == 0
