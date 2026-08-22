@@ -289,13 +289,15 @@ def collect_base_context(
             ),
             "stale_lineage": stale_lineage,
             "regulatory_knowledge_count": len(regulatory),
-            "retrieved_knowledge_count": len(retrieved),
+            "retrieved_knowledge_count": sum(
+                fact.fact_type == "retrieved_knowledge" for fact in retrieved
+            ),
             "evidence_count": len(evidence_rows),
             "evidence_required": bool(mappings or regulatory),
             "supporting_evidence_count": (
                 len(evidence_rows)
                 + sum(bool(fact.evidence_references) for fact in regulatory)
-                + len(retrieved)
+                + sum(fact.fact_type == "retrieved_knowledge" for fact in retrieved)
             ),
             "historical_count": len(historical),
             "semantic_definitions": [
@@ -1084,6 +1086,46 @@ def collect_retrieved_knowledge(
             evidence_references=evidence,
             observed_at=observed_at,
             confidence=float(item.get("final_score") or 0.0),
+            provenance=provenance,
+        ))
+    if not facts:
+        observed_at = _aware_datetime(retrieval_log.created_at)
+        source_type = "knowledge_retrieval"
+        location = f"retrieval-log:{retrieval_log.id}"
+        evidence = [ContextEvidenceReference(
+            evidence_type="retrieval_log",
+            evidence_id=retrieval_log.id,
+            source_location=location,
+        )]
+        confidentiality = _confidentiality(authorized_project)
+        provenance = ContextProvenance(
+            project_id=authorized_project.id,
+            institution_id=authorized_project.institution_id,
+            source_model="RetrievalLog",
+            source_type=source_type,
+            source_id=retrieval_log.id,
+            evidence_references=evidence,
+            observed_at=observed_at,
+            retrieval_log_id=retrieval_log.id,
+            confidentiality_level=confidentiality,
+        )
+        facts.append(ContextFact(
+            fact_type="knowledge_retrieval_empty",
+            value=KnowledgeEvidenceContextValue(
+                evidence_reference_id=retrieval_log.id,
+                knowledge_type="retrieval_attempt",
+                title="No matching knowledge returned",
+                source_location=location,
+                confidentiality_level=confidentiality,
+                retrieval_score=0.0,
+            ),
+            authority=authority_for_source(source_type),
+            state=FactState.RETRIEVED,
+            source_type=source_type,
+            source_id=retrieval_log.id,
+            evidence_references=evidence,
+            observed_at=observed_at,
+            confidence=0.0,
             provenance=provenance,
         ))
     return facts

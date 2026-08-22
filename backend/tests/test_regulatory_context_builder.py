@@ -163,7 +163,11 @@ def test_repeat_builds_preserve_domain_content_and_validate_volatile_metadata(
     for context in (first, second):
         assert context.build_metadata.built_at.tzinfo is not None
         assert context.build_metadata.built_at.utcoffset() is not None
-        assert context.build_metadata.retrieval_log_ids == []
+        assert len(context.build_metadata.retrieval_log_ids) == 1
+        assert db_session.get(
+            RetrievalLog,
+            context.build_metadata.retrieval_log_ids[0],
+        ).final_result_count == 0
         assert context.conflicts == sorted(
             context.conflicts,
             key=lambda item: item.deterministic_sort_key(),
@@ -198,7 +202,9 @@ def test_zero_result_retrieval_log_remains_traceable_through_existing_fact_prove
     assert log.project_id == fixture["project_id"]
     assert log.final_result_count == 0
     assert log.result_ids_json == []
-    assert "MISSING_KNOWLEDGE" in {item.code for item in context.conflicts}
+    assert "MISSING_KNOWLEDGE" in {
+        item.question_code for item in context.open_questions
+    }
 
 
 def test_mapping_lineage_evidence_history_and_knowledge_families_are_aggregated(
@@ -1617,4 +1623,18 @@ def _stable_projection(context: RegulatoryContext) -> dict:
         for fact in payload[section]:
             if fact["provenance"]["retrieval_log_id"] is not None:
                 fact["provenance"]["retrieval_log_id"] = "<volatile-retrieval-log-id>"
+            if fact["provenance"]["source_model"] == "RetrievalLog":
+                fact["source_id"] = "<volatile-retrieval-log-id>"
+                fact["provenance"]["source_id"] = "<volatile-retrieval-log-id>"
+                fact["observed_at"] = "<volatile-retrieval-observed-at>"
+                fact["provenance"]["observed_at"] = "<volatile-retrieval-observed-at>"
+                fact["value"]["evidence_reference_id"] = "<volatile-retrieval-log-id>"
+                fact["value"]["source_location"] = "retrieval-log:<volatile>"
+                for references in (
+                    fact["evidence_references"],
+                    fact["provenance"]["evidence_references"],
+                ):
+                    for reference in references:
+                        reference["evidence_id"] = "<volatile-retrieval-log-id>"
+                        reference["source_location"] = "retrieval-log:<volatile>"
     return payload
