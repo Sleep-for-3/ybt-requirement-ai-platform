@@ -805,6 +805,85 @@ def test_candidate_ranking_uses_explicit_tiers_and_caps_only_after_full_sort(
     ]
 
 
+def test_late_exact_regulatory_and_field_candidates_rank_before_output_caps(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="LATE_EXACT")
+    project = db_session.get(Project, fixture["project_id"])
+    target_field = db_session.get(TargetField, fixture["target_field_id"])
+    for index in range(200):
+        db_session.add(RegulatoryKnowledgeItem(
+            project_id=project.id,
+            knowledge_type="regulatory_qa",
+            target_table_code="2.3",
+            target_field_code=f"BROAD_{index:03d}",
+            target_field_name=f"宽泛字段 {index}",
+            regulatory_reply=f"宽泛监管答复 {index}",
+        ))
+    db_session.flush()
+    late_exact_regulatory = RegulatoryKnowledgeItem(
+        project_id=project.id,
+        knowledge_type="regulatory_qa",
+        target_table_code="2.3",
+        target_field_code=target_field.field_code,
+        target_field_name=target_field.field_name,
+        regulatory_reply="LATE_EXACT_REGULATORY_RULE",
+    )
+    db_session.add(late_exact_regulatory)
+
+    system = BusinessSystem(
+        project_id=project.id,
+        system_code="LATE_EXACT_SYS",
+        system_name="晚到精确候选系统",
+        enabled=True,
+    )
+    db_session.add(system)
+    db_session.flush()
+    source_table = SourceTable(
+        project_id=project.id,
+        business_system_id=system.id,
+        table_code="LATE_EXACT_SOURCE",
+        table_name="晚到精确候选表",
+    )
+    db_session.add(source_table)
+    db_session.flush()
+    for index in range(200):
+        db_session.add(SourceField(
+            project_id=project.id,
+            source_table_id=source_table.id,
+            field_code=f"BROAD_FIELD_{index:03d}",
+            field_name=f"宽泛候选字段 {index}",
+            field_comment="客户唯一标识相关候选",
+        ))
+    db_session.flush()
+    late_exact_field = SourceField(
+        project_id=project.id,
+        source_table_id=source_table.id,
+        field_code=target_field.field_code,
+        field_name="晚到精确来源字段",
+    )
+    db_session.add(late_exact_field)
+    db_session.commit()
+
+    context = _build_context(
+        db_session,
+        fixture,
+        mode=ContextMode.CANDIDATE,
+        candidate_limit=10,
+    )
+
+    assert len(context.regulatory) == 200
+    assert late_exact_regulatory.id in {
+        fact.source_id for fact in context.regulatory
+    }
+    assert any(
+        fact.value.candidate_type == "source_field"
+        and fact.value.candidate_id == late_exact_field.id
+        and fact.value.rank_tier == 2
+        for fact in context.candidates
+    )
+
+
 def test_spec_less_records_remain_test_metadata_and_never_enter_runtime_output(
     db_session: Session,
 ) -> None:
