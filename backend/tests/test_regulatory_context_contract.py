@@ -101,6 +101,7 @@ def _semantic_fact(
         version_no=2,
         effective_period=effective_period,
         observed_at=observed_at,
+        retrieval_log_id=(401 if authority is AuthorityRank.RETRIEVED or state is FactState.RETRIEVED else None),
         confidentiality_level="internal",
     )
     return ContextFact(

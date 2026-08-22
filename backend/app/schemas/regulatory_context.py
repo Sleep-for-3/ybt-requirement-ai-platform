@@ -316,6 +316,15 @@ class ContextFact(_StrictModel):
             raise ValueError("retrieved state requires retrieved authority")
         if self.state is FactState.INFERRED and self.authority is not AuthorityRank.INFERRED:
             raise ValueError("inferred state requires inferred authority")
+        if (
+            self.authority is AuthorityRank.RETRIEVED or self.state is FactState.RETRIEVED
+        ) and self.provenance.retrieval_log_id is None:
+            raise ValueError("retrieved facts require provenance.retrieval_log_id")
+        if isinstance(self.value, KnowledgeEvidenceContextValue):
+            if self.provenance.confidentiality_level != self.value.confidentiality_level:
+                raise ValueError(
+                    "knowledge/evidence confidentiality must match provenance.confidentiality_level"
+                )
 
         mirrored = (
             ("source_type", self.source_type, self.provenance.source_type),
