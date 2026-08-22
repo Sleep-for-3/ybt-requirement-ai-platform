@@ -10,9 +10,11 @@ from app.schemas.regulatory_context import (
     ContextConflict,
     ContextEvidenceReference,
     ContextFact,
+    ContextInputScope,
     ContextMode,
     ContextOpenQuestion,
     ContextProvenance,
+    ContextScenario,
     ContextScope,
     ContextTarget,
     EffectivePeriod,
@@ -47,31 +49,73 @@ SPECLESS_EDGE_PROBE_METADATA = tuple(
 )
 
 
+def _build_metadata(
+    *,
+    scope: ContextScope,
+    target: ContextTarget,
+    scenario: ContextScenario | None = None,
+    facts: list[ContextFact] | None = None,
+    built_at: datetime = datetime(2026, 12, 31, 8, 30, tzinfo=UTC),
+    conflict_count: int = 0,
+    open_question_count: int = 0,
+    source_count: int | None = None,
+    retrieval_log_ids: list[int] | None = None,
+) -> ContextBuildMetadata:
+    facts = facts or []
+    actual_retrieval_log_ids = sorted(
+        {
+            fact.provenance.retrieval_log_id
+            for fact in facts
+            if fact.provenance.retrieval_log_id is not None
+        }
+    )
+    return ContextBuildMetadata(
+        context_version="1.0",
+        built_at=built_at,
+        project_id=scope.project_id,
+        as_of=scope.as_of,
+        input_scope=ContextInputScope(
+            reporting_period=scope.reporting_period,
+            mode=scope.mode,
+            target_table_id=target.target_table_id,
+            target_field_id=target.target_field_id,
+            mart_field_id=target.mart_field_id,
+            semantic_concept_id=target.semantic_concept_id,
+            scenario_id=(scenario.scenario_id if scenario is not None else None),
+        ),
+        semantic_policy_version="1.0",
+        authority_policy_version="1.0",
+        retrieval_log_ids=(
+            actual_retrieval_log_ids if retrieval_log_ids is None else retrieval_log_ids
+        ),
+        mode=scope.mode,
+        fact_count=len(facts),
+        conflict_count=conflict_count,
+        open_question_count=open_question_count,
+        source_count=(len(facts) if source_count is None else source_count),
+    )
+
+
 def _empty_context() -> RegulatoryContext:
+    scope = ContextScope(
+        project_id=7,
+        institution_id=3,
+        as_of=date(2026, 12, 31),
+        reporting_period="2026 Q4",
+        mode=ContextMode.TRUSTED,
+    )
+    target = ContextTarget(
+        target_table_id=23,
+        target_field_id=47,
+        target_table_code="2.3",
+        target_table_name="同业客户表",
+        target_field_code="CUST_UNIFIED_NO",
+        target_field_name="客户统一编号",
+    )
     return RegulatoryContext(
-        scope=ContextScope(
-            project_id=7,
-            institution_id=3,
-            as_of=date(2026, 12, 31),
-            reporting_period="2026 Q4",
-            mode=ContextMode.TRUSTED,
-        ),
-        target=ContextTarget(
-            target_table_id=23,
-            target_field_id=47,
-            target_table_code="2.3",
-            target_table_name="同业客户表",
-            target_field_code="CUST_UNIFIED_NO",
-            target_field_name="客户统一编号",
-        ),
-        build_metadata=ContextBuildMetadata(
-            built_at=datetime(2026, 12, 31, 8, 30, tzinfo=UTC),
-            mode=ContextMode.TRUSTED,
-            fact_count=0,
-            conflict_count=0,
-            open_question_count=0,
-            source_count=0,
-        ),
+        scope=scope,
+        target=target,
+        build_metadata=_build_metadata(scope=scope, target=target),
     )
 
 
@@ -80,6 +124,10 @@ def _semantic_fact(
     authority: AuthorityRank = AuthorityRank.SEMANTIC,
     state: FactState = FactState.CONFIRMED,
 ) -> ContextFact:
+    source_type = {
+        AuthorityRank.RETRIEVED: "retrieved_knowledge",
+        AuthorityRank.INFERRED: "ai_inference",
+    }.get(authority, "semantic_concept_version")
     evidence = ContextEvidenceReference(
         evidence_type="semantic_version",
         evidence_id=91,
@@ -95,7 +143,7 @@ def _semantic_fact(
         project_id=7,
         institution_id=3,
         source_model="SemanticConceptVersion",
-        source_type="semantic_concept_version",
+        source_type=source_type,
         source_id=91,
         evidence_references=[evidence],
         version_no=2,
@@ -117,7 +165,7 @@ def _semantic_fact(
         ),
         authority=authority,
         state=state,
-        source_type="semantic_concept_version",
+        source_type=source_type,
         source_id=91,
         evidence_references=[evidence],
         version_no=2,
@@ -282,6 +330,40 @@ def test_authority_order_is_code_defined_without_mutating_fact_state() -> None:
     assert retrieved.state is FactState.RETRIEVED
     with pytest.raises(ValidationError):
         _semantic_fact(authority=AuthorityRank.RETRIEVED, state=FactState.CONFIRMED)
+
+
+def test_fact_authority_must_match_registered_source_and_unknown_sources_fail_closed() -> None:
+    semantic = _semantic_fact()
+    mismatched_payload = semantic.model_dump(mode="python")
+    mismatched_payload["authority"] = AuthorityRank.METADATA
+    with pytest.raises(ValidationError, match="authority must match source_type"):
+        ContextFact.model_validate(mismatched_payload)
+
+    unknown_payload = semantic.model_dump(mode="python")
+    unknown_payload["source_type"] = "unregistered_semantic_adapter"
+    unknown_payload["provenance"]["source_type"] = "unregistered_semantic_adapter"
+    with pytest.raises(ValidationError, match="unknown context source_type"):
+        ContextFact.model_validate(unknown_payload)
+
+    inferred = _fact_for_value(
+        CandidateContextValue(
+            candidate_type="source_field",
+            candidate_id=81,
+            code="CUST_NO",
+            name="客户号",
+            match_reason="exact_code",
+            score=0.92,
+            rank_tier=2,
+        ),
+        authority=AuthorityRank.INFERRED,
+        state=FactState.AI_SUGGESTED,
+        source_type="ai_inference",
+        source_id=81,
+    )
+    promoted_payload = inferred.model_dump(mode="python")
+    promoted_payload["state"] = FactState.CONFIRMED
+    with pytest.raises(ValidationError, match="retrieved or inferred facts cannot use trusted states"):
+        ContextFact.model_validate(promoted_payload)
 
 
 def test_spec_less_edge_metadata_is_planning_only_and_not_product_output() -> None:
@@ -461,9 +543,22 @@ def test_all_section_values_are_bounded_and_reject_orm_or_arbitrary_nested_data(
         source_id=601,
     )
 
+    scope = _empty_context().scope
+    target = _empty_context().target
+    facts = [
+        semantic,
+        regulatory,
+        metadata,
+        candidate,
+        mapping,
+        lineage,
+        knowledge,
+        historical,
+        quality,
+    ]
     context = RegulatoryContext(
-        scope=_empty_context().scope,
-        target=_empty_context().target,
+        scope=scope,
+        target=target,
         semantic=[semantic],
         regulatory=[regulatory],
         metadata=[metadata],
@@ -473,12 +568,11 @@ def test_all_section_values_are_bounded_and_reject_orm_or_arbitrary_nested_data(
         knowledge_evidence=[knowledge],
         historical=[historical],
         quality=[quality],
-        build_metadata=ContextBuildMetadata(
+        build_metadata=_build_metadata(
+            scope=scope,
+            target=target,
+            facts=facts,
             built_at=datetime(2026, 8, 22, 13, 1, tzinfo=UTC),
-            mode=ContextMode.TRUSTED,
-            fact_count=9,
-            conflict_count=0,
-            open_question_count=0,
             source_count=9,
         ),
     )
@@ -582,6 +676,172 @@ def test_retrieved_provenance_requires_log_and_matching_confidentiality() -> Non
         )
 
 
+def test_build_metadata_is_typed_complete_and_bound_to_context_inputs_and_retrievals() -> None:
+    scope = _empty_context().scope
+    target = _empty_context().target.model_copy(
+        update={"mart_field_id": 61, "semantic_concept_id": 12}
+    )
+    scenario = ContextScenario(
+        scenario_id=73,
+        scenario_code="REG_REPORT",
+        scenario_name="监管报送",
+        scenario_type="regulatory_reporting",
+    )
+    retrieved_401 = _fact_for_value(
+        KnowledgeEvidenceContextValue(
+            knowledge_unit_id=301,
+            knowledge_type="regulatory_qa",
+            title="监管答疑 A",
+            excerpt="统一客户号采用行内客户主索引。",
+            confidentiality_level="internal",
+            retrieval_score=0.99,
+        ),
+        authority=AuthorityRank.RETRIEVED,
+        state=FactState.RETRIEVED,
+        source_type="retrieved_knowledge",
+        source_id=301,
+        retrieval_log_id=401,
+        confidentiality_level="internal",
+    )
+    retrieved_9 = _fact_for_value(
+        KnowledgeEvidenceContextValue(
+            knowledge_unit_id=302,
+            knowledge_type="regulatory_qa",
+            title="监管答疑 B",
+            excerpt="统一客户号必须在目标表内保持稳定。",
+            confidentiality_level="internal",
+            retrieval_score=0.97,
+        ),
+        authority=AuthorityRank.RETRIEVED,
+        state=FactState.RETRIEVED,
+        source_type="retrieved_knowledge",
+        source_id=302,
+        retrieval_log_id=9,
+        confidentiality_level="internal",
+    )
+    facts = [retrieved_401, retrieved_9]
+    metadata = _build_metadata(
+        scope=scope,
+        target=target,
+        scenario=scenario,
+        facts=facts,
+        retrieval_log_ids=[401, 9, 401],
+    )
+    context = RegulatoryContext(
+        scope=scope,
+        target=target,
+        scenario=scenario,
+        knowledge_evidence=facts,
+        build_metadata=metadata,
+    )
+
+    required_fields = {
+        "context_version",
+        "built_at",
+        "project_id",
+        "as_of",
+        "input_scope",
+        "semantic_policy_version",
+        "authority_policy_version",
+        "retrieval_log_ids",
+    }
+    assert required_fields <= set(context.build_metadata.model_dump())
+    assert isinstance(context.build_metadata.input_scope, ContextInputScope)
+    assert context.build_metadata.retrieval_log_ids == [9, 401]
+
+    nested_extra_payload = metadata.model_dump(mode="python")
+    nested_extra_payload["input_scope"]["arbitrary_filters"] = {"unsafe": object()}
+    with pytest.raises(ValidationError):
+        ContextBuildMetadata.model_validate(nested_extra_payload)
+    with pytest.raises(ValidationError):
+        _build_metadata(
+            scope=scope,
+            target=target,
+            scenario=scenario,
+            facts=facts,
+            retrieval_log_ids=[0, 9, 401],
+        )
+    with pytest.raises(ValidationError):
+        _build_metadata(
+            scope=scope,
+            target=target,
+            scenario=scenario,
+            facts=facts,
+            retrieval_log_ids=list(range(1, 102)),
+        )
+
+    mismatched_metadata = [
+        metadata.model_copy(update={"project_id": 8}),
+        metadata.model_copy(update={"as_of": date(2026, 12, 30)}),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(
+                    update={"reporting_period": "2026 Q3"}
+                )
+            }
+        ),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(
+                    update={"mode": ContextMode.EXPLORATORY}
+                )
+            }
+        ),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(update={"target_table_id": 24})
+            }
+        ),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(update={"target_field_id": 48})
+            }
+        ),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(update={"mart_field_id": 62})
+            }
+        ),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(
+                    update={"semantic_concept_id": 13}
+                )
+            }
+        ),
+        metadata.model_copy(
+            update={
+                "input_scope": metadata.input_scope.model_copy(update={"scenario_id": 74})
+            }
+        ),
+    ]
+    for mismatched in mismatched_metadata:
+        with pytest.raises(ValidationError, match="build_metadata"):
+            RegulatoryContext(
+                scope=scope,
+                target=target,
+                scenario=scenario,
+                knowledge_evidence=facts,
+                build_metadata=mismatched,
+            )
+
+    for mismatched_ids in ([401], [9, 401, 999]):
+        with pytest.raises(ValidationError, match="retrieval_log_ids"):
+            RegulatoryContext(
+                scope=scope,
+                target=target,
+                scenario=scenario,
+                knowledge_evidence=facts,
+                build_metadata=_build_metadata(
+                    scope=scope,
+                    target=target,
+                    scenario=scenario,
+                    facts=facts,
+                    retrieval_log_ids=list(mismatched_ids),
+                ),
+            )
+
+
 def test_inclusive_period_bounds_scope_and_deterministic_gap_ordering() -> None:
     inclusive = EffectivePeriod(effective_from="2026-12-31", effective_to="2026-12-31")
     assert inclusive.effective_from == inclusive.effective_to == date(2026, 12, 31)
@@ -633,18 +893,19 @@ def test_inclusive_period_bounds_scope_and_deterministic_gap_ordering() -> None:
             question_text="先排序问题？",
         ),
     ]
+    scope = _empty_context().scope
+    target = _empty_context().target
     ordered = RegulatoryContext(
-        scope=_empty_context().scope,
-        target=_empty_context().target,
+        scope=scope,
+        target=target,
         conflicts=conflicts,
         open_questions=questions,
-        build_metadata=ContextBuildMetadata(
+        build_metadata=_build_metadata(
+            scope=scope,
+            target=target,
             built_at=datetime(2026, 8, 22, 13, 2, tzinfo=UTC),
-            mode=ContextMode.TRUSTED,
-            fact_count=0,
             conflict_count=2,
             open_question_count=2,
-            source_count=0,
         ),
     )
     assert [item.code for item in ordered.conflicts] == ["A_CONFLICT", "Z_CONFLICT"]
@@ -658,12 +919,10 @@ def test_inclusive_period_bounds_scope_and_deterministic_gap_ordering() -> None:
             scope=_empty_context().scope,
             target=_empty_context().target,
             semantic=[cross_project_fact],
-            build_metadata=ContextBuildMetadata(
+            build_metadata=_build_metadata(
+                scope=scope,
+                target=target,
+                facts=[cross_project_fact],
                 built_at=datetime(2026, 8, 22, 13, 3, tzinfo=UTC),
-                mode=ContextMode.TRUSTED,
-                fact_count=1,
-                conflict_count=0,
-                open_question_count=0,
-                source_count=1,
             ),
         )
