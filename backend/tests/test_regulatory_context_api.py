@@ -92,6 +92,7 @@ def test_endpoint_uses_locked_authorization_and_builder_handoff(
         "context_schema_version",
         "scope",
         "target",
+        "scenario",
         "semantic",
         "regulatory",
         "metadata",
@@ -153,7 +154,7 @@ def test_cross_project_target_is_a_stable_scoped_error() -> None:
         )
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "target field is outside the authorized project scope"}
+    assert response.json() == {"detail": "target field does not belong to the authorized project"}
 
 
 def test_http_build_does_not_mutate_authoritative_semantic_rows() -> None:

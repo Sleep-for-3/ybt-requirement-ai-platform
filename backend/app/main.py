@@ -39,6 +39,7 @@ from app.api import (
     projects,
     project_readiness,
     retrieval,
+    regulatory_context,
     scenarios,
     scenario_mappings,
     source_recommendations,
@@ -180,3 +181,4 @@ app.include_router(lineage.router, prefix=settings.api_prefix, dependencies=secu
 app.include_router(deliverables.router, prefix=settings.api_prefix)
 app.include_router(uat.router, prefix=settings.api_prefix)
 app.include_router(semantic.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(regulatory_context.router, prefix=settings.api_prefix, dependencies=secured)
