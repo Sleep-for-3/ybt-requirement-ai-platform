@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 09
 current_phase_name: Regulatory Context
 status: executing
-stopped_at: Completed and independently reviewed 09-01-PLAN.md; 09-02 remains pending
-last_updated: "2026-08-20T19:56:58+08:00"
-last_activity: 2026-08-20
-last_activity_desc: 09-01 semantic hardening completed; 09-02 ready to execute
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-08-22T12:30:14.594Z"
+last_activity: 2026-08-22
+last_activity_desc: 09-02 RegulatoryContext contract completed; 09-03 ready to execute
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -28,17 +28,17 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 09 (Regulatory Context) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
-Last activity: 2026-08-20 — 09-01 semantic hardening completed
+Last activity: 2026-08-22 — 09-02 RegulatoryContext contract completed
 
-Progress: [███░░░░░░░] 25% of Phase 9 plans
+Progress: [█████░░░░░] 50% of Phase 9 plans
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3
+- Total plans completed: 5
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -47,6 +47,7 @@ Progress: [███░░░░░░░] 25% of Phase 9 plans
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 09 P01 | 40m | 3 tasks | 15 files |
+| Phase 09 P02 | 23m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,10 @@ Progress: [███░░░░░░░] 25% of Phase 9 plans
 - [Phase 9]: SemanticConceptVersion is canonical temporal meaning and legacy Concept fields are a same-transaction compatibility projection.
 - [Phase 9]: The additive effective version route is declared before the dynamic version-id route and uses inclusive date intervals.
 - [Phase 9]: Migration 202608200016 bootstraps one version_no=1 per legacy Concept using created_at or fixed 2026-08-20 fallback without fabricated history.
+- [Phase 9]: RegulatoryContext requests exclude institution_id; output facts must match the derived project and institution scope.
+- [Phase 9]: Formal and human-confirmed sources share the highest authority tier; authority and FactState remain independent.
+- [Phase 9]: Retrieved facts require RetrievalLog provenance and matching knowledge confidentiality.
+- [Phase 9]: CTX spec-less records remain test-only planning metadata and never enter runtime context output.
 
 ### Pending Todos
 
@@ -83,6 +88,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-20T11:02:40.022Z
-Stopped at: Completed and independently reviewed 09-01-PLAN.md; 09-02 remains pending
+Last session: 2026-08-22T12:30:14.563Z
+Stopped at: Completed 09-02-PLAN.md
 Resume file: None
