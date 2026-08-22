@@ -504,7 +504,7 @@ def test_mapping_and_scenario_lineage_use_persisted_status_fields(
     source_stale = SourceToMartMapping(
         project_id=project.id,
         mart_field_id=mart_field.id,
-        mapping_status="draft",
+        mapping_status="approved",
         final_content="过期来源口径",
         lineage_status="stale",
         lineage_last_verified_at=verified_at,
@@ -545,7 +545,7 @@ def test_mapping_and_scenario_lineage_use_persisted_status_fields(
         scenario_id=linked_scenario.id,
         processing_logic="仅链接场景技术口径",
         final_content="仅链接场景技术口径",
-        tech_confirm_status="draft",
+        tech_confirm_status="confirmed",
         lineage_status="linked",
         lineage_last_verified_at=verified_at,
     )
@@ -574,9 +574,9 @@ def test_mapping_and_scenario_lineage_use_persisted_status_fields(
     }
 
     assert mapping_by_source[("SourceToMartMapping", source_verified.id)].state is FactState.APPROVED
-    assert mapping_by_source[("SourceToMartMapping", source_stale.id)].state is FactState.DRAFT
+    assert mapping_by_source[("SourceToMartMapping", source_stale.id)].state is FactState.APPROVED
     assert mapping_by_source[("ScenarioBusinessMapping", business.id)].state is FactState.CONFIRMED
-    assert mapping_by_source[("ScenarioTechnicalLineage", technical_linked.id)].state is FactState.DRAFT
+    assert mapping_by_source[("ScenarioTechnicalLineage", technical_linked.id)].state is FactState.CONFIRMED
     assert lineage_by_source[("SourceToMartMapping", source_verified.id)].state is FactState.VERIFIED
     assert lineage_by_source[("SourceToMartMapping", source_stale.id)].state is not FactState.VERIFIED
     assert lineage_by_source[("MartToYbtMapping", mart_verified_without_timestamp.id)].state is not FactState.VERIFIED

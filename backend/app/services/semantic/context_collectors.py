@@ -68,6 +68,20 @@ CANDIDATE_TIER_HISTORICAL_MAPPING = 5
 CANDIDATE_TIER_LINEAGE_NEIGHBORHOOD = 6
 CANDIDATE_TIER_RETRIEVAL_EVIDENCE = 7
 
+MAPPING_FAMILIES = (
+    "source_to_mart",
+    "mart_to_ybt",
+    "scenario_business",
+    "scenario_technical",
+)
+MAPPING_TRUSTED_STATUSES = {
+    "source_to_mart": frozenset({"approved"}),
+    "mart_to_ybt": frozenset({"approved"}),
+    "scenario_business": frozenset({"confirmed"}),
+    "scenario_technical": frozenset({"confirmed"}),
+}
+MAPPING_CANDIDATE_STATUSES = frozenset({"draft", "ai_suggested"})
+
 
 @dataclass
 class CollectedContext:
@@ -157,21 +171,36 @@ def collect_base_context(
     mapping_rows = collect_mapping_rows(db, authorized_project, request, target)
     evidence_rows = collect_mapping_evidence_rows(db, authorized_project, mapping_rows)
     evidence_by_mapping = _evidence_by_mapping(evidence_rows)
+    trusted_mapping_rows, candidate_mapping_rows = _partition_mapping_rows(mapping_rows)
     mappings = collect_mapping_facts(
         authorized_project,
-        mapping_rows,
+        trusted_mapping_rows,
+        evidence_by_mapping,
+    )
+    mapping_candidates = collect_mapping_candidate_facts(
+        authorized_project,
+        candidate_mapping_rows,
         evidence_by_mapping,
     )
     mapping_lineage = collect_mapping_lineage_facts(
         authorized_project,
-        mapping_rows,
+        trusted_mapping_rows,
         evidence_by_mapping,
     )
+    trusted_mapping_keys = {
+        (mapping_type, int(row.id))
+        for mapping_type, rows in zip(MAPPING_FAMILIES, trusted_mapping_rows, strict=True)
+        for row in rows
+    }
     evidence_facts = collect_mapping_evidence_facts(
         authorized_project,
-        evidence_rows,
+        [
+            row
+            for row in evidence_rows
+            if (row.mapping_type, int(row.mapping_id)) in trusted_mapping_keys
+        ],
     )
-    source_mappings, mart_mappings, business_mappings, technical_mappings = mapping_rows
+    source_mappings, mart_mappings, business_mappings, technical_mappings = trusted_mapping_rows
     stale_lineage = sorted(
         (source_type, int(row.id))
         for source_type, rows in (
@@ -208,6 +237,7 @@ def collect_base_context(
         context_scenario,
     )
     if request.mode is ContextMode.CANDIDATE:
+        candidates.extend(mapping_candidates)
         candidates.extend(collect_source_mart_candidates(
             db,
             authorized_project,
@@ -421,6 +451,15 @@ def collect_mapping_rows(
     """Load the four mapping families through project-bounded set queries."""
 
     project_id = int(authorized_project.id)
+    source_statuses = set(MAPPING_TRUSTED_STATUSES["source_to_mart"])
+    mart_statuses = set(MAPPING_TRUSTED_STATUSES["mart_to_ybt"])
+    business_statuses = set(MAPPING_TRUSTED_STATUSES["scenario_business"])
+    technical_statuses = set(MAPPING_TRUSTED_STATUSES["scenario_technical"])
+    if request.mode is ContextMode.CANDIDATE:
+        source_statuses.update(MAPPING_CANDIDATE_STATUSES)
+        mart_statuses.update(MAPPING_CANDIDATE_STATUSES)
+        business_statuses.update(MAPPING_CANDIDATE_STATUSES)
+        technical_statuses.update(MAPPING_CANDIDATE_STATUSES)
     mart_mappings: list[MartToYbtMapping] = []
     business_mappings: list[ScenarioBusinessMapping] = []
     technical_mappings: list[ScenarioTechnicalLineage] = []
@@ -428,14 +467,17 @@ def collect_mapping_rows(
         mart_mappings = list(db.scalars(select(MartToYbtMapping).where(
             MartToYbtMapping.project_id == project_id,
             MartToYbtMapping.target_field_id == target.target_field_id,
+            MartToYbtMapping.mapping_status.in_(sorted(mart_statuses)),
         ).order_by(MartToYbtMapping.id)).all())
         business_statement = select(ScenarioBusinessMapping).where(
             ScenarioBusinessMapping.project_id == project_id,
             ScenarioBusinessMapping.target_field_id == target.target_field_id,
+            ScenarioBusinessMapping.business_confirm_status.in_(sorted(business_statuses)),
         )
         technical_statement = select(ScenarioTechnicalLineage).where(
             ScenarioTechnicalLineage.project_id == project_id,
             ScenarioTechnicalLineage.target_field_id == target.target_field_id,
+            ScenarioTechnicalLineage.tech_confirm_status.in_(sorted(technical_statuses)),
         )
         if request.scenario_id is not None:
             business_statement = business_statement.where(
@@ -462,9 +504,33 @@ def collect_mapping_rows(
         select(SourceToMartMapping).where(
             SourceToMartMapping.project_id == project_id,
             SourceToMartMapping.mart_field_id.in_(sorted(mart_field_ids)),
+            SourceToMartMapping.mapping_status.in_(sorted(source_statuses)),
         ).order_by(SourceToMartMapping.id)
     ).all())
     return source_mappings, mart_mappings, business_mappings, technical_mappings
+
+
+def _partition_mapping_rows(
+    mapping_rows: tuple[
+        list[SourceToMartMapping],
+        list[MartToYbtMapping],
+        list[ScenarioBusinessMapping],
+        list[ScenarioTechnicalLineage],
+    ],
+) -> tuple[tuple[list, list, list, list], tuple[list, list, list, list]]:
+    trusted: list[list] = []
+    candidates: list[list] = []
+    for mapping_type, rows in zip(MAPPING_FAMILIES, mapping_rows, strict=True):
+        trusted_statuses = MAPPING_TRUSTED_STATUSES[mapping_type]
+        trusted.append([
+            row for row in rows if _mapping_row_status(mapping_type, row) in trusted_statuses
+        ])
+        candidates.append([
+            row
+            for row in rows
+            if _mapping_row_status(mapping_type, row) in MAPPING_CANDIDATE_STATUSES
+        ])
+    return tuple(trusted), tuple(candidates)
 
 
 def collect_mapping_evidence_rows(
@@ -575,6 +641,68 @@ def collect_mapping_facts(
             rule_text=row.final_content or row.processing_logic,
             evidence=evidence_by_mapping.get(("scenario_technical", row.id), []),
         ))
+    return facts
+
+
+def collect_mapping_candidate_facts(
+    project: Project,
+    mapping_rows: tuple[list, list, list, list],
+    evidence_by_mapping: dict[tuple[str, int], list[MappingEvidenceReference]],
+) -> list[ContextFact]:
+    """Project draft/AI mapping rows only as explicit review candidates."""
+
+    facts: list[ContextFact] = []
+    for mapping_type, rows in zip(MAPPING_FAMILIES, mapping_rows, strict=True):
+        for row in rows:
+            status = _mapping_row_status(mapping_type, row)
+            if status not in MAPPING_CANDIDATE_STATUSES:
+                continue
+            observed_at = _aware_datetime(row.updated_at or row.created_at)
+            references = _mapping_evidence_refs(
+                evidence_by_mapping.get((mapping_type, int(row.id)), [])
+            )
+            source_type = "resolver_candidate"
+            provenance = ContextProvenance(
+                project_id=project.id,
+                institution_id=project.institution_id,
+                source_model=type(row).__name__,
+                source_type=source_type,
+                source_id=row.id,
+                evidence_references=references,
+                observed_at=observed_at,
+                confidentiality_level=_confidentiality(project),
+            )
+            rule_text = (
+                getattr(row, "final_content", None)
+                or getattr(row, "business_rule", None)
+                or getattr(row, "business_definition", None)
+                or getattr(row, "processing_logic", None)
+            )
+            score = 0.65 if status == "ai_suggested" else 0.55
+            facts.append(ContextFact(
+                fact_type="mapping_candidate",
+                value=CandidateContextValue(
+                    candidate_type=mapping_type,
+                    candidate_id=row.id,
+                    name=_bounded(
+                        getattr(row, "mapping_name", None)
+                        or f"{mapping_type} #{row.id}",
+                        500,
+                    ),
+                    match_reason=f"{status} mapping requires explicit review",
+                    score=score,
+                    rank_tier=CANDIDATE_TIER_SEMANTIC_EVIDENCE,
+                    evidence_excerpt=_bounded(rule_text, 1000),
+                ),
+                authority=authority_for_source(source_type),
+                state=FactState(status),
+                source_type=source_type,
+                source_id=row.id,
+                evidence_references=references,
+                observed_at=observed_at,
+                confidence=score,
+                provenance=provenance,
+            ))
     return facts
 
 
@@ -1364,6 +1492,16 @@ def _source_type_for_mapping_type(mapping_type: str) -> str:
         }[mapping_type]
     except KeyError as exc:
         raise ValueError(f"unsupported mapping evidence type: {mapping_type}") from exc
+
+
+def _mapping_row_status(mapping_type: str, row: object) -> str:
+    field_name = {
+        "source_to_mart": "mapping_status",
+        "mart_to_ybt": "mapping_status",
+        "scenario_business": "business_confirm_status",
+        "scenario_technical": "tech_confirm_status",
+    }[mapping_type]
+    return str(getattr(row, field_name))
 
 
 def _lineage_node_identity(node: LineageNode) -> int:
