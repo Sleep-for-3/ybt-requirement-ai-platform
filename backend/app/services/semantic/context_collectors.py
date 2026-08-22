@@ -82,6 +82,7 @@ MAPPING_TRUSTED_STATUSES = {
 }
 MAPPING_CANDIDATE_STATUSES = frozenset({"draft", "ai_suggested"})
 EVIDENCE_REFERENCE_LIMIT = 50
+PERSISTED_MAPPING_LINEAGE_STATUSES = frozenset({"linked", "verified", "stale"})
 
 
 @dataclass
@@ -325,7 +326,13 @@ def collect_base_context(
             "mart_mapping_count": len(mart_mappings),
             "business_mapping_count": len(business_mappings),
             "technical_mapping_count": len(technical_mappings),
-            "lineage_count": len(lineage),
+            "lineage_count": (
+                len(raw_lineage)
+                + sum(
+                    fact.value.lineage_status in PERSISTED_MAPPING_LINEAGE_STATUSES
+                    for fact in mapping_lineage
+                )
+            ),
             "verified_lineage_count": sum(
                 fact.state is FactState.VERIFIED for fact in lineage
             ),

@@ -513,6 +513,34 @@ def test_candidate_mapping_evidence_does_not_suppress_trusted_evidence_gap(
     }
 
 
+def test_not_linked_mapping_remains_visible_but_does_not_satisfy_lineage_gap(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="NOT_LINKED_AUDIT")
+    mapping = MartToYbtMapping(
+        project_id=fixture["project_id"],
+        target_field_id=fixture["target_field_id"],
+        mapping_name="未建立血缘的已审批映射",
+        mapping_status="approved",
+        business_rule="直接映射",
+        lineage_status="not_linked",
+    )
+    db_session.add(mapping)
+    db_session.commit()
+
+    context = _build_context(db_session, fixture)
+
+    audit_fact = next(
+        fact for fact in context.lineage
+        if fact.source_id == mapping.id and fact.fact_type == "mapping_lineage"
+    )
+    assert audit_fact.value.lineage_status == "not_linked"
+    assert audit_fact.state is FactState.OBSERVED
+    assert "MISSING_LINEAGE" in {
+        question.question_code for question in context.open_questions
+    }
+
+
 def test_missing_stale_history_knowledge_evidence_and_conflict_codes_are_deterministic(
     db_session: Session,
 ) -> None:
