@@ -15,6 +15,7 @@ from app.schemas.regulatory_context import (
     RegulatoryContextRequest,
 )
 from app.services.semantic.context_collectors import collect_base_context
+from app.services.semantic.context_conflicts import build_open_questions, detect_conflicts
 
 
 SEMANTIC_POLICY_VERSION = "semantic-status-policy-v1"
@@ -38,6 +39,8 @@ class RegulatoryContextBuilder:
 
         collected = collect_base_context(self.db, authorized_project, request)
         facts = collected.all_facts()
+        conflicts = detect_conflicts(collected)
+        open_questions = build_open_questions(collected)
         retrieval_log_ids = sorted({
             fact.provenance.retrieval_log_id
             for fact in facts
@@ -64,8 +67,8 @@ class RegulatoryContextBuilder:
             retrieval_log_ids=retrieval_log_ids,
             mode=request.mode,
             fact_count=len(facts),
-            conflict_count=0,
-            open_question_count=0,
+            conflict_count=len(conflicts),
+            open_question_count=len(open_questions),
             source_count=source_count,
             collector_names=collected.collector_names,
         )
@@ -88,8 +91,8 @@ class RegulatoryContextBuilder:
             knowledge_evidence=collected.knowledge_evidence,
             historical=collected.historical,
             quality=collected.quality,
-            conflicts=[],
-            open_questions=[],
+            conflicts=conflicts,
+            open_questions=open_questions,
             build_metadata=metadata,
         )
 
