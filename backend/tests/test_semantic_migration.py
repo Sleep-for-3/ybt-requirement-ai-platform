@@ -5,9 +5,13 @@ import json
 import subprocess
 import sys
 from datetime import datetime
+from importlib.util import module_from_spec, spec_from_file_location
+from io import StringIO
 from pathlib import Path
 
 import sqlalchemy as sa
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -35,6 +39,28 @@ def test_semantic_revision_is_additive_and_runtime_model_free() -> None:
     assert "Base.metadata" not in migration
     assert "from app" not in migration
     assert "drop_table(\"embedding_index_versions\")" not in migration
+
+
+def test_revision_016_compiles_portable_postgresql_upgrade_and_downgrade_sql() -> None:
+    upgrade_sql = _compile_revision_016_for_postgresql("upgrade")
+    downgrade_sql = _compile_revision_016_for_postgresql("downgrade")
+    normalized_upgrade = " ".join(upgrade_sql.split()).lower()
+    normalized_downgrade = " ".join(downgrade_sql.split()).lower()
+
+    assert "create table semantic_concept_versions" in normalized_upgrade
+    assert "foreign key(semantic_concept_id) references semantic_concepts (id)" in normalized_upgrade
+    assert "foreign key(institution_id) references institutions (id)" in normalized_upgrade
+    assert "foreign key(project_id) references projects (id)" in normalized_upgrade
+    assert "constraint ck_semantic_concept_version_dates" in normalized_upgrade
+    assert "effective_to is null or effective_to >= effective_from" in normalized_upgrade
+    assert "create index ix_semantic_concept_version_project_effective" in normalized_upgrade
+    assert "drop table semantic_concept_versions" in normalized_downgrade
+    assert "drop index ix_semantic_concept_versions_status" in normalized_downgrade
+
+    combined = f"{upgrade_sql}\n{downgrade_sql}".lower()
+    assert "pragma" not in combined
+    assert "autoincrement" not in combined
+    assert "sqlite" not in combined
 
 
 def test_semantic_version_migration_bootstraps_one_v1_per_legacy_concept_and_downgrades_safely(tmp_path: Path) -> None:
@@ -93,6 +119,30 @@ def _run_alembic(database_path: Path, *arguments: str) -> None:
         capture_output=True, text=True, timeout=120,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def _compile_revision_016_for_postgresql(direction: str) -> str:
+    migration_path = (
+        BACKEND_DIR
+        / "alembic"
+        / "versions"
+        / f"{SEMANTIC_REVISION}_semantic_concept_versions.py"
+    )
+    spec = spec_from_file_location(f"semantic_revision_{direction}", migration_path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.revision == SEMANTIC_REVISION
+    assert module.down_revision == LEGACY_SEMANTIC_REVISION
+
+    output = StringIO()
+    context = MigrationContext.configure(
+        dialect_name="postgresql",
+        opts={"as_sql": True, "output_buffer": output},
+    )
+    module.op = Operations(context)
+    getattr(module, direction)()
+    return output.getvalue()
 
 
 def _assert_semantic_schema(database_path: Path) -> None:
