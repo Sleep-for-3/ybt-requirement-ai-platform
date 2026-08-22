@@ -332,7 +332,7 @@ def test_source_type_authority_and_knowledge_scope_are_contract_driven(
     assert regulatory_fact.source_type == "regulatory_knowledge_item"
     assert "CROSS_PROJECT_REGULATORY_SECRET" not in payload
     assert "GLOBAL_VISIBLE_KNOWLEDGE" in payload
-    assert "INSTITUTION_VISIBLE_KNOWLEDGE" in payload
+    assert "INSTITUTION_VISIBLE_KNOWLEDGE" not in payload
     assert "INSTITUTION_HIDDEN_SECRET" not in payload
     assert "OTHER_PROJECT_HIDDEN_SECRET" not in payload
     assert retrieved

@@ -40,13 +40,15 @@ class HybridRetriever:
             raise ValueError("Project not found")
         visibility = or_(
             and_(
-                KnowledgeUnit.knowledge_scope == "project",
+                KnowledgeUnit.knowledge_scope.in_(("project", "institution")),
                 KnowledgeUnit.project_id == project_id,
             ),
-            KnowledgeUnit.knowledge_scope == "global",
             and_(
-                KnowledgeUnit.knowledge_scope == "institution",
-                KnowledgeUnit.institution_name == project.bank_name,
+                KnowledgeUnit.knowledge_scope == "global",
+                or_(
+                    KnowledgeUnit.project_id == project_id,
+                    KnowledgeUnit.confidentiality_level != "restricted",
+                ),
             ),
         )
         predicates = [KnowledgeUnit.enabled.is_(True), visibility]
@@ -134,11 +136,10 @@ class HybridRetriever:
                     {"knowledge_scope": "project", "project_id": project_id},
                     {"knowledge_scope": "global"},
                 ]
-                if project.bank_name:
-                    scope_filters.append({
-                        "knowledge_scope": "institution",
-                        "institution_name": project.bank_name,
-                    })
+                scope_filters.append({
+                    "knowledge_scope": "institution",
+                    "project_id": project_id,
+                })
                 vector_results = []
                 for filters in scope_filters:
                     if knowledge_types:
@@ -303,13 +304,11 @@ def _visible(unit, project_id, institution, knowledge_types=None, scenario_id=No
     if not unit.enabled:
         return False
     scope_visible = (
+        unit.project_id == project_id
+        and unit.knowledge_scope in {"project", "institution", "global"}
+    ) or (
         unit.knowledge_scope == "global"
-        or (unit.project_id == project_id and unit.knowledge_scope == "project")
-        or (
-            unit.knowledge_scope == "institution"
-            and bool(institution)
-            and unit.institution_name == institution
-        )
+        and unit.confidentiality_level != "restricted"
     )
     if not scope_visible:
         return False
