@@ -4,16 +4,16 @@ milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
 current_phase: 09
 current_phase_name: Regulatory Context
-status: executing
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-08-22T17:28:05.000Z"
+status: ready_for_verification
+stopped_at: Completed 09-04-PLAN.md; awaiting Phase 9 verification
+last_updated: "2026-08-22T18:42:45.128Z"
 last_activity: 2026-08-23
-last_activity_desc: 09-03 supplemental remediation completed; 09-04 next
+last_activity_desc: 09-04 execution completed; Phase 9 verification next
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -27,12 +27,12 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 ## Current Position
 
-Phase: 09 (Regulatory Context) — EXECUTING
+Phase: 09 (Regulatory Context) — AWAITING VERIFICATION
 Plan: 4 of 4
-Status: Ready for 09-04
-Last activity: 2026-08-23 — 09-03 supplemental remediation completed; 09-04 next
+Status: Ready for Phase 9 verification
+Last activity: 2026-08-23 — 09-04 execution completed; orchestrator verification next
 
-Progress: [████████░░] 75% of Phase 9 plans
+Progress: [██████████] 100% of Phase 9 plans
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Progress: [████████░░] 75% of Phase 9 plans
 | Phase 09 P01 | 40m | 3 tasks | 15 files |
 | Phase 09 P02 | 23m | 2 tasks | 4 files |
 | Phase 09 P03 | 1h 2m | 3 tasks | 9 files |
+| Phase 09 P04 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,9 @@ Progress: [████████░░] 75% of Phase 9 plans
 - [Phase 9]: Institution-scoped and restricted knowledge fail closed to their owner project; bank_name is never an authorization identity.
 - [Phase 9]: Mapping audit rows stay absent, while draft and ai_suggested rows remain explicit state-preserving candidates only.
 - [Phase 9]: Effective semantic versions resolve in one batched query using the same inclusive trusted policy as the single resolver.
+- [Phase 09]: RegulatoryContext API uses explicit project.view authorization and the canonical authorized-Project builder handoff.
+- [Phase 09]: Existing semantic.py mode propagation remains unchanged; regression coverage proves Phase 8 route compatibility.
+- [Phase 09]: PostgreSQL 016 offline compilation passes, but live PostgreSQL remains a mandatory staging gate because localhost was unavailable.
 
 ### Pending Todos
 
@@ -95,6 +99,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-22T17:28:05.000Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-08-22T18:42:45.106Z
+Stopped at: Completed 09-04-PLAN.md; awaiting Phase 9 verification
 Resume file: None
