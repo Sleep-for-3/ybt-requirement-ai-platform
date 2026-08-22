@@ -174,6 +174,33 @@ def test_repeat_builds_preserve_domain_content_and_validate_volatile_metadata(
         )
 
 
+def test_zero_result_retrieval_log_remains_traceable_through_existing_fact_provenance(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="EMPTY_RETRIEVAL")
+
+    context = _build_context(db_session, fixture)
+    empty_retrieval_facts = [
+        fact
+        for fact in context.knowledge_evidence
+        if fact.fact_type == "knowledge_retrieval_empty"
+    ]
+
+    assert len(empty_retrieval_facts) == 1
+    fact = empty_retrieval_facts[0]
+    log_id = fact.provenance.retrieval_log_id
+    assert log_id is not None
+    assert fact.value.knowledge_unit_id is None
+    assert fact.value.evidence_reference_id == log_id
+    assert fact.value.knowledge_type == "retrieval_attempt"
+    assert context.build_metadata.retrieval_log_ids == [log_id]
+    log = db_session.get(RetrievalLog, log_id)
+    assert log.project_id == fixture["project_id"]
+    assert log.final_result_count == 0
+    assert log.result_ids_json == []
+    assert "MISSING_KNOWLEDGE" in {item.code for item in context.conflicts}
+
+
 def test_mapping_lineage_evidence_history_and_knowledge_families_are_aggregated(
     db_session: Session,
 ) -> None:
