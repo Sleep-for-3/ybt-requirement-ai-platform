@@ -396,6 +396,7 @@ class ContextInputScope(_StrictModel):
     mart_field_id: int | None = Field(default=None, gt=0)
     semantic_concept_id: int | None = Field(default=None, gt=0)
     scenario_id: int | None = Field(default=None, gt=0)
+    candidate_limit: int = Field(default=50, ge=1, le=100)
 
     @field_validator("reporting_period", mode="before")
     @classmethod

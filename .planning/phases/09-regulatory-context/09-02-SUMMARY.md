@@ -151,7 +151,7 @@ Each TDD task was committed as RED then GREEN; RED-test corrections were kept as
 - Keep authority, state, source/evidence/temporal fields, confidence, and provenance independently serialized; mirrored fact/provenance fields must agree.
 - Require a retrieval log for retrieved facts and require knowledge confidentiality to survive unchanged into provenance.
 - Derive `ContextFact.authority` from the registered source policy at validation time; an unknown or mismatched source fails closed before it can enter a context.
-- Record build project/date, typed target/scenario inputs, semantic/authority policy versions, and a bounded normalized retrieval-log list; require exact agreement with the context and all emitted fact provenance.
+- Record build project/date, typed target/scenario inputs, candidate limit, semantic/authority policy versions, and a bounded normalized retrieval-log list; require exact agreement with the context and all emitted fact provenance.
 - Keep conflict/question normalization in the contract, but keep domain gap production and all persistence in later plans or existing source models.
 
 ## Deviations from Plan

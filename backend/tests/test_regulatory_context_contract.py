@@ -747,6 +747,7 @@ def test_build_metadata_is_typed_complete_and_bound_to_context_inputs_and_retrie
     }
     assert required_fields <= set(context.build_metadata.model_dump())
     assert isinstance(context.build_metadata.input_scope, ContextInputScope)
+    assert context.build_metadata.input_scope.candidate_limit == 50
     assert context.build_metadata.retrieval_log_ids == [9, 401]
 
     nested_extra_payload = metadata.model_dump(mode="python")
@@ -769,6 +770,8 @@ def test_build_metadata_is_typed_complete_and_bound_to_context_inputs_and_retrie
             facts=facts,
             retrieval_log_ids=list(range(1, 102)),
         )
+    with pytest.raises(ValidationError):
+        ContextInputScope(mode=scope.mode, candidate_limit=101)
 
     mismatched_metadata = [
         metadata.model_copy(update={"project_id": 8}),
