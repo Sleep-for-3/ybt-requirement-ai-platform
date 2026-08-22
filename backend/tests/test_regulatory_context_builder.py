@@ -207,6 +207,40 @@ def test_zero_result_retrieval_log_remains_traceable_through_existing_fact_prove
     }
 
 
+def test_oversized_orm_text_and_aliases_are_compacted_at_contract_boundaries(
+    db_session: Session,
+) -> None:
+    fixture = _seed_acceptance_target(db_session, suffix="BOUNDED_TEXT")
+    version = db_session.get(SemanticConceptVersion, fixture["semantic_version_id"])
+    target_field = db_session.get(TargetField, fixture["target_field_id"])
+    exact_definition = "定" * 12000
+    exact_alias = "A" * 500
+    oversized_alias = "B" * 501
+    version.definition = exact_definition
+    version.aliases_json = [
+        exact_alias,
+        oversized_alias,
+        *[f"alias-{index:03d}" for index in range(105)],
+    ]
+    target_field.regulatory_description = " 监管\n描述 " * 1000
+    db_session.commit()
+
+    exact = _build_context(db_session, fixture)
+    assert exact.semantic[0].value.definition == exact_definition
+    assert len(exact.semantic[0].value.aliases) == 100
+    assert exact.semantic[0].value.aliases[0] == exact_alias
+    assert len(exact.semantic[0].value.aliases[1]) == 500
+    assert exact.semantic[0].value.aliases[1].endswith("…")
+    assert len(exact.metadata[0].value.description) <= 4000
+
+    version.definition = "超" * 12001
+    db_session.commit()
+    oversized = _build_context(db_session, fixture)
+    assert len(oversized.semantic[0].value.definition) == 12000
+    assert oversized.semantic[0].value.definition.endswith("…")
+    assert oversized.semantic[0].value.aliases == exact.semantic[0].value.aliases
+
+
 def test_mapping_lineage_evidence_history_and_knowledge_families_are_aggregated(
     db_session: Session,
 ) -> None:
