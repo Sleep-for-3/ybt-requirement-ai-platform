@@ -723,6 +723,7 @@ def test_additive_version_routes_preserve_concept_compatibility_and_static_prece
         listed = client.get(versions_path)
         assert listed.status_code == 200, listed.text
         assert [item["version_no"] for item in listed.json()] == [1]
+        initial_effective_from = listed.json()[0]["effective_from"]
 
         updated = client.patch(
             f"/api/projects/{project_id}/semantic-concepts/{concept['id']}",
@@ -759,7 +760,10 @@ def test_additive_version_routes_preserve_concept_compatibility_and_static_prece
         detail = client.get(f"{versions_path}/{version['id']}")
         assert detail.status_code == 200, detail.text
         assert detail.json()["version_no"] == 2
-        effective = client.get(f"{versions_path}/effective", params={"as_of": "2026-08-20"})
+        effective = client.get(
+            f"{versions_path}/effective",
+            params={"as_of": initial_effective_from},
+        )
         assert effective.status_code == 200, effective.text
         assert effective.json()["version_no"] == 1
 
