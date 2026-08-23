@@ -87,7 +87,7 @@ The Phase 9 Contract is sufficient for authority/state/provenance, mappings, lin
 
 No reusable project/task reporting date exists in the current persisted models. `Project` contains identity, confidentiality and governance fields; mapping/scenario rows contain review timestamps and a textual `reporting_condition`, while `TargetField.report_name` and `report_field_name` are labels. The only governed business-date fields are SemanticConceptVersion `effective_from`/`effective_to`, selected by the request's required `as_of`. Therefore Phase 10's date resolver is: explicit optional API/service `as_of`, then no model-backed intermediate tier in the current schema, then injected `date.today()`; record the result as `resolved_as_of` and its source in audit. [VERIFIED: backend/app/models/entities.py:31-48,63-80,193-249,335-394; backend/app/models/semantic.py:42-79; backend/app/schemas/regulatory_context.py:591-613]
 
-**Primary recommendation:** Implement one shared orchestration seam plus three deterministic adapters, enrich the existing Context metadata projection just enough for Mart/catalog descriptors, migrate all direct and background callers, and enforce “one builder call, zero generator-side shared-fact reads, zero fallback.”
+**Primary recommendation:** Implement one shared orchestration seam plus three deterministic adapters, enrich the existing Context metadata projection just enough for Mart/catalog descriptors, migrate all direct and background callers, and enforce “one builder call, zero generator-side shared-fact reads, zero fallback.” Capture an optimistic task + authorized-Project generation snapshot before Context/model work, then use a fresh short write transaction with fixed-order Project/task `SELECT ... FOR UPDATE`, re-authorization and full snapshot comparison before persisting any draft; never hold a database lock across the external model call. [VERIFIED: backend/app/services/retrieval/hybrid_retriever.py:238-258; backend/app/services/llm/prompt_runtime.py:108-119,163-205; Phase 10 research-resolution directive 2026-08-23]
 
 ## Architectural Responsibility Map
 
@@ -162,7 +162,9 @@ POST generate-draft (+ optional as_of)
 Resource guard + explicit Project authorization
         |
         v
-Load exactly one task row ----> governance/editability check ----X blocked (409, audit, no model call)
+Load exactly one task row + canonical task/authorized-Project snapshot
+        |
+        +---- governance/editability check ----X blocked (409, audit, no model call)
         |
         v
 resolve_generation_as_of(explicit -> no persisted tier today -> injected current date)
@@ -185,13 +187,18 @@ Deterministic bounded prompt projection + confidentiality levels
 prepare_model_input -> execute_runtime_chat(existing prompt key + existing output schema)
         |
         v
+fresh write transaction: lock Project/task in fixed order + re-authorize + compare snapshot
+        |
+        +---- any input/status/project/final_content changed ----X 409, no new draft
+        |
+        v
 confidence cap + stable question merge + task-local output apply
         |
         v
 ModelCallLog + AuditLog + task AI draft commit; final_content untouched
 ```
 
-This flow is derived from the existing API guard, canonical builder, prompt runtime and explicit adopt/review boundary. [VERIFIED: backend/app/services/auth/resource_guard.py:19-53; backend/app/services/semantic/context_builder.py:49-122; backend/app/services/llm/prompt_runtime.py:95-205; backend/app/api/mapping_rules.py:80-99,180-199]
+This flow is derived from the existing API guard, canonical builder, prompt runtime and explicit adopt/review boundary. The optimistic snapshot/re-lock step is required because Context retrieval commits the same Session and runtime denial/failure paths can also commit it; a lock acquired before Context construction therefore cannot be treated as spanning the model call. [VERIFIED: backend/app/services/auth/resource_guard.py:19-53; backend/app/services/semantic/context_builder.py:49-122; backend/app/services/semantic/context_collectors.py:1112-1141; backend/app/services/retrieval/hybrid_retriever.py:238-258; backend/app/services/llm/prompt_runtime.py:108-119,163-205; backend/app/api/mapping_rules.py:80-99,180-199]
 
 ### Recommended Project Structure
 
@@ -274,13 +281,13 @@ The code strings used above are quoted exactly from the Context conflict catalog
 
 The four task rows persist `open_questions` as nullable Text, while Context questions carry code, target, evidence and resolution state. [VERIFIED: backend/app/models/entities.py:193-215,219-246,335-388; backend/app/schemas/regulatory_context.py:431-449]
 
-Do not add a new question table in this phase. Merge in this order: existing task text (human-owned) → sorted Context questions → validated model questions. Split existing text by non-empty lines; normalize Unicode whitespace and case only for dedup keys; preserve first-seen original text. Serialize Context questions as `[CTX:<question_code>:<target_type>:<target_id-or-none>] <question_text>` and model additions as `[AI] <text>`. Repeated generation must be idempotent. Put complete Context question codes and evidence references in AuditLog even when the Text field can only preserve compact tags. This is the recommended storage-compatible solution under D-19. [ASSUMED]
+Do not add a new question table in this phase. Preserve the existing human Text byte-for-byte as the first segment; build normalized Unicode-whitespace/case keys only to prevent later Context/model additions from duplicating it, without rewriting or deleting existing human lines. Then append deterministically sorted Context questions as `[CTX:<question_code>] <question_text>` and validated model-only additions as `[AI] <text>`, preserving first-seen original text within each appended source. Repeated generation must be idempotent. Put complete Context targets, evidence references and merge-source trace in AuditLog even though the task Text keeps only the stable compact source label. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 
 ### Pattern 5: Generation Trace Without a New Store
 
 Keep ModelCallLog as the runtime trace: it already stores project, model profile, one retrieval-log FK, prompt key/version, provider/model, request hash, redacted summaries, status, latency, token usage, confidentiality and error type. [VERIFIED: backend/app/models/entities.py:580-581; backend/app/services/llm/prompt_runtime.py:122-205]
 
-Add/standardize an AuditLog for every generator family. Recommended `after_summary_json` keys: `context_schema_version`, `context_built_at`, `resolved_as_of`, `as_of_source`, `context_fact_count`, `context_conflict_codes`, `context_question_codes`, `retrieval_log_ids`, `readiness`, `prompt_projection_hash`, `prompt_projection_truncated`, `output_fields`, `merged_question_sources`, and `final_content_preserved`. Do not store raw Context or prompt text in audit. On success, task draft + ModelCallLog + AuditLog commit together; on readiness block, persist only retrieval/audit diagnostics with `result="blocked"`; on runtime failure, preserve the existing failed ModelCallLog and add a redacted generation audit before re-raising. [VERIFIED: backend/app/services/governance/audit.py:15-72; backend/app/models/governance.py:182-200; backend/app/services/llm/prompt_runtime.py:122-205]
+Add/standardize an AuditLog for every generator family. Recommended `after_summary_json` keys: `context_schema_version`, `context_built_at`, `resolved_as_of`, `as_of_source`, `context_fact_count`, `context_conflict_codes`, `context_question_codes`, `retrieval_log_ids`, `readiness`, `prompt_projection_hash`, `prompt_projection_truncated`, `output_fields`, `merged_question_sources`, and `final_content_preserved`. Do not store raw Context or prompt text in audit. RetrievalLog and ModelCallLog are attempt traces and may commit before the fresh task write transaction; on successful snapshot comparison, task draft + generation AuditLog commit together. On a stale snapshot, retain the model-attempt trace, add a redacted stale-snapshot AuditLog outcome, and persist no draft. On readiness block, persist retrieval/audit diagnostics with a blocked outcome; on runtime failure, preserve the existing failed ModelCallLog and add a redacted generation audit before re-raising. [VERIFIED: backend/app/services/governance/audit.py:15-72; backend/app/models/governance.py:182-200; backend/app/services/llm/prompt_runtime.py:122-205; Phase 10 research-resolution directive 2026-08-23]
 
 ### Anti-Patterns to Avoid
 
@@ -331,6 +338,20 @@ Pass confidentiality levels for every fact actually placed in the prompt, plus P
 
 Context retrieval already creates a RetrievalLog even for zero results and exposes its ID through fact provenance/build metadata. Do not call HybridRetriever again in generators. Pass the sole/current first retrieval log ID to `execute_runtime_chat` for backward-compatible ModelCallLog linkage and preserve the complete sorted list in AuditLog for future multi-log builds. [VERIFIED: backend/app/services/semantic/context_collectors.py:1112-1243; backend/app/services/semantic/context_builder.py:67-97; backend/tests/test_regulatory_context_builder.py:188-214]
 
+### Transaction and Concurrent-Edit Boundary
+
+`collect_retrieved_knowledge` delegates to `HybridRetriever.search`, whose exact persistence sequence is `self.db.add(log)`, `self.db.commit()`, `self.db.refresh(log)`. `prepare_model_input` commits a confidentiality-denial audit, and `execute_runtime_chat` commits a failed ModelCallLog before re-raising. All of these receive the generator's same SQLAlchemy Session. Existing generators then mutate their previously loaded ORM task object and commit after the external model call. Consequently, Phase 10 must not rely on a task-row lock, transaction snapshot, or ORM identity-map value obtained before Context construction remaining authoritative through generation. [VERIFIED: backend/app/services/semantic/context_collectors.py:1112-1141; backend/app/services/retrieval/hybrid_retriever.py:238-258; backend/app/services/llm/prompt_runtime.py:95-119,163-205; backend/app/services/mapping/source_to_mart_generator.py:10-53; backend/app/services/mapping/mart_to_ybt_generator.py:18-67; backend/app/services/mapping/scenario_draft_generator.py:11-59]
+
+Use an optimistic two-boundary protocol:
+
+1. After authorization and the initial task-row read, create a canonical immutable generation snapshot/hash. It covers every task value that influences scope, Context request, prompt, readiness or output merge—including `id`, `project_id`, target/mart/scenario IDs, lifecycle/editability/status fields, all current task-specific input fields, `open_questions`, `confidence_level`, `ai_generated_content`, `final_content`, and `updated_at`—plus the authorized Project values that affect scope/security/governance: `id`, `institution_id`, `project_status`, `confidentiality_level`, `governance_workflow_enabled`, and `updated_at`. [VERIFIED: backend/app/models/entities.py:8-14,31-42,193-249,335-394]
+2. Perform Context build, readiness, prompt preparation and the external model call without holding a task-row database lock. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+3. After model return and before applying output, persist the pending ModelCallLog/attempt-only records without mutating the task, explicitly end/clear the current transaction and expire stale ORM state, then begin a fresh write transaction. In one fixed lock order, re-select the same Project and task row with `SELECT ... FOR UPDATE`, re-authorize, rebuild the same canonical generation snapshot, and compare it with the pre-generation snapshot. The repository already uses SQLAlchemy `.with_for_update()` followed by a transactional mutation/flush for serialized state changes. [VERIFIED: backend/app/api/ai_runtime.py:539-555; backend/app/services/llm/prompt_runtime.py:175-189; Phase 10 research-resolution directive 2026-08-23]
+4. If any compared input, scope ID, project ID, status/editability field, `final_content`, current questions/draft, or `updated_at` changed—or the row disappeared—fail closed with the same additive 409 conflict family, audit a redacted stale-snapshot result, and persist no new AI draft. Re-authorize/re-evaluate governance against the reloaded row before mutation. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+5. If unchanged, apply the capped structured output and stable question merge, write audit, and commit once. Do not hold a database lock across Context retrieval or the external LLM call. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+
+The comparison must use explicit typed fields or a canonical serializer, not `model.__dict__`; it must not treat volatile Context build/retrieval timestamps as task-row concurrency inputs. [VERIFIED: backend/app/services/mapping/scenario_draft_generator.py:63-73; Phase 10 research-resolution directive 2026-08-23]
+
 ## Don't Hand-Roll
 
 | Problem | Don't Build | Use Instead | Why |
@@ -342,6 +363,7 @@ Context retrieval already creates a RetrievalLog even for zero results and expos
 | Output parsing | Raw JSON/dict trust | Existing four Pydantic output schemas via `execute_runtime_chat` | Runtime calls `chat_structured` and dumps validated output. [VERIFIED: backend/app/services/llm/prompt_runtime.py:163-189; backend/app/services/llm/structured_outputs.py:15-89] |
 | Confidentiality/redaction | Adapter regex/redaction | `prepare_model_input` | Central policy audits denied external sends. [VERIFIED: backend/app/services/llm/prompt_runtime.py:95-119] |
 | Audit persistence | New generation trace table | Existing `AuditLog`, `ModelCallLog`, `RetrievalLog` | Existing stores already cover governance summary, model execution and retrieval provenance. [VERIFIED: backend/app/models/governance.py:182-200; backend/app/models/entities.py:559-581] |
+| Long-running generation transaction | A row lock held across Context retrieval and external LLM latency | Canonical optimistic snapshot, then fresh `SELECT ... FOR UPDATE` write transaction and snapshot comparison | HybridRetriever/runtime may commit the same Session, and external model calls must not retain database locks. [VERIFIED: backend/app/services/retrieval/hybrid_retriever.py:238-258; backend/app/services/llm/prompt_runtime.py:108-119,163-205] |
 | Tokenizer/package | New tokenizer dependency | Deterministic character/fact budgets | No package install is needed; exact prompt bounds can be tested without provider coupling. [ASSUMED] |
 
 ## Runtime State Inventory
@@ -403,6 +425,11 @@ Context retrieval already creates a RetrievalLog even for zero results and expos
 **What goes wrong:** a block or provider failure leaves partial task-field changes.  
 **How to avoid:** build/project/readiness/prepare/runtime first; only then apply all output fields; commit once with logs/audit. On exception, ensure no task snapshot change. [VERIFIED: backend/app/services/llm/prompt_runtime.py:175-205; backend/app/services/mapping/source_to_mart_generator.py:50-53]
 
+### Pitfall 10: Holding or Trusting a Pre-Context Row Lock
+
+**What goes wrong:** code locks or loads the task before Context construction, assumes that state remains current through the LLM call, then overwrites a human edit or newly governed `final_content`. HybridRetriever commits the same Session during Context retrieval, and prompt-runtime denial/failure paths also commit, so the original transaction boundary is not durable. [VERIFIED: backend/app/services/semantic/context_collectors.py:1112-1141; backend/app/services/retrieval/hybrid_retriever.py:238-258; backend/app/services/llm/prompt_runtime.py:108-119,190-205]
+**How to avoid:** optimistic canonical task snapshot before Context; no database lock during retrieval/model latency; fresh write transaction with `SELECT ... FOR UPDATE`, complete snapshot comparison and governance recheck before applying output. A mismatch returns 409 and writes no new draft. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+
 ## Code Examples
 
 ### Deterministic Fact Key and Prompt Provenance
@@ -426,12 +453,13 @@ The exact authority values and numeric ranks come from the Phase 9 source of tru
 ### Fail-Closed Generation Order
 
 ```python
-# Proposed orchestration; no legacy branch is allowed.
+# Proposed orchestration; no legacy branch and no long-held row lock.
 task = load_task_row(db, task_id)
 assert_task_editable(db, task)
+before = canonical_generation_snapshot(task, authorized_project)
 resolved = resolve_generation_as_of(as_of, task, authorized_project)
 context = build_one_context(db, authorized_project, task, resolved.date)
-projection = adapter.project(context, task_snapshot(task))
+projection = adapter.project(context, before)
 if not projection.readiness.can_generate:
     audit_blocked_generation(db, task, context, projection, resolved)
     raise GenerationBlockedError(projection.readiness)
@@ -443,12 +471,22 @@ model_input = prepare_model_input(
     project_id=task.project_id,
 )
 output = await execute_runtime_chat(...)
-apply_capped_output_and_merge_questions(task, output, projection)
-audit_successful_generation(...)
-db.commit()
+persist_model_attempt_and_end_transaction(db)  # task still unmodified
+with fresh_write_transaction(db):
+    current_project = select_project_for_update(db, before.project_id)
+    current = select_task_for_update(db, task_id)
+    if current_project is None or current is None:
+        raise GenerationStaleError()
+    reauthorize_current_project(principal, current_project, current)
+    if canonical_generation_snapshot(current, current_project) != before:
+        audit_stale_generation(db, current, context, projection, resolved)
+        raise GenerationStaleError(changed_snapshot_fields(before, current))
+    assert_task_editable(db, current)
+    apply_capped_output_and_merge_questions(current, output, projection)
+    audit_successful_generation(...)
 ```
 
-This ordering is recommended from the locked fail-closed and final-content boundaries; it is not current code. [ASSUMED]
+This ordering is the resolved concurrency design derived from the locked fail-closed/final-content boundaries and current same-Session commit behavior; it is not current generator code. [VERIFIED: backend/app/services/retrieval/hybrid_retriever.py:238-258; backend/app/services/llm/prompt_runtime.py:108-119,163-205; Phase 10 research-resolution directive 2026-08-23]
 
 ## State of the Art in This Repository
 
@@ -466,8 +504,8 @@ This ordering is recommended from the locked fail-closed and final-content bound
 
 | File | Symbols | Required action |
 |------|---------|-----------------|
-| `backend/app/services/semantic/context_collectors.py` | `collect_base_context`, metadata helpers, evidence/catalog batching | Add MartField/MartTable metadata and scoped catalog-column descriptors using existing `MetadataContextValue`; preserve project filters, stable ordering and 21-query ceiling or justify a new fixed ceiling. [VERIFIED: backend/app/services/semantic/context_collectors.py:120-365,370-406] |
-| `backend/app/services/mapping/generator_context.py` | proposed `ResolvedGenerationDate`, `build_generation_context`, trace/question helpers | New shared seam; exactly one builder call; no fallback; no task-independent ORM queries. [ASSUMED] |
+| `backend/app/services/semantic/context_collectors.py` | `collect_base_context`, metadata helpers, evidence/catalog batching | Add MartField/MartTable metadata and scoped catalog-column descriptors using existing `MetadataContextValue`; preserve project filters/stable ordering, measure the unchanged baseline first, and allow only a documented fixed delta with constant growth. Historical `21`/`22` are not unconditional new ceilings. [VERIFIED: backend/app/services/semantic/context_collectors.py:120-365,370-406; Phase 10 research-resolution directive 2026-08-23] |
+| `backend/app/services/mapping/generator_context.py` | proposed `ResolvedGenerationDate`, `build_generation_context`, canonical task snapshots, fresh write re-lock/compare, trace/question helpers | New shared seam; exactly one builder call; no fallback; no task-independent ORM queries; no lock across Context/model call; stale snapshot fails closed before draft mutation. [ASSUMED] |
 | `backend/app/services/mapping/context_adapters.py` | proposed SourceToMart, MartToYbt and Scenario adapters | Explicit zero-SQL projection, authority order, bounded prompt, compact provenance, confidentiality levels, technical whitelist. [ASSUMED] |
 | `backend/app/services/mapping/generation_readiness.py` | proposed `GenerationReadiness`, `evaluate_readiness`, confidence cap | Central task-aware policy consuming existing conflict/question codes without changing Contract. [ASSUMED] |
 | `backend/app/services/mapping/source_to_mart_generator.py` | `generate_source_to_mart_draft`, `_apply_output`, question/final-content helpers | Retain task row/output application; replace all shared reads with shared seam; add audit; remove `_source_candidates`/`_evidence_text`/RAG. [VERIFIED: backend/app/services/mapping/source_to_mart_generator.py:10-133] |
@@ -477,30 +515,32 @@ This ordering is recommended from the locked fail-closed and final-content bound
 | `backend/app/api/scenario_mappings.py` | four generate/adopt routes; editability guard | Add optional query `as_of` and authorized Project handoff; preserve `ensure_scenario_mapping_editable`. [VERIFIED: backend/app/api/scenario_mappings.py:76-114,177-221] |
 | `backend/app/api/jobs.py` | `_business_handler`, `_technical_handler`, `_draft_handler` | Pass job-scoped Project and actor into generators; no implicit old signature. [VERIFIED: backend/app/api/jobs.py:125-140,167-181] |
 | `backend/app/api/deliverables.py` | `_deliverable_generate_handler` | Pass package/job-scoped Project and actor; retain existing skip of governed content. [VERIFIED: backend/app/api/deliverables.py:395-444] |
-| `backend/tests/test_generator_context_adapters.py` | proposed unit tests | Wave 0: date priority, readiness matrix, ordering/truncation, confidentiality aggregation, question merge, technical whitelist, zero SQL. [ASSUMED] |
+| `backend/tests/test_generator_context_adapters.py` | proposed unit tests | Wave 0: date priority, readiness matrix, ordering/truncation, confidentiality aggregation, stable labeled question merge, technical whitelist, zero SQL, canonical snapshot coverage and stale-write rejection. [ASSUMED] |
 | `backend/tests/test_double_layer_mapping.py` | `test_double_layer_mapping_end_to_end_api` plus focused cases | Preserve route/output/final/adopt behavior; add as_of/temporal/summary/no-fallback/audit/query-growth cases. [VERIFIED: backend/tests/test_double_layer_mapping.py:13-203] |
 | `backend/tests/test_scenario_traceability.py` | scenario mapping integration cases | Preserve business/technical/adopt/confirmation; add Context, physical refusal, question merge, governance, jobs/Deliverable callers. [VERIFIED: backend/tests/test_scenario_traceability.py:49-205] |
-| `backend/tests/test_regulatory_context_builder.py` | metadata and 21-query tests | Cover narrow metadata enrichment and keep deterministic project/institution/confidentiality/query behavior. [VERIFIED: backend/tests/test_regulatory_context_builder.py:62-64,73-214,1326-1385] |
+| `backend/tests/test_regulatory_context_builder.py` | metadata and query-growth tests | Cover narrow metadata enrichment, record baseline plus fixed delta, and keep deterministic project/institution/confidentiality behavior with no data-size-dependent query growth. [VERIFIED: backend/tests/test_regulatory_context_builder.py:62-64,73-214,1326-1385; Phase 10 research-resolution directive 2026-08-23] |
 
 ## Executable Plan Decomposition
 
 ### Plan 10-01 — Shared Generator Context Foundation
 
-1. Add RED tests for resolved date, three adapter projections, readiness matrix, question merge, confidence cap and zero-SQL adapter behavior. [ASSUMED]
+1. Add RED tests for resolved date, three adapter projections, readiness matrix, stable `[CTX:<question_code>]`/`[AI]` question merge, confidence cap and zero-SQL adapter behavior. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 2. Add narrow Context collector tests for requested MartField/MartTable metadata and evidence/lineage-connected CatalogColumn metadata; assert foreign project/institution descriptors never appear. [ASSUMED]
-3. Implement collector enrichment using existing Contract types, then implement `generator_context.py`, `context_adapters.py`, and `generation_readiness.py`. [ASSUMED]
-4. Gate: adapter tests + Context builder/API suites; maintain deterministic order and fixed growth query count. [VERIFIED: backend/tests/test_regulatory_context_builder.py:1326-1385; backend/tests/test_regulatory_context_api.py:601-630]
+3. Add a read-only fixture/data coverage audit for Scenario technical catalog/evidence/verified-lineage links; insufficient coverage remains a warning/open-question/confidence-cap state, never an invitation for model invention and never a human blocker checkpoint. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+4. Add canonical per-family task + authorized-Project snapshot/hash helpers plus transaction tests proving Context/runtime Session commits invalidate reliance on a pre-build lock, and proving a fresh fixed-order Project/task `SELECT ... FOR UPDATE` comparison detects every input/status/project-security/final-content edit. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+5. Measure the unchanged builder/query baseline before enrichment, then implement collector enrichment using existing Contract types plus `generator_context.py`, `context_adapters.py`, and `generation_readiness.py`; accept only a documented fixed query delta whose count remains constant under row growth. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+6. Gate: adapter tests + Context builder/API suites; maintain deterministic order and fixed-growth query count. The historical 21/22 budgets are comparison evidence, not unconditional post-enrichment ceilings. [VERIFIED: backend/tests/test_regulatory_context_builder.py:1326-1385; backend/tests/test_regulatory_context_api.py:601-630]
 
 ### Plan 10-02 — Double-Layer Mapping Cutover
 
-1. Add RED integration tests for optional `as_of`, authorized Project handoff, one Context build, no direct retrieval/evidence/candidate fallback, temporal version selection, Source→Mart gap exception, Mart→YBT upstream Source→Mart summary, blocked conflict, question preservation, confidence cap, audit and final-content immutability. [ASSUMED]
+1. Add RED integration tests for optional `as_of`, authorized Project handoff, one Context build, no direct retrieval/evidence/candidate fallback, temporal version selection, Source→Mart gap exception, Mart→YBT upstream Source→Mart summary, blocked conflict, stable labeled question preservation, confidence cap, audit and final-content immutability. Include a concurrent human edit between model return and write re-lock; expect 409 and no new draft. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 2. Refactor both mapping generators and API routes; preserve exact runtime keys and response/adopt contracts. [ASSUMED]
 3. Remove deprecated helpers/imports and add static/dynamic no-fallback assertions. [ASSUMED]
 4. Gate: `python -m pytest -q tests/test_generator_context_adapters.py tests/test_double_layer_mapping.py tests/test_regulatory_context_builder.py -x`. [ASSUMED]
 
 ### Plan 10-03 — Scenario Cutover and Background Callers
 
-1. Add RED business/technical tests for same Context, distinct outputs, editability/governance blocks, explicit task snapshots, current physical-value retention, unsupported new tuple refusal/open question, provenance/confidentiality/audit and final-content preservation. [ASSUMED]
+1. Add RED business/technical tests for same Context, distinct outputs, editability/governance blocks, optimistic task snapshots and fresh write re-lock, current physical-value retention, unsupported new tuple refusal/open question/confidence cap, provenance/confidentiality/audit and final-content preservation. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 2. Refactor Scenario generator; remove direct Target/Scenario/peer/evidence/RAG/catalog shared reads. [ASSUMED]
 3. Update direct API, job batch and Deliverable queued callers to pass scoped Project/actor/as_of (none for existing batch calls). [ASSUMED]
 4. Gate: `python -m pytest -q tests/test_scenario_traceability.py tests/test_llm_runtime.py tests/test_governance.py -x`. [ASSUMED]
@@ -508,9 +548,10 @@ This ordering is recommended from the locked fail-closed and final-content bound
 ### Plan 10-04 — Cross-Cutting Regression and Qualification
 
 1. Add two-project/two-institution generation isolation and restricted-external denial tests; assert no model call/no task mutation on block. [ASSUMED]
-2. Add generator query-growth tests: adapter adds zero SQL; one Context build; row growth does not change total statement count; builder remains at or below the accepted fixed ceiling. [ASSUMED]
-3. Run Phase 9 Contract/builder/API regressions, generator/runtime/governance/knowledge tests, compileall, then full backend suite; classify only the two documented Windows baseline failures if signatures remain identical. [VERIFIED: .planning/phases/09-regulatory-context/09-VERIFICATION.md:86-119,128-145]
-4. Static scope fence: no frontend, SQL Generator, Semantic Impact or DataQualityExpectation production diff; no package, migration or new fact store. [VERIFIED: .planning/phases/10-generator-refactor/10-CONTEXT.md:7-9]
+2. Add generator query-growth tests: adapter adds zero SQL; one Context build; record pre-enrichment baseline and exact fixed delta; row growth does not change either count. Do not encode historical 21/22 as an unconditional new ceiling. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+3. Add concurrency regressions for input, status/editability, project/scope ID, questions/draft, `final_content`, `updated_at`, deletion and re-authorization changes; each mismatch must fail closed/409 without a new draft, and instrumentation must prove no lock spans the external model call. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
+4. Run Phase 9 Contract/builder/API regressions, generator/runtime/governance/knowledge tests, compileall, then full backend suite; classify only the two documented Windows baseline failures if signatures remain identical. [VERIFIED: .planning/phases/09-regulatory-context/09-VERIFICATION.md:86-119,128-145]
+5. Static scope fence: no frontend, SQL Generator, Semantic Impact or DataQualityExpectation production diff; no package, migration or new fact store. [VERIFIED: .planning/phases/10-generator-refactor/10-CONTEXT.md:7-9]
 
 ## Validation Architecture
 
@@ -545,11 +586,13 @@ This ordering is recommended from the locked fail-closed and final-content bound
 | Scope leak | Cross-project task/context IDs return hidden/not-authorized failure; prompt/audit contains no foreign marker; institution comes from Project only. |
 | Confidentiality | Restricted selected fact blocks external model before call and audits denial; local runtime accepts it; prompt audit contains no raw secret. |
 | Human/final overwrite | Snapshot all task fields before block/failure; `final_content` and confirmed/approved statuses remain byte-for-byte unchanged after generation. |
+| Concurrent human/governance/project edit | Capture a canonical task + authorized-Project optimistic snapshot, make the model boundary observable in the test, mutate any compared field concurrently, then require fresh fixed-order Project/task `SELECT ... FOR UPDATE` comparison to return 409 with no new draft/audit claiming success. |
+| Long-held lock / stale ORM identity | Assert no task-row lock spans Context retrieval or model execution; expire/reload in the fresh write transaction so comparison uses current database state, not a pre-commit identity-map value. |
 | Question loss | Existing human + Context + AI questions survive; repeated generation is idempotent; source tags/codes retained. |
 | Confidence inflation | Model `high` is persisted as low/medium when readiness caps it. |
 | Physical hallucination | Unknown Catalog tuple is skipped and questioned; current tuple or Context-whitelisted tuple is accepted. |
 | Call-site breakage | Direct routes, background batch and Deliverable queued generation all call the new signature. |
-| Query growth | Same statement count after candidate/knowledge/evidence row growth; adapters execute zero SQL. |
+| Query growth | Measure unchanged pre-enrichment baseline, record the exact accepted fixed delta, and assert identical counts after candidate/knowledge/evidence/catalog/lineage row growth; adapters execute zero SQL and historical 21/22 are not unconditional ceilings. |
 
 ### Sampling Rate
 
@@ -559,16 +602,16 @@ This ordering is recommended from the locked fail-closed and final-content bound
 
 ### Wave 0 Gaps
 
-- [ ] `backend/tests/test_generator_context_adapters.py` — adapter/date/readiness/question/confidence/whitelist/zero-SQL contract. [ASSUMED]
-- [ ] Context builder tests for Mart metadata and scoped CatalogColumn projection. [ASSUMED]
-- [ ] Test helpers to capture prompt input, model-call count and SQL statement count around one generation. [ASSUMED]
+- [ ] `backend/tests/test_generator_context_adapters.py` — adapter/date/readiness/stable labeled-question/confidence/whitelist/zero-SQL and canonical snapshot contract. [ASSUMED]
+- [ ] Context builder tests for Mart metadata and scoped CatalogColumn projection, plus the mandatory read-only Scenario technical catalog/verified-lineage coverage audit fixture. [ASSUMED]
+- [ ] Test helpers to capture prompt input, model-call count, transaction/lock boundaries, concurrent task mutations and SQL statement count around one generation. [ASSUMED]
 - [ ] Job/Deliverable caller regression covering explicit authorized Project handoff. [ASSUMED]
 
 ### Current Baseline Executed During Research
 
 - `python -m pytest -q tests/test_double_layer_mapping.py tests/test_scenario_traceability.py` → **4 passed in 5.67s**. [VERIFIED: local pytest run 2026-08-23]
 - `python -m pytest -q tests/test_llm_runtime.py` → **22 passed in 3.08s**. [VERIFIED: local pytest run 2026-08-23]
-- Phase 9 records builder growth budget `21` and HTTP budget `22`; preserve the row-growth invariant and re-measure any fixed increase caused by narrowly enriched metadata. [VERIFIED: backend/tests/test_regulatory_context_builder.py:62-64,1326-1385; backend/tests/test_regulatory_context_api.py:49-50,601-630]
+- Phase 9 records historical builder growth budget `21` and HTTP budget `22`. They are the pre-enrichment comparison baseline only: Phase 10 must measure the actual unchanged baseline before implementation, document any accepted fixed delta, and prove that delta remains constant as data grows. The values `21`/`22` are not unconditional post-enrichment ceilings. [VERIFIED: backend/tests/test_regulatory_context_builder.py:62-64,1326-1385; backend/tests/test_regulatory_context_api.py:49-50,601-630]
 
 ## Performance and Query Impact
 
@@ -576,7 +619,7 @@ Context construction currently performs one keyword-only HybridRetriever call wi
 
 Absolute generator query count may be higher than the legacy happy path because Context intentionally aggregates more governed domains, but it must remain constant under data growth. Require: one task row load, one authorized Project handoff, one builder call, zero adapter SQL, two existing prompt-runtime selects, bounded log/audit writes and one final refresh. Avoid a brittle guessed total; lock the measured post-implementation count and assert the growth count is identical. [VERIFIED: backend/app/services/llm/prompt_runtime.py:51-82; backend/tests/test_regulatory_context_builder.py:1326-1385]
 
-Collector enrichment must batch Mart table/field and evidence-connected CatalogColumn IDs. If it adds queries, the planner must update the fixed Context budget only with an explicit before/after rationale and retain constant growth. Do not introduce lazy relationships in adapters. [ASSUMED]
+Collector enrichment must batch Mart table/field and evidence-connected CatalogColumn IDs. Execution must first measure the unchanged pre-enrichment query baseline, then accept only an explicitly documented fixed query delta. The delta must remain identical when candidate, knowledge, evidence, catalog and lineage row counts grow; any linear increase fails the phase gate. Do not treat the old `21`/`22` as an unconditional new ceiling, and do not introduce lazy relationships in adapters. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 
 ## Security Domain
 
@@ -626,26 +669,22 @@ The current worktree contains unrelated user frontend changes; Phase 10 planning
 |---|-------|---------|---------------|
 | A1 | Proposed module/class names and the 6,000/12,000 character budgets are suitable. | Architecture Patterns / File Map | Low: names/budgets are discretion and can be adjusted while retaining deterministic tests. |
 | A2 | HTTP 409 with additive detail is the preferred readiness-block response. | Effective Date Resolution | Medium: clients may expect another error shape; verify current frontend/client generic error handling before locking. |
-| A3 | Prefixing Text questions with `[CTX:...]` and `[AI]` is acceptable user-visible storage. | Open-Question Merge | Medium: exports/UI may display prefixes; validate desired presentation or keep provenance only in AuditLog. |
+| A3 | The exact canonical snapshot serialization/hash format can be selected during implementation if it compares every enumerated task input/status/project/final-content field and `updated_at`. | Transaction Boundary | Medium: omitting a field can permit a stale AI overwrite; tests must mutate each compared category. |
 | A4 | Context candidate mode should be used for every generator invocation. | Pattern 1 | Medium: it is required for ranked candidates but exposes draft/AI rows; adapter tests must prove lifecycle labels and no promotion. |
-| A5 | Evidence/lineage-connected CatalogColumn projection is sufficient for technical physical-source safety. | Projection Completion | High: if current data lacks those links, the adapter will conservatively refuse new physical fields and produce questions, which is safe but may reduce generation usefulness. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Question provenance in user-visible Text**
-   - What we know: existing storage is a single Text field; Context has structured codes/evidence. [VERIFIED: backend/app/models/entities.py:193-246,335-388; backend/app/schemas/regulatory_context.py:431-449]
-   - What's unclear: whether UI/export should show `[CTX:...]` prefixes.
-   - Recommendation: keep stable prefixes unless product owners reject them; always retain full provenance in AuditLog. [ASSUMED]
+1. **Question provenance in existing Text storage — RESOLVED**
+   - Evidence: all four task families persist `open_questions` as nullable Text, while Context questions carry structured code, target, evidence and resolution fields. No separate question fact store exists or is authorized in Phase 10. [VERIFIED: backend/app/models/entities.py:193-249,335-394; backend/app/schemas/regulatory_context.py:431-449; .planning/phases/10-generator-refactor/10-CONTEXT.md:7-9,40-47]
+   - Final decision: preserve each existing human question byte-for-byte and in its original order; serialize each Context-derived question with stable label `[CTX:<question_code>]`, and each new model-only question with `[AI]`. Adapter/persistence performs stable first-seen dedup across human → Context → model sources. The structured Context/AuditLog remains provenance; this merge does not create or imply a new fact store. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 
-2. **Catalog evidence completeness**
-   - What we know: current technical safety accepts any exact enabled project CatalogColumn, while Context does not yet project CatalogColumn metadata. [VERIFIED: backend/app/services/mapping/scenario_draft_generator.py:94-113]
-   - What's unclear: how many existing Scenario technical rows have catalog evidence or lineage links.
-   - Recommendation: add a read-only fixture/data audit in Plan 10-01; do not weaken fail-closed physical-field behavior if coverage is sparse. [ASSUMED]
+2. **Scenario technical Catalog coverage — RESOLVED**
+   - Evidence: current technical generation permits a proposed physical value only when it matches the current row or an exact enabled project-scoped CatalogColumn; Phase 9 Context does not yet emit a CatalogColumn metadata descriptor. [VERIFIED: backend/app/services/mapping/scenario_draft_generator.py:46-57,94-113; backend/app/services/semantic/context_collectors.py:209-215; backend/app/schemas/regulatory_context.py:167-180]
+   - Final decision: Plan 10-01 includes a read-only fixture/data coverage audit. Insufficient coverage is a valid business state, not a planning checkpoint or construction failure. The adapter may use only the current task-row physical identifier or a Context-projected identifier with traceable catalog/verified-lineage provenance. Otherwise it omits the proposed physical value, emits a deterministic warning/open question and lowers confidence; it never asks or permits the LLM to invent the missing identifier. No blocker checkpoint is added. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 
-3. **Fixed query budget after metadata enrichment**
-   - What we know: current builder baseline is 21 and row growth is bounded. [VERIFIED: backend/tests/test_regulatory_context_builder.py:62-64,1326-1385]
-   - What's unclear: whether the narrow Mart/catalog batch can reuse existing queries or adds one/two fixed statements.
-   - Recommendation: preserve 21 if practical; otherwise document the exact fixed delta and keep growth identical. [ASSUMED]
+3. **Query budget after metadata enrichment — RESOLVED**
+   - Evidence: Phase 9 tests encode historical builder/HTTP budgets of `21`/`22` and separately assert fixed query growth. [VERIFIED: backend/tests/test_regulatory_context_builder.py:62-64,1326-1385; backend/tests/test_regulatory_context_api.py:49-50,601-630]
+   - Final decision: execution measures the actual unchanged pre-enrichment baseline before modifying collectors. Only a documented fixed query delta is acceptable, and that delta must remain constant as data volume grows. The historical `21`/`22` values are comparison evidence, not unconditional new ceilings; any linear growth fails validation. [VERIFIED: Phase 10 research-resolution directive 2026-08-23]
 
 ## Environment Availability
 
@@ -689,7 +728,7 @@ The current worktree contains unrelated user frontend changes; Phase 10 planning
 - Standard stack: HIGH — installed versions and requirements were probed locally.
 - Current call graph and storage boundaries: HIGH — source files were opened with line-level evidence and current tests executed.
 - Date-field inventory: HIGH — source-of-truth Project, Target, Mapping, Scenario and Semantic model definitions were opened; no project/task reporting date exists.
-- Adapter/readiness/file decomposition: MEDIUM-HIGH — constrained by locked decisions and current Contract, with explicit assumptions/open questions.
+- Adapter/readiness/file decomposition: MEDIUM-HIGH — constrained by locked decisions and current Contract; the prior three Research Resolution questions are now recorded as final decisions, while only implementation naming/bounds remain assumptions.
 - Pitfalls/security/performance: HIGH for observed risks; MEDIUM-HIGH for proposed exact bounds/status code.
 
 **Research date:** 2026-08-23  
