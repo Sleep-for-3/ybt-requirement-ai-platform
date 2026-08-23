@@ -14,12 +14,14 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import (
+    CatalogColumn,
     HistoricalCaliberItem,
     KnowledgeUnit,
     LineageEdge,
     LineageNode,
     MappingEvidenceReference,
     MartField,
+    MartTable,
     MartToYbtMapping,
     ProductScenario,
     Project,
@@ -125,7 +127,11 @@ def collect_base_context(
     """Collect target metadata and date-effective governed semantic facts."""
 
     project_id = int(authorized_project.id)
-    target_table, target_field, mart_field = _target_scope(db, project_id, request)
+    target_table, target_field, mart_field, mart_table = _target_scope(
+        db,
+        project_id,
+        request,
+    )
     scenario = _scenario_scope(db, project_id, request.scenario_id)
     target = ContextTarget(
         target_table_id=target_table.id if target_table is not None else request.target_table_id,
@@ -209,6 +215,10 @@ def collect_base_context(
     metadata: list[ContextFact] = []
     if target_field is not None:
         metadata.append(_target_field_fact(authorized_project, target_field))
+    if mart_field is not None:
+        metadata.append(_mart_field_fact(authorized_project, mart_field))
+    if mart_table is not None:
+        metadata.append(_mart_table_fact(authorized_project, mart_table))
 
     mapping_rows = collect_mapping_rows(db, authorized_project, request, target)
     evidence_rows = collect_mapping_evidence_rows(db, authorized_project, mapping_rows)
@@ -254,11 +264,18 @@ def collect_base_context(
         for row in rows
         if row.lineage_status == "stale"
     )
+    catalog_links = _catalog_links_from_scenario_evidence(evidence_rows)
     raw_lineage = collect_raw_lineage(
         db,
         authorized_project,
         target,
+        catalog_links=catalog_links,
     )
+    metadata.extend(_collect_catalog_column_metadata(
+        db,
+        authorized_project,
+        catalog_links,
+    ))
     regulatory = collect_regulatory_knowledge(
         db,
         authorized_project,
@@ -371,7 +388,12 @@ def _target_scope(
     db: Session,
     project_id: int,
     request: RegulatoryContextRequest,
-) -> tuple[TargetTable | None, TargetField | None, MartField | None]:
+) -> tuple[
+    TargetTable | None,
+    TargetField | None,
+    MartField | None,
+    MartTable | None,
+]:
     target_field = None
     if request.target_field_id is not None:
         target_field = db.scalar(select(TargetField).where(
@@ -396,14 +418,20 @@ def _target_scope(
             raise ValueError("target table does not belong to the authorized project")
 
     mart_field = None
+    mart_table = None
     if request.mart_field_id is not None:
-        mart_field = db.scalar(select(MartField).where(
+        row = db.execute(select(MartField, MartTable).join(
+            MartTable,
+            MartTable.id == MartField.mart_table_id,
+        ).where(
             MartField.id == request.mart_field_id,
             MartField.project_id == project_id,
-        ))
-        if mart_field is None:
+            MartTable.project_id == project_id,
+        )).one_or_none()
+        if row is None:
             raise ValueError("mart field does not belong to the authorized project")
-    return target_table, target_field, mart_field
+        mart_field, mart_table = row
+    return target_table, target_field, mart_field, mart_table
 
 
 def _scenario_scope(db: Session, project_id: int, scenario_id: int | None) -> ProductScenario | None:
@@ -914,6 +942,8 @@ def collect_raw_lineage(
     db: Session,
     authorized_project: Project,
     target: ContextTarget,
+    *,
+    catalog_links: dict[int, list[ContextEvidenceReference]] | None = None,
 ) -> list[ContextFact]:
     """Project raw lineage with only predicates present on its real models."""
 
@@ -979,6 +1009,14 @@ def collect_raw_lineage(
                 source_location=_bounded(script.relative_path, 1000),
             )
         ]
+        if verified and catalog_links is not None:
+            for node in (source, destination):
+                if node.catalog_column_id is not None:
+                    _append_catalog_link(
+                        catalog_links,
+                        int(node.catalog_column_id),
+                        evidence[0],
+                    )
         provenance = ContextProvenance(
             project_id=authorized_project.id,
             institution_id=authorized_project.institution_id,
@@ -1968,6 +2006,211 @@ def _target_field_fact(project: Project, field: TargetField) -> ContextFact:
         state=FactState.OBSERVED,
         source_type=source_type,
         source_id=field.id,
+        observed_at=observed_at,
+        confidence=1.0,
+        provenance=provenance,
+    )
+
+
+def _mart_field_fact(project: Project, field: MartField) -> ContextFact:
+    observed_at = _aware_datetime(field.updated_at or field.created_at)
+    source_type = "mart_metadata"
+    provenance = ContextProvenance(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        source_model="MartField",
+        source_type=source_type,
+        source_id=field.id,
+        observed_at=observed_at,
+        confidentiality_level=_confidentiality(project),
+    )
+    attributes = [
+        ContextAttribute(name="mart_table_id", value=field.mart_table_id),
+        ContextAttribute(name="is_existing", value=field.is_existing),
+    ]
+    for name, value in (
+        ("field_type", field.field_type),
+        ("physical_column_name", field.physical_column_name),
+    ):
+        if value is not None:
+            attributes.append(ContextAttribute(name=name, value=_bounded(value, 2000)))
+    return ContextFact(
+        fact_type="mart_field_metadata",
+        value=MetadataContextValue(
+            entity_type="mart_field",
+            entity_id=field.id,
+            code=_bounded(field.field_code, 500),
+            name=_bounded(field.field_name, 500),
+            description=_bounded(field.field_comment or field.description, 4000),
+            attributes=attributes,
+        ),
+        authority=authority_for_source(source_type),
+        state=FactState.OBSERVED,
+        source_type=source_type,
+        source_id=field.id,
+        observed_at=observed_at,
+        confidence=1.0,
+        provenance=provenance,
+    )
+
+
+def _mart_table_fact(project: Project, table: MartTable) -> ContextFact:
+    observed_at = _aware_datetime(table.updated_at or table.created_at)
+    source_type = "mart_metadata"
+    provenance = ContextProvenance(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        source_model="MartTable",
+        source_type=source_type,
+        source_id=table.id,
+        observed_at=observed_at,
+        confidentiality_level=_confidentiality(project),
+    )
+    attributes = [ContextAttribute(name="is_existing", value=table.is_existing)]
+    for name, value in (
+        ("subject_area", table.subject_area),
+        ("database_name", table.database_name),
+        ("schema_name", table.schema_name),
+        ("physical_table_name", table.physical_table_name),
+    ):
+        if value is not None:
+            attributes.append(ContextAttribute(name=name, value=_bounded(value, 2000)))
+    return ContextFact(
+        fact_type="mart_table_metadata",
+        value=MetadataContextValue(
+            entity_type="mart_table",
+            entity_id=table.id,
+            code=_bounded(table.table_code, 500),
+            name=_bounded(table.table_name, 500),
+            description=_bounded(table.table_comment or table.description, 4000),
+            attributes=attributes,
+        ),
+        authority=authority_for_source(source_type),
+        state=FactState.OBSERVED,
+        source_type=source_type,
+        source_id=table.id,
+        observed_at=observed_at,
+        confidence=1.0,
+        provenance=provenance,
+    )
+
+
+def _catalog_links_from_scenario_evidence(
+    rows: list[MappingEvidenceReference],
+) -> dict[int, list[ContextEvidenceReference]]:
+    links: dict[int, list[ContextEvidenceReference]] = {}
+    for row in rows:
+        if (
+            row.mapping_type != "scenario_technical"
+            or row.evidence_type != "catalog_column"
+            or row.evidence_id is None
+            or int(row.evidence_id) <= 0
+        ):
+            continue
+        _append_catalog_link(
+            links,
+            int(row.evidence_id),
+            ContextEvidenceReference(
+                evidence_type="catalog_column",
+                evidence_id=int(row.evidence_id),
+                citation=_bounded(row.source_name, 1000),
+                source_location=_bounded(row.location_text, 1000),
+            ),
+        )
+    return links
+
+
+def _append_catalog_link(
+    links: dict[int, list[ContextEvidenceReference]],
+    catalog_column_id: int,
+    reference: ContextEvidenceReference,
+) -> None:
+    references = links.setdefault(catalog_column_id, [])
+    key = (
+        reference.evidence_type,
+        reference.evidence_id,
+        reference.citation,
+        reference.source_location,
+    )
+    if key not in {
+        (item.evidence_type, item.evidence_id, item.citation, item.source_location)
+        for item in references
+    }:
+        references.append(reference)
+
+
+def _collect_catalog_column_metadata(
+    db: Session,
+    project: Project,
+    catalog_links: dict[int, list[ContextEvidenceReference]],
+) -> list[ContextFact]:
+    column_ids = sorted(catalog_links)[:EVIDENCE_REFERENCE_LIMIT]
+    if not column_ids:
+        return []
+    rows = list(db.scalars(select(CatalogColumn).where(
+        CatalogColumn.id.in_(column_ids),
+        CatalogColumn.project_id == project.id,
+        CatalogColumn.enabled.is_(True),
+    ).order_by(CatalogColumn.id).limit(EVIDENCE_REFERENCE_LIMIT)).all())
+    return [
+        _catalog_column_fact(project, row, catalog_links[int(row.id)])
+        for row in rows
+    ]
+
+
+def _catalog_column_fact(
+    project: Project,
+    column: CatalogColumn,
+    evidence: list[ContextEvidenceReference],
+) -> ContextFact:
+    observed_at = _aware_datetime(column.updated_at or column.created_at)
+    source_type = "source_metadata"
+    references = evidence[:EVIDENCE_REFERENCE_LIMIT]
+    provenance = ContextProvenance(
+        project_id=project.id,
+        institution_id=project.institution_id,
+        source_model="CatalogColumn",
+        source_type=source_type,
+        source_id=column.id,
+        evidence_references=references,
+        observed_at=observed_at,
+        confidentiality_level=_confidentiality(project),
+    )
+    attributes = [
+        ContextAttribute(name="database_name", value=_bounded(column.database_name, 2000)),
+        ContextAttribute(name="schema_name", value=_bounded(column.schema_name, 2000)),
+        ContextAttribute(name="table_name", value=_bounded(column.table_name, 2000)),
+        ContextAttribute(name="column_name", value=_bounded(column.column_name, 2000)),
+        ContextAttribute(name="data_type", value=_bounded(column.data_type, 2000)),
+        ContextAttribute(name="nullable", value=column.nullable),
+        ContextAttribute(name="ordinal_position", value=column.ordinal_position),
+        ContextAttribute(name="is_primary_key", value=column.is_primary_key),
+    ]
+    physical_code = ".".join(
+        str(value).strip()
+        for value in (
+            column.database_name,
+            column.schema_name,
+            column.table_name,
+            column.column_name,
+        )
+        if value is not None and str(value).strip()
+    )
+    return ContextFact(
+        fact_type="catalog_column_metadata",
+        value=MetadataContextValue(
+            entity_type="catalog_column",
+            entity_id=column.id,
+            code=_bounded(physical_code, 500),
+            name=_bounded(column.column_name, 500),
+            description=_bounded(column.column_comment, 4000),
+            attributes=attributes,
+        ),
+        authority=authority_for_source(source_type),
+        state=FactState.OBSERVED,
+        source_type=source_type,
+        source_id=column.id,
+        evidence_references=references,
         observed_at=observed_at,
         confidence=1.0,
         provenance=provenance,

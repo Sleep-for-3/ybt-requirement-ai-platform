@@ -21,6 +21,7 @@ from app.schemas.regulatory_context import (
     SemanticContextValue,
 )
 from app.services.mapping.generation_readiness import (
+    ConfidenceLevel,
     GenerationReadiness,
     evaluate_generation_readiness,
 )
@@ -35,6 +36,8 @@ SOURCE_TO_MART_PROJECTION_LIMIT = 6000
 MAX_SELECTED_FACTS = 30
 MAX_CONTEXT_QUESTIONS = 20
 TRUNCATION_MARKER = "\n[TRUNCATED:generator-context-projection]"
+PHYSICAL_SOURCE_EVIDENCE_MISSING = "PHYSICAL_SOURCE_EVIDENCE_MISSING"
+PhysicalSourceTuple = tuple[str, str, str, str]
 
 
 class ContextQuestionConstraint(BaseModel):
@@ -58,6 +61,20 @@ class SourceToMartProjection(BaseModel):
     readiness: GenerationReadiness
     projection_hash: str
     truncated: bool
+
+
+class ScenarioPhysicalCoverageAudit(BaseModel):
+    """Pure read-only report over the physical descriptors already in Context."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    allowlisted_sources: tuple[PhysicalSourceTuple, ...]
+    unchanged_current_source: PhysicalSourceTuple | None
+    catalog_evidence_count: int
+    verified_lineage_count: int
+    warning: str | None
+    open_question: str | None
+    confidence_cap: ConfidenceLevel
 
 
 class SourceToMartContextAdapter:
@@ -112,6 +129,85 @@ class SourceToMartContextAdapter:
             projection_hash=sha256(prompt.encode("utf-8")).hexdigest(),
             truncated=truncated,
         )
+
+
+def build_physical_source_whitelist(
+    context: RegulatoryContext,
+) -> tuple[PhysicalSourceTuple, ...]:
+    """Return exact normalized tuples from connected CatalogColumn metadata only."""
+
+    allowed: set[PhysicalSourceTuple] = set()
+    for fact in context.metadata:
+        value = fact.value
+        if (
+            not isinstance(value, MetadataContextValue)
+            or value.entity_type != "catalog_column"
+            or fact.source_type != "source_metadata"
+            or fact.provenance.source_model != "CatalogColumn"
+        ):
+            continue
+        attributes = {item.name: item.value for item in value.attributes}
+        physical = tuple(
+            _normalize_physical_identifier(attributes.get(name))
+            for name in (
+                "database_name",
+                "schema_name",
+                "table_name",
+                "column_name",
+            )
+        )
+        if all(physical):
+            allowed.add(physical)  # type: ignore[arg-type]
+    return tuple(sorted(allowed))
+
+
+def audit_scenario_physical_coverage(
+    context: RegulatoryContext,
+    *,
+    current_physical_source: tuple[object, object, object, object] | None = None,
+) -> ScenarioPhysicalCoverageAudit:
+    """Describe proven/current coverage without querying or inventing an identifier."""
+
+    allowlisted = build_physical_source_whitelist(context)
+    current = None
+    if current_physical_source is not None:
+        normalized = tuple(
+            _normalize_physical_identifier(value)
+            for value in current_physical_source
+        )
+        if all(normalized):
+            current = normalized  # type: ignore[assignment]
+
+    catalog_evidence_count = 0
+    verified_lineage_count = 0
+    for fact in context.metadata:
+        if not isinstance(fact.value, MetadataContextValue):
+            continue
+        if fact.value.entity_type != "catalog_column":
+            continue
+        catalog_evidence_count += sum(
+            reference.evidence_type == "catalog_column"
+            for reference in fact.evidence_references
+        )
+        verified_lineage_count += sum(
+            reference.evidence_type == "script_file_version"
+            for reference in fact.evidence_references
+        )
+
+    has_coverage = bool(allowlisted or current)
+    return ScenarioPhysicalCoverageAudit(
+        allowlisted_sources=allowlisted,
+        unchanged_current_source=current,
+        catalog_evidence_count=catalog_evidence_count,
+        verified_lineage_count=verified_lineage_count,
+        warning=None if has_coverage else PHYSICAL_SOURCE_EVIDENCE_MISSING,
+        open_question=(
+            None
+            if has_coverage
+            else "请确认来源数据库、模式、表和字段，并提供 CatalogColumn 证据或已验证血缘。"
+        ),
+        confidence_cap="high" if has_coverage else "low",
+    )
 
 
 def _select_facts(context: RegulatoryContext) -> list[ContextFact]:
@@ -241,8 +337,17 @@ def _display(value: object | None) -> str:
     return normalized or "待确认"
 
 
+def _normalize_physical_identifier(value: object | None) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
 __all__ = [
     "ContextQuestionConstraint",
+    "PHYSICAL_SOURCE_EVIDENCE_MISSING",
+    "PhysicalSourceTuple",
+    "ScenarioPhysicalCoverageAudit",
     "SourceToMartContextAdapter",
     "SourceToMartProjection",
+    "audit_scenario_physical_coverage",
+    "build_physical_source_whitelist",
 ]
