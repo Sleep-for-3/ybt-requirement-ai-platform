@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 10
 current_phase_name: Generator Refactor
 status: executing
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-08-23T08:22:38.797Z"
+stopped_at: Completed 10-03-PLAN.md
+last_updated: "2026-08-23T09:58:35.687Z"
 last_activity: 2026-08-23
-last_activity_desc: Phase 10 Plan 02 double-layer generator Context cutover completed
+last_activity_desc: Phase 10 Plan 03 Scenario generator and queued caller Context cutover completed
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 11
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 10 (Generator Refactor) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
-Last activity: 2026-08-23 — Phase 10 Plan 02 completed
+Last activity: 2026-08-23 — Phase 10 Plan 03 completed
 
-Progress: [████████░░] 82%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [████████░░] 82%
 | Phase 09 P04 | 35min | 3 tasks | 5 files |
 | Phase 10 P01 | 45min | 3 tasks | 6 files |
 | Phase 10 P02 | 57min | 3 tasks | 4 files |
+| Phase 10 P03 | 1h 22m | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,11 @@ Progress: [████████░░] 82%
 - [Phase 10]: Model attempts commit before a fresh short actor-PermissionService-Project-task snapshot transaction applies any draft.
 - [Phase 10]: Mart-to-YBT approved upstream rules are point-in-time Context facts and are not part of the local stale snapshot.
 - [Phase 10]: Generation never mutates final_content or formal review state; explicit adoption and review remain human governance boundaries.
+- [Phase 10]: Scenario business and technical generation share only the authorized RegulatoryContext seam while retaining distinct snapshots, prompts, outputs, renderers, and apply policies.
+- [Phase 10]: Queued authority is reconstructed only from an active persisted User as an explicitly non-legacy frozen Principal; missing, zero, disabled, and revoked identities fail closed.
+- [Phase 10]: Scenario generation performs Context and model work without row locks, then revalidates actor and permission before fixed Project-to-task locks and complete snapshot comparison.
+- [Phase 10]: Technical physical identifiers require an exact current or same-Context tuple; refused tuples preserve current physical fields and add a stable governed question.
+- [Phase 10]: Queued security, readiness, governance, and stale outcomes use bounded blocked codes and per-item commits rather than content-bearing failures or legacy retry paths.
 
 ### Pending Todos
 
@@ -109,6 +115,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-23T08:22:38.678Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-08-23T09:58:35.643Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None

@@ -26,7 +26,7 @@
 
 - [x] **GEN-01**: Source→Mart Generator 主要消费 RegulatoryContext，同时保留现有 API、structured output 与 task-specific instruction。
 - [x] **GEN-02**: Mart→YBT Generator 主要消费 RegulatoryContext，同时保留现有 API、structured output 与 Source→Mart 摘要语义。
-- [ ] **GEN-03**: Scenario generators 在适用范围消费同一 Context，confirmed/final 内容不会被 AI draft 覆盖。
+- [x] **GEN-03**: Scenario generators 在适用范围消费同一 Context，confirmed/final 内容不会被 AI draft 覆盖。
 - [x] **GEN-04**: 缺少证据时生成器产生 open question，不凭空创建不存在的表、字段或正式状态。
 
 ### Semantic Experience
