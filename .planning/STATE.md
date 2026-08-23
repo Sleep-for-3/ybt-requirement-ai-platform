@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 10
 current_phase_name: Generator Refactor
 status: executing
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-08-23T07:12:34.359Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-08-23T08:22:38.797Z"
 last_activity: 2026-08-23
-last_activity_desc: Phase 10 Plan 01 generator Context foundation completed
+last_activity_desc: Phase 10 Plan 02 double-layer generator Context cutover completed
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 11
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 10 (Generator Refactor) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
-Last activity: 2026-08-23 — Phase 10 execution started
+Last activity: 2026-08-23 — Phase 10 Plan 02 completed
 
-Progress: [███████░░░] 73%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Progress: [███████░░░] 73%
 | Phase 09 P03 | 1h 2m | 3 tasks | 9 files |
 | Phase 09 P04 | 35min | 3 tasks | 5 files |
 | Phase 10 P01 | 45min | 3 tasks | 6 files |
+| Phase 10 P02 | 57min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,10 @@ Progress: [███████░░░] 73%
 - [Phase 10]: CatalogColumn projection is limited to enabled same-project evidence or verified-lineage links with one fixed query.
 - [Phase 10]: Physical output accepts only exact Context-whitelisted tuples or the unchanged canonical task tuple.
 - [Phase 10]: Question merge preserves the human prefix byte-for-byte and appends stable CTX and AI provenance markers.
+- [Phase 10]: Both double-layer generators use one immutable RegulatoryContext projection and no legacy shared-fact fallback.
+- [Phase 10]: Model attempts commit before a fresh short actor-PermissionService-Project-task snapshot transaction applies any draft.
+- [Phase 10]: Mart-to-YBT approved upstream rules are point-in-time Context facts and are not part of the local stale snapshot.
+- [Phase 10]: Generation never mutates final_content or formal review state; explicit adoption and review remain human governance boundaries.
 
 ### Pending Todos
 
@@ -104,6 +109,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-23T07:12:34.287Z
-Stopped at: Completed 10-01-PLAN.md
+Last session: 2026-08-23T08:22:38.678Z
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
