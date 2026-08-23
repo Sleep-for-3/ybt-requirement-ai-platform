@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 3
 waived_count: 0
-fixed_count: 1
-total_count: 4
-last_updated: 2026-08-23T09:59:43.455Z
+fixed_count: 2
+total_count: 5
+last_updated: 2026-08-23T11:35:15.542Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,7 @@ last_updated: 2026-08-23T09:59:43.455Z
 | 2 | 09 | deviation | backend/app/services/semantic/__init__.py |  | Lazy builder export was required to preserve the existing semantic package import graph | fixed |  | 2026-08-22T16:55:16.015Z | 2026-08-22T16:56:02.619Z |
 | 3 | 10 | deviation | backend/tests/test_productization.py | 165 | Windows ACL productization test reports null protection state on this host; unchanged from the 10-03 baseline. | open |  | 2026-08-23T09:59:42.617Z |  |
 | 4 | 10 | deviation | backend/tests/test_productization.py | 195 | Interactive lifecycle-script productization test times out after input 0 on this host; unchanged from the 10-03 baseline. | open |  | 2026-08-23T09:59:43.455Z |  |
+| 5 | 10 | deviation | backend/app/services/mapping/context_adapters.py |  | Metadata catalog compatibility required bounded current-task candidate profile evidence in the frozen Scenario technical projection without restoring a shared-fact fallback. | fixed |  | 2026-08-23T11:34:50.912Z | 2026-08-23T11:35:15.542Z |
 
 ````json
 [
@@ -69,6 +70,18 @@ last_updated: 2026-08-23T09:59:43.455Z
     "reason": "",
     "recorded_at": "2026-08-23T09:59:43.455Z",
     "resolved_at": null
+  },
+  {
+    "id": 5,
+    "kind": "deviation",
+    "phase": "10",
+    "file": "backend/app/services/mapping/context_adapters.py",
+    "line": null,
+    "description": "Metadata catalog compatibility required bounded current-task candidate profile evidence in the frozen Scenario technical projection without restoring a shared-fact fallback.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-23T11:34:50.912Z",
+    "resolved_at": "2026-08-23T11:35:15.542Z"
   }
 ]
 ````
