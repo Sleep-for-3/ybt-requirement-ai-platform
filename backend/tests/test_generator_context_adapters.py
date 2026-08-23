@@ -46,6 +46,11 @@ from app.services.mapping.generation_readiness import (
     evaluate_generation_readiness,
     merge_generation_questions,
 )
+from app.services.mapping import (
+    mart_to_ybt_generator,
+    scenario_draft_generator,
+    source_to_mart_generator,
+)
 from app.services.mapping.generator_context import (
     GenerationActorError,
     build_generation_context,
@@ -62,6 +67,81 @@ from app.services.semantic.context_authority import FactState, authority_for_sou
 
 
 AS_OF = date(2026, 6, 30)
+
+
+@pytest.mark.parametrize(
+    (
+        "generator",
+        "prompt_key",
+        "output_contract",
+        "permission",
+        "task_lock",
+    ),
+    (
+        (
+            source_to_mart_generator.generate_source_to_mart_draft,
+            "source_to_mart_mapping",
+            "SourceToMartOutput",
+            "technical.edit",
+            "select(SourceToMartMapping)",
+        ),
+        (
+            mart_to_ybt_generator.generate_mart_to_ybt_draft,
+            "mart_to_ybt_mapping",
+            "MartToYbtOutput",
+            "technical.edit",
+            "select(MartToYbtMapping)",
+        ),
+        (
+            scenario_draft_generator.generate_business_draft,
+            "scenario_business_mapping",
+            "ScenarioBusinessOutput",
+            "business.edit",
+            "select(ScenarioBusinessMapping)",
+        ),
+        (
+            scenario_draft_generator.generate_technical_draft,
+            "scenario_technical_lineage",
+            "ScenarioTechnicalOutput",
+            "technical.edit",
+            "select(ScenarioTechnicalLineage)",
+        ),
+    ),
+)
+def test_all_four_generators_share_one_context_seam_and_distinct_runtime_contracts(
+    generator: object,
+    prompt_key: str,
+    output_contract: str,
+    permission: str,
+    task_lock: str,
+) -> None:
+    """Keep the four public contracts distinct behind one governed seam."""
+
+    source = inspect.getsource(generator)
+
+    assert source.count("build_generation_context(") == 1
+    assert f'get_prompt_runtime(db, "{prompt_key}")' in source
+    assert output_contract in source
+    assert f'"{permission}"' in source
+
+    context_build = source.index("build_generation_context(")
+    model_call = source.index("execute_runtime_chat(", context_build)
+    write_transaction = source.index("with db.begin():", model_call)
+    actor_check = source.index("validate_generation_actor(db, actor)", write_transaction)
+    permission_check = source.index("PermissionService(db, actor)", actor_check)
+    project_lock = source.index("select(Project)", permission_check)
+    local_task_lock = source.index(task_lock, project_lock)
+    assert context_build < model_call < write_transaction
+    assert actor_check < permission_check < project_lock < local_task_lock
+
+    for forbidden in (
+        "HybridRetriever",
+        "MappingEvidenceReference",
+        "CatalogColumn",
+        "_source_candidates",
+        "_evidence_text",
+    ):
+        assert forbidden not in source
 
 
 def test_source_to_mart_tracer_builds_one_candidate_context_and_bounded_projection(

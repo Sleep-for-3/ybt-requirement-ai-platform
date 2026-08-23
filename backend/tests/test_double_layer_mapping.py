@@ -541,6 +541,28 @@ def test_mart_to_ybt_route_passes_exact_authorized_boundary(
         assert captured["authorized_project"] is fixture["project"]
         assert captured["as_of"] == selected_date
 
+        explicit_legacy = Principal(None, "legacy-system", "Legacy", True)
+        asyncio.run(
+            mapping_rules.generate_mart_to_ybt_mapping_draft(
+                mart_mapping.id,
+                principal=explicit_legacy,
+                as_of=None,
+                db=db,
+            )
+        )
+        assert captured["actor"] is explicit_legacy
+
+        with pytest.raises(HTTPException) as invalid:
+            asyncio.run(
+                mapping_rules.generate_mart_to_ybt_mapping_draft(
+                    mart_mapping.id,
+                    principal=Principal(0, "falsey", None, False),
+                    as_of=None,
+                    db=db,
+                )
+            )
+        assert invalid.value.status_code in {401, 403}
+
 
 def test_mart_to_ybt_service_uses_frozen_context_upstream_and_output_policy(
     tmp_path: Path,
@@ -550,25 +572,35 @@ def test_mart_to_ybt_service_uses_frozen_context_upstream_and_output_policy(
         mart_mapping = _seed_mart_to_ybt_mapping(db, fixture, "mart-context")
         actor = _principal(fixture)
         calls = {"context": 0, "model": 0}
+        projected_upstream: list[str] = []
 
         def fake_build(*args, **kwargs):
             calls["context"] += 1
             assert kwargs["authorized_project"] is fixture["project"]
             assert kwargs["actor"] is actor
-            return _mart_context_envelope(snapshot=kwargs["snapshot"])
+            with factory() as reader:
+                upstream = reader.get(SourceToMartMapping, fixture["mapping"].id)
+                assert upstream is not None
+                rule = upstream.final_content
+            projected_upstream.append(rule)
+            return _mart_context_envelope(
+                snapshot=kwargs["snapshot"],
+                upstream_rule=rule,
+            )
 
         async def fake_model(*args, **kwargs):
             calls["model"] += 1
             assert args[2].prompt_key == "mart_to_ybt_mapping"
             assert args[4].__name__ == "MartToYbtOutput"
-            assert "APPROVED_CONTEXT_RULE" in args[3]
-            with factory() as concurrent:
-                upstream = concurrent.get(
-                    SourceToMartMapping,
-                    fixture["mapping"].id,
-                )
-                upstream.final_content = "模型执行期间更新的上游规则"
-                concurrent.commit()
+            assert projected_upstream[-1] in args[3]
+            if calls["model"] == 1:
+                with factory() as concurrent:
+                    upstream = concurrent.get(
+                        SourceToMartMapping,
+                        fixture["mapping"].id,
+                    )
+                    upstream.final_content = "模型执行期间更新的上游规则"
+                    concurrent.commit()
             return {
                 "mart_table_summary": "AI 集市表",
                 "business_rule": "受治理的 Mart-to-YBT 规则",
@@ -601,6 +633,22 @@ def test_mart_to_ybt_service_uses_frozen_context_upstream_and_output_policy(
         assert "[CTX:MISSING_MART_TO_YBT_MAPPING]" in generated.open_questions
         assert "[AI] Mart 模型问题" in generated.open_questions
         assert generated.ai_generated_content == "监管集市到一表通口径：\n受治理的报送草稿"
+
+        regenerated = asyncio.run(
+            mart_to_ybt_generator.generate_mart_to_ybt_draft(
+                db,
+                mart_mapping.id,
+                authorized_project=fixture["project"],
+                actor=actor,
+                as_of=date(2026, 6, 30),
+            )
+        )
+        assert regenerated.id == mart_mapping.id
+        assert calls == {"context": 2, "model": 2}
+        assert projected_upstream == [
+            "APPROVED_CONTEXT_RULE",
+            "模型执行期间更新的上游规则",
+        ]
 
         source = inspect.getsource(mart_to_ybt_generator)
         for forbidden in (
@@ -1219,6 +1267,7 @@ def _mart_context_envelope(
     *,
     snapshot: object,
     can_generate: bool = True,
+    upstream_rule: str = "APPROVED_CONTEXT_RULE",
 ) -> SimpleNamespace:
     blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
     context_questions = [
@@ -1235,7 +1284,7 @@ def _mart_context_envelope(
         task_type="mart_to_ybt",
         prompt_text=(
             "受治理的 Mart-to-YBT Context 投影\n"
-            "已批准 Source-to-Mart：APPROVED_CONTEXT_RULE"
+            f"已批准 Source-to-Mart：{upstream_rule}"
         ),
         confidentiality_levels=["internal"],
         context_questions=context_questions,
@@ -1245,7 +1294,7 @@ def _mart_context_envelope(
             warnings=["MISSING_MART_TO_YBT_MAPPING"],
             confidence_cap="low",
         ),
-        upstream_rule_summaries=["APPROVED_CONTEXT_RULE"],
+        upstream_rule_summaries=[upstream_rule],
     )
     trace_values = {
         "context_schema_version": "1.0",
