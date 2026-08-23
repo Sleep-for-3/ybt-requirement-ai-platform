@@ -1,13 +1,358 @@
+import asyncio
+import inspect
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.models import (
+    AuditLog,
+    ProductScenario,
+    Project,
+    ProjectMembership,
+    ScenarioBusinessMapping,
+    TargetField,
+    TargetTable,
+    User,
+)
+from app.services.auth.dependencies import Principal
+from app.services.mapping import scenario_draft_generator
+from app.services.mapping.generator_context import (
+    GenerationActorError,
+    GenerationBlockedError,
+    GenerationStaleError,
+)
+from app.api import scenario_mappings
+
+
+def test_business_generate_route_passes_exact_authorized_context_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "business-route") as (db, _, fixture):
+        actor = _principal(fixture)
+        captured: list[dict[str, object]] = []
+        editability_calls: list[tuple[str, int]] = []
+
+        def editable_spy(session: Session, mapping_type: str, mapping_id: int) -> None:
+            assert session is db
+            editability_calls.append((mapping_type, mapping_id))
+
+        async def fake_generate(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None = None,
+            today_provider=date.today,
+        ) -> ScenarioBusinessMapping:
+            captured.append({
+                "session": session,
+                "mapping_id": mapping_id,
+                "authorized_project": authorized_project,
+                "actor": actor,
+                "as_of": as_of,
+                "today_provider": today_provider,
+            })
+            return fixture["mapping"]
+
+        monkeypatch.setattr(scenario_mappings, "ensure_scenario_mapping_editable", editable_spy)
+        monkeypatch.setattr(scenario_mappings, "generate_business_draft", fake_generate)
+
+        selected_date = date(2026, 6, 30)
+        result = asyncio.run(
+            scenario_mappings.generate_scenario_business_draft(
+                fixture["mapping"].id,
+                principal=actor,
+                as_of=selected_date,
+                db=db,
+            )
+        )
+        assert result.id == fixture["mapping"].id
+        assert captured[-1]["actor"] is actor
+        assert captured[-1]["authorized_project"] is fixture["project"]
+        assert captured[-1]["as_of"] == selected_date
+        assert editability_calls == [("scenario_business", fixture["mapping"].id)]
+
+        asyncio.run(
+            scenario_mappings.generate_scenario_business_draft(
+                fixture["mapping"].id,
+                principal=actor,
+                as_of=None,
+                db=db,
+            )
+        )
+        assert captured[-1]["as_of"] is None
+
+        explicit_legacy = Principal(None, "legacy-system", "Legacy", True)
+        asyncio.run(
+            scenario_mappings.generate_scenario_business_draft(
+                fixture["mapping"].id,
+                principal=explicit_legacy,
+                as_of=None,
+                db=db,
+            )
+        )
+        assert captured[-1]["actor"] is explicit_legacy
+
+        with pytest.raises(HTTPException) as invalid:
+            asyncio.run(
+                scenario_mappings.generate_scenario_business_draft(
+                    fixture["mapping"].id,
+                    principal=Principal(None, "falsey", None, False),
+                    as_of=None,
+                    db=db,
+                )
+            )
+        assert invalid.value.status_code in {401, 403}
+
+
+def test_business_generate_uses_context_preserves_final_and_questions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "business-context") as (db, _, fixture):
+        actor = _principal(fixture)
+        calls = {"context": 0, "model": 0}
+
+        def fake_build(*args, **kwargs):
+            calls["context"] += 1
+            assert kwargs["authorized_project"] is fixture["project"]
+            assert kwargs["actor"] is actor
+            assert kwargs["explicit_as_of"] == date(2026, 6, 30)
+            return _business_context_envelope(snapshot=kwargs["snapshot"])
+
+        async def fake_model(*args, **kwargs):
+            calls["model"] += 1
+            assert args[2].prompt_key == "scenario_business_mapping"
+            assert args[4].__name__ == "ScenarioBusinessOutput"
+            return {
+                "business_definition": "受治理的 AI 业务定义",
+                "business_owner": "AI 建议负责人",
+                "open_questions": ["模型问题"],
+                "confidence_level": "high",
+                "final_content_draft": "受治理的场景业务草稿",
+                "business_confirm_status": "confirmed",
+            }
+
+        monkeypatch.setattr(scenario_draft_generator, "build_generation_context", fake_build)
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", fake_model)
+        before = _business_mapping_state(fixture["mapping"])
+
+        generated = asyncio.run(
+            scenario_draft_generator.generate_business_draft(
+                db,
+                fixture["mapping"].id,
+                authorized_project=fixture["project"],
+                actor=actor,
+                as_of=date(2026, 6, 30),
+            )
+        )
+
+        assert calls == {"context": 1, "model": 1}
+        assert generated.final_content == before[2]
+        assert generated.business_confirm_status == before[3]
+        assert generated.open_questions.startswith("人工业务问题保持原样")
+        assert "[CTX:MISSING_EVIDENCE]" in generated.open_questions
+        assert "[AI] 模型问题" in generated.open_questions
+        assert generated.confidence_level == "low"
+        assert generated.ai_generated_content == "受治理的场景业务草稿"
+        audit = db.scalar(select(AuditLog).where(
+            AuditLog.action == "generate_business_draft",
+            AuditLog.resource_id == str(generated.id),
+        ))
+        assert audit is not None
+        assert audit.result == "success"
+        assert audit.after_summary_json["resolved_as_of"] == "2026-06-30"
+        assert "受治理的场景业务草稿" not in str(audit.after_summary_json)
+
+        source = inspect.getsource(scenario_draft_generator)
+        for forbidden in (
+            "HybridRetriever",
+            "MappingEvidenceReference",
+            "TargetField",
+            "ProductScenario",
+            "CatalogColumn",
+            "__dict__",
+            "_context",
+            "_physical_value_allowed",
+        ):
+            assert forbidden not in source
+
+
+def test_business_generate_blocks_or_fails_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "business-failure") as (db, _, fixture):
+        actor = _principal(fixture)
+        before = _business_mapping_state(fixture["mapping"])
+
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _business_context_envelope(
+                snapshot=kwargs["snapshot"],
+                can_generate=False,
+            ),
+        )
+
+        async def forbidden_model(*args, **kwargs):
+            raise AssertionError("blocked business generation reached the model")
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", forbidden_model)
+        with pytest.raises(GenerationBlockedError, match="CONFLICTING_AUTHORITATIVE_FACTS"):
+            asyncio.run(
+                scenario_draft_generator.generate_business_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=actor,
+                )
+            )
+        db.expire_all()
+        assert _business_mapping_state(db.get(ScenarioBusinessMapping, fixture["mapping"].id)) == before
+
+        def builder_failure(*args, **kwargs):
+            raise RuntimeError("Context unavailable")
+
+        monkeypatch.setattr(scenario_draft_generator, "build_generation_context", builder_failure)
+        with pytest.raises(RuntimeError, match="Context unavailable"):
+            asyncio.run(
+                scenario_draft_generator.generate_business_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=actor,
+                )
+            )
+        db.rollback()
+        db.expire_all()
+        assert _business_mapping_state(db.get(ScenarioBusinessMapping, fixture["mapping"].id)) == before
+
+
+def test_business_generate_rejects_concurrent_final_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "business-stale") as (db, factory, fixture):
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _business_context_envelope(snapshot=kwargs["snapshot"]),
+        )
+
+        async def mutate_final_during_model(*args, **kwargs):
+            with factory() as concurrent:
+                current = concurrent.get(ScenarioBusinessMapping, fixture["mapping"].id)
+                current.final_content = "并发人工最终内容"
+                concurrent.commit()
+            return {
+                "business_definition": "不应落库的模型定义",
+                "open_questions": ["不应落库的问题"],
+                "confidence_level": "high",
+            }
+
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "execute_runtime_chat",
+            mutate_final_during_model,
+        )
+        old_draft = fixture["mapping"].ai_generated_content
+        with pytest.raises(GenerationStaleError) as stale:
+            asyncio.run(
+                scenario_draft_generator.generate_business_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        assert "task.final_content" in stale.value.changed_fields
+        with factory() as verify:
+            current = verify.get(ScenarioBusinessMapping, fixture["mapping"].id)
+            assert current.final_content == "并发人工最终内容"
+            assert current.ai_generated_content == old_draft
+            assert verify.scalar(select(AuditLog.id).where(
+                AuditLog.action == "generate_business_draft",
+                AuditLog.result == "success",
+            )) is None
+
+
+def test_business_generate_revalidates_actor_and_permission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "business-actor") as (db, factory, fixture):
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _business_context_envelope(snapshot=kwargs["snapshot"]),
+        )
+
+        async def disable_actor(*args, **kwargs):
+            with factory() as concurrent:
+                current = concurrent.get(User, fixture["user"].id)
+                current.status = "disabled"
+                concurrent.commit()
+            return {"business_definition": "不应落库", "confidence_level": "high"}
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", disable_actor)
+        with pytest.raises(GenerationActorError, match="active User"):
+            asyncio.run(
+                scenario_draft_generator.generate_business_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        with factory() as verify:
+            assert verify.get(ScenarioBusinessMapping, fixture["mapping"].id).ai_generated_content == "旧业务 AI 草稿"
+
+    with _scenario_service_session(tmp_path, "business-permission") as (db, factory, fixture):
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _business_context_envelope(snapshot=kwargs["snapshot"]),
+        )
+
+        async def revoke_permission(*args, **kwargs):
+            with factory() as concurrent:
+                membership = concurrent.get(ProjectMembership, fixture["membership"].id)
+                membership.project_role = "viewer"
+                concurrent.commit()
+            return {"business_definition": "不应落库", "confidence_level": "high"}
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", revoke_permission)
+        with pytest.raises(HTTPException) as denied:
+            asyncio.run(
+                scenario_draft_generator.generate_business_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        assert denied.value.status_code == 403
+        with factory() as verify:
+            current = verify.get(ScenarioBusinessMapping, fixture["mapping"].id)
+            assert current.ai_generated_content == "旧业务 AI 草稿"
+            assert verify.scalar(select(AuditLog.id).where(
+                AuditLog.action == "generate_business_draft",
+                AuditLog.result == "success",
+            )) is None
 
 
 def test_product_scenario_crud_and_project_code_uniqueness() -> None:
@@ -313,3 +658,167 @@ def _get(client: TestClient, path: str) -> dict | list[dict]:
     response = client.get(path)
     response.raise_for_status()
     return response.json()
+
+
+@contextmanager
+def _scenario_service_session(
+    tmp_path: Path,
+    suffix: str,
+) -> Iterator[tuple[Session, sessionmaker, dict[str, object]]]:
+    database_path = tmp_path / f"scenario-{suffix}.sqlite3"
+    engine = create_engine(f"sqlite:///{database_path}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    db = factory()
+    fixture = _seed_business_mapping(db, suffix)
+    try:
+        yield db, factory, fixture
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def _seed_business_mapping(db: Session, suffix: str) -> dict[str, object]:
+    user = User(
+        username=f"scenario-generator-{suffix}",
+        display_name=f"Scenario Generator {suffix}",
+        status="active",
+    )
+    project = Project(
+        name=f"Scenario generator {suffix}",
+        project_status="active",
+        confidentiality_level="internal",
+        governance_workflow_enabled=True,
+    )
+    db.add_all([user, project])
+    db.flush()
+    membership = ProjectMembership(
+        project_id=project.id,
+        user_id=user.id,
+        project_role="business_analyst",
+        status="active",
+    )
+    target_table = TargetTable(
+        project_id=project.id,
+        table_code=f"YBT_{suffix.upper()}",
+        table_name="场景目标表",
+    )
+    scenario = ProductScenario(
+        project_id=project.id,
+        scenario_code=f"SCENARIO_{suffix.upper()}",
+        scenario_name="借记卡",
+        enabled=True,
+    )
+    db.add_all([membership, target_table, scenario])
+    db.flush()
+    target_field = TargetField(
+        project_id=project.id,
+        target_table_id=target_table.id,
+        field_code=f"FIELD_{suffix.upper()}",
+        field_name="场景目标字段",
+        field_definition="人工监管字段定义",
+    )
+    db.add(target_field)
+    db.flush()
+    mapping = ScenarioBusinessMapping(
+        project_id=project.id,
+        target_field_id=target_field.id,
+        scenario_id=scenario.id,
+        business_definition="人工原业务定义",
+        source_system_screenshot_required=True,
+        source_system_change_required=False,
+        external_data_required=False,
+        manual_supplement_required=True,
+        business_owner="人工业务负责人",
+        business_confirm_status="draft",
+        remarks="人工备注",
+        ai_generated_content="旧业务 AI 草稿",
+        final_content="人工最终业务口径",
+        confidence_level="medium",
+        open_questions="人工业务问题保持原样",
+        created_by=user.username,
+    )
+    db.add(mapping)
+    db.commit()
+    for row in (user, project, membership, target_table, target_field, scenario, mapping):
+        db.refresh(row)
+    return {
+        "user": user,
+        "project": project,
+        "membership": membership,
+        "target_table": target_table,
+        "target_field": target_field,
+        "scenario": scenario,
+        "mapping": mapping,
+    }
+
+
+def _principal(fixture: dict[str, object]) -> Principal:
+    user = fixture["user"]
+    return Principal(user.id, user.username, user.display_name, False)
+
+
+def _business_context_envelope(
+    *,
+    snapshot: object,
+    can_generate: bool = True,
+) -> SimpleNamespace:
+    blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
+    context_questions = [
+        SimpleNamespace(
+            question_code="MISSING_EVIDENCE",
+            question_text="请补充业务证据。",
+            priority="high",
+            target_type="scenario_business",
+            target_id=1,
+            resolution_state="open",
+        )
+    ]
+    projection = SimpleNamespace(
+        task_type="scenario_business",
+        prompt_text="受治理的 Scenario business Context 投影",
+        confidentiality_levels=["internal"],
+        context_questions=context_questions,
+        readiness=SimpleNamespace(
+            can_generate=can_generate,
+            blocking_reasons=blocking,
+            warnings=["MISSING_EVIDENCE"],
+            confidence_cap="low",
+        ),
+    )
+    trace_values = {
+        "context_schema_version": "1.0",
+        "context_built_at": "2026-06-30T00:00:00+00:00",
+        "resolved_as_of": "2026-06-30",
+        "as_of_source": "explicit",
+        "context_fact_count": 1,
+        "context_conflict_codes": blocking,
+        "context_question_codes": ["MISSING_EVIDENCE"],
+        "retrieval_log_ids": [301],
+        "readiness_can_generate": can_generate,
+        "readiness_confidence_cap": "low",
+        "prompt_projection_hash": "c" * 64,
+        "prompt_projection_truncated": False,
+    }
+    return SimpleNamespace(
+        snapshot=snapshot,
+        projection=projection,
+        trace=SimpleNamespace(
+            retrieval_log_ids=[301],
+            model_dump=lambda **kwargs: dict(trace_values),
+        ),
+    )
+
+
+def _business_mapping_state(mapping: ScenarioBusinessMapping) -> tuple[object, ...]:
+    return (
+        mapping.business_definition,
+        mapping.open_questions,
+        mapping.final_content,
+        mapping.business_confirm_status,
+        mapping.ai_generated_content,
+        mapping.confidence_level,
+        mapping.business_owner,
+        mapping.remarks,
+    )
