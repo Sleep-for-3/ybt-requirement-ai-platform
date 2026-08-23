@@ -214,7 +214,7 @@ def test_source_to_mart_snapshot_is_explicit_frozen_and_actor_identity_fails_clo
         "governance_workflow_enabled": project.governance_workflow_enabled,
         "updated_at": project.updated_at.isoformat(),
     }
-    assert set(snapshot.task.model_fields) == {
+    assert set(type(snapshot.task).model_fields) == {
         "id",
         "project_id",
         "mart_field_id",
