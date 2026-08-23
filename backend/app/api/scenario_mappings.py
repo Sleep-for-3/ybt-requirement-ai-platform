@@ -246,13 +246,47 @@ def adopt_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> Sce
 
 
 @router.post("/scenario-technical-lineages/{lineage_id}/generate-draft", response_model=ScenarioTechnicalLineageRead)
-async def generate_scenario_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> ScenarioTechnicalLineage:
+async def generate_scenario_technical_draft(
+    lineage_id: int,
+    principal: CurrentPrincipal,
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ScenarioTechnicalLineage:
     lineage = _lineage_or_404(db, lineage_id)
-    ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
     try:
-        return await generate_technical_draft(db, lineage_id)
+        validate_generation_actor(db, principal)
+        authorized_project = PermissionService(
+            db,
+            principal,
+        ).require_project_permission(lineage.project_id, "technical.edit")
+        ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
+        return await generate_technical_draft(
+            db,
+            lineage_id,
+            authorized_project=authorized_project,
+            actor=principal,
+            as_of=as_of,
+        )
+    except GenerationActorError as exc:
+        raise _generation_actor_http_error(exc) from exc
+    except GenerationBlockedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "generation-blocked",
+                "reasons": list(exc.reasons),
+            },
+        ) from exc
+    except GenerationStaleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale-task",
+                "changed_fields": list(exc.changed_fields),
+            },
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _generation_context_http_error() from exc
 
 
 @router.post("/scenario-technical-lineages/{lineage_id}/confirm", response_model=ScenarioTechnicalLineageRead)
