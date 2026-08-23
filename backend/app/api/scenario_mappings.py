@@ -1,6 +1,6 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,7 +19,14 @@ from app.schemas import (
 )
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
 from app.services.auth.dependencies import CurrentPrincipal
+from app.services.auth.permission_service import PermissionService
 from app.services.governance.scenario_review import ensure_scenario_mapping_editable
+from app.services.mapping.generator_context import (
+    GenerationActorError,
+    GenerationBlockedError,
+    GenerationStaleError,
+    validate_generation_actor,
+)
 
 router = APIRouter(tags=["scenario mappings"])
 
@@ -28,6 +35,23 @@ PROCESSING_LOGIC_TYPES = {
     "manual_supplement", "external_data", "pending_confirmation",
 }
 CONFIRM_STATUSES = {"draft", "pending", "confirmed", "rejected"}
+
+
+def _generation_actor_http_error(exc: GenerationActorError) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "generation-actor-invalid",
+            "reason": str(exc),
+        },
+    )
+
+
+def _generation_context_http_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"code": "generation-context-failed"},
+    )
 
 
 @router.post("/target-fields/{field_id}/scenarios/{scenario_id}/business-mapping", response_model=ScenarioBusinessMappingRead)
@@ -87,13 +111,47 @@ def adopt_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> Scen
 
 
 @router.post("/scenario-business-mappings/{mapping_id}/generate-draft", response_model=ScenarioBusinessMappingRead)
-async def generate_scenario_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> ScenarioBusinessMapping:
+async def generate_scenario_business_draft(
+    mapping_id: int,
+    principal: CurrentPrincipal,
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ScenarioBusinessMapping:
     mapping = _business_or_404(db, mapping_id)
-    ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
     try:
-        return await generate_business_draft(db, mapping_id)
+        validate_generation_actor(db, principal)
+        authorized_project = PermissionService(
+            db,
+            principal,
+        ).require_project_permission(mapping.project_id, "business.edit")
+        ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
+        return await generate_business_draft(
+            db,
+            mapping_id,
+            authorized_project=authorized_project,
+            actor=principal,
+            as_of=as_of,
+        )
+    except GenerationActorError as exc:
+        raise _generation_actor_http_error(exc) from exc
+    except GenerationBlockedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "generation-blocked",
+                "reasons": list(exc.reasons),
+            },
+        ) from exc
+    except GenerationStaleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale-task",
+                "changed_fields": list(exc.changed_fields),
+            },
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _generation_context_http_error() from exc
 
 
 @router.post("/scenario-business-mappings/{mapping_id}/confirm", response_model=ScenarioBusinessMappingRead)

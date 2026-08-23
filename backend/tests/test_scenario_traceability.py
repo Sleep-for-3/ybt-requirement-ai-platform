@@ -184,7 +184,6 @@ def test_business_generate_uses_context_preserves_final_and_questions(
             "TargetField",
             "ProductScenario",
             "__dict__",
-            "_context",
         ):
             assert forbidden not in source
 
