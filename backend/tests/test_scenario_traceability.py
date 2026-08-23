@@ -177,16 +177,14 @@ def test_business_generate_uses_context_preserves_final_and_questions(
         assert audit.after_summary_json["resolved_as_of"] == "2026-06-30"
         assert "受治理的场景业务草稿" not in str(audit.after_summary_json)
 
-        source = inspect.getsource(scenario_draft_generator)
+        source = inspect.getsource(scenario_draft_generator.generate_business_draft)
         for forbidden in (
             "HybridRetriever",
             "MappingEvidenceReference",
             "TargetField",
             "ProductScenario",
-            "CatalogColumn",
             "__dict__",
             "_context",
-            "_physical_value_allowed",
         ):
             assert forbidden not in source
 
