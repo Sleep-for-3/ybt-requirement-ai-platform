@@ -567,6 +567,59 @@ def test_technical_generate_skips_unknown_physical_tuple_but_keeps_safe_output(
         assert generated.tech_confirm_status == before[5]
 
 
+def test_technical_generate_appends_only_frozen_context_evidence_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "technical-evidence") as (db, _, fixture):
+        marker = "PROFILE_EVIDENCE total=4; null_rate=0.25; distinct=2"
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _technical_context_envelope(
+                snapshot=kwargs["snapshot"],
+                supporting_evidence_summaries=(marker,),
+            ),
+        )
+
+        async def safe_model(*args, **kwargs):
+            assert marker in args[3]
+            return {
+                "processing_logic": "按已确认探查指标生成保守技术草稿",
+                "confidence_level": "medium",
+                "final_content_draft": "受治理的技术草稿",
+            }
+
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "execute_runtime_chat",
+            safe_model,
+        )
+        original_final = fixture["lineage"].final_content
+        original_status = fixture["lineage"].tech_confirm_status
+
+        generated = asyncio.run(
+            scenario_draft_generator.generate_technical_draft(
+                db,
+                fixture["lineage"].id,
+                authorized_project=fixture["project"],
+                actor=_principal(fixture),
+            )
+        )
+
+        assert generated.ai_generated_content == (
+            "受治理的技术草稿\n\n目录字段与安全探查摘要：\n" + marker
+        )
+        assert generated.final_content == original_final
+        assert generated.tech_confirm_status == original_status
+        audit = db.scalar(select(AuditLog).where(
+            AuditLog.action == "generate_technical_draft",
+            AuditLog.resource_id == str(generated.id),
+        ))
+        assert audit is not None
+        assert marker not in str(audit.after_summary_json)
+
+
 def test_technical_generate_blocks_or_rejects_concurrent_physical_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1534,6 +1587,7 @@ def _technical_context_envelope(
     snapshot: object,
     can_generate: bool = True,
     whitelist: tuple[tuple[str, str, str, str], ...] = (),
+    supporting_evidence_summaries: tuple[str, ...] = (),
 ) -> SimpleNamespace:
     blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
     questions = []
@@ -1559,7 +1613,10 @@ def _technical_context_envelope(
         confidence_cap="high",
     )
     projection = ScenarioTechnicalProjection(
-        prompt_text="受治理的 Scenario technical Context 投影",
+        prompt_text=(
+            "受治理的 Scenario technical Context 投影\n"
+            + "\n".join(supporting_evidence_summaries)
+        ),
         confidentiality_levels=["internal"],
         selected_fact_refs=["metadata:catalog_column:1"],
         context_questions=questions,
@@ -1568,6 +1625,7 @@ def _technical_context_envelope(
         truncated=False,
         physical_whitelist=whitelist,
         physical_coverage=coverage,
+        supporting_evidence_summaries=supporting_evidence_summaries,
     )
     trace_values = {
         "context_schema_version": "1.0",

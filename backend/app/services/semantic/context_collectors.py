@@ -797,9 +797,11 @@ def collect_mapping_candidate_facts(
             if status not in MAPPING_CANDIDATE_STATUSES:
                 continue
             observed_at = _aware_datetime(row.updated_at or row.created_at)
-            references = _mapping_evidence_refs(
-                evidence_by_mapping.get((mapping_type, int(row.id)), [])
+            candidate_evidence = evidence_by_mapping.get(
+                (mapping_type, int(row.id)),
+                [],
             )
+            references = _mapping_evidence_refs(candidate_evidence)
             source_type = "resolver_candidate"
             provenance = ContextProvenance(
                 project_id=project.id,
@@ -817,6 +819,10 @@ def collect_mapping_candidate_facts(
                 or getattr(row, "business_definition", None)
                 or getattr(row, "processing_logic", None)
             )
+            evidence_excerpt = _candidate_evidence_excerpt(
+                candidate_evidence,
+                fallback=rule_text,
+            )
             score = 0.65 if status == "ai_suggested" else 0.55
             facts.append(ContextFact(
                 fact_type="mapping_candidate",
@@ -831,7 +837,7 @@ def collect_mapping_candidate_facts(
                     match_reason=f"{status} mapping requires explicit review",
                     score=score,
                     rank_tier=CANDIDATE_TIER_SEMANTIC_EVIDENCE,
-                    evidence_excerpt=_bounded(rule_text, 1000),
+                    evidence_excerpt=evidence_excerpt,
                 ),
                 authority=authority_for_source(source_type),
                 state=FactState(status),
@@ -1672,6 +1678,24 @@ def _mapping_evidence_refs(
         citation=_bounded(row.source_name, 1000),
         source_location=_bounded(row.location_text, 1000),
     ) for row in rows[:EVIDENCE_REFERENCE_LIMIT]]
+
+
+def _candidate_evidence_excerpt(
+    rows: list[MappingEvidenceReference],
+    *,
+    fallback: object | None,
+) -> str | None:
+    """Keep candidate proof visible as bounded, explicitly untrusted data."""
+
+    summaries: list[str] = []
+    for row in rows:
+        value = row.evidence_summary or row.quoted_content or row.source_name
+        normalized = str(value).strip() if value is not None else ""
+        if normalized and normalized not in summaries:
+            summaries.append(normalized)
+    if summaries:
+        return _bounded("\n".join(summaries), 1000)
+    return _bounded(fallback, 1000)
 
 
 def _source_type_for_mapping_type(mapping_type: str) -> str:

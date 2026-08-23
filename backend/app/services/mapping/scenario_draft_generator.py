@@ -422,6 +422,9 @@ async def generate_technical_draft(
                 locked_lineage,
                 policy,
                 scenario_name=scenario_name,
+                supporting_evidence_summaries=(
+                    envelope.projection.supporting_evidence_summaries
+                ),
             )
             output_trace = redacted_generation_output_trace(policy)
             _record_technical_generation_audit(
@@ -457,6 +460,7 @@ def _apply_technical_output(
     policy: GenerationOutputPolicy,
     *,
     scenario_name: str | None,
+    supporting_evidence_summaries: tuple[str, ...] = (),
 ) -> None:
     output = policy.output_fields
     for key in (
@@ -477,11 +481,17 @@ def _apply_technical_output(
     lineage.open_questions = policy.merged_questions.text
     lineage.confidence_level = policy.confidence_level
     draft = output.get("final_content_draft")
-    lineage.ai_generated_content = (
+    generated_content = (
         draft
         if isinstance(draft, str) and draft.strip()
         else _technical_content(lineage, scenario_name)
     )
+    if supporting_evidence_summaries:
+        generated_content = (
+            f"{generated_content}\n\n目录字段与安全探查摘要：\n"
+            + "\n".join(supporting_evidence_summaries)
+        )
+    lineage.ai_generated_content = generated_content
 
 
 def _record_technical_generation_audit(

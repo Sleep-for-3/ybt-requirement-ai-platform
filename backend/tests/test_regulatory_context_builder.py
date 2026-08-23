@@ -641,6 +641,7 @@ def test_candidate_mapping_evidence_does_not_suppress_trusted_evidence_gap(
         candidate.value.candidate_type == "mart_to_ybt"
         and candidate.value.candidate_id == draft.id
         and candidate.evidence_references[0].evidence_id is None
+        and candidate.value.evidence_excerpt == "该证据不能支撑已审批映射"
         for candidate in context.candidates
     )
     assert "MISSING_EVIDENCE" in {
