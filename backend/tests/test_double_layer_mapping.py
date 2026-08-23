@@ -20,13 +20,17 @@ from app.models import (
     AuditLog,
     MartField,
     MartTable,
+    MartToYbtMapping,
     Project,
     ProjectMembership,
     SourceToMartMapping,
+    TargetField,
+    TargetTable,
     User,
 )
 from app.services.auth.dependencies import Principal
 from app.services.mapping import source_to_mart_generator
+from app.services.mapping import mart_to_ybt_generator
 from app.services.mapping.generator_context import (
     GenerationActorError,
     GenerationBlockedError,
@@ -492,6 +496,155 @@ def test_source_to_mart_revalidates_actor_after_model(
             assert current.ai_generated_content == "旧 AI 草稿"
 
 
+def test_mart_to_ybt_route_passes_exact_authorized_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "mart-route") as (db, _, fixture):
+        mart_mapping = _seed_mart_to_ybt_mapping(db, fixture, "mart-route")
+        actor = _principal(fixture)
+        captured: dict[str, object] = {}
+
+        async def fake_generate(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None = None,
+            today_provider=date.today,
+        ) -> MartToYbtMapping:
+            captured.update(
+                session=session,
+                mapping_id=mapping_id,
+                authorized_project=authorized_project,
+                actor=actor,
+                as_of=as_of,
+                today_provider=today_provider,
+            )
+            return mart_mapping
+
+        monkeypatch.setattr(mapping_rules, "generate_mart_to_ybt_draft", fake_generate)
+        selected_date = date(2026, 6, 30)
+        result = asyncio.run(
+            mapping_rules.generate_mart_to_ybt_mapping_draft(
+                mart_mapping.id,
+                principal=actor,
+                as_of=selected_date,
+                db=db,
+            )
+        )
+
+        assert result.id == mart_mapping.id
+        assert captured["actor"] is actor
+        assert captured["authorized_project"] is fixture["project"]
+        assert captured["as_of"] == selected_date
+
+
+def test_mart_to_ybt_service_uses_frozen_context_upstream_and_output_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "mart-context") as (db, factory, fixture):
+        mart_mapping = _seed_mart_to_ybt_mapping(db, fixture, "mart-context")
+        actor = _principal(fixture)
+        calls = {"context": 0, "model": 0}
+
+        def fake_build(*args, **kwargs):
+            calls["context"] += 1
+            assert kwargs["authorized_project"] is fixture["project"]
+            assert kwargs["actor"] is actor
+            return _mart_context_envelope(snapshot=kwargs["snapshot"])
+
+        async def fake_model(*args, **kwargs):
+            calls["model"] += 1
+            assert args[2].prompt_key == "mart_to_ybt_mapping"
+            assert args[4].__name__ == "MartToYbtOutput"
+            assert "APPROVED_CONTEXT_RULE" in args[3]
+            with factory() as concurrent:
+                upstream = concurrent.get(
+                    SourceToMartMapping,
+                    fixture["mapping"].id,
+                )
+                upstream.final_content = "模型执行期间更新的上游规则"
+                concurrent.commit()
+            return {
+                "mart_table_summary": "AI 集市表",
+                "business_rule": "受治理的 Mart-to-YBT 规则",
+                "open_questions": ["Mart 模型问题"],
+                "confidence_level": "high",
+                "final_content_draft": "受治理的报送草稿",
+                "mapping_status": "approved",
+            }
+
+        monkeypatch.setattr(mart_to_ybt_generator, "build_generation_context", fake_build)
+        monkeypatch.setattr(mart_to_ybt_generator, "execute_runtime_chat", fake_model)
+        original_final = mart_mapping.final_content
+        original_status = mart_mapping.mapping_status
+
+        generated = asyncio.run(
+            mart_to_ybt_generator.generate_mart_to_ybt_draft(
+                db,
+                mart_mapping.id,
+                authorized_project=fixture["project"],
+                actor=actor,
+                as_of=date(2026, 6, 30),
+            )
+        )
+
+        assert calls == {"context": 1, "model": 1}
+        assert generated.final_content == original_final
+        assert generated.mapping_status == original_status
+        assert generated.confidence_level == "low"
+        assert generated.open_questions.startswith("人工 Mart 问题")
+        assert "[CTX:MISSING_MART_TO_YBT_MAPPING]" in generated.open_questions
+        assert "[AI] Mart 模型问题" in generated.open_questions
+        assert generated.ai_generated_content == "监管集市到一表通口径：\n受治理的报送草稿"
+
+        source = inspect.getsource(mart_to_ybt_generator)
+        for forbidden in (
+            "HybridRetriever",
+            "MappingEvidenceReference",
+            "SourceToMartMapping",
+            "_source_to_mart_summary",
+            "_evidence_text",
+        ):
+            assert forbidden not in source
+
+
+def test_mart_to_ybt_blocked_readiness_never_calls_model_or_mutates_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "mart-blocked") as (db, _, fixture):
+        mart_mapping = _seed_mart_to_ybt_mapping(db, fixture, "mart-blocked")
+        monkeypatch.setattr(
+            mart_to_ybt_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _mart_context_envelope(
+                snapshot=kwargs["snapshot"],
+                can_generate=False,
+            ),
+        )
+
+        async def forbidden_model(*args, **kwargs):
+            raise AssertionError("blocked readiness reached the model")
+
+        monkeypatch.setattr(mart_to_ybt_generator, "execute_runtime_chat", forbidden_model)
+        before = _mart_mapping_state(mart_mapping)
+        with pytest.raises(GenerationBlockedError, match="CONFLICTING_AUTHORITATIVE_FACTS"):
+            asyncio.run(
+                mart_to_ybt_generator.generate_mart_to_ybt_draft(
+                    db,
+                    mart_mapping.id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        db.expire_all()
+        assert _mart_mapping_state(db.get(MartToYbtMapping, mart_mapping.id)) == before
+
+
 @contextmanager
 def _client() -> Iterator[TestClient]:
     engine = create_engine(
@@ -600,6 +753,56 @@ def _seed_source_mapping(db: Session, suffix: str) -> dict[str, object]:
     }
 
 
+def _seed_mart_to_ybt_mapping(
+    db: Session,
+    fixture: dict[str, object],
+    suffix: str,
+) -> MartToYbtMapping:
+    project = fixture["project"]
+    mart_field = fixture["mart_field"]
+    target_table = TargetTable(
+        project_id=project.id,
+        table_code=f"YBT_{suffix.upper()}",
+        table_name="一表通目标表",
+        description="监管目标表",
+    )
+    db.add(target_table)
+    db.flush()
+    target_field = TargetField(
+        project_id=project.id,
+        target_table_id=target_table.id,
+        field_code=f"TARGET_{suffix.upper()}",
+        field_name="一表通目标字段",
+        field_type="varchar(64)",
+        required_flag=True,
+        field_definition="监管目标定义",
+    )
+    db.add(target_field)
+    db.flush()
+    mapping = MartToYbtMapping(
+        project_id=project.id,
+        target_field_id=target_field.id,
+        mart_field_id=mart_field.id,
+        mapping_name=f"Mart-to-YBT {suffix}",
+        mapping_status="draft",
+        mart_table_summary="人工集市表",
+        mart_field_summary="人工集市字段",
+        business_rule="人工报送规则",
+        open_questions="人工 Mart 问题",
+        ai_generated_content="旧 Mart AI 草稿",
+        final_content="人工 Mart 最终内容",
+        confidence_level="medium",
+        lineage_status="not_linked",
+    )
+    db.add(mapping)
+    fixture["mapping"].mapping_status = "approved"
+    fixture["mapping"].final_content = "APPROVED_CONTEXT_RULE"
+    db.commit()
+    db.refresh(mapping)
+    db.refresh(fixture["mapping"])
+    return mapping
+
+
 def _principal(fixture: dict[str, object]) -> Principal:
     user = fixture["user"]
     return Principal(user.id, user.username, user.display_name, False)
@@ -657,9 +860,77 @@ def _source_context_envelope(
     )
 
 
+def _mart_context_envelope(
+    *,
+    snapshot: object,
+    can_generate: bool = True,
+) -> SimpleNamespace:
+    blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
+    context_questions = [
+        SimpleNamespace(
+            question_code="MISSING_MART_TO_YBT_MAPPING",
+            question_text="请确认 Mart-to-YBT 映射。",
+            priority="high",
+            target_type="mart_to_ybt",
+            target_id=1,
+            resolution_state="open",
+        )
+    ]
+    projection = SimpleNamespace(
+        task_type="mart_to_ybt",
+        prompt_text=(
+            "受治理的 Mart-to-YBT Context 投影\n"
+            "已批准 Source-to-Mart：APPROVED_CONTEXT_RULE"
+        ),
+        confidentiality_levels=["internal"],
+        context_questions=context_questions,
+        readiness=SimpleNamespace(
+            can_generate=can_generate,
+            blocking_reasons=blocking,
+            warnings=["MISSING_MART_TO_YBT_MAPPING"],
+            confidence_cap="low",
+        ),
+        upstream_rule_summaries=["APPROVED_CONTEXT_RULE"],
+    )
+    trace_values = {
+        "context_schema_version": "1.0",
+        "context_built_at": "2026-06-30T00:00:00+00:00",
+        "resolved_as_of": "2026-06-30",
+        "as_of_source": "explicit",
+        "context_fact_count": 1,
+        "context_conflict_codes": blocking,
+        "context_question_codes": ["MISSING_MART_TO_YBT_MAPPING"],
+        "retrieval_log_ids": [202],
+        "readiness_can_generate": can_generate,
+        "readiness_confidence_cap": "low",
+        "prompt_projection_hash": "b" * 64,
+        "prompt_projection_truncated": False,
+    }
+    return SimpleNamespace(
+        snapshot=snapshot,
+        projection=projection,
+        trace=SimpleNamespace(
+            retrieval_log_ids=[202],
+            model_dump=lambda **kwargs: dict(trace_values),
+        ),
+    )
+
+
 def _mapping_state(mapping: SourceToMartMapping) -> tuple[object, ...]:
     return (
         mapping.source_system_summary,
+        mapping.business_rule,
+        mapping.open_questions,
+        mapping.ai_generated_content,
+        mapping.final_content,
+        mapping.confidence_level,
+        mapping.mapping_status,
+    )
+
+
+def _mart_mapping_state(mapping: MartToYbtMapping) -> tuple[object, ...]:
+    return (
+        mapping.mart_table_summary,
         mapping.business_rule,
         mapping.open_questions,
         mapping.ai_generated_content,
