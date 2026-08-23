@@ -71,7 +71,7 @@
 |-------------|-------|--------|
 | SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07 | Phase 8 | Complete |
 | CTX-01, CTX-02, CTX-03, CTX-04 | Phase 9 | Complete |
-| GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Pending |
+| GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Complete |
 | SUI-01, SUI-02 | Phase 11 | Pending |
 | WRK-01, WRK-02, WRK-03 | Phase 12 | Pending |
 | DSH-01, DSH-02 | Phase 13 | Pending |

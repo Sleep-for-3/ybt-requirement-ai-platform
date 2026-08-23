@@ -4,16 +4,16 @@ milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
 current_phase: 10
 current_phase_name: Generator Refactor
-status: executing
-stopped_at: Completed 10-03-PLAN.md
-last_updated: "2026-08-23T09:58:35.687Z"
+status: verifying
+stopped_at: Completed 10-04-PLAN.md
+last_updated: "2026-08-23T11:41:31.355Z"
 last_activity: 2026-08-23
-last_activity_desc: Phase 10 Plan 03 Scenario generator and queued caller Context cutover completed
+last_activity_desc: Phase 10 Plan 04 generator qualification completed; ready for phase verification
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -27,20 +27,20 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 ## Current Position
 
-Phase: 10 (Generator Refactor) — EXECUTING
+Phase: 10 (Generator Refactor) — VERIFYING
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-08-23 — Phase 10 Plan 03 completed
+Status: Phase complete — ready for verification
+Last activity: 2026-08-23 — Phase 10 Plan 04 qualification completed
 
-Progress: [█████████░] 91%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 7
-- Average duration: 42m
-- Total execution time: 2h 5m
+- Total plans completed: 8
+- Average duration: 54m
+- Total execution time: 7h 14m
 
 **Per-Plan Metrics:**
 
@@ -53,6 +53,7 @@ Progress: [█████████░] 91%
 | Phase 10 P01 | 45min | 3 tasks | 6 files |
 | Phase 10 P02 | 57min | 3 tasks | 4 files |
 | Phase 10 P03 | 1h 22m | 3 tasks | 7 files |
+| Phase 10 P04 | 1h 30m | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,10 @@ Progress: [█████████░] 91%
 - [Phase 10]: Scenario generation performs Context and model work without row locks, then revalidates actor and permission before fixed Project-to-task locks and complete snapshot comparison.
 - [Phase 10]: Technical physical identifiers require an exact current or same-Context tuple; refused tuples preserve current physical fields and add a stable governed question.
 - [Phase 10]: Queued security, readiness, governance, and stale outcomes use bounded blocked codes and per-item commits rather than content-bearing failures or legacy retry paths.
+- [Phase 10]: Query regression uses a positive post-warm-up measured baseline, exact +1 Catalog enrichment delta, and invariant growth; historical 21/22 counts are comparison data, not ceilings.
+- [Phase 10]: Scenario technical profile evidence remains bounded resolver-candidate provenance frozen into the current-lineage typed projection; it never becomes trusted evidence or a shared-fact fallback.
+- [Phase 10]: Only the two exact documented Windows node IDs with matching signatures qualify as pre-existing; the maximum backend suite may deselect those nodes and nothing broader.
+- [Phase 10]: SQLite qualification does not imply PostgreSQL parity; live production-driver row-lock and concurrent-commit behavior remains an explicit staging gate while PostgreSQL is unavailable.
 
 ### Pending Todos
 
@@ -104,7 +109,7 @@ None.
 
 - v1.0 frontend changes are still uncommitted and must be preserved during backend work.
 - No PostgreSQL service is guaranteed locally; dialect correctness must be covered by migration construction and SQLite execution, with PostgreSQL runtime verification documented if unavailable.
-- Baseline backend suite still has the same two pre-existing Windows-only failures: ACL inspection and interactive lifecycle-script timeout; final Phase 9 HEAD has 337 passing tests and no new failure.
+- The final unfiltered backend suite has 386 passing tests and only the same two pre-existing Windows-only failures (ACL inspection and interactive lifecycle-script timeout); the maximum suite passes 386 tests when exactly those two nodes are deselected.
 
 ## Deferred Items
 
@@ -115,6 +120,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-23T09:58:35.643Z
-Stopped at: Completed 10-03-PLAN.md
+Last session: 2026-08-23T11:41:31.320Z
+Stopped at: Completed 10-04-PLAN.md
 Resume file: None
