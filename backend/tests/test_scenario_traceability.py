@@ -21,12 +21,19 @@ from app.models import (
     Project,
     ProjectMembership,
     ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
     TargetField,
     TargetTable,
     User,
 )
 from app.services.auth.dependencies import Principal
 from app.services.mapping import scenario_draft_generator
+from app.services.mapping.context_adapters import (
+    PHYSICAL_SOURCE_EVIDENCE_MISSING,
+    ScenarioPhysicalCoverageAudit,
+    ScenarioTechnicalProjection,
+)
+from app.services.mapping.generation_readiness import GenerationReadiness
 from app.services.mapping.generator_context import (
     GenerationActorError,
     GenerationBlockedError,
@@ -348,6 +355,360 @@ def test_business_generate_revalidates_actor_and_permission(
             assert current.ai_generated_content == "旧业务 AI 草稿"
             assert verify.scalar(select(AuditLog.id).where(
                 AuditLog.action == "generate_business_draft",
+                AuditLog.result == "success",
+            )) is None
+
+
+def test_technical_generate_route_passes_exact_authorized_context_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "technical-route") as (db, _, fixture):
+        actor = _principal(fixture)
+        captured: list[dict[str, object]] = []
+        editability_calls: list[tuple[str, int]] = []
+
+        def editable_spy(session: Session, mapping_type: str, mapping_id: int) -> None:
+            assert session is db
+            editability_calls.append((mapping_type, mapping_id))
+
+        async def fake_generate(
+            session: Session,
+            lineage_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None = None,
+            today_provider=date.today,
+        ) -> ScenarioTechnicalLineage:
+            captured.append({
+                "session": session,
+                "lineage_id": lineage_id,
+                "authorized_project": authorized_project,
+                "actor": actor,
+                "as_of": as_of,
+                "today_provider": today_provider,
+            })
+            return fixture["lineage"]
+
+        monkeypatch.setattr(scenario_mappings, "ensure_scenario_mapping_editable", editable_spy)
+        monkeypatch.setattr(scenario_mappings, "generate_technical_draft", fake_generate)
+
+        selected_date = date(2026, 6, 30)
+        result = asyncio.run(
+            scenario_mappings.generate_scenario_technical_draft(
+                fixture["lineage"].id,
+                principal=actor,
+                as_of=selected_date,
+                db=db,
+            )
+        )
+        assert result.id == fixture["lineage"].id
+        assert captured[-1]["actor"] is actor
+        assert captured[-1]["authorized_project"] is fixture["project"]
+        assert captured[-1]["as_of"] == selected_date
+        assert editability_calls == [("scenario_technical", fixture["lineage"].id)]
+
+        explicit_legacy = Principal(None, "legacy-system", "Legacy", True)
+        asyncio.run(
+            scenario_mappings.generate_scenario_technical_draft(
+                fixture["lineage"].id,
+                principal=explicit_legacy,
+                as_of=None,
+                db=db,
+            )
+        )
+        assert captured[-1]["actor"] is explicit_legacy
+
+        with pytest.raises(HTTPException) as invalid:
+            asyncio.run(
+                scenario_mappings.generate_scenario_technical_draft(
+                    fixture["lineage"].id,
+                    principal=Principal(None, "falsey", None, False),
+                    as_of=None,
+                    db=db,
+                )
+            )
+        assert invalid.value.status_code in {401, 403}
+
+
+def test_technical_generate_accepts_exact_context_physical_tuple(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "technical-allowed") as (db, _, fixture):
+        actor = _principal(fixture)
+        allowed = ("trusted_db", "ods", "trusted_table", "trusted_field")
+        calls = {"context": 0, "model": 0}
+
+        def fake_build(*args, **kwargs):
+            calls["context"] += 1
+            assert kwargs["authorized_project"] is fixture["project"]
+            assert kwargs["actor"] is actor
+            assert kwargs["explicit_as_of"] == date(2026, 6, 30)
+            return _technical_context_envelope(
+                snapshot=kwargs["snapshot"],
+                whitelist=(allowed,),
+            )
+
+        async def fake_model(*args, **kwargs):
+            calls["model"] += 1
+            assert args[2].prompt_key == "scenario_technical_lineage"
+            assert args[4].__name__ == "ScenarioTechnicalOutput"
+            return {
+                "source_system_name": "受治理的系统建议",
+                "source_database_name": "TRUSTED_DB",
+                "source_schema_name": "ODS",
+                "source_table_english_name": "TRUSTED_TABLE",
+                "source_field_english_name": "TRUSTED_FIELD",
+                "processing_logic": "受治理的安全处理逻辑",
+                "processing_logic_type": "direct",
+                "open_questions": ["模型技术问题"],
+                "confidence_level": "high",
+                "final_content_draft": "受治理的场景技术草稿",
+                "tech_confirm_status": "confirmed",
+            }
+
+        monkeypatch.setattr(scenario_draft_generator, "build_generation_context", fake_build)
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", fake_model)
+        before = _technical_lineage_state(fixture["lineage"])
+
+        generated = asyncio.run(
+            scenario_draft_generator.generate_technical_draft(
+                db,
+                fixture["lineage"].id,
+                authorized_project=fixture["project"],
+                actor=actor,
+                as_of=date(2026, 6, 30),
+            )
+        )
+
+        assert calls == {"context": 1, "model": 1}
+        assert generated.final_content == before[4]
+        assert generated.tech_confirm_status == before[5]
+        assert (
+            generated.source_database_name.casefold(),
+            generated.source_schema_name.casefold(),
+            generated.source_table_english_name.casefold(),
+            generated.source_field_english_name.casefold(),
+        ) == allowed
+        assert generated.processing_logic == "受治理的安全处理逻辑"
+        assert generated.open_questions.startswith("人工技术问题保持原样")
+        assert "[AI] 模型技术问题" in generated.open_questions
+        assert generated.ai_generated_content == "受治理的场景技术草稿"
+        assert generated.confidence_level == "high"
+        audit = db.scalar(select(AuditLog).where(
+            AuditLog.action == "generate_technical_draft",
+            AuditLog.resource_id == str(generated.id),
+        ))
+        assert audit is not None
+        assert audit.result == "success"
+        assert audit.after_summary_json["resolved_as_of"] == "2026-06-30"
+        assert "受治理的场景技术草稿" not in str(audit.after_summary_json)
+
+        source = inspect.getsource(scenario_draft_generator.generate_technical_draft)
+        for forbidden in (
+            "HybridRetriever",
+            "MappingEvidenceReference",
+            "CatalogColumn",
+            "TargetField",
+            "ProductScenario",
+            "__dict__",
+            "_physical_value_allowed",
+        ):
+            assert forbidden not in source
+
+
+def test_technical_generate_skips_unknown_physical_tuple_but_keeps_safe_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "technical-unknown") as (db, _, fixture):
+        allowed = ("trusted_db", "ods", "trusted_table", "trusted_field")
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _technical_context_envelope(
+                snapshot=kwargs["snapshot"],
+                whitelist=(allowed,),
+            ),
+        )
+
+        async def unknown_physical(*args, **kwargs):
+            return {
+                "source_database_name": "foreign_db",
+                "source_schema_name": "foreign_schema",
+                "source_table_english_name": "foreign_table",
+                "source_field_english_name": "foreign_field",
+                "processing_logic": "仍可采用的安全处理逻辑",
+                "confidence_level": "high",
+                "final_content_draft": "不含证据原文的技术草稿",
+            }
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", unknown_physical)
+        before = _technical_lineage_state(fixture["lineage"])
+        generated = asyncio.run(
+            scenario_draft_generator.generate_technical_draft(
+                db,
+                fixture["lineage"].id,
+                authorized_project=fixture["project"],
+                actor=_principal(fixture),
+            )
+        )
+
+        assert _technical_physical_tuple(generated) == before[:4]
+        assert generated.processing_logic == "仍可采用的安全处理逻辑"
+        assert generated.confidence_level == "low"
+        assert f"[CTX:{PHYSICAL_SOURCE_EVIDENCE_MISSING}]" in generated.open_questions
+        assert generated.final_content == before[4]
+        assert generated.tech_confirm_status == before[5]
+
+
+def test_technical_generate_blocks_or_rejects_concurrent_physical_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "technical-blocked") as (db, _, fixture):
+        before = _technical_lineage_state(fixture["lineage"])
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _technical_context_envelope(
+                snapshot=kwargs["snapshot"],
+                can_generate=False,
+            ),
+        )
+
+        async def forbidden_model(*args, **kwargs):
+            raise AssertionError("blocked technical generation reached the model")
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", forbidden_model)
+        with pytest.raises(GenerationBlockedError, match="CONFLICTING_AUTHORITATIVE_FACTS"):
+            asyncio.run(
+                scenario_draft_generator.generate_technical_draft(
+                    db,
+                    fixture["lineage"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        db.expire_all()
+        assert _technical_lineage_state(
+            db.get(ScenarioTechnicalLineage, fixture["lineage"].id)
+        ) == before
+
+    with _scenario_service_session(tmp_path, "technical-stale") as (db, factory, fixture):
+        allowed = ("trusted_db", "ods", "trusted_table", "trusted_field")
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _technical_context_envelope(
+                snapshot=kwargs["snapshot"],
+                whitelist=(allowed,),
+            ),
+        )
+
+        async def mutate_physical_during_model(*args, **kwargs):
+            with factory() as concurrent:
+                current = concurrent.get(ScenarioTechnicalLineage, fixture["lineage"].id)
+                current.source_database_name = "并发人工数据库"
+                concurrent.commit()
+            return {
+                "source_database_name": "trusted_db",
+                "source_schema_name": "ods",
+                "source_table_english_name": "trusted_table",
+                "source_field_english_name": "trusted_field",
+                "processing_logic": "不应落库的模型逻辑",
+                "confidence_level": "high",
+            }
+
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "execute_runtime_chat",
+            mutate_physical_during_model,
+        )
+        old_draft = fixture["lineage"].ai_generated_content
+        with pytest.raises(GenerationStaleError) as stale:
+            asyncio.run(
+                scenario_draft_generator.generate_technical_draft(
+                    db,
+                    fixture["lineage"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        assert "task.source_database_name" in stale.value.changed_fields
+        with factory() as verify:
+            current = verify.get(ScenarioTechnicalLineage, fixture["lineage"].id)
+            assert current.source_database_name == "并发人工数据库"
+            assert current.ai_generated_content == old_draft
+            assert verify.scalar(select(AuditLog.id).where(
+                AuditLog.action == "generate_technical_draft",
+                AuditLog.result == "success",
+            )) is None
+
+
+def test_technical_generate_revalidates_actor_and_permission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "technical-actor") as (db, factory, fixture):
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _technical_context_envelope(snapshot=kwargs["snapshot"]),
+        )
+
+        async def disable_actor(*args, **kwargs):
+            with factory() as concurrent:
+                current = concurrent.get(User, fixture["user"].id)
+                current.status = "disabled"
+                concurrent.commit()
+            return {"processing_logic": "不应落库", "confidence_level": "high"}
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", disable_actor)
+        with pytest.raises(GenerationActorError, match="active User"):
+            asyncio.run(
+                scenario_draft_generator.generate_technical_draft(
+                    db,
+                    fixture["lineage"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        with factory() as verify:
+            assert verify.get(ScenarioTechnicalLineage, fixture["lineage"].id).ai_generated_content == "旧技术 AI 草稿"
+
+    with _scenario_service_session(tmp_path, "technical-permission") as (db, factory, fixture):
+        monkeypatch.setattr(
+            scenario_draft_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _technical_context_envelope(snapshot=kwargs["snapshot"]),
+        )
+
+        async def revoke_permission(*args, **kwargs):
+            with factory() as concurrent:
+                membership = concurrent.get(ProjectMembership, fixture["membership"].id)
+                membership.project_role = "viewer"
+                concurrent.commit()
+            return {"processing_logic": "不应落库", "confidence_level": "high"}
+
+        monkeypatch.setattr(scenario_draft_generator, "execute_runtime_chat", revoke_permission)
+        with pytest.raises(HTTPException) as denied:
+            asyncio.run(
+                scenario_draft_generator.generate_technical_draft(
+                    db,
+                    fixture["lineage"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        assert denied.value.status_code == 403
+        with factory() as verify:
+            current = verify.get(ScenarioTechnicalLineage, fixture["lineage"].id)
+            assert current.ai_generated_content == "旧技术 AI 草稿"
+            assert verify.scalar(select(AuditLog.id).where(
+                AuditLog.action == "generate_technical_draft",
                 AuditLog.result == "success",
             )) is None
 
@@ -693,7 +1054,7 @@ def _seed_business_mapping(db: Session, suffix: str) -> dict[str, object]:
     membership = ProjectMembership(
         project_id=project.id,
         user_id=user.id,
-        project_role="business_analyst",
+        project_role="project_manager",
         status="active",
     )
     target_table = TargetTable(
@@ -737,8 +1098,34 @@ def _seed_business_mapping(db: Session, suffix: str) -> dict[str, object]:
         created_by=user.username,
     )
     db.add(mapping)
+    db.flush()
+    lineage = ScenarioTechnicalLineage(
+        project_id=project.id,
+        target_field_id=target_field.id,
+        scenario_id=scenario.id,
+        business_mapping_id=mapping.id,
+        source_system_name="人工原系统",
+        source_database_name="current_db",
+        source_schema_name="current_schema",
+        source_table_english_name="current_table",
+        source_table_chinese_name="人工原表",
+        source_field_english_name="current_field",
+        source_field_chinese_name="人工原字段",
+        processing_logic="人工原处理逻辑",
+        processing_logic_type="direct",
+        tech_owner="人工技术负责人",
+        tech_confirm_status="draft",
+        remarks="人工技术备注",
+        ai_generated_content="旧技术 AI 草稿",
+        final_content="人工最终技术口径",
+        confidence_level="medium",
+        open_questions="人工技术问题保持原样",
+        created_by=user.username,
+        lineage_status="verified",
+    )
+    db.add(lineage)
     db.commit()
-    for row in (user, project, membership, target_table, target_field, scenario, mapping):
+    for row in (user, project, membership, target_table, target_field, scenario, mapping, lineage):
         db.refresh(row)
     return {
         "user": user,
@@ -748,6 +1135,7 @@ def _seed_business_mapping(db: Session, suffix: str) -> dict[str, object]:
         "target_field": target_field,
         "scenario": scenario,
         "mapping": mapping,
+        "lineage": lineage,
     }
 
 
@@ -818,4 +1206,94 @@ def _business_mapping_state(mapping: ScenarioBusinessMapping) -> tuple[object, .
         mapping.confidence_level,
         mapping.business_owner,
         mapping.remarks,
+    )
+
+
+def _technical_context_envelope(
+    *,
+    snapshot: object,
+    can_generate: bool = True,
+    whitelist: tuple[tuple[str, str, str, str], ...] = (),
+) -> SimpleNamespace:
+    blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
+    questions = []
+    readiness = GenerationReadiness(
+        can_generate=can_generate,
+        confidence_cap="high" if can_generate else "low",
+        blocking_reasons=blocking,
+        warnings=[],
+    )
+    current = (
+        snapshot.task.source_database_name.casefold(),
+        snapshot.task.source_schema_name.casefold(),
+        snapshot.task.source_table_english_name.casefold(),
+        snapshot.task.source_field_english_name.casefold(),
+    )
+    coverage = ScenarioPhysicalCoverageAudit(
+        allowlisted_sources=whitelist,
+        unchanged_current_source=current,
+        catalog_evidence_count=len(whitelist),
+        verified_lineage_count=0,
+        warning=None,
+        open_question=None,
+        confidence_cap="high",
+    )
+    projection = ScenarioTechnicalProjection(
+        prompt_text="受治理的 Scenario technical Context 投影",
+        confidentiality_levels=["internal"],
+        selected_fact_refs=["metadata:catalog_column:1"],
+        context_questions=questions,
+        readiness=readiness,
+        projection_hash="d" * 64,
+        truncated=False,
+        physical_whitelist=whitelist,
+        physical_coverage=coverage,
+    )
+    trace_values = {
+        "context_schema_version": "1.0",
+        "context_built_at": "2026-06-30T00:00:00+00:00",
+        "resolved_as_of": "2026-06-30",
+        "as_of_source": "explicit",
+        "context_fact_count": 1,
+        "context_conflict_codes": blocking,
+        "context_question_codes": [],
+        "retrieval_log_ids": [302],
+        "readiness_can_generate": can_generate,
+        "readiness_confidence_cap": readiness.confidence_cap,
+        "prompt_projection_hash": "d" * 64,
+        "prompt_projection_truncated": False,
+    }
+    return SimpleNamespace(
+        snapshot=snapshot,
+        projection=projection,
+        context=SimpleNamespace(scenario=SimpleNamespace(scenario_name="借记卡")),
+        trace=SimpleNamespace(
+            retrieval_log_ids=[302],
+            model_dump=lambda **kwargs: dict(trace_values),
+        ),
+    )
+
+
+def _technical_physical_tuple(
+    lineage: ScenarioTechnicalLineage,
+) -> tuple[object, object, object, object]:
+    return (
+        lineage.source_database_name,
+        lineage.source_schema_name,
+        lineage.source_table_english_name,
+        lineage.source_field_english_name,
+    )
+
+
+def _technical_lineage_state(lineage: ScenarioTechnicalLineage) -> tuple[object, ...]:
+    return (
+        *_technical_physical_tuple(lineage),
+        lineage.final_content,
+        lineage.tech_confirm_status,
+        lineage.ai_generated_content,
+        lineage.processing_logic,
+        lineage.confidence_level,
+        lineage.open_questions,
+        lineage.lineage_status,
+        lineage.remarks,
     )
