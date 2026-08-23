@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -55,6 +58,16 @@ class GenerationReadiness(BaseModel):
     confidence_cap: ConfidenceLevel
     blocking_reasons: list[str]
     warnings: list[str]
+
+
+class MergedGenerationQuestions(BaseModel):
+    """Stable text merge result; existing human bytes are always the prefix."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str
+    appended_context_codes: list[str]
+    appended_model_count: int
 
 
 def evaluate_generation_readiness(
@@ -133,11 +146,94 @@ def apply_confidence_cap(
     return min((normalized, cap), key=_CONFIDENCE_ORDER.__getitem__)
 
 
+def merge_generation_questions(
+    existing_human_text: str | None,
+    context_questions: Sequence[object],
+    model_questions: object,
+) -> MergedGenerationQuestions:
+    """Append governed/model questions without rewriting the human segment."""
+
+    existing = existing_human_text or ""
+    seen = {
+        key
+        for line in existing.splitlines()
+        if (key := _normalized_question_key(line))
+    }
+    additions: list[str] = []
+    appended_context_codes: list[str] = []
+    context_rows = sorted(
+        (
+            (
+                str(getattr(question, "question_code", "")).strip(),
+                str(getattr(question, "question_text", "")).strip(),
+                str(getattr(question, "target_type", "")),
+                int(getattr(question, "target_id", 0) or 0),
+                str(getattr(question, "priority", "")),
+                str(getattr(question, "resolution_state", "open")),
+            )
+            for question in context_questions
+        ),
+        key=lambda item: (item[0], item[2], item[3], item[4], item[1]),
+    )
+    for code, question_text, _, _, _, resolution_state in context_rows:
+        if not code or not question_text or resolution_state != "open":
+            continue
+        key = _normalized_question_key(question_text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        additions.append(f"[CTX:{code}] {question_text}")
+        appended_context_codes.append(code)
+
+    if isinstance(model_questions, str):
+        model_values: Sequence[object] = [model_questions]
+    elif isinstance(model_questions, (list, tuple)):
+        model_values = model_questions
+    else:
+        model_values = []
+    appended_model_count = 0
+    for value in model_values:
+        if not isinstance(value, str):
+            continue
+        question_text = value.strip()
+        key = _normalized_question_key(question_text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        additions.append(f"[AI] {question_text}")
+        appended_model_count += 1
+
+    if not additions:
+        merged_text = existing
+    elif not existing:
+        merged_text = "\n".join(additions)
+    elif existing.endswith(("\n", "\r")):
+        merged_text = existing + "\n".join(additions)
+    else:
+        merged_text = existing + "\n" + "\n".join(additions)
+    return MergedGenerationQuestions(
+        text=merged_text,
+        appended_context_codes=appended_context_codes,
+        appended_model_count=appended_model_count,
+    )
+
+
+_QUESTION_MARKER = re.compile(r"^\[(?:CTX:[^\]]+|AI)\]\s*", re.IGNORECASE)
+
+
+def _normalized_question_key(value: str) -> str:
+    without_marker = _QUESTION_MARKER.sub("", value.strip())
+    normalized = unicodedata.normalize("NFKC", without_marker)
+    return " ".join(normalized.split()).casefold()
+
+
 __all__ = [
     "ConfidenceLevel",
     "GenerationReadiness",
     "GenerationTaskType",
+    "MergedGenerationQuestions",
     "apply_confidence_cap",
     "evaluate_generation_readiness",
+    "merge_generation_questions",
     "normalize_confidence",
 ]

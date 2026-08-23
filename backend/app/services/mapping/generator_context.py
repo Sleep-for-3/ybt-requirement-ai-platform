@@ -15,7 +15,14 @@ from typing import Generic, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.models import Project, SourceToMartMapping, User
+from app.models import (
+    MartToYbtMapping,
+    Project,
+    ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
+    SourceToMartMapping,
+    User,
+)
 from app.schemas.regulatory_context import (
     ContextMode,
     RegulatoryContext,
@@ -104,7 +111,111 @@ class SourceToMartGenerationSnapshot(_FrozenModel):
     task: SourceToMartTaskSnapshot
 
 
-GenerationSnapshot = SourceToMartGenerationSnapshot
+class MartToYbtTaskSnapshot(_FrozenModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    mart_field_id: int | None
+    mapping_name: str | None
+    mapping_status: str
+    mart_table_summary: str | None
+    mart_field_summary: str | None
+    business_rule: str | None
+    filter_condition: str | None
+    join_condition: str | None
+    code_mapping_rule: str | None
+    null_handling_rule: str | None
+    reporting_condition: str | None
+    validation_rule: str | None
+    open_questions: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    created_by: str | None
+    reviewed_by: str | None
+    reviewed_at: str | None
+    lineage_status: str
+    lineage_last_verified_at: str | None
+    lineage_change_set_id: int | None
+    updated_at: str
+
+
+class MartToYbtGenerationSnapshot(_FrozenModel):
+    task_type: Literal["mart_to_ybt"] = "mart_to_ybt"
+    project: ProjectGenerationSnapshot
+    task: MartToYbtTaskSnapshot
+
+
+class ScenarioBusinessTaskSnapshot(_FrozenModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    scenario_id: int
+    business_definition: str | None
+    source_system_screenshot_required: bool
+    source_system_change_required: bool
+    external_data_required: bool
+    manual_supplement_required: bool
+    business_owner: str | None
+    business_confirm_status: str
+    business_confirm_at: str | None
+    remarks: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    open_questions: str | None
+    created_by: str | None
+    updated_at: str
+
+
+class ScenarioBusinessGenerationSnapshot(_FrozenModel):
+    task_type: Literal["scenario_business"] = "scenario_business"
+    project: ProjectGenerationSnapshot
+    task: ScenarioBusinessTaskSnapshot
+
+
+class ScenarioTechnicalTaskSnapshot(_FrozenModel):
+    id: int
+    project_id: int
+    target_field_id: int
+    scenario_id: int
+    business_mapping_id: int | None
+    source_system_name: str | None
+    source_database_name: str | None
+    source_schema_name: str | None
+    source_table_english_name: str | None
+    source_table_chinese_name: str | None
+    source_field_english_name: str | None
+    source_field_chinese_name: str | None
+    processing_logic: str | None
+    processing_logic_type: str | None
+    tech_owner: str | None
+    tech_confirm_status: str
+    tech_confirm_at: str | None
+    remarks: str | None
+    ai_generated_content: str | None
+    final_content: str | None
+    confidence_level: str
+    open_questions: str | None
+    created_by: str | None
+    lineage_status: str
+    lineage_last_verified_at: str | None
+    lineage_change_set_id: int | None
+    updated_at: str
+
+
+class ScenarioTechnicalGenerationSnapshot(_FrozenModel):
+    task_type: Literal["scenario_technical"] = "scenario_technical"
+    project: ProjectGenerationSnapshot
+    task: ScenarioTechnicalTaskSnapshot
+
+
+GenerationSnapshot = (
+    SourceToMartGenerationSnapshot
+    | MartToYbtGenerationSnapshot
+    | ScenarioBusinessGenerationSnapshot
+    | ScenarioTechnicalGenerationSnapshot
+)
 
 
 class GenerationTraceSummary(_FrozenModel):
@@ -210,6 +321,117 @@ def snapshot_source_to_mart_generation(
     )
 
 
+def snapshot_mart_to_ybt_generation(
+    task: MartToYbtMapping,
+    project: Project,
+) -> MartToYbtGenerationSnapshot:
+    return MartToYbtGenerationSnapshot(
+        project=snapshot_project_generation(project),
+        task=MartToYbtTaskSnapshot(
+            id=task.id,
+            project_id=task.project_id,
+            target_field_id=task.target_field_id,
+            mart_field_id=task.mart_field_id,
+            mapping_name=task.mapping_name,
+            mapping_status=task.mapping_status,
+            mart_table_summary=task.mart_table_summary,
+            mart_field_summary=task.mart_field_summary,
+            business_rule=task.business_rule,
+            filter_condition=task.filter_condition,
+            join_condition=task.join_condition,
+            code_mapping_rule=task.code_mapping_rule,
+            null_handling_rule=task.null_handling_rule,
+            reporting_condition=task.reporting_condition,
+            validation_rule=task.validation_rule,
+            open_questions=task.open_questions,
+            ai_generated_content=task.ai_generated_content,
+            final_content=task.final_content,
+            confidence_level=task.confidence_level,
+            created_by=task.created_by,
+            reviewed_by=task.reviewed_by,
+            reviewed_at=_optional_timestamp(task.reviewed_at),
+            lineage_status=task.lineage_status,
+            lineage_last_verified_at=_optional_timestamp(task.lineage_last_verified_at),
+            lineage_change_set_id=task.lineage_change_set_id,
+            updated_at=_required_timestamp(task.updated_at, "MartToYbtMapping.updated_at"),
+        ),
+    )
+
+
+def snapshot_scenario_business_generation(
+    task: ScenarioBusinessMapping,
+    project: Project,
+) -> ScenarioBusinessGenerationSnapshot:
+    return ScenarioBusinessGenerationSnapshot(
+        project=snapshot_project_generation(project),
+        task=ScenarioBusinessTaskSnapshot(
+            id=task.id,
+            project_id=task.project_id,
+            target_field_id=task.target_field_id,
+            scenario_id=task.scenario_id,
+            business_definition=task.business_definition,
+            source_system_screenshot_required=task.source_system_screenshot_required,
+            source_system_change_required=task.source_system_change_required,
+            external_data_required=task.external_data_required,
+            manual_supplement_required=task.manual_supplement_required,
+            business_owner=task.business_owner,
+            business_confirm_status=task.business_confirm_status,
+            business_confirm_at=_optional_timestamp(task.business_confirm_at),
+            remarks=task.remarks,
+            ai_generated_content=task.ai_generated_content,
+            final_content=task.final_content,
+            confidence_level=task.confidence_level,
+            open_questions=task.open_questions,
+            created_by=task.created_by,
+            updated_at=_required_timestamp(
+                task.updated_at,
+                "ScenarioBusinessMapping.updated_at",
+            ),
+        ),
+    )
+
+
+def snapshot_scenario_technical_generation(
+    task: ScenarioTechnicalLineage,
+    project: Project,
+) -> ScenarioTechnicalGenerationSnapshot:
+    return ScenarioTechnicalGenerationSnapshot(
+        project=snapshot_project_generation(project),
+        task=ScenarioTechnicalTaskSnapshot(
+            id=task.id,
+            project_id=task.project_id,
+            target_field_id=task.target_field_id,
+            scenario_id=task.scenario_id,
+            business_mapping_id=task.business_mapping_id,
+            source_system_name=task.source_system_name,
+            source_database_name=task.source_database_name,
+            source_schema_name=task.source_schema_name,
+            source_table_english_name=task.source_table_english_name,
+            source_table_chinese_name=task.source_table_chinese_name,
+            source_field_english_name=task.source_field_english_name,
+            source_field_chinese_name=task.source_field_chinese_name,
+            processing_logic=task.processing_logic,
+            processing_logic_type=task.processing_logic_type,
+            tech_owner=task.tech_owner,
+            tech_confirm_status=task.tech_confirm_status,
+            tech_confirm_at=_optional_timestamp(task.tech_confirm_at),
+            remarks=task.remarks,
+            ai_generated_content=task.ai_generated_content,
+            final_content=task.final_content,
+            confidence_level=task.confidence_level,
+            open_questions=task.open_questions,
+            created_by=task.created_by,
+            lineage_status=task.lineage_status,
+            lineage_last_verified_at=_optional_timestamp(task.lineage_last_verified_at),
+            lineage_change_set_id=task.lineage_change_set_id,
+            updated_at=_required_timestamp(
+                task.updated_at,
+                "ScenarioTechnicalLineage.updated_at",
+            ),
+        ),
+    )
+
+
 def compare_generation_snapshots(
     before: GenerationSnapshot,
     after: GenerationSnapshot,
@@ -281,11 +503,10 @@ def build_generation_context(
         explicit_as_of,
         today_provider=today_provider,
     )
-    request = RegulatoryContextRequest(
+    request = _context_request_for_snapshot(
+        snapshot,
         project_id=authorized_project.id,
-        mart_field_id=snapshot.task.mart_field_id,
         as_of=resolved.as_of,
-        mode=ContextMode.CANDIDATE,
     )
     context = RegulatoryContextBuilder(db).build(
         request,
@@ -315,6 +536,43 @@ def build_generation_context(
         projection=projection,
         trace=trace,
     )
+
+
+def _context_request_for_snapshot(
+    snapshot: GenerationSnapshot,
+    *,
+    project_id: int,
+    as_of: date,
+) -> RegulatoryContextRequest:
+    common = {
+        "project_id": project_id,
+        "as_of": as_of,
+        "mode": ContextMode.CANDIDATE,
+    }
+    if isinstance(snapshot, SourceToMartGenerationSnapshot):
+        return RegulatoryContextRequest(
+            **common,
+            mart_field_id=snapshot.task.mart_field_id,
+        )
+    if isinstance(snapshot, MartToYbtGenerationSnapshot):
+        return RegulatoryContextRequest(
+            **common,
+            target_field_id=snapshot.task.target_field_id,
+            mart_field_id=snapshot.task.mart_field_id,
+        )
+    if isinstance(snapshot, ScenarioBusinessGenerationSnapshot):
+        return RegulatoryContextRequest(
+            **common,
+            target_field_id=snapshot.task.target_field_id,
+            scenario_id=snapshot.task.scenario_id,
+        )
+    if isinstance(snapshot, ScenarioTechnicalGenerationSnapshot):
+        return RegulatoryContextRequest(
+            **common,
+            target_field_id=snapshot.task.target_field_id,
+            scenario_id=snapshot.task.scenario_id,
+        )
+    raise TypeError(f"Unsupported generation snapshot: {type(snapshot).__name__}")
 
 
 def _required_timestamp(value: object, field_name: str) -> str:
@@ -349,8 +607,14 @@ __all__ = [
     "GenerationSnapshot",
     "GenerationStaleError",
     "GenerationTraceSummary",
+    "MartToYbtGenerationSnapshot",
+    "MartToYbtTaskSnapshot",
     "ProjectGenerationSnapshot",
     "ResolvedGenerationDate",
+    "ScenarioBusinessGenerationSnapshot",
+    "ScenarioBusinessTaskSnapshot",
+    "ScenarioTechnicalGenerationSnapshot",
+    "ScenarioTechnicalTaskSnapshot",
     "SourceToMartGenerationSnapshot",
     "SourceToMartTaskSnapshot",
     "build_generation_context",
@@ -358,6 +622,9 @@ __all__ = [
     "recover_queued_actor",
     "resolve_generation_as_of",
     "snapshot_project_generation",
+    "snapshot_mart_to_ybt_generation",
+    "snapshot_scenario_business_generation",
+    "snapshot_scenario_technical_generation",
     "snapshot_source_to_mart_generation",
     "validate_generation_actor",
 ]
