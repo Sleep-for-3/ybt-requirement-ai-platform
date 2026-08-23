@@ -8,28 +8,52 @@ from pydantic import ValidationError
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from app.models import MartField, MartTable, Project, SourceToMartMapping, User
+from app.models import (
+    MartField,
+    MartTable,
+    MartToYbtMapping,
+    ProductScenario,
+    Project,
+    ScenarioBusinessMapping,
+    ScenarioTechnicalLineage,
+    SourceToMartMapping,
+    TargetField,
+    TargetTable,
+    User,
+)
 from app.schemas.regulatory_context import (
     ContextAttribute,
     ContextConflict,
     ContextFact,
     ContextMode,
+    ContextOpenQuestion,
     ContextProvenance,
     MetadataContextValue,
 )
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.mapping.context_adapters import (
+    MartToYbtContextAdapter,
+    ScenarioBusinessContextAdapter,
+    ScenarioTechnicalContextAdapter,
     SourceToMartContextAdapter,
+    apply_generation_output_policy,
     audit_scenario_physical_coverage,
     build_physical_source_whitelist,
+    redacted_generation_output_trace,
 )
-from app.services.mapping.generation_readiness import evaluate_generation_readiness
+from app.services.mapping.generation_readiness import (
+    evaluate_generation_readiness,
+    merge_generation_questions,
+)
 from app.services.mapping.generator_context import (
     GenerationActorError,
     build_generation_context,
     recover_queued_actor,
     resolve_generation_as_of,
+    snapshot_mart_to_ybt_generation,
+    snapshot_scenario_business_generation,
+    snapshot_scenario_technical_generation,
     snapshot_source_to_mart_generation,
     validate_generation_actor,
 )
@@ -284,6 +308,192 @@ def test_physical_catalog_whitelist_and_coverage_audit_are_exact_and_zero_sql(
     assert missing.confidence_cap == "low"
 
 
+def test_all_four_task_projections_are_distinct_and_mart_uses_approved_context_rule_only(
+    db_session: Session,
+) -> None:
+    fixture = _seed_all_generator_tasks(db_session)
+    project = fixture["project"]
+    actor = Principal(None, "legacy-system", "Legacy", True)
+    specifications = (
+        (
+            snapshot_source_to_mart_generation(fixture["source_task"], project),
+            SourceToMartContextAdapter().project,
+        ),
+        (
+            snapshot_mart_to_ybt_generation(fixture["mart_task"], project),
+            MartToYbtContextAdapter().project,
+        ),
+        (
+            snapshot_scenario_business_generation(fixture["business_task"], project),
+            ScenarioBusinessContextAdapter().project,
+        ),
+        (
+            snapshot_scenario_technical_generation(fixture["technical_task"], project),
+            ScenarioTechnicalContextAdapter().project,
+        ),
+    )
+
+    projections = [
+        build_generation_context(
+            db_session,
+            snapshot=snapshot,
+            actor=actor,
+            authorized_project=project,
+            explicit_as_of=AS_OF,
+            adapter=adapter,
+        ).projection
+        for snapshot, adapter in specifications
+    ]
+
+    assert [projection.task_type for projection in projections] == [
+        "source_to_mart",
+        "mart_to_ybt",
+        "scenario_business",
+        "scenario_technical",
+    ]
+    assert len({projection.projection_hash for projection in projections}) == 4
+    assert all(0 < len(projection.prompt_text) <= 6000 for projection in projections)
+    mart_projection = projections[1]
+    assert mart_projection.upstream_rule_summaries == ["APPROVED_CONTEXT_RULE"]
+    assert "FORBIDDEN_DRAFT_FALLBACK" not in mart_projection.prompt_text
+    assert "FORBIDDEN_DRAFT_FALLBACK" not in "\n".join(
+        mart_projection.upstream_rule_summaries
+    )
+    assert "场景业务口径" in projections[2].prompt_text
+    assert "场景技术溯源" in projections[3].prompt_text
+    assert "__dict__" not in inspect.getsource(MartToYbtContextAdapter)
+    assert "__dict__" not in inspect.getsource(ScenarioBusinessContextAdapter)
+    assert "__dict__" not in inspect.getsource(ScenarioTechnicalContextAdapter)
+
+
+def test_question_merge_preserves_human_bytes_and_is_stable_deduplicated_and_idempotent() -> None:
+    human = "人工问题 B\r\n人工问题 A  "
+    context_questions = [
+        ContextOpenQuestion(
+            question_code="CTX_Z",
+            question_type="governance",
+            priority="medium",
+            target_type="target_field",
+            target_id=8,
+            question_text="请确认业务负责人",
+        ),
+        ContextOpenQuestion(
+            question_code="CTX_A",
+            question_type="physical_source",
+            priority="high",
+            target_type="target_field",
+            target_id=8,
+            question_text="Schema Required",
+        ),
+    ]
+
+    merged = merge_generation_questions(
+        human,
+        context_questions,
+        ["schema\u00a0required", "Model only question", "MODEL ONLY\u3000QUESTION", "人工问题 a"],
+    )
+
+    assert merged.text.startswith(human)
+    assert merged.text == (
+        human
+        + "\n[CTX:CTX_A] Schema Required"
+        + "\n[CTX:CTX_Z] 请确认业务负责人"
+        + "\n[AI] Model only question"
+    )
+    assert merged.appended_context_codes == ["CTX_A", "CTX_Z"]
+    assert merged.appended_model_count == 1
+    repeated = merge_generation_questions(
+        merged.text,
+        context_questions,
+        ["Schema Required", "model only question"],
+    )
+    assert repeated.text == merged.text
+    assert repeated.appended_context_codes == []
+    assert repeated.appended_model_count == 0
+
+
+def test_sparse_output_policy_caps_confidence_and_omits_unknown_physical_and_governance_fields(
+    db_session: Session,
+) -> None:
+    fixture = _seed_all_generator_tasks(db_session, suffix="SAFE_OUTPUT")
+    project = fixture["project"]
+    snapshot = snapshot_scenario_technical_generation(
+        fixture["technical_task"],
+        project,
+    )
+    projection = build_generation_context(
+        db_session,
+        snapshot=snapshot,
+        actor=Principal(None, "legacy-system", "Legacy", True),
+        authorized_project=project,
+        explicit_as_of=AS_OF,
+        adapter=ScenarioTechnicalContextAdapter().project,
+    ).projection
+    proposed = {
+        "source_database_name": "UNKNOWN_DB",
+        "source_schema_name": "UNKNOWN_SCHEMA",
+        "source_table_english_name": "UNKNOWN_TABLE",
+        "source_field_english_name": "UNKNOWN_FIELD",
+        "processing_logic": "SECRET_PROCESSING remains non-physical",
+        "confidence_level": "high",
+        "open_questions": ["Model-only safety question"],
+        "tech_confirm_status": "confirmed",
+        "final_content": "must never become authoritative",
+    }
+
+    safe = apply_generation_output_policy(
+        projection,
+        proposed,
+        existing_human_questions="人工原始问题",
+    )
+
+    assert safe.output_fields["processing_logic"] == "SECRET_PROCESSING remains non-physical"
+    assert not {
+        "source_database_name",
+        "source_schema_name",
+        "source_table_english_name",
+        "source_field_english_name",
+        "tech_confirm_status",
+        "final_content",
+    } & safe.output_fields.keys()
+    assert safe.confidence_level == "low"
+    assert safe.pending_confirmation is True
+    assert "[CTX:PHYSICAL_SOURCE_EVIDENCE_MISSING]" in safe.merged_questions.text
+    assert "[AI] Model-only safety question" in safe.merged_questions.text
+    assert "UNKNOWN_DB" not in safe.merged_questions.text
+
+    allowlisted = apply_generation_output_policy(
+        projection,
+        proposed,
+        physical_whitelist=((
+            "unknown_db",
+            "unknown_schema",
+            "unknown_table",
+            "unknown_field",
+        ),),
+    )
+    assert allowlisted.output_fields["source_database_name"] == "UNKNOWN_DB"
+    assert allowlisted.output_fields["source_field_english_name"] == "UNKNOWN_FIELD"
+
+    unchanged = apply_generation_output_policy(
+        projection,
+        {
+            "source_database_name": "LEGACY_DB",
+            "source_schema_name": "LEGACY_SCHEMA",
+            "source_table_english_name": "LEGACY_TABLE",
+            "source_field_english_name": "LEGACY_FIELD",
+            "processing_logic": "unchanged physical tuple",
+            "confidence_level": "high",
+        },
+    )
+    assert unchanged.output_fields["source_database_name"] == "LEGACY_DB"
+    assert unchanged.output_fields["source_field_english_name"] == "LEGACY_FIELD"
+    trace_json = redacted_generation_output_trace(safe).model_dump_json()
+    assert "SECRET_PROCESSING" not in trace_json
+    assert "UNKNOWN_DB" not in trace_json
+    assert "must never become authoritative" not in trace_json
+
+
 def test_source_to_mart_snapshot_is_explicit_frozen_and_actor_identity_fails_closed(
     db_session: Session,
 ) -> None:
@@ -445,4 +655,116 @@ def _seed_source_to_mart_task(
         "mart_table": mart_table,
         "mart_field": mart_field,
         "mapping": mapping,
+    }
+
+
+def _seed_all_generator_tasks(
+    db: Session,
+    *,
+    suffix: str = "ALL",
+) -> dict[str, object]:
+    base = _seed_source_to_mart_task(db, suffix=suffix)
+    project = base["project"]
+    mart_field = base["mart_field"]
+    source_task = base["mapping"]
+    source_task.mapping_status = "draft"
+    source_task.final_content = "FORBIDDEN_DRAFT_FALLBACK"
+    source_task.ai_generated_content = "FORBIDDEN_DRAFT_AI"
+    approved_source = SourceToMartMapping(
+        project_id=project.id,
+        mart_field_id=mart_field.id,
+        mapping_name=f"Approved upstream {suffix}",
+        mapping_status="approved",
+        business_rule="APPROVED_BUSINESS_RULE_SHOULD_NOT_WIN",
+        final_content="APPROVED_CONTEXT_RULE",
+        confidence_level="high",
+        lineage_status="verified",
+        lineage_last_verified_at=datetime(2026, 5, 1, tzinfo=UTC),
+    )
+    target_table = TargetTable(
+        project_id=project.id,
+        table_code=f"YBT_{suffix}",
+        table_name=f"一表通表 {suffix}",
+        description="监管报送目标表",
+    )
+    db.add_all([approved_source, target_table])
+    db.flush()
+    target_field = TargetField(
+        project_id=project.id,
+        target_table_id=target_table.id,
+        field_code=f"TARGET_{suffix}",
+        field_name=f"目标字段 {suffix}",
+        field_type="VARCHAR(64)",
+        required_flag=True,
+        field_definition="监管目标字段定义",
+    )
+    scenario = ProductScenario(
+        project_id=project.id,
+        scenario_code=f"SCENARIO_{suffix}",
+        scenario_name=f"监管场景 {suffix}",
+        scenario_type="regulatory_reporting",
+        enabled=True,
+    )
+    db.add_all([target_field, scenario])
+    db.flush()
+    mart_task = MartToYbtMapping(
+        project_id=project.id,
+        target_field_id=target_field.id,
+        mart_field_id=mart_field.id,
+        mapping_name=f"Mart to YBT {suffix}",
+        mapping_status="draft",
+        business_rule="人工 Mart-to-YBT 规则",
+        open_questions="人工 Mart 问题",
+        confidence_level="medium",
+        lineage_status="not_linked",
+    )
+    business_task = ScenarioBusinessMapping(
+        project_id=project.id,
+        target_field_id=target_field.id,
+        scenario_id=scenario.id,
+        business_definition="人工场景业务定义",
+        business_confirm_status="draft",
+        open_questions="人工业务问题",
+        confidence_level="medium",
+    )
+    db.add_all([mart_task, business_task])
+    db.flush()
+    technical_task = ScenarioTechnicalLineage(
+        project_id=project.id,
+        target_field_id=target_field.id,
+        scenario_id=scenario.id,
+        business_mapping_id=business_task.id,
+        source_system_name="LEGACY_SYSTEM",
+        source_database_name="LEGACY_DB",
+        source_schema_name="LEGACY_SCHEMA",
+        source_table_english_name="LEGACY_TABLE",
+        source_field_english_name="LEGACY_FIELD",
+        processing_logic="人工处理逻辑",
+        tech_confirm_status="draft",
+        open_questions="人工技术问题",
+        confidence_level="medium",
+        lineage_status="not_linked",
+    )
+    db.add(technical_task)
+    db.commit()
+    for value in (
+        project,
+        source_task,
+        approved_source,
+        mart_task,
+        business_task,
+        technical_task,
+    ):
+        db.refresh(value)
+    return {
+        **base,
+        "project": project,
+        "source_task": source_task,
+        "approved_source": approved_source,
+        "target_table": target_table,
+        "target_field": target_field,
+        "scenario": scenario,
+        "mart_task": mart_task,
+        "business_task": business_task,
+        "technical_task": technical_task,
     }
