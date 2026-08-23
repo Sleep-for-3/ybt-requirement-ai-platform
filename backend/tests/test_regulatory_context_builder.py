@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     BusinessSystem,
+    CatalogColumn,
+    CatalogSchema,
+    CatalogTable,
+    DataSource,
     HistoricalCaliberImport,
     HistoricalCaliberItem,
     Institution,
@@ -62,6 +66,7 @@ from app.services.vector.mock import MockVectorStore
 AS_OF = date(2026, 6, 30)
 ACCEPTANCE_QUERY_BUDGET = 21
 EFFECTIVE_VERSION_BATCH_QUERY_BUDGET = 14
+CATALOG_ENRICHMENT_QUERY_DELTA = 1
 SPEC_LESS_REQUIREMENT_METADATA = (
     {"id": "CTX-01", "classification": "unclassified", "resolution": "unresolved"},
     {"id": "CTX-02", "classification": "unclassified", "resolution": "unresolved"},
@@ -1323,6 +1328,156 @@ def test_spec_less_records_remain_test_metadata_and_never_enter_runtime_output(
     )
 
 
+def test_mart_metadata_is_typed_project_scoped_and_deterministically_ordered(
+    db_session: Session,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="MART_METADATA")
+    context = _build_context(db_session, fixture)
+    mart_facts = [
+        fact
+        for fact in context.metadata
+        if fact.value.entity_type in {"mart_field", "mart_table"}
+    ]
+
+    assert [fact.value.entity_type for fact in mart_facts] == [
+        "mart_field",
+        "mart_table",
+    ]
+    assert mart_facts[0].value.entity_id == fixture["mart_field_id"]
+    assert mart_facts[0].value.code == "CUST_UNIFIED_NO"
+    mart_table_id = db_session.get(MartField, fixture["mart_field_id"]).mart_table_id
+    assert mart_facts[1].value.entity_id == mart_table_id
+    assert all(fact.source_type == "mart_metadata" for fact in mart_facts)
+    assert all(fact.provenance.project_id == fixture["project_id"] for fact in mart_facts)
+    assert all(
+        fact.provenance.institution_id
+        == db_session.get(Project, fixture["project_id"]).institution_id
+        for fact in mart_facts
+    )
+    assert "physical_sources" not in type(context).model_fields
+
+
+def test_catalog_physical_projection_is_scoped_bounded_and_query_count_is_fixed(
+    db_session: Session,
+) -> None:
+    fixture = _seed_populated_context(db_session, suffix="CATALOG_QUERY_COUNT")
+    project = db_session.get(Project, fixture["project_id"])
+    linked = _seed_catalog_column(db_session, project, suffix="LINKED")
+    disabled = _seed_catalog_column(
+        db_session,
+        project,
+        suffix="DISABLED",
+        enabled=False,
+    )
+    unconnected = _seed_catalog_column(db_session, project, suffix="UNCONNECTED")
+    foreign_project = _seed_project(
+        db_session,
+        "CTX_BANK_CATALOG_FOREIGN",
+        "隔离银行 CATALOG FOREIGN",
+        "隔离项目 CATALOG FOREIGN",
+    )
+    foreign = _seed_catalog_column(db_session, foreign_project, suffix="FOREIGN")
+    for column in (linked, disabled, foreign):
+        db_session.add(MappingEvidenceReference(
+            project_id=project.id,
+            mapping_type="scenario_technical",
+            mapping_id=fixture["technical_mapping_id"],
+            evidence_type="catalog_column",
+            evidence_id=column.id,
+            source_name=f"CatalogColumn #{column.id}",
+            location_text=f"catalog_columns/{column.id}",
+        ))
+    edge = db_session.get(LineageEdge, fixture["raw_lineage_id"])
+    db_session.get(LineageNode, edge.source_node_id).catalog_column_id = linked.id
+    db_session.commit()
+    engine = db_session.get_bind()
+
+    def measured_build() -> tuple[int, RegulatoryContext]:
+        db_session.expire_all()
+        authorized_project = _authorized_project(db_session, fixture["project_id"])
+        statement_count = 0
+
+        def before_cursor_execute(*args: object, **kwargs: object) -> None:
+            nonlocal statement_count
+            statement_count += 1
+
+        event.listen(engine, "before_cursor_execute", before_cursor_execute)
+        try:
+            context = RegulatoryContextBuilder(db_session).build(
+                _request_for_fixture(fixture),
+                authorized_project=authorized_project,
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", before_cursor_execute)
+        return statement_count, context
+
+    enriched_count, context = measured_build()
+    catalog_facts = [
+        fact for fact in context.metadata
+        if fact.value.entity_type == "catalog_column"
+    ]
+    attributes = {
+        attribute.name: attribute.value
+        for attribute in catalog_facts[0].value.attributes
+    }
+
+    assert enriched_count == ACCEPTANCE_QUERY_BUDGET + CATALOG_ENRICHMENT_QUERY_DELTA
+    assert [fact.value.entity_id for fact in catalog_facts] == [linked.id]
+    assert linked.id != disabled.id != foreign.id != unconnected.id
+    assert attributes == {
+        "database_name": "BANK_DB",
+        "schema_name": "ODS",
+        "table_name": "SOURCE_LINKED",
+        "column_name": "FIELD_LINKED",
+        "data_type": "VARCHAR(64)",
+        "nullable": False,
+        "ordinal_position": 1,
+        "is_primary_key": False,
+    }
+    assert catalog_facts[0].provenance.project_id == project.id
+    assert catalog_facts[0].provenance.institution_id == project.institution_id
+    assert {
+        reference.evidence_type for reference in catalog_facts[0].evidence_references
+    } == {"catalog_column", "script_file_version"}
+
+    mart_table_id = db_session.get(MartField, fixture["mart_field_id"]).mart_table_id
+    for index in range(6):
+        db_session.add(MartField(
+            project_id=project.id,
+            mart_table_id=mart_table_id,
+            field_code=f"GROWTH_FIELD_{index}",
+            field_name=f"增长字段 {index}",
+        ))
+        column = _seed_catalog_column(db_session, project, suffix=f"GROWTH_{index}")
+        db_session.add(MappingEvidenceReference(
+            project_id=project.id,
+            mapping_type="scenario_technical",
+            mapping_id=fixture["technical_mapping_id"],
+            evidence_type="catalog_column",
+            evidence_id=column.id,
+            source_name=f"CatalogColumn growth #{column.id}",
+            location_text=f"catalog_columns/{column.id}",
+        ))
+        _seed_raw_lineage_case(
+            db_session,
+            project,
+            fixture["target_field_id"],
+            suffix=f"CATALOG_GROWTH_{index}",
+            source_catalog_column_id=column.id,
+        )
+    db_session.commit()
+
+    growth_count, growth = measured_build()
+    growth_catalog_facts = [
+        fact for fact in growth.metadata
+        if fact.value.entity_type == "catalog_column"
+    ]
+
+    assert growth_count == enriched_count
+    assert 1 < len(growth_catalog_facts) <= 50
+    assert all(fact.provenance.project_id == project.id for fact in growth_catalog_facts)
+
+
 def test_query_count_is_measured_bounded_and_retriever_get_boundary_is_qualified(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -2065,6 +2220,7 @@ def _seed_raw_lineage_case(
     script_enabled: bool = True,
     current_version_no: int = 1,
     created_at: datetime | None = None,
+    source_catalog_column_id: int | None = None,
 ) -> int:
     script = ScriptFile(
         institution_id=project.institution_id,
@@ -2097,6 +2253,7 @@ def _seed_raw_lineage_case(
         schema_name="ODS",
         table_name="CUSTOMER",
         column_name=suffix,
+        catalog_column_id=source_catalog_column_id,
         unresolved_flag=not source_resolved,
     )
     target = LineageNode(
@@ -2128,6 +2285,62 @@ def _seed_raw_lineage_case(
     db.add(edge)
     db.flush()
     return edge.id
+
+
+def _seed_catalog_column(
+    db: Session,
+    project: Project,
+    *,
+    suffix: str,
+    enabled: bool = True,
+) -> CatalogColumn:
+    datasource = DataSource(
+        project_id=project.id,
+        name=f"catalog-{suffix.casefold()}",
+        display_name=f"Catalog {suffix}",
+        db_type="postgresql",
+        database_name="BANK_DB",
+        schema_name="ODS",
+        enabled=True,
+    )
+    db.add(datasource)
+    db.flush()
+    schema = CatalogSchema(
+        project_id=project.id,
+        datasource_id=datasource.id,
+        schema_name="ODS",
+        enabled=True,
+    )
+    db.add(schema)
+    db.flush()
+    table = CatalogTable(
+        project_id=project.id,
+        datasource_id=datasource.id,
+        catalog_schema_id=schema.id,
+        database_name="BANK_DB",
+        schema_name="ODS",
+        table_name=f"SOURCE_{suffix}",
+        enabled=True,
+    )
+    db.add(table)
+    db.flush()
+    column = CatalogColumn(
+        project_id=project.id,
+        datasource_id=datasource.id,
+        catalog_table_id=table.id,
+        database_name="BANK_DB",
+        schema_name="ODS",
+        table_name=table.table_name,
+        column_name=f"FIELD_{suffix}",
+        data_type="VARCHAR(64)",
+        nullable=False,
+        ordinal_position=1,
+        is_primary_key=False,
+        enabled=enabled,
+    )
+    db.add(column)
+    db.flush()
+    return column
 
 
 def _request_for_fixture(

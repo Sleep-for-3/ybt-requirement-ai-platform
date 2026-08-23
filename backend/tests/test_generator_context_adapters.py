@@ -5,13 +5,25 @@ import inspect
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.models import MartField, MartTable, Project, SourceToMartMapping, User
-from app.schemas.regulatory_context import ContextConflict, ContextMode
+from app.schemas.regulatory_context import (
+    ContextAttribute,
+    ContextConflict,
+    ContextFact,
+    ContextMode,
+    ContextProvenance,
+    MetadataContextValue,
+)
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
-from app.services.mapping.context_adapters import SourceToMartContextAdapter
+from app.services.mapping.context_adapters import (
+    SourceToMartContextAdapter,
+    audit_scenario_physical_coverage,
+    build_physical_source_whitelist,
+)
 from app.services.mapping.generation_readiness import evaluate_generation_readiness
 from app.services.mapping.generator_context import (
     GenerationActorError,
@@ -22,6 +34,7 @@ from app.services.mapping.generator_context import (
     validate_generation_actor,
 )
 from app.services.semantic.context_builder import RegulatoryContextBuilder
+from app.services.semantic.context_authority import FactState, authority_for_source
 
 
 AS_OF = date(2026, 6, 30)
@@ -190,6 +203,85 @@ def test_source_to_mart_readiness_treats_own_mapping_gap_as_non_blocking_but_blo
 
     assert blocked.can_generate is False
     assert blocked.blocking_reasons == ["CONFLICTING_AUTHORITATIVE_FACTS"]
+
+
+def test_physical_catalog_whitelist_and_coverage_audit_are_exact_and_zero_sql(
+    db_session: Session,
+) -> None:
+    fixture = _seed_source_to_mart_task(db_session, suffix="PHYSICAL")
+    snapshot = snapshot_source_to_mart_generation(
+        fixture["mapping"],
+        fixture["project"],
+    )
+    envelope = build_generation_context(
+        db_session,
+        snapshot=snapshot,
+        actor=Principal(None, "legacy-system", "Legacy", True),
+        authorized_project=fixture["project"],
+        explicit_as_of=AS_OF,
+        adapter=SourceToMartContextAdapter().project,
+    )
+    observed_at = datetime(2026, 6, 30, tzinfo=UTC)
+    catalog_fact = ContextFact(
+        fact_type="catalog_column_metadata",
+        value=MetadataContextValue(
+            entity_type="catalog_column",
+            entity_id=7001,
+            code="BANK_DB.ODS.CUSTOMER.CUST_UNIFIED_NO",
+            name="CUST_UNIFIED_NO",
+            attributes=[
+                ContextAttribute(name="database_name", value=" BANK_DB "),
+                ContextAttribute(name="schema_name", value="ODS"),
+                ContextAttribute(name="table_name", value="Customer"),
+                ContextAttribute(name="column_name", value="Cust_Unified_No"),
+            ],
+        ),
+        authority=authority_for_source("source_metadata"),
+        state=FactState.OBSERVED,
+        source_type="source_metadata",
+        source_id=7001,
+        observed_at=observed_at,
+        confidence=1.0,
+        provenance=ContextProvenance(
+            project_id=fixture["project"].id,
+            institution_id=fixture["project"].institution_id,
+            source_model="CatalogColumn",
+            source_type="source_metadata",
+            source_id=7001,
+            observed_at=observed_at,
+            confidentiality_level=fixture["project"].confidentiality_level,
+        ),
+    )
+    enriched = envelope.context.model_copy(
+        update={"metadata": [*envelope.context.metadata, catalog_fact]},
+    )
+    engine = db_session.get_bind()
+    statement_count = 0
+
+    def before_cursor_execute(*args: object, **kwargs: object) -> None:
+        nonlocal statement_count
+        statement_count += 1
+
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        whitelist = build_physical_source_whitelist(enriched)
+        complete = audit_scenario_physical_coverage(enriched)
+        missing = audit_scenario_physical_coverage(envelope.context)
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor_execute)
+
+    assert statement_count == 0
+    assert whitelist == (("bank_db", "ods", "customer", "cust_unified_no"),)
+    assert complete.allowlisted_sources == whitelist
+    assert complete.warning is None
+    assert complete.open_question is None
+    assert complete.confidence_cap == "high"
+    assert missing.allowlisted_sources == ()
+    assert missing.warning == "PHYSICAL_SOURCE_EVIDENCE_MISSING"
+    assert missing.open_question == (
+        "请确认来源数据库、模式、表和字段，并提供 CatalogColumn 证据或已验证血缘。"
+    )
+    assert missing.confidence_cap == "low"
 
 
 def test_source_to_mart_snapshot_is_explicit_frozen_and_actor_identity_fails_closed(
