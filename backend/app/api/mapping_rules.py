@@ -221,11 +221,44 @@ def delete_mart_to_ybt_mapping(mapping_id: int, db: Session = Depends(get_db)) -
 
 
 @router.post("/mart-to-ybt-mappings/{mapping_id}/generate-draft", response_model=MartToYbtMappingRead)
-async def generate_mart_to_ybt_mapping_draft(mapping_id: int, db: Session = Depends(get_db)) -> MartToYbtMapping:
+async def generate_mart_to_ybt_mapping_draft(
+    mapping_id: int,
+    principal: CurrentPrincipal,
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> MartToYbtMapping:
+    mapping = _get_mart_to_ybt_or_404(db, mapping_id)
     try:
-        return await generate_mart_to_ybt_draft(db, mapping_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        validate_generation_actor(db, principal)
+        authorized_project = PermissionService(
+            db,
+            principal,
+        ).require_project_permission(mapping.project_id, "technical.edit")
+        return await generate_mart_to_ybt_draft(
+            db,
+            mapping_id,
+            authorized_project=authorized_project,
+            actor=principal,
+            as_of=as_of,
+        )
+    except GenerationActorError as exc:
+        raise _generation_actor_http_error(exc) from exc
+    except GenerationBlockedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "generation-blocked",
+                "reasons": list(exc.reasons),
+            },
+        ) from exc
+    except GenerationStaleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale-task",
+                "changed_fields": list(exc.changed_fields),
+            },
+        ) from exc
 
 
 @router.post("/mart-to-ybt-mappings/{mapping_id}/adopt-ai-draft", response_model=MartToYbtMappingRead)
