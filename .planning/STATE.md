@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 10
 current_phase_name: Generator Refactor
 status: executing
-stopped_at: Phase 10 context gathered
-last_updated: "2026-08-23T06:15:03.985Z"
+stopped_at: Completed 10-01-PLAN.md
+last_updated: "2026-08-23T07:12:34.359Z"
 last_activity: 2026-08-23
-last_activity_desc: Phase 09 verified complete; Phase 10 planning not started
+last_activity_desc: Phase 10 Plan 01 generator Context foundation completed
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 11
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 **Core value:** 监管语义、口径、证据、血缘和治理关系是核心资产，AI 不能越过人工确认。
-**Current focus:** Phase 10 — Generator Refactor planning boundary
+**Current focus:** Phase 10 — Generator Refactor
 
 ## Current Position
 
-Phase: 10 — Generator Refactor
-Plan: Not started
+Phase: 10 (Generator Refactor) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-23 — Phase 09 complete, transitioned to Phase 10
+Last activity: 2026-08-23 — Phase 10 execution started
 
-Progress: [███░░░░░░░] 2/8 milestone phases complete
+Progress: [███████░░░] 73%
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Progress: [███░░░░░░░] 2/8 milestone phases complete
 | Phase 09 P02 | 23m | 2 tasks | 4 files |
 | Phase 09 P03 | 1h 2m | 3 tasks | 9 files |
 | Phase 09 P04 | 35min | 3 tasks | 5 files |
+| Phase 10 P01 | 45min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,10 @@ Progress: [███░░░░░░░] 2/8 milestone phases complete
 - [Phase 09]: RegulatoryContext API uses explicit project.view authorization and the canonical authorized-Project builder handoff.
 - [Phase 09]: Existing semantic.py mode propagation remains unchanged; regression coverage proves Phase 8 route compatibility.
 - [Phase 09]: PostgreSQL 016 offline compilation passes, but live PostgreSQL remains a mandatory staging gate because localhost was unavailable.
+- [Phase 10]: Shared RegulatoryContext is the sole generator shared-fact seam; each task builds it exactly once in candidate mode with no legacy fallback.
+- [Phase 10]: CatalogColumn projection is limited to enabled same-project evidence or verified-lineage links with one fixed query.
+- [Phase 10]: Physical output accepts only exact Context-whitelisted tuples or the unchanged canonical task tuple.
+- [Phase 10]: Question merge preserves the human prefix byte-for-byte and appends stable CTX and AI provenance markers.
 
 ### Pending Todos
 
@@ -99,6 +104,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-23T04:13:22.848Z
-Stopped at: Phase 10 context gathered
-Resume file: .planning/phases/10-generator-refactor/10-CONTEXT.md
+Last session: 2026-08-23T07:12:34.287Z
+Stopped at: Completed 10-01-PLAN.md
+Resume file: None
