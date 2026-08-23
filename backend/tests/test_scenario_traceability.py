@@ -884,6 +884,52 @@ def test_batch_queued_handler_blocks_disabled_creator_without_fallback(
         assert item.error_message == "queued_actor_invalid"
 
 
+def test_batch_runtime_failure_is_bounded_to_one_background_item(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "batch-runtime") as (db, _, fixture):
+        before = _business_mapping_state(fixture["mapping"])
+        job = _seed_background_job(
+            db,
+            fixture,
+            "batch-runtime",
+            "batch_ai_generation_business",
+        )
+        monkeypatch.setattr(jobs, "notify_user", lambda *args, **kwargs: None)
+
+        async def runtime_failure(*args, **kwargs):
+            raise RuntimeError("private prompt and evidence must not enter job summaries")
+
+        result = jobs._draft_handler(
+            db,
+            job,
+            ScenarioBusinessMapping,
+            runtime_failure,
+        )
+
+        assert result == {
+            "success_count": 0,
+            "failed_count": 1,
+            "blocked_count": 0,
+            "total_count": 1,
+        }
+        item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+        ))
+        assert item.status == "failed"
+        assert item.result_summary_json == {
+            "mapping_id": fixture["mapping"].id,
+            "reason_code": "generation_failed",
+        }
+        assert item.error_message == "generation_failed"
+        assert "private prompt" not in str(item.result_summary_json)
+        db.expire_all()
+        assert _business_mapping_state(
+            db.get(ScenarioBusinessMapping, fixture["mapping"].id)
+        ) == before
+
+
 def test_deliverable_queued_handler_passes_scoped_context_and_counts_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -955,6 +1001,36 @@ def test_deliverable_queued_handler_passes_scoped_context_and_counts_blocks(
             "reason_code": "generation_readiness_blocked",
         }
         assert item.error_message == "generation_readiness_blocked"
+
+
+def test_deliverable_queued_handler_blocks_disabled_actor_before_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "deliverable-disabled") as (db, _, fixture):
+        package, job = _seed_deliverable_job(db, fixture, "deliverable-disabled")
+        fixture["user"].status = "disabled"
+        db.commit()
+        _isolate_deliverable_generation(monkeypatch)
+
+        async def forbidden_generator(*args, **kwargs):
+            raise AssertionError("disabled Deliverable actor reached generator")
+
+        monkeypatch.setattr(deliverables, "generate_business_draft", forbidden_generator)
+        monkeypatch.setattr(deliverables, "generate_technical_draft", forbidden_generator)
+
+        result = deliverables._deliverable_generate_handler(db, job)
+
+        assert result["success_count"] == result["failed_count"] == 0
+        assert result["blocked_count"] == 1
+        assert db.get(DeliverablePackage, package.id).status == "draft"
+        item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+            BackgroundJobItem.item_key == f"package:{package.id}",
+        ))
+        assert item.status == "blocked"
+        assert item.result_summary_json["reason_code"] == "queued_actor_invalid"
+        assert item.error_message == "queued_actor_invalid"
 
 
 def test_product_scenario_crud_and_project_code_uniqueness() -> None:

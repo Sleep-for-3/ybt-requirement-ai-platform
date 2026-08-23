@@ -12,6 +12,12 @@ from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit
 from app.services.governance.notifications import notify_user
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
+from app.services.mapping.generator_context import (
+    GenerationActorError,
+    GenerationBlockedError,
+    GenerationStaleError,
+    recover_queued_actor,
+)
 from app.services.governance.workflow import start_workflow
 from app.services.governance.scenario_review import get_or_create_review_package
 from app.services.export import export_traceability_workbook
@@ -133,11 +139,23 @@ def _enqueue(db, project_id, principal, job_type, payload, idempotency_key, hand
 
 
 def _business_handler(db: Session, job: BackgroundJob) -> dict:
-    return _draft_handler(db, job, ScenarioBusinessMapping, generate_business_draft)
+    return _draft_handler(
+        db,
+        job,
+        ScenarioBusinessMapping,
+        generate_business_draft,
+        permission="business.edit",
+    )
 
 
 def _technical_handler(db: Session, job: BackgroundJob) -> dict:
-    return _draft_handler(db, job, ScenarioTechnicalLineage, generate_technical_draft)
+    return _draft_handler(
+        db,
+        job,
+        ScenarioTechnicalLineage,
+        generate_technical_draft,
+        permission="technical.edit",
+    )
 
 
 def _review_task_handler(db: Session, job: BackgroundJob) -> dict:
@@ -164,23 +182,171 @@ def _export_handler(db: Session, job: BackgroundJob) -> dict:
     row=StoredFile(institution_id=project.institution_id,project_id=project.id,storage_key=saved.storage_key,original_file_name=file_name,content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",byte_size=saved.byte_size,content_hash=saved.content_hash,classification=project.confidentiality_level,created_by=job.created_by,enabled=True);db.add(row);db.flush();db.add(BackgroundJobItem(background_job_id=job.id,item_key="workbook",status="completed",result_summary_json={"file_id":row.id,"byte_size":row.byte_size}));record_audit(db,action="export",resource_type="traceability_workbook",resource_id=row.id,actor_user_id=job.created_by,institution_id=project.institution_id,project_id=project.id,after={"file_name":file_name,"background_job_id":job.id});notify_user(db,job.created_by,"export_completed","Excel 导出完成",file_name,project_id=project.id,resource_type="stored_file",resource_id=row.id);db.commit();return {"success_count":1,"failed_count":0,"file_id":row.id,"byte_size":row.byte_size}
 
 
-def _draft_handler(db, job, model, generator):
+def _draft_handler(db, job, model, generator, *, permission: str | None = None):
     field_ids = list(job.payload_summary_json.get("field_ids") or [])
     statement = select(model).where(model.project_id == job.project_id)
-    if field_ids: statement = statement.where(model.target_field_id.in_(field_ids))
+    if field_ids:
+        statement = statement.where(model.target_field_id.in_(field_ids))
     if job.payload_summary_json.get("scenario_id"):
-        statement = statement.where(model.scenario_id == int(job.payload_summary_json["scenario_id"]))
-    rows = list(db.scalars(statement).all());success=0;failed=0
+        statement = statement.where(
+            model.scenario_id == int(job.payload_summary_json["scenario_id"])
+        )
+    rows = list(db.scalars(statement).all())
+    success = failed = blocked = 0
+    permission = permission or (
+        "business.edit"
+        if model is ScenarioBusinessMapping
+        else "technical.edit"
+    )
+    prior_items = {
+        item.item_key: item
+        for item in db.scalars(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+        )).all()
+    }
+
+    try:
+        actor = recover_queued_actor(db, job.created_by)
+        if not isinstance(job.project_id, int) or job.project_id <= 0:
+            raise GenerationStaleError(["job.project_id"])
+        authorized_project = PermissionService(
+            db,
+            actor,
+        ).require_project_permission(job.project_id, permission)
+        if (
+            authorized_project.id != job.project_id
+            or authorized_project.institution_id != job.institution_id
+        ):
+            raise GenerationStaleError(["job.project_scope"])
+    except Exception as exc:
+        reason_code = _queued_generation_block_code(exc)
+        item_status = "blocked" if reason_code is not None else "failed"
+        reason_code = reason_code or "queued_scope_failed"
+        for row in rows:
+            _record_draft_job_item(
+                db,
+                job.id,
+                str(row.id),
+                status=item_status,
+                mapping_id=row.id,
+                reason_code=reason_code,
+            )
+            if item_status == "blocked":
+                blocked += 1
+            else:
+                failed += 1
+        db.commit()
+        return {
+            "success_count": success,
+            "failed_count": failed,
+            "blocked_count": blocked,
+            "total_count": len(rows),
+        }
+
     for row in rows:
-        if _job_cancelled(db, job): break
+        row_id = row.id
+        prior = prior_items.get(str(row_id))
+        if prior is not None and prior.status == "completed":
+            success += 1
+            continue
+        if _job_cancelled(db, job):
+            break
         try:
-            asyncio.run(generator(db, row.id));success += 1
-            db.add(BackgroundJobItem(background_job_id=job.id, item_key=str(row.id), status="completed", result_summary_json={"mapping_id": row.id}));db.commit()
+            asyncio.run(generator(
+                db,
+                row_id,
+                authorized_project=authorized_project,
+                actor=actor,
+                as_of=None,
+            ))
+            success += 1
+            _record_draft_job_item(
+                db,
+                job.id,
+                str(row_id),
+                status="completed",
+                mapping_id=row_id,
+            )
+            db.commit()
         except Exception as exc:
-            db.rollback();job=db.get(BackgroundJob,job.id);failed += 1
-            db.add(BackgroundJobItem(background_job_id=job.id, item_key=str(row.id), status="failed", result_summary_json={}, error_message=str(exc)[:1000]));db.commit()
-    notify_user(db,job.created_by,"batch_generation_completed","批量草稿生成完成",f"成功 {success}，失败 {failed}",project_id=job.project_id,resource_type="background_job",resource_id=job.id);db.commit()
-    return {"success_count": success, "failed_count": failed, "total_count": len(rows)}
+            db.rollback()
+            job = db.get(BackgroundJob, job.id)
+            reason_code = _queued_generation_block_code(exc)
+            item_status = "blocked" if reason_code is not None else "failed"
+            reason_code = reason_code or "generation_failed"
+            if item_status == "blocked":
+                blocked += 1
+            else:
+                failed += 1
+            _record_draft_job_item(
+                db,
+                job.id,
+                str(row_id),
+                status=item_status,
+                mapping_id=row_id,
+                reason_code=reason_code,
+            )
+            db.commit()
+    notify_user(
+        db,
+        job.created_by,
+        "batch_generation_completed",
+        "批量草稿生成完成",
+        f"成功 {success}，阻断 {blocked}，失败 {failed}",
+        project_id=job.project_id,
+        resource_type="background_job",
+        resource_id=job.id,
+    )
+    db.commit()
+    return {
+        "success_count": success,
+        "failed_count": failed,
+        "blocked_count": blocked,
+        "total_count": len(rows),
+    }
+
+
+def _queued_generation_block_code(exc: Exception) -> str | None:
+    if isinstance(exc, GenerationActorError):
+        return "queued_actor_invalid"
+    if isinstance(exc, GenerationBlockedError):
+        return "generation_readiness_blocked"
+    if isinstance(exc, GenerationStaleError):
+        return "generation_stale"
+    if isinstance(exc, HTTPException):
+        if exc.status_code in {401, 403}:
+            return "generation_permission_denied"
+        if exc.status_code == 409:
+            return "generation_governance_blocked"
+    return None
+
+
+def _record_draft_job_item(
+    db: Session,
+    job_id: int,
+    item_key: str,
+    *,
+    status: str,
+    mapping_id: int,
+    reason_code: str | None = None,
+) -> None:
+    item = db.scalar(select(BackgroundJobItem).where(
+        BackgroundJobItem.background_job_id == job_id,
+        BackgroundJobItem.item_key == item_key,
+    ))
+    if item is None:
+        item = BackgroundJobItem(
+            background_job_id=job_id,
+            item_key=item_key,
+            result_summary_json={},
+        )
+        db.add(item)
+    result = {"mapping_id": mapping_id}
+    if reason_code is not None:
+        result["reason_code"] = reason_code
+    item.status = status
+    item.result_summary_json = result
+    item.error_message = reason_code
 
 
 def _job_cancelled(db: Session, job: BackgroundJob) -> bool:

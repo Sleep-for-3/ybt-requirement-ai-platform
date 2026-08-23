@@ -44,6 +44,12 @@ from app.services.governance.workflow import start_workflow
 from app.services.storage import get_storage_service
 from app.services.security import redact_content
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
+from app.services.mapping.generator_context import (
+    GenerationActorError,
+    GenerationBlockedError,
+    GenerationStaleError,
+    recover_queued_actor,
+)
 from app.services.task_queue import get_task_queue
 
 router = APIRouter(tags=["deliverables"])
@@ -409,7 +415,64 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
     if package is None or package.project_id != job.project_id: raise ValueError("Deliverable package not found")
     if package.generation_fingerprint != job.payload_summary_json.get("generation_fingerprint_hash"):
         raise ValueError("Deliverable generation fingerprint is stale")
-    items = _ensure_field_items(db, package); success = failed = blocked = skipped = 0
+    try:
+        actor = recover_queued_actor(db, job.created_by)
+        authorized_project = PermissionService(
+            db,
+            actor,
+        ).require_project_permission(package.project_id, "deliverable.generate")
+        if (
+            authorized_project.id != job.project_id
+            or authorized_project.id != package.project_id
+            or authorized_project.institution_id != job.institution_id
+            or authorized_project.institution_id != package.institution_id
+        ):
+            raise GenerationStaleError(["deliverable.project_scope"])
+    except Exception as exc:
+        reason_code = _deliverable_generation_block_code(exc)
+        item_status = "blocked" if reason_code is not None else "failed"
+        reason_code = reason_code or "queued_scope_failed"
+        _record_generation_item(
+            db,
+            job.id,
+            f"package:{package.id}",
+            item_status,
+            {"package_id": package.id, "reason_code": reason_code},
+        )
+        package.status = "draft" if item_status == "blocked" else "generation_failed"
+        result = {
+            "success_count": 0,
+            "failed_count": int(item_status == "failed"),
+            "blocked_count": int(item_status == "blocked"),
+            "skipped_count": 0,
+            "total_count": 0,
+            "lineage_count": 0,
+            "change_impact_count": 0,
+        }
+        record_audit(
+            db,
+            action="generate_deliverable",
+            resource_type="deliverable_package",
+            resource_id=package.id,
+            actor_user_id=(
+                job.created_by
+                if isinstance(job.created_by, int) and job.created_by > 0
+                else None
+            ),
+            project_id=package.project_id,
+            after={**result, "reason_code": reason_code},
+            result=item_status,
+        )
+        db.commit()
+        return result
+
+    items = _ensure_field_items(db, package)
+    # Field work items are resumable queue state and must survive a later
+    # per-generator rollback.
+    db.commit()
+    success = failed = blocked = skipped = 0
+    blocked_fields: set[int] = set()
+    failed_fields: set[int] = set()
     job.current_step = "build_lineage_records"
     lineage_records = build_lineage_records(db, package.project_id, package.target_table_id)
     job.current_step = "build_change_impact_records"
@@ -417,6 +480,8 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
     prior_items = {row.item_key: row for row in db.scalars(select(BackgroundJobItem).where(BackgroundJobItem.background_job_id == job.id)).all()}
     completed = {key for key, row in prior_items.items() if row.status == "completed"}
     for index, item in enumerate(items, 1):
+        field_item_id = item.id
+        target_field_id = item.target_field_id
         db.refresh(job)
         if job.status == "cancelled": break
         if str(item.target_field_id) in completed:
@@ -430,18 +495,44 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
             for mapping in business:
                 if mapping.final_content or mapping.business_confirm_status == "confirmed" or mapping.ai_generated_content:
                     _record_generation_item(db, job.id, f"business:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                    db.commit()
                     continue
-                asyncio.run(generate_business_draft(db, mapping.id))
-                _record_generation_item(db, job.id, f"business:{mapping.id}", "completed", {"mapping_id": mapping.id})
+                outcome = _run_deliverable_scenario_generation(
+                    db,
+                    job_id=job.id,
+                    mapping_id=mapping.id,
+                    item_key=f"business:{mapping.id}",
+                    actor=actor,
+                    authorized_project=authorized_project,
+                    permission="business.edit",
+                    generator=generate_business_draft,
+                )
+                if outcome == "blocked":
+                    blocked_fields.add(item.target_field_id)
+                elif outcome == "failed":
+                    failed_fields.add(item.target_field_id)
             db.refresh(job)
             if job.status == "cancelled": break
             job.current_step = "generate_technical_drafts"
             for mapping in technical:
                 if mapping.final_content or mapping.tech_confirm_status == "confirmed" or mapping.ai_generated_content:
                     _record_generation_item(db, job.id, f"technical:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                    db.commit()
                     continue
-                asyncio.run(generate_technical_draft(db, mapping.id))
-                _record_generation_item(db, job.id, f"technical:{mapping.id}", "completed", {"mapping_id": mapping.id})
+                outcome = _run_deliverable_scenario_generation(
+                    db,
+                    job_id=job.id,
+                    mapping_id=mapping.id,
+                    item_key=f"technical:{mapping.id}",
+                    actor=actor,
+                    authorized_project=authorized_project,
+                    permission="technical.edit",
+                    generator=generate_technical_draft,
+                )
+                if outcome == "blocked":
+                    blocked_fields.add(item.target_field_id)
+                elif outcome == "failed":
+                    failed_fields.add(item.target_field_id)
             db.refresh(job)
             if job.status == "cancelled": break
             ybt_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.project_id == package.project_id, MartToYbtMapping.target_field_id == item.target_field_id)).all())
@@ -476,15 +567,51 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
             item.business_summary = "\n".join(row.final_content or row.ai_generated_content or "待确认" for row in business); item.technical_summary = "\n".join(row.final_content or row.ai_generated_content or "待确认" for row in technical)
             item.confidence_level = "confirmed" if readiness["status"] == "approved" else "evidence_supported" if readiness["evidence_completeness"] >= .5 else "unverified"
             job_item = prior_items.get(str(item.target_field_id)) or BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), result_summary_json={})
-            job_item.status = "completed"; job_item.result_summary_json = {"readiness": item.field_status}; job_item.error_message = None; db.add(job_item); success += 1
-            if readiness["status"] != "approved": blocked += 1
-        except Exception as exc:
-            job_item = prior_items.get(str(item.target_field_id)) or BackgroundJobItem(background_job_id=job.id, item_key=str(item.target_field_id), result_summary_json={})
-            job_item.status = "failed"; job_item.result_summary_json = {}; job_item.error_message = str(exc)[:1000]; db.add(job_item); failed += 1
+            if item.target_field_id in failed_fields:
+                job_item.status = "failed"
+                job_item.result_summary_json = {"readiness": item.field_status, "reason_code": "generation_failed"}
+                job_item.error_message = "generation_failed"
+                failed += 1
+            elif item.target_field_id in blocked_fields or readiness["status"] != "approved":
+                reason_code = (
+                    "generation_blocked"
+                    if item.target_field_id in blocked_fields
+                    else "field_readiness_blocked"
+                )
+                job_item.status = "blocked"
+                job_item.result_summary_json = {"readiness": item.field_status, "reason_code": reason_code}
+                job_item.error_message = reason_code
+                blocked += 1
+            else:
+                job_item.status = "completed"
+                job_item.result_summary_json = {"readiness": item.field_status}
+                job_item.error_message = None
+                success += 1
+            db.add(job_item)
+        except Exception:
+            db.rollback()
+            package = db.get(DeliverablePackage, package.id)
+            job = db.get(BackgroundJob, job.id)
+            item = db.get(DeliverableFieldItem, field_item_id)
+            _record_generation_item(
+                db,
+                job.id,
+                str(target_field_id),
+                "failed",
+                {"reason_code": "field_generation_failed"},
+            )
+            failed += 1
         job.progress = int(index / max(len(items), 1) * 100)
+        db.commit()
     package.status = "cancelled" if job.status == "cancelled" else "generation_failed" if failed and not success else "draft"
     result = {"success_count": success, "failed_count": failed, "blocked_count": blocked, "skipped_count": skipped, "total_count": len(items), "lineage_count": len(lineage_records), "change_impact_count": len(impact_records)}
-    record_audit(db, action="generate_deliverable", resource_type="deliverable_package", resource_id=package.id, actor_user_id=job.created_by, project_id=package.project_id, after=result); db.commit(); return result
+    if failed:
+        audit_result = "partial" if success else "failed"
+    elif blocked:
+        audit_result = "partial" if success else "blocked"
+    else:
+        audit_result = "success"
+    record_audit(db, action="generate_deliverable", resource_type="deliverable_package", resource_id=package.id, actor_user_id=job.created_by, project_id=package.project_id, after=result, result=audit_result); db.commit(); return result
 
 
 @router.post("/deliverables/{package_id}/validate")
@@ -851,6 +978,76 @@ def _ensure_generation_questions(db, package: DeliverablePackage, field_id: int)
         ))
 
 
+def _run_deliverable_scenario_generation(
+    db: Session,
+    *,
+    job_id: int,
+    mapping_id: int,
+    item_key: str,
+    actor,
+    authorized_project: Project,
+    permission: str,
+    generator,
+) -> str:
+    try:
+        checked_project = PermissionService(
+            db,
+            actor,
+        ).require_project_permission(authorized_project.id, permission)
+        if (
+            checked_project.id != authorized_project.id
+            or checked_project.institution_id != authorized_project.institution_id
+        ):
+            raise GenerationStaleError(["deliverable.project_scope"])
+        asyncio.run(generator(
+            db,
+            mapping_id,
+            authorized_project=authorized_project,
+            actor=actor,
+            as_of=None,
+        ))
+        _record_generation_item(
+            db,
+            job_id,
+            item_key,
+            "completed",
+            {"mapping_id": mapping_id},
+        )
+        db.commit()
+        return "completed"
+    except Exception as exc:
+        db.rollback()
+        reason_code = _deliverable_generation_block_code(exc)
+        status = "blocked" if reason_code is not None else "failed"
+        _record_generation_item(
+            db,
+            job_id,
+            item_key,
+            status,
+            {
+                "mapping_id": mapping_id,
+                "reason_code": reason_code or "generation_failed",
+            },
+        )
+        db.commit()
+        return status
+
+
+def _deliverable_generation_block_code(exc: Exception) -> str | None:
+    if isinstance(exc, GenerationActorError):
+        return "queued_actor_invalid"
+    if isinstance(exc, GenerationBlockedError):
+        return "generation_readiness_blocked"
+    if isinstance(exc, GenerationStaleError):
+        return "generation_stale"
+    if isinstance(exc, HTTPException):
+        if exc.status_code in {401, 403}:
+            return "generation_permission_denied"
+        if exc.status_code == 409:
+            return "generation_governance_blocked"
+    return None
+
+
 def _record_generation_item(db: Session, job_id: int, item_key: str, status: str, result: dict) -> None:
     item = db.scalar(select(BackgroundJobItem).where(
         BackgroundJobItem.background_job_id == job_id,
@@ -861,7 +1058,7 @@ def _record_generation_item(db: Session, job_id: int, item_key: str, status: str
         db.add(item)
     item.status = status
     item.result_summary_json = result
-    item.error_message = None
+    item.error_message = result.get("reason_code")
 
 
 def _generation_fingerprint(db: Session, package: DeliverablePackage) -> str:

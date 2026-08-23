@@ -615,21 +615,53 @@ def test_semantic_job_keys_exclude_secrets_and_separate_targets() -> None:
 
 def test_running_batch_stops_before_next_item_when_cancelled(db_session) -> None:
     from app.api.jobs import _draft_handler
-    from app.models import BackgroundJob, ScenarioBusinessMapping
+    from app.models import (
+        BackgroundJob,
+        Project,
+        ProjectMembership,
+        ScenarioBusinessMapping,
+        User,
+    )
+
+    user = User(username="cancel-batch-user", status="active")
+    project = Project(
+        name="Cancel running batch project",
+        project_status="active",
+        confidentiality_level="internal",
+    )
+    db_session.add_all([user, project])
+    db_session.flush()
+    db_session.add(ProjectMembership(
+        project_id=project.id,
+        user_id=user.id,
+        project_role="project_manager",
+        status="active",
+    ))
 
     job = BackgroundJob(
-        institution_id=None, project_id=77, idempotency_key="cancel-running-batch",
+        institution_id=project.institution_id, project_id=project.id, idempotency_key="cancel-running-batch",
         job_type="batch_ai_generation_business", status="running", progress=1,
-        payload_summary_json={}, result_summary_json={}, created_by=1,
+        payload_summary_json={}, result_summary_json={}, created_by=user.id,
     )
     rows = [
-        ScenarioBusinessMapping(project_id=77, target_field_id=index, scenario_id=index, business_definition=f"row-{index}")
+        ScenarioBusinessMapping(project_id=project.id, target_field_id=index, scenario_id=index, business_definition=f"row-{index}")
         for index in (1, 2)
     ]
     db_session.add_all([job, *rows]); db_session.commit(); db_session.refresh(job)
     processed = []
 
-    async def cancel_after_first(db, mapping_id):
+    async def cancel_after_first(
+        db,
+        mapping_id,
+        *,
+        authorized_project,
+        actor,
+        as_of,
+    ):
+        assert authorized_project.id == project.id
+        assert actor.user_id == user.id
+        assert actor.is_legacy_system is False
+        assert as_of is None
         processed.append(mapping_id)
         current = db.get(BackgroundJob, job.id)
         current.status = "cancelled"
