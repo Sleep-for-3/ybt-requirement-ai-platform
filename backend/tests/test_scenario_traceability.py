@@ -17,6 +17,9 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    BackgroundJob,
+    BackgroundJobItem,
+    DeliverablePackage,
     ProductScenario,
     Project,
     ProjectMembership,
@@ -39,7 +42,7 @@ from app.services.mapping.generator_context import (
     GenerationBlockedError,
     GenerationStaleError,
 )
-from app.api import scenario_mappings
+from app.api import deliverables, jobs, scenario_mappings
 
 
 def test_business_generate_route_passes_exact_authorized_context_boundary(
@@ -713,6 +716,247 @@ def test_technical_generate_revalidates_actor_and_permission(
             )) is None
 
 
+def test_batch_queued_handlers_recover_exact_nonlegacy_actor_and_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "batch-context") as (db, _, fixture):
+        captures: list[tuple[str, Project, Principal, date | None]] = []
+
+        async def fake_business(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None,
+        ) -> ScenarioBusinessMapping:
+            assert session is db
+            assert mapping_id == fixture["mapping"].id
+            captures.append(("business", authorized_project, actor, as_of))
+            return fixture["mapping"]
+
+        async def fake_technical(
+            session: Session,
+            lineage_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None,
+        ) -> ScenarioTechnicalLineage:
+            assert session is db
+            assert lineage_id == fixture["lineage"].id
+            captures.append(("technical", authorized_project, actor, as_of))
+            return fixture["lineage"]
+
+        monkeypatch.setattr(jobs, "generate_business_draft", fake_business)
+        monkeypatch.setattr(jobs, "generate_technical_draft", fake_technical)
+        monkeypatch.setattr(jobs, "notify_user", lambda *args, **kwargs: None)
+        business_job = _seed_background_job(
+            db,
+            fixture,
+            "batch-business-context",
+            "batch_ai_generation_business",
+        )
+        technical_job = _seed_background_job(
+            db,
+            fixture,
+            "batch-technical-context",
+            "batch_ai_generation_technical",
+        )
+
+        business_result = jobs._business_handler(db, business_job)
+        technical_result = jobs._technical_handler(db, technical_job)
+
+        assert business_result == {
+            "success_count": 1,
+            "failed_count": 0,
+            "blocked_count": 0,
+            "total_count": 1,
+        }
+        assert technical_result == {
+            "success_count": 1,
+            "failed_count": 0,
+            "blocked_count": 0,
+            "total_count": 1,
+        }
+        assert [item[0] for item in captures] == ["business", "technical"]
+        for _, authorized_project, actor, as_of in captures:
+            assert authorized_project is fixture["project"]
+            assert actor == Principal(
+                fixture["user"].id,
+                fixture["user"].username,
+                fixture["user"].display_name,
+                False,
+            )
+            assert actor.is_legacy_system is False
+            assert as_of is None
+
+
+@pytest.mark.parametrize("invalid_creator", [None, 0, 999_999])
+def test_batch_queued_handler_blocks_invalid_creator_without_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_creator: int | None,
+) -> None:
+    with _scenario_service_session(tmp_path, f"batch-invalid-{invalid_creator}") as (db, _, fixture):
+        called = 0
+
+        async def forbidden_generator(*args, **kwargs):
+            nonlocal called
+            called += 1
+            raise AssertionError("invalid queued identity reached generator")
+
+        monkeypatch.setattr(jobs, "notify_user", lambda *args, **kwargs: None)
+        persisted = _seed_background_job(
+            db,
+            fixture,
+            f"batch-invalid-{invalid_creator}",
+            "batch_ai_generation_business",
+        )
+        queued_view = SimpleNamespace(
+            id=persisted.id,
+            project_id=persisted.project_id,
+            institution_id=persisted.institution_id,
+            created_by=invalid_creator,
+            payload_summary_json={},
+            status="running",
+        )
+
+        result = jobs._draft_handler(
+            db,
+            queued_view,
+            ScenarioBusinessMapping,
+            forbidden_generator,
+        )
+
+        assert called == 0
+        assert result == {
+            "success_count": 0,
+            "failed_count": 0,
+            "blocked_count": 1,
+            "total_count": 1,
+        }
+        item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == persisted.id,
+            BackgroundJobItem.item_key == str(fixture["mapping"].id),
+        ))
+        assert item is not None
+        assert item.status == "blocked"
+        assert item.result_summary_json == {
+            "mapping_id": fixture["mapping"].id,
+            "reason_code": "queued_actor_invalid",
+        }
+        assert item.error_message == "queued_actor_invalid"
+
+
+def test_batch_queued_handler_blocks_disabled_creator_without_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "batch-disabled") as (db, _, fixture):
+        job = _seed_background_job(
+            db,
+            fixture,
+            "batch-disabled",
+            "batch_ai_generation_technical",
+        )
+        fixture["user"].status = "disabled"
+        db.commit()
+        monkeypatch.setattr(jobs, "notify_user", lambda *args, **kwargs: None)
+
+        async def forbidden_generator(*args, **kwargs):
+            raise AssertionError("disabled queued identity reached generator")
+
+        result = jobs._draft_handler(
+            db,
+            job,
+            ScenarioTechnicalLineage,
+            forbidden_generator,
+        )
+
+        assert result["blocked_count"] == 1
+        assert result["success_count"] == result["failed_count"] == 0
+        item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+        ))
+        assert item.status == "blocked"
+        assert item.error_message == "queued_actor_invalid"
+
+
+def test_deliverable_queued_handler_passes_scoped_context_and_counts_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "deliverable-context") as (db, _, fixture):
+        package, job = _seed_deliverable_job(db, fixture, "deliverable-context")
+        captures: list[tuple[str, Project, Principal, date | None]] = []
+
+        async def fake_business(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None,
+        ) -> ScenarioBusinessMapping:
+            captures.append(("business", authorized_project, actor, as_of))
+            return session.get(ScenarioBusinessMapping, mapping_id)
+
+        async def fake_technical(
+            session: Session,
+            lineage_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None,
+        ) -> ScenarioTechnicalLineage:
+            captures.append(("technical", authorized_project, actor, as_of))
+            return session.get(ScenarioTechnicalLineage, lineage_id)
+
+        _isolate_deliverable_generation(monkeypatch)
+        monkeypatch.setattr(deliverables, "generate_business_draft", fake_business)
+        monkeypatch.setattr(deliverables, "generate_technical_draft", fake_technical)
+        result = deliverables._deliverable_generate_handler(db, job)
+
+        assert result["success_count"] == 1
+        assert result["failed_count"] == result["blocked_count"] == 0
+        assert [item[0] for item in captures] == ["business", "technical"]
+        for _, authorized_project, actor, as_of in captures:
+            assert authorized_project is fixture["project"]
+            assert actor == _principal(fixture)
+            assert actor.is_legacy_system is False
+            assert as_of is None
+        assert db.get(DeliverablePackage, package.id).status == "draft"
+
+    with _scenario_service_session(tmp_path, "deliverable-blocked") as (db, _, fixture):
+        _, job = _seed_deliverable_job(db, fixture, "deliverable-blocked")
+        fixture["lineage"].ai_generated_content = "已有技术 AI 草稿"
+        db.commit()
+
+        async def readiness_block(*args, **kwargs):
+            raise GenerationBlockedError(["CONFLICTING_AUTHORITATIVE_FACTS"])
+
+        _isolate_deliverable_generation(monkeypatch)
+        monkeypatch.setattr(deliverables, "generate_business_draft", readiness_block)
+
+        result = deliverables._deliverable_generate_handler(db, job)
+
+        assert result["failed_count"] == 0
+        assert result["blocked_count"] == 1
+        item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+            BackgroundJobItem.item_key == f"business:{fixture['mapping'].id}",
+        ))
+        assert item is not None
+        assert item.status == "blocked"
+        assert item.result_summary_json == {
+            "mapping_id": fixture["mapping"].id,
+            "reason_code": "generation_readiness_blocked",
+        }
+        assert item.error_message == "generation_readiness_blocked"
+
+
 def test_product_scenario_crud_and_project_code_uniqueness() -> None:
     with _client() as client:
         project = _post(client, "/api/projects", {"name": "场景口径项目"})
@@ -1296,4 +1540,111 @@ def _technical_lineage_state(lineage: ScenarioTechnicalLineage) -> tuple[object,
         lineage.open_questions,
         lineage.lineage_status,
         lineage.remarks,
+    )
+
+
+def _seed_background_job(
+    db: Session,
+    fixture: dict[str, object],
+    suffix: str,
+    job_type: str,
+    *,
+    payload: dict[str, object] | None = None,
+) -> BackgroundJob:
+    job = BackgroundJob(
+        institution_id=fixture["project"].institution_id,
+        project_id=fixture["project"].id,
+        idempotency_key=f"scenario-{suffix}",
+        job_type=job_type,
+        status="running",
+        progress=0,
+        payload_summary_json=payload or {},
+        result_summary_json={},
+        created_by=fixture["user"].id,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _seed_deliverable_job(
+    db: Session,
+    fixture: dict[str, object],
+    suffix: str,
+) -> tuple[DeliverablePackage, BackgroundJob]:
+    fixture["mapping"].final_content = None
+    fixture["mapping"].ai_generated_content = None
+    fixture["mapping"].business_confirm_status = "draft"
+    fixture["lineage"].final_content = None
+    fixture["lineage"].ai_generated_content = None
+    fixture["lineage"].tech_confirm_status = "draft"
+    fingerprint = "e" * 64
+    package = DeliverablePackage(
+        institution_id=fixture["project"].institution_id,
+        project_id=fixture["project"].id,
+        package_name=f"Scenario deliverable {suffix}",
+        package_type="full_delivery_package",
+        target_table_id=fixture["target_table"].id,
+        template_version_id=1,
+        status="generating",
+        generation_fingerprint=fingerprint,
+        created_by=fixture["user"].id,
+    )
+    db.add(package)
+    db.flush()
+    job = BackgroundJob(
+        institution_id=fixture["project"].institution_id,
+        project_id=fixture["project"].id,
+        idempotency_key=f"scenario-deliverable-{suffix}",
+        job_type="deliverable_generate_field_items",
+        status="running",
+        progress=0,
+        payload_summary_json={
+            "package_id": package.id,
+            "generation_fingerprint_hash": fingerprint,
+        },
+        result_summary_json={},
+        created_by=fixture["user"].id,
+    )
+    db.add(job)
+    db.flush()
+    package.generation_job_id = job.id
+    db.commit()
+    db.refresh(package)
+    db.refresh(job)
+    return package, job
+
+
+def _isolate_deliverable_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        deliverables,
+        "build_lineage_records",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        deliverables,
+        "build_change_impact_records",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        deliverables,
+        "_sync_evidence_items",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        deliverables,
+        "_ensure_generation_questions",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        deliverables,
+        "field_readiness",
+        lambda *args, **kwargs: {
+            "status": "approved",
+            "evidence_completeness": 1.0,
+            "open_question_count": 0,
+        },
     )
