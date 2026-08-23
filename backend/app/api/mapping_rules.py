@@ -44,6 +44,15 @@ def _generation_actor_http_error(exc: GenerationActorError) -> HTTPException:
     )
 
 
+def _generation_context_http_error() -> HTTPException:
+    """Return a bounded failure without reflecting Context/model input text."""
+
+    return HTTPException(
+        status_code=409,
+        detail={"code": "generation-context-failed"},
+    )
+
+
 @router.post("/mart-fields/{mart_field_id}/source-to-mart-mappings", response_model=SourceToMartMappingRead)
 def create_source_to_mart_mapping(mart_field_id: int, payload: SourceToMartMappingCreate, db: Session = Depends(get_db)) -> SourceToMartMapping:
     mart_field = _get_mart_field_or_404(db, mart_field_id)
@@ -126,6 +135,8 @@ async def generate_source_to_mart_mapping_draft(
                 "changed_fields": list(exc.changed_fields),
             },
         ) from exc
+    except ValueError as exc:
+        raise _generation_context_http_error() from exc
 
 
 @router.post("/source-to-mart-mappings/{mapping_id}/adopt-ai-draft", response_model=SourceToMartMappingRead)
@@ -259,6 +270,8 @@ async def generate_mart_to_ybt_mapping_draft(
                 "changed_fields": list(exc.changed_fields),
             },
         ) from exc
+    except ValueError as exc:
+        raise _generation_context_http_error() from exc
 
 
 @router.post("/mart-to-ybt-mappings/{mapping_id}/adopt-ai-draft", response_model=MartToYbtMappingRead)

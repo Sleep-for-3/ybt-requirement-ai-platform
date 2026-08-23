@@ -908,6 +908,9 @@ def test_generation_audit_is_redacted_and_query_delta_is_row_count_invariant(
         monkeypatch.setattr(source_to_mart_generator, "build_generation_context", fake_build)
         monkeypatch.setattr(source_to_mart_generator, "execute_runtime_chat", fake_model)
         engine = db.get_bind()
+        mapping_id = fixture["mapping"].id
+        project_id = fixture["project"].id
+        mart_field_id = fixture["mart_field"].id
         statement_count = 0
 
         def count_statement(*args, **kwargs):
@@ -916,13 +919,16 @@ def test_generation_audit_is_redacted_and_query_delta_is_row_count_invariant(
 
         def measured_generation() -> int:
             nonlocal statement_count
-            db.expire_all()
+            db.rollback()
+            db.expunge_all()
+            authorized_project = db.get(Project, project_id)
+            assert authorized_project is not None
             statement_count = 0
             asyncio.run(
                 source_to_mart_generator.generate_source_to_mart_draft(
                     db,
-                    fixture["mapping"].id,
-                    authorized_project=fixture["project"],
+                    mapping_id,
+                    authorized_project=authorized_project,
                     actor=actor,
                 )
             )
@@ -930,11 +936,12 @@ def test_generation_audit_is_redacted_and_query_delta_is_row_count_invariant(
 
         event.listen(engine, "before_cursor_execute", count_statement)
         try:
+            measured_generation()  # Exclude one-time runtime/settings cold start.
             baseline_count = measured_generation()
             db.add_all(
                 SourceToMartMapping(
-                    project_id=fixture["project"].id,
-                    mart_field_id=fixture["mart_field"].id,
+                    project_id=project_id,
+                    mart_field_id=mart_field_id,
                     mapping_name=f"unrelated-{index}",
                     mapping_status="draft",
                     business_rule=f"unrelated-rule-{index}",
@@ -956,7 +963,7 @@ def test_generation_audit_is_redacted_and_query_delta_is_row_count_invariant(
                 AuditLog.result == "success",
             )
         ).all()
-        assert len(audits) == 2
+        assert len(audits) == 3
         serialized = str(
             [
                 (audit.before_summary_json, audit.after_summary_json)
