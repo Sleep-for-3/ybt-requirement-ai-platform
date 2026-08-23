@@ -32,14 +32,15 @@ from app.models import (
     User,
     WorkflowInstance,
 )
-from app.services.storage import get_storage_service
+from app.services.auth.dependencies import Principal, get_current_principal
 from app.services.deliverables.lineage_records import build_change_impact_records
 from app.services.deliverables.workbook import render_workbook
+from app.services.storage import get_storage_service
 
 
 def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage")); get_storage_service.cache_clear()
-    with _client() as client:
+    with _client_with_factory() as (client, factory):
         project = _post(client, "/api/projects", {"name": "正式交付项目"})
         table = _post(client, "/api/target-tables", {"project_id": project["id"], "table_code": "YBT_CUSTOMER", "table_name": "客户信息"})
         field = _post(client, "/api/fields", {"project_id": project["id"], "target_table_id": table["id"], "field_code": "CERT_TYPE", "field_name": "客户证件类型", "field_type": "VARCHAR", "regulatory_description": "客户证件类型监管定义"})
@@ -89,6 +90,24 @@ def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatc
         package = _post(client, f"/api/projects/{project['id']}/deliverables", {"package_name": "客户信息正式交付包", "target_table_id": table["id"], "template_version_id": version_id})
         immutable = client.post(f"/api/deliverable-template-versions/{version_id}/configure", json=_full_template_configuration())
         assert immutable.status_code == 409
+        with factory() as db:
+            creator = User(
+                username="deliverable_lifecycle_creator",
+                display_name="交付生命周期创建人",
+                email="deliverable-lifecycle-creator@example.invalid",
+                status="active",
+            )
+            db.add(creator); db.flush()
+            db.add(ProjectMembership(
+                project_id=project["id"],
+                user_id=creator.id,
+                project_role="project_manager",
+                status="active",
+                created_by=creator.id,
+            ))
+            db.commit()
+            principal = Principal(creator.id, creator.username, creator.display_name, False)
+        app.dependency_overrides[get_current_principal] = lambda: principal
         generated = _post(client, f"/api/deliverables/{package['id']}/generate", {}); assert generated["job"]["status"] == "completed"
         workbench = client.get(f"/api/deliverables/{package['id']}").json()
         assert workbench["generation_job"]["status"] == "completed"
