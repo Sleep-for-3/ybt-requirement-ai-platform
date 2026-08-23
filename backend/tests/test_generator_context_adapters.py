@@ -5,13 +5,15 @@ import inspect
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AuditLog,
     MartField,
     MartTable,
     MartToYbtMapping,
+    ModelCallLog,
     ProductScenario,
     Project,
     ScenarioBusinessMapping,
@@ -32,6 +34,7 @@ from app.schemas.regulatory_context import (
 )
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
+from app.services.llm.prompt_runtime import PromptRuntime, prepare_model_input
 from app.services.mapping.context_adapters import (
     MartToYbtContextAdapter,
     ScenarioBusinessContextAdapter,
@@ -444,6 +447,89 @@ def test_all_four_task_projections_are_distinct_and_mart_uses_approved_context_r
     assert "__dict__" not in inspect.getsource(MartToYbtContextAdapter)
     assert "__dict__" not in inspect.getsource(ScenarioBusinessContextAdapter)
     assert "__dict__" not in inspect.getsource(ScenarioTechnicalContextAdapter)
+
+
+def test_confidential_four_projection_matrix_denies_external_runtime_and_redacts_audit(
+    db_session: Session,
+) -> None:
+    fixture = _seed_all_generator_tasks(db_session, suffix="CONFIDENTIAL")
+    project = fixture["project"]
+    project.confidentiality_level = "restricted"
+    db_session.commit()
+    actor = Principal(None, "legacy-system", "Legacy", True)
+    specifications = (
+        (
+            snapshot_source_to_mart_generation(fixture["source_task"], project),
+            SourceToMartContextAdapter().project,
+        ),
+        (
+            snapshot_mart_to_ybt_generation(fixture["mart_task"], project),
+            MartToYbtContextAdapter().project,
+        ),
+        (
+            snapshot_scenario_business_generation(fixture["business_task"], project),
+            ScenarioBusinessContextAdapter().project,
+        ),
+        (
+            snapshot_scenario_technical_generation(fixture["technical_task"], project),
+            ScenarioTechnicalContextAdapter().project,
+        ),
+    )
+    projections = [
+        build_generation_context(
+            db_session,
+            snapshot=snapshot,
+            actor=actor,
+            authorized_project=project,
+            explicit_as_of=AS_OF,
+            adapter=adapter,
+        ).projection
+        for snapshot, adapter in specifications
+    ]
+    runtime = PromptRuntime(
+        prompt_key="qualification-external",
+        version=1,
+        system_prompt="qualification",
+        user_template="{evidence}",
+        model_profile_id=None,
+        provider_type="openai-compatible",
+        base_url="https://example.invalid/v1",
+        model_name="qualification-only",
+        api_key_env_name=None,
+        local_only=False,
+        config={},
+    )
+    raw_markers: list[str] = []
+
+    for projection in projections:
+        assert "restricted" in projection.confidentiality_levels
+        marker = f"RAW_RESTRICTED_{projection.task_type.upper()}_BODY"
+        raw_markers.append(marker)
+        with pytest.raises(ValueError, match="restricted"):
+            prepare_model_input(
+                runtime,
+                f"{projection.prompt_text}\n{marker}",
+                projection.confidentiality_levels,
+                db=db_session,
+                project_id=project.id,
+            )
+
+    audits = db_session.scalars(
+        select(AuditLog).where(
+            AuditLog.project_id == project.id,
+            AuditLog.action == "external_model_data_denied",
+        )
+    ).all()
+    assert len(audits) == 4
+    assert all(audit.result == "denied" for audit in audits)
+    serialized_audits = str([
+        (audit.before_summary_json, audit.after_summary_json)
+        for audit in audits
+    ])
+    assert all(marker not in serialized_audits for marker in raw_markers)
+    assert db_session.scalar(
+        select(ModelCallLog.id).where(ModelCallLog.project_id == project.id)
+    ) is None
 
 
 def test_question_merge_preserves_human_bytes_and_is_stable_deduplicated_and_idempotent() -> None:
