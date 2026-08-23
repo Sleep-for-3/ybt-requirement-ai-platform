@@ -1,80 +1,250 @@
+"""Governed Source-to-Mart draft generation.
+
+Shared facts cross the model boundary only through the single immutable
+``RegulatoryContext`` projection built by :mod:`generator_context`. The
+database row remains optimistic: no task lock is held while Context or the
+model is running, and a fresh short transaction reauthorizes and compares the
+canonical local snapshot before applying any output.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import MappingEvidenceReference, MartField, MartTable, SourceField, SourceTable, SourceToMartMapping
-from app.services.llm.prompt_runtime import execute_runtime_chat,get_prompt_runtime,prepare_model_input
+from app.models import Project, SourceToMartMapping
+from app.services.auth.dependencies import Principal
+from app.services.auth.permission_service import PermissionService
+from app.services.governance.audit import record_audit
+from app.services.llm.prompt_runtime import (
+    execute_runtime_chat,
+    get_prompt_runtime,
+    prepare_model_input,
+)
 from app.services.llm.structured_outputs import SourceToMartOutput
-from app.services.retrieval import HybridRetriever
+from app.services.mapping.context_adapters import (
+    GenerationOutputPolicy,
+    SourceToMartContextAdapter,
+    apply_generation_output_policy,
+    redacted_generation_output_trace,
+)
+from app.services.mapping.generator_context import (
+    GenerationBlockedError,
+    GenerationContextEnvelope,
+    GenerationStaleError,
+    build_generation_context,
+    compare_generation_snapshots,
+    snapshot_source_to_mart_generation,
+    validate_generation_actor,
+)
 
 
-async def generate_source_to_mart_draft(db: Session, mapping_id: int) -> SourceToMartMapping:
+_CLASSIFICATION_RANK = {
+    "public": 0,
+    "internal": 1,
+    "confidential": 2,
+    "restricted": 3,
+}
+
+
+async def generate_source_to_mart_draft(
+    db: Session,
+    mapping_id: int,
+    *,
+    authorized_project: Project,
+    actor: Principal,
+    as_of: date | None = None,
+    today_provider: Callable[[], date] = date.today,
+) -> SourceToMartMapping:
+    """Generate one Source-to-Mart AI draft through governed Context only."""
+
     mapping = db.get(SourceToMartMapping, mapping_id)
     if mapping is None:
         raise ValueError("Source-to-mart mapping not found")
+    if mapping.project_id != authorized_project.id:
+        raise GenerationStaleError(["task.project_id"])
 
-    mart_field = db.get(MartField, mapping.mart_field_id)
-    mart_table = db.get(MartTable, mart_field.mart_table_id) if mart_field else None
-    evidence_rows = db.scalars(
-        select(MappingEvidenceReference)
-        .where(
-            MappingEvidenceReference.mapping_type == "source_to_mart",
-            MappingEvidenceReference.mapping_id == mapping.id,
+    validate_generation_actor(db, actor)
+    snapshot = snapshot_source_to_mart_generation(mapping, authorized_project)
+    envelope = build_generation_context(
+        db,
+        snapshot=snapshot,
+        authorized_project=authorized_project,
+        actor=actor,
+        explicit_as_of=as_of,
+        adapter=SourceToMartContextAdapter().project,
+        today_provider=today_provider,
+    )
+    if not envelope.projection.readiness.can_generate:
+        _record_generation_audit(
+            db,
+            envelope,
+            action="generate_source_to_mart_blocked",
+            result="blocked",
+            actor=actor,
+            extra={
+                "blocking_reasons": list(
+                    envelope.projection.readiness.blocking_reasons
+                ),
+            },
         )
-        .order_by(MappingEvidenceReference.id)
-    ).all()
-    source_candidates = _source_candidates(db, mapping.project_id)
+        db.commit()
+        raise GenerationBlockedError(
+            list(envelope.projection.readiness.blocking_reasons)
+        )
 
-    user_prompt = f"""
-监管集市字段:
-- 集市表: {mart_table.table_code if mart_table else "-"} / {mart_table.table_name if mart_table else "-"}
-- 集市字段: {mart_field.field_code if mart_field else "-"} / {mart_field.field_name if mart_field else "-"}
-- 字段类型: {mart_field.field_type if mart_field else "-"}
-- 设计说明: {mart_field.field_comment if mart_field else "-"}
+    runtime = get_prompt_runtime(db, "source_to_mart_mapping")
+    model_input = prepare_model_input(
+        runtime,
+        envelope.projection.prompt_text,
+        envelope.projection.confidentiality_levels,
+        db=db,
+        project_id=snapshot.project.id,
+    )
+    output = await execute_runtime_chat(
+        db,
+        snapshot.project.id,
+        runtime,
+        model_input,
+        SourceToMartOutput,
+        confidentiality=_highest_confidentiality(
+            envelope.projection.confidentiality_levels
+        ),
+        retrieval_log_id=_first_retrieval_log_id(
+            envelope.trace.retrieval_log_ids
+        ),
+    )
 
-当前人工信息:
-- 来源系统摘要: {mapping.source_system_summary or "-"}
-- 来源表摘要: {mapping.source_tables_summary or "-"}
-- 来源字段摘要: {mapping.source_fields_summary or "-"}
-- 业务规则: {mapping.business_rule or "-"}
-- 过滤条件: {mapping.filter_condition or "-"}
-- 关联条件: {mapping.join_condition or "-"}
-- 优先级: {mapping.priority_rule or "-"}
-- 多系统合并: {mapping.merge_rule or "-"}
-
-候选源字段:
-{source_candidates}
-
-证据:
-{_evidence_text(evidence_rows)}
-"""
-    runtime=get_prompt_runtime(db,"source_to_mart_mapping");retrieval_log,knowledge=HybridRetriever(db).search(mapping.project_id,f"{mart_field.field_name if mart_field else ''} {mapping.source_fields_summary or ''}",None,None,None,10);user_prompt+=f"\n混合知识证据:\n"+"\n".join(f"[{item['knowledge_unit_id']}] {item['content']}" for item in knowledge);model_input=prepare_model_input(runtime,user_prompt,[item["confidentiality_level"] for item in knowledge],db=db,project_id=mapping.project_id);output = await execute_runtime_chat(db,mapping.project_id,runtime,model_input,SourceToMartOutput,retrieval_log_id=retrieval_log.id)
-    _apply_output(mapping, output)
+    # Persist the model attempt independently, then discard every ORM value
+    # retained across Context/model work before opening the authoritative write.
     db.commit()
-    db.refresh(mapping)
-    return mapping
+    db.expire_all()
+
+    stale_error: GenerationStaleError | None = None
+    result: SourceToMartMapping | None = None
+    with db.begin():
+        validate_generation_actor(db, actor)
+        reauthorized = PermissionService(db, actor).require_project_permission(
+            snapshot.project.id,
+            "technical.edit",
+        )
+        locked_project = db.scalar(
+            select(Project)
+            .where(Project.id == snapshot.project.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        locked_mapping = db.scalar(
+            select(SourceToMartMapping)
+            .where(SourceToMartMapping.id == snapshot.task.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+        changed_fields: list[str]
+        if locked_project is None or locked_mapping is None:
+            changed_fields = [
+                "project.deleted" if locked_project is None else "task.deleted"
+            ]
+        elif reauthorized.id != locked_project.id:
+            changed_fields = ["project.authorization_scope"]
+        elif locked_mapping.project_id != locked_project.id:
+            changed_fields = ["task.project_id"]
+        else:
+            current_snapshot = snapshot_source_to_mart_generation(
+                locked_mapping,
+                locked_project,
+            )
+            changed_fields = compare_generation_snapshots(
+                snapshot,
+                current_snapshot,
+            )
+
+        if changed_fields:
+            stale_error = GenerationStaleError(changed_fields)
+            _record_generation_audit(
+                db,
+                envelope,
+                action="generate_source_to_mart_stale",
+                result="stale",
+                actor=actor,
+                extra={"changed_fields": changed_fields},
+            )
+        else:
+            policy = apply_generation_output_policy(
+                envelope.projection,
+                output,
+                existing_human_questions=locked_mapping.open_questions,
+            )
+            _apply_output(locked_mapping, policy)
+            output_trace = redacted_generation_output_trace(policy)
+            _record_generation_audit(
+                db,
+                envelope,
+                action="generate_source_to_mart",
+                result="success",
+                actor=actor,
+                extra={"output": output_trace.model_dump(mode="json")},
+            )
+            result = locked_mapping
+
+    if stale_error is not None:
+        raise stale_error
+    if result is None:  # pragma: no cover - defensive invariant
+        raise RuntimeError("Source-to-mart generation produced no write result")
+    db.refresh(result)
+    return result
 
 
-def _apply_output(mapping: SourceToMartMapping, output: dict) -> None:
-    mapping.source_system_summary = output.get("source_system_summary") or mapping.source_system_summary
-    mapping.source_tables_summary = output.get("source_tables_summary") or mapping.source_tables_summary
-    mapping.source_fields_summary = output.get("source_fields_summary") or mapping.source_fields_summary
-    mapping.business_rule = output.get("business_rule") or output.get("business_to_mart_rule") or mapping.business_rule
-    mapping.filter_condition = output.get("filter_condition") or mapping.filter_condition
+def _apply_output(
+    mapping: SourceToMartMapping,
+    policy: GenerationOutputPolicy,
+) -> None:
+    output = policy.output_fields
+    mapping.source_system_summary = (
+        output.get("source_system_summary") or mapping.source_system_summary
+    )
+    mapping.source_tables_summary = (
+        output.get("source_tables_summary") or mapping.source_tables_summary
+    )
+    mapping.source_fields_summary = (
+        output.get("source_fields_summary") or mapping.source_fields_summary
+    )
+    mapping.business_rule = (
+        output.get("business_rule")
+        or output.get("business_to_mart_rule")
+        or mapping.business_rule
+    )
+    mapping.filter_condition = (
+        output.get("filter_condition") or mapping.filter_condition
+    )
     mapping.join_condition = output.get("join_condition") or mapping.join_condition
     mapping.priority_rule = output.get("priority_rule") or mapping.priority_rule
     mapping.merge_rule = output.get("merge_rule") or mapping.merge_rule
-    mapping.code_mapping_rule = output.get("code_mapping_rule") or mapping.code_mapping_rule
-    mapping.null_handling_rule = output.get("null_handling_rule") or mapping.null_handling_rule
+    mapping.code_mapping_rule = (
+        output.get("code_mapping_rule") or mapping.code_mapping_rule
+    )
+    mapping.null_handling_rule = (
+        output.get("null_handling_rule") or mapping.null_handling_rule
+    )
     mapping.exception_rule = output.get("exception_rule") or mapping.exception_rule
-    mapping.quality_check_rule = output.get("quality_check_rule") or mapping.quality_check_rule
-    mapping.open_questions = _questions_text(output.get("open_questions")) or mapping.open_questions
-    mapping.confidence_level = output.get("confidence_level") or mapping.confidence_level
+    mapping.quality_check_rule = (
+        output.get("quality_check_rule") or mapping.quality_check_rule
+    )
+    mapping.open_questions = policy.merged_questions.text
+    mapping.confidence_level = policy.confidence_level
     mapping.ai_generated_content = _business_final_content(mapping, output)
 
 
-def _business_final_content(mapping: SourceToMartMapping, output: dict) -> str:
+def _business_final_content(
+    mapping: SourceToMartMapping,
+    output: Mapping[str, object],
+) -> str:
     draft = output.get("final_content_draft")
-    if draft and not _looks_like_raw_sql(draft):
+    if isinstance(draft, str) and draft and not _looks_like_raw_sql(draft):
         return f"业务系统到监管集市口径：\n{draft}"
     lines = [
         "业务系统到监管集市口径：",
@@ -95,39 +265,43 @@ def _business_final_content(mapping: SourceToMartMapping, output: dict) -> str:
     return "\n".join(lines)
 
 
-def _source_candidates(db: Session, project_id: int) -> str:
-    rows = db.execute(
-        select(SourceField, SourceTable)
-        .join(SourceTable, SourceTable.id == SourceField.source_table_id)
-        .where(SourceField.project_id == project_id)
-        .limit(50)
-    ).all()
-    if not rows:
-        return "暂无候选源字段。"
-    return "\n".join(
-        f"- {table.table_code}.{field.field_code} / {field.field_name} / {field.field_type or '-'}"
-        for field, table in rows
+def _record_generation_audit(
+    db: Session,
+    envelope: GenerationContextEnvelope,
+    *,
+    action: str,
+    result: str,
+    actor: Principal,
+    extra: Mapping[str, object] | None = None,
+) -> None:
+    after = envelope.trace.model_dump(mode="json")
+    after.update(dict(extra or {}))
+    record_audit(
+        db,
+        action=action,
+        resource_type="source_to_mart_mapping",
+        resource_id=envelope.snapshot.task.id,
+        actor_user_id=actor.user_id,
+        institution_id=envelope.snapshot.project.institution_id,
+        project_id=envelope.snapshot.project.id,
+        after=after,
+        result=result,
     )
 
 
-def _evidence_text(evidence_rows: list[MappingEvidenceReference]) -> str:
-    if not evidence_rows:
-        return "暂无绑定证据，生成内容必须标记待确认。"
-    return "\n".join(
-        f"- {item.evidence_type} / {item.source_name} / {item.location_text or '-'}: "
-        f"{item.evidence_summary or item.quoted_content or '-'}"
-        for item in evidence_rows
+def _first_retrieval_log_id(values: list[int]) -> int | None:
+    return values[0] if values else None
+
+
+def _highest_confidentiality(levels: list[str]) -> str:
+    return max(
+        levels or ["internal"],
+        key=lambda value: _CLASSIFICATION_RANK.get(value, 1),
     )
-
-
-def _questions_text(value: object) -> str | None:
-    if isinstance(value, list):
-        return "\n".join(str(item) for item in value)
-    if isinstance(value, str):
-        return value
-    return None
 
 
 def _looks_like_raw_sql(text: str) -> bool:
     stripped = text.strip().lower()
-    return stripped.startswith(("select ", "with ")) and (" from " in stripped or "\nfrom " in stripped)
+    return stripped.startswith(("select ", "with ")) and (
+        " from " in stripped or "\nfrom " in stripped
+    )

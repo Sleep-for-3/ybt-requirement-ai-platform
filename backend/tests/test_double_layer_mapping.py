@@ -302,7 +302,6 @@ def test_source_to_mart_service_uses_one_context_and_governed_output_policy(
 ) -> None:
     with _source_service_session(tmp_path, "context") as (db, _, fixture):
         actor = _principal(fixture)
-        envelope = _source_context_envelope(can_generate=True)
         calls = {"context": 0, "model": 0}
 
         def fake_build(*args, **kwargs):
@@ -310,7 +309,10 @@ def test_source_to_mart_service_uses_one_context_and_governed_output_policy(
             assert kwargs["authorized_project"] is fixture["project"]
             assert kwargs["actor"] is actor
             assert kwargs["explicit_as_of"] == date(2026, 6, 30)
-            return envelope
+            return _source_context_envelope(
+                can_generate=True,
+                snapshot=kwargs["snapshot"],
+            )
 
         async def fake_model(*args, **kwargs):
             calls["model"] += 1
@@ -367,7 +369,10 @@ def test_source_to_mart_blocked_readiness_never_calls_model_or_mutates_task(
         monkeypatch.setattr(
             source_to_mart_generator,
             "build_generation_context",
-            lambda *args, **kwargs: _source_context_envelope(can_generate=False),
+            lambda *args, **kwargs: _source_context_envelope(
+                can_generate=False,
+                snapshot=kwargs["snapshot"],
+            ),
         )
 
         async def forbidden_model(*args, **kwargs):
@@ -396,7 +401,10 @@ def test_source_to_mart_rejects_concurrent_snapshot_change_without_draft(
         monkeypatch.setattr(
             source_to_mart_generator,
             "build_generation_context",
-            lambda *args, **kwargs: _source_context_envelope(can_generate=True),
+            lambda *args, **kwargs: _source_context_envelope(
+                can_generate=True,
+                snapshot=kwargs["snapshot"],
+            ),
         )
 
         async def mutate_while_model_runs(*args, **kwargs):
@@ -456,7 +464,10 @@ def test_source_to_mart_revalidates_actor_after_model(
         monkeypatch.setattr(
             source_to_mart_generator,
             "build_generation_context",
-            lambda *args, **kwargs: _source_context_envelope(can_generate=True),
+            lambda *args, **kwargs: _source_context_envelope(
+                can_generate=True,
+                snapshot=kwargs["snapshot"],
+            ),
         )
 
         async def disable_actor(*args, **kwargs):
@@ -594,7 +605,11 @@ def _principal(fixture: dict[str, object]) -> Principal:
     return Principal(user.id, user.username, user.display_name, False)
 
 
-def _source_context_envelope(*, can_generate: bool) -> SimpleNamespace:
+def _source_context_envelope(
+    *,
+    can_generate: bool,
+    snapshot: object,
+) -> SimpleNamespace:
     blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
     context_questions = [
         SimpleNamespace(
@@ -633,8 +648,12 @@ def _source_context_envelope(*, can_generate: bool) -> SimpleNamespace:
         "prompt_projection_truncated": False,
     }
     return SimpleNamespace(
+        snapshot=snapshot,
         projection=projection,
-        trace=SimpleNamespace(model_dump=lambda **kwargs: dict(trace_values)),
+        trace=SimpleNamespace(
+            retrieval_log_ids=[101],
+            model_dump=lambda **kwargs: dict(trace_values),
+        ),
     )
 
 
