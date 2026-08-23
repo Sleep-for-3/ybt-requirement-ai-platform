@@ -1,13 +1,37 @@
+import asyncio
+import inspect
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api import mapping_rules
 from app.core.database import Base, get_db
 from app.main import app
+from app.models import (
+    AuditLog,
+    MartField,
+    MartTable,
+    Project,
+    ProjectMembership,
+    SourceToMartMapping,
+    User,
+)
+from app.services.auth.dependencies import Principal
+from app.services.mapping import source_to_mart_generator
+from app.services.mapping.generator_context import (
+    GenerationActorError,
+    GenerationBlockedError,
+    GenerationStaleError,
+)
 
 
 def test_double_layer_mapping_end_to_end_api() -> None:
@@ -202,6 +226,261 @@ def test_double_layer_mapping_end_to_end_api() -> None:
             assert "审核状态" in markdown
 
 
+def test_source_to_mart_route_passes_exact_authorized_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "route") as (db, _, fixture):
+        actor = _principal(fixture)
+        captured: dict[str, object] = {}
+
+        async def fake_generate(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None = None,
+            today_provider=date.today,
+        ) -> SourceToMartMapping:
+            captured.update(
+                session=session,
+                mapping_id=mapping_id,
+                authorized_project=authorized_project,
+                actor=actor,
+                as_of=as_of,
+                today_provider=today_provider,
+            )
+            return fixture["mapping"]
+
+        monkeypatch.setattr(mapping_rules, "generate_source_to_mart_draft", fake_generate)
+        selected_date = date(2026, 6, 30)
+        result = asyncio.run(
+            mapping_rules.generate_source_to_mart_mapping_draft(
+                fixture["mapping"].id,
+                principal=actor,
+                as_of=selected_date,
+                db=db,
+            )
+        )
+
+        assert result.id == fixture["mapping"].id
+        assert captured["actor"] is actor
+        assert captured["authorized_project"] is fixture["project"]
+        assert captured["as_of"] == selected_date
+
+        foreign = User(username="foreign-route-user", status="active")
+        db.add(foreign)
+        db.commit()
+        foreign_actor = Principal(foreign.id, foreign.username, foreign.display_name, False)
+        with pytest.raises(HTTPException, match="Project not found"):
+            asyncio.run(
+                mapping_rules.generate_source_to_mart_mapping_draft(
+                    fixture["mapping"].id,
+                    principal=foreign_actor,
+                    as_of=None,
+                    db=db,
+                )
+            )
+        assert captured["actor"] is actor
+
+        with pytest.raises(HTTPException) as invalid:
+            asyncio.run(
+                mapping_rules.generate_source_to_mart_mapping_draft(
+                    fixture["mapping"].id,
+                    principal=Principal(None, "falsey", None, False),
+                    as_of=None,
+                    db=db,
+                )
+            )
+        assert invalid.value.status_code in {401, 403}
+
+
+def test_source_to_mart_service_uses_one_context_and_governed_output_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "context") as (db, _, fixture):
+        actor = _principal(fixture)
+        envelope = _source_context_envelope(can_generate=True)
+        calls = {"context": 0, "model": 0}
+
+        def fake_build(*args, **kwargs):
+            calls["context"] += 1
+            assert kwargs["authorized_project"] is fixture["project"]
+            assert kwargs["actor"] is actor
+            assert kwargs["explicit_as_of"] == date(2026, 6, 30)
+            return envelope
+
+        async def fake_model(*args, **kwargs):
+            calls["model"] += 1
+            assert args[2].prompt_key == "source_to_mart_mapping"
+            assert args[4].__name__ == "SourceToMartOutput"
+            return {
+                "source_system_summary": "AI 核心系统",
+                "business_rule": "受治理的 AI 业务规则",
+                "open_questions": ["模型问题"],
+                "confidence_level": "high",
+                "final_content_draft": "受治理的业务草稿",
+                "mapping_status": "approved",
+            }
+
+        monkeypatch.setattr(source_to_mart_generator, "build_generation_context", fake_build)
+        monkeypatch.setattr(source_to_mart_generator, "execute_runtime_chat", fake_model)
+        original_final = fixture["mapping"].final_content
+        original_status = fixture["mapping"].mapping_status
+
+        generated = asyncio.run(
+            source_to_mart_generator.generate_source_to_mart_draft(
+                db,
+                fixture["mapping"].id,
+                authorized_project=fixture["project"],
+                actor=actor,
+                as_of=date(2026, 6, 30),
+            )
+        )
+
+        assert calls == {"context": 1, "model": 1}
+        assert generated.final_content == original_final
+        assert generated.mapping_status == original_status
+        assert generated.confidence_level == "low"
+        assert generated.open_questions.startswith("人工问题保持原样")
+        assert "[CTX:MISSING_SOURCE_MAPPING]" in generated.open_questions
+        assert "[AI] 模型问题" in generated.open_questions
+        assert generated.ai_generated_content == "业务系统到监管集市口径：\n受治理的业务草稿"
+
+        source = inspect.getsource(source_to_mart_generator)
+        for forbidden in (
+            "HybridRetriever",
+            "MappingEvidenceReference",
+            "_source_candidates",
+            "_evidence_text",
+        ):
+            assert forbidden not in source
+
+
+def test_source_to_mart_blocked_readiness_never_calls_model_or_mutates_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "blocked") as (db, _, fixture):
+        monkeypatch.setattr(
+            source_to_mart_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _source_context_envelope(can_generate=False),
+        )
+
+        async def forbidden_model(*args, **kwargs):
+            raise AssertionError("blocked readiness reached the model")
+
+        monkeypatch.setattr(source_to_mart_generator, "execute_runtime_chat", forbidden_model)
+        before = _mapping_state(fixture["mapping"])
+        with pytest.raises(GenerationBlockedError, match="CONFLICTING_AUTHORITATIVE_FACTS"):
+            asyncio.run(
+                source_to_mart_generator.generate_source_to_mart_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        db.expire_all()
+        assert _mapping_state(db.get(SourceToMartMapping, fixture["mapping"].id)) == before
+
+
+def test_source_to_mart_rejects_concurrent_snapshot_change_without_draft(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "stale") as (db, factory, fixture):
+        monkeypatch.setattr(
+            source_to_mart_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _source_context_envelope(can_generate=True),
+        )
+
+        async def mutate_while_model_runs(*args, **kwargs):
+            with factory() as concurrent:
+                current = concurrent.get(SourceToMartMapping, fixture["mapping"].id)
+                current.final_content = "并发人工最终内容"
+                concurrent.commit()
+            return {
+                "business_rule": "不应落库的模型规则",
+                "confidence_level": "high",
+                "open_questions": ["不应落库的问题"],
+            }
+
+        monkeypatch.setattr(
+            source_to_mart_generator,
+            "execute_runtime_chat",
+            mutate_while_model_runs,
+        )
+        original_draft = fixture["mapping"].ai_generated_content
+        with pytest.raises(GenerationStaleError) as stale:
+            asyncio.run(
+                source_to_mart_generator.generate_source_to_mart_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        assert "task.final_content" in stale.value.changed_fields
+
+        with factory() as verify:
+            current = verify.get(SourceToMartMapping, fixture["mapping"].id)
+            assert current.final_content == "并发人工最终内容"
+            assert current.ai_generated_content == original_draft
+            stale_audit = verify.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == "generate_source_to_mart_stale",
+                    AuditLog.resource_id == str(fixture["mapping"].id),
+                )
+            )
+            assert stale_audit is not None
+            assert stale_audit.result == "stale"
+            assert "task.final_content" in stale_audit.after_summary_json["changed_fields"]
+            assert verify.scalar(
+                select(AuditLog.id).where(
+                    AuditLog.action == "generate_source_to_mart",
+                    AuditLog.result == "success",
+                )
+            ) is None
+
+
+def test_source_to_mart_revalidates_actor_after_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "actor") as (db, factory, fixture):
+        monkeypatch.setattr(
+            source_to_mart_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: _source_context_envelope(can_generate=True),
+        )
+
+        async def disable_actor(*args, **kwargs):
+            with factory() as concurrent:
+                current = concurrent.get(User, fixture["user"].id)
+                current.status = "disabled"
+                concurrent.commit()
+            return {"business_rule": "不应落库", "confidence_level": "high"}
+
+        monkeypatch.setattr(source_to_mart_generator, "execute_runtime_chat", disable_actor)
+        with pytest.raises(GenerationActorError, match="active User"):
+            asyncio.run(
+                source_to_mart_generator.generate_source_to_mart_draft(
+                    db,
+                    fixture["mapping"].id,
+                    authorized_project=fixture["project"],
+                    actor=_principal(fixture),
+                )
+            )
+        with factory() as verify:
+            current = verify.get(SourceToMartMapping, fixture["mapping"].id)
+            assert current.ai_generated_content == "旧 AI 草稿"
+
+
 @contextmanager
 def _client() -> Iterator[TestClient]:
     engine = create_engine(
@@ -226,6 +505,149 @@ def _client() -> Iterator[TestClient]:
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)
+
+
+@contextmanager
+def _source_service_session(
+    tmp_path: Path,
+    suffix: str,
+) -> Iterator[tuple[Session, sessionmaker, dict[str, object]]]:
+    database_path = tmp_path / f"source-to-mart-{suffix}.sqlite3"
+    engine = create_engine(f"sqlite:///{database_path}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    db = factory()
+    fixture = _seed_source_mapping(db, suffix)
+    try:
+        yield db, factory, fixture
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def _seed_source_mapping(db: Session, suffix: str) -> dict[str, object]:
+    user = User(
+        username=f"source-generator-{suffix}",
+        display_name=f"Source Generator {suffix}",
+        status="active",
+    )
+    project = Project(
+        name=f"Source generator {suffix}",
+        project_status="active",
+        confidentiality_level="internal",
+        governance_workflow_enabled=True,
+    )
+    db.add_all([user, project])
+    db.flush()
+    membership = ProjectMembership(
+        project_id=project.id,
+        user_id=user.id,
+        project_role="technical_analyst",
+        status="active",
+    )
+    mart_table = MartTable(
+        project_id=project.id,
+        table_code=f"MART_{suffix.upper()}",
+        table_name="监管集市",
+    )
+    db.add_all([membership, mart_table])
+    db.flush()
+    mart_field = MartField(
+        project_id=project.id,
+        mart_table_id=mart_table.id,
+        field_code=f"FIELD_{suffix.upper()}",
+        field_name="监管字段",
+        field_type="varchar(64)",
+    )
+    db.add(mart_field)
+    db.flush()
+    mapping = SourceToMartMapping(
+        project_id=project.id,
+        mart_field_id=mart_field.id,
+        mapping_name=f"Source-to-Mart {suffix}",
+        mapping_status="draft",
+        source_system_summary="人工核心系统",
+        business_rule="人工原规则",
+        open_questions="人工问题保持原样",
+        ai_generated_content="旧 AI 草稿",
+        final_content="人工最终内容",
+        confidence_level="medium",
+        lineage_status="not_linked",
+    )
+    db.add(mapping)
+    db.commit()
+    for row in (user, project, membership, mart_table, mart_field, mapping):
+        db.refresh(row)
+    return {
+        "user": user,
+        "project": project,
+        "membership": membership,
+        "mart_table": mart_table,
+        "mart_field": mart_field,
+        "mapping": mapping,
+    }
+
+
+def _principal(fixture: dict[str, object]) -> Principal:
+    user = fixture["user"]
+    return Principal(user.id, user.username, user.display_name, False)
+
+
+def _source_context_envelope(*, can_generate: bool) -> SimpleNamespace:
+    blocking = [] if can_generate else ["CONFLICTING_AUTHORITATIVE_FACTS"]
+    context_questions = [
+        SimpleNamespace(
+            question_code="MISSING_SOURCE_MAPPING",
+            question_text="请确认来源映射。",
+            priority="high",
+            target_type="source_to_mart",
+            target_id=1,
+            resolution_state="open",
+        )
+    ]
+    projection = SimpleNamespace(
+        task_type="source_to_mart",
+        prompt_text="受治理的 Source-to-Mart Context 投影",
+        confidentiality_levels=["internal"],
+        context_questions=context_questions,
+        readiness=SimpleNamespace(
+            can_generate=can_generate,
+            blocking_reasons=blocking,
+            warnings=["MISSING_SOURCE_MAPPING"],
+            confidence_cap="low",
+        ),
+    )
+    trace_values = {
+        "context_schema_version": "1.0",
+        "context_built_at": "2026-06-30T00:00:00+00:00",
+        "resolved_as_of": "2026-06-30",
+        "as_of_source": "explicit",
+        "context_fact_count": 1,
+        "context_conflict_codes": blocking,
+        "context_question_codes": ["MISSING_SOURCE_MAPPING"],
+        "retrieval_log_ids": [101],
+        "readiness_can_generate": can_generate,
+        "readiness_confidence_cap": "low",
+        "prompt_projection_hash": "a" * 64,
+        "prompt_projection_truncated": False,
+    }
+    return SimpleNamespace(
+        projection=projection,
+        trace=SimpleNamespace(model_dump=lambda **kwargs: dict(trace_values)),
+    )
+
+
+def _mapping_state(mapping: SourceToMartMapping) -> tuple[object, ...]:
+    return (
+        mapping.source_system_summary,
+        mapping.business_rule,
+        mapping.open_questions,
+        mapping.ai_generated_content,
+        mapping.final_content,
+        mapping.confidence_level,
+        mapping.mapping_status,
+    )
 
 
 def _post(client: TestClient, path: str, payload: dict) -> dict:
