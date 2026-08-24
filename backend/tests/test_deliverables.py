@@ -1,8 +1,13 @@
+import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
@@ -21,6 +26,7 @@ from app.models import (
     MartField,
     MartTable,
     MartToYbtMapping,
+    Project,
     ProjectMembership,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
@@ -33,9 +39,190 @@ from app.models import (
     WorkflowInstance,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
+from app.api import deliverables
 from app.services.deliverables.lineage_records import build_change_impact_records
 from app.services.deliverables.workbook import render_workbook
 from app.services.storage import get_storage_service
+
+
+AS_OF = date(2026, 6, 30)
+
+
+def test_direct_source_and_mart_compile_use_governed_generators_and_keep_response_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "Governed direct compile"})
+        table = _post(client, "/api/target-tables", {
+            "project_id": project["id"],
+            "table_code": "YBT_COMPILE",
+            "table_name": "编译目标表",
+        })
+        field = _post(client, "/api/fields", {
+            "project_id": project["id"],
+            "target_table_id": table["id"],
+            "field_code": "COMPILE_FIELD",
+            "field_name": "编译字段",
+        })
+        with factory() as db:
+            mart_table = MartTable(
+                project_id=project["id"],
+                table_code="MART_COMPILE",
+                table_name="编译集市表",
+            )
+            db.add(mart_table)
+            db.flush()
+            mart_field = MartField(
+                project_id=project["id"],
+                mart_table_id=mart_table.id,
+                field_code="MART_COMPILE_FIELD",
+                field_name="编译集市字段",
+            )
+            db.add(mart_field)
+            db.flush()
+            source = SourceToMartMapping(
+                project_id=project["id"],
+                mart_field_id=mart_field.id,
+                mapping_status="draft",
+            )
+            mart = MartToYbtMapping(
+                project_id=project["id"],
+                target_field_id=field["id"],
+                mart_field_id=mart_field.id,
+                mapping_status="draft",
+            )
+            actor_row = User(
+                username="direct_compile_technical",
+                display_name="Direct compile technical",
+                status="active",
+            )
+            db.add_all([source, mart, actor_row])
+            db.flush()
+            db.add(ProjectMembership(
+                project_id=project["id"],
+                user_id=actor_row.id,
+                project_role="technical_analyst",
+                status="active",
+                created_by=actor_row.id,
+            ))
+            db.commit()
+            source_id = source.id
+            mart_id = mart.id
+            actor = Principal(actor_row.id, actor_row.username, actor_row.display_name, False)
+
+        captures: list[tuple[str, int, Project, Principal, date | None]] = []
+
+        async def fake_source(session, mapping_id, *, authorized_project, actor, as_of):
+            mapping = session.get(SourceToMartMapping, mapping_id)
+            captures.append(("source", mapping_id, authorized_project, actor, as_of))
+            mapping.ai_generated_content = "Governed Source draft"
+            mapping.open_questions = "待确认来源"
+            mapping.confidence_level = "medium"
+            return mapping
+
+        async def fake_mart(session, mapping_id, *, authorized_project, actor, as_of):
+            mapping = session.get(MartToYbtMapping, mapping_id)
+            captures.append(("mart", mapping_id, authorized_project, actor, as_of))
+            mapping.ai_generated_content = "Governed Mart draft"
+            mapping.open_questions = None
+            mapping.confidence_level = "high"
+            return mapping
+
+        monkeypatch.setattr(
+            deliverables,
+            "generate_source_to_mart_draft",
+            fake_source,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            deliverables,
+            "generate_mart_to_ybt_draft",
+            fake_mart,
+            raising=False,
+        )
+
+        with factory() as db:
+            source_result = asyncio.run(deliverables.compile_source(
+                source_id,
+                principal=actor,
+                as_of=AS_OF,
+                db=db,
+            ))
+        with factory() as db:
+            mart_result = asyncio.run(deliverables.compile_ybt(
+                mart_id,
+                principal=actor,
+                as_of=AS_OF,
+                db=db,
+            ))
+
+        assert set(source_result) == {"mapping_id", "draft", "claim_type", "open_questions"}
+        assert set(mart_result) == {"mapping_id", "draft", "claim_type", "open_questions"}
+        assert source_result["draft"] == "Governed Source draft"
+        assert source_result["open_questions"] == ["待确认来源"]
+        assert mart_result["draft"] == "Governed Mart draft"
+        assert [item[0] for item in captures] == ["source", "mart"]
+        for _, _, authorized_project, captured_actor, as_of in captures:
+            assert authorized_project.id == project["id"]
+            assert captured_actor == actor
+            assert captured_actor.is_legacy_system is False
+            assert as_of == AS_OF
+
+
+def test_direct_compile_requires_technical_edit_before_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client_with_factory() as (client, factory):
+        project = _post(client, "/api/projects", {"name": "Compile permission"})
+        with factory() as db:
+            mart_table = MartTable(project_id=project["id"], table_code="MART_DENY", table_name="拒绝集市")
+            db.add(mart_table)
+            db.flush()
+            mart_field = MartField(project_id=project["id"], mart_table_id=mart_table.id, field_code="DENY", field_name="拒绝字段")
+            db.add(mart_field)
+            db.flush()
+            mapping = SourceToMartMapping(project_id=project["id"], mart_field_id=mart_field.id, mapping_status="draft")
+            actor_row = User(username="compile_business_only", display_name="Compile business only", status="active")
+            db.add_all([mapping, actor_row])
+            db.flush()
+            db.add(ProjectMembership(
+                project_id=project["id"],
+                user_id=actor_row.id,
+                project_role="business_analyst",
+                status="active",
+                created_by=actor_row.id,
+            ))
+            db.commit()
+            mapping_id = mapping.id
+            actor = Principal(actor_row.id, actor_row.username, actor_row.display_name, False)
+
+        calls = 0
+
+        async def forbidden(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("deliverable.generate-only actor reached technical generator")
+
+        monkeypatch.setattr(deliverables, "generate_source_to_mart_draft", forbidden, raising=False)
+        with factory() as db, pytest.raises(HTTPException) as denied:
+            asyncio.run(deliverables.compile_source(
+                mapping_id,
+                principal=actor,
+                as_of=AS_OF,
+                db=db,
+            ))
+
+        assert denied.value.status_code == 403
+        assert calls == 0
+
+
+def test_legacy_deliverable_compilers_are_removed_from_production() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    assert not (backend_root / "app/services/deliverables/source_to_mart_compiler.py").exists()
+    assert not (backend_root / "app/services/deliverables/mart_to_ybt_compiler.py").exists()
+    source = (backend_root / "app/api/deliverables.py").read_text(encoding="utf-8")
+    assert "compile_source_to_mart" not in source
+    assert "compile_mart_to_ybt" not in source
 
 
 def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatch, tmp_path) -> None:

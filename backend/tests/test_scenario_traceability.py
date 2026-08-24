@@ -20,11 +20,15 @@ from app.models import (
     BackgroundJob,
     BackgroundJobItem,
     DeliverablePackage,
+    MartField,
+    MartTable,
+    MartToYbtMapping,
     ProductScenario,
     Project,
     ProjectMembership,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
+    SourceToMartMapping,
     TargetField,
     TargetTable,
     User,
@@ -989,6 +993,34 @@ def test_deliverable_queued_handler_passes_scoped_context_and_counts_blocks(
 ) -> None:
     with _scenario_service_session(tmp_path, "deliverable-context") as (db, _, fixture):
         package, job = _seed_deliverable_job(db, fixture, "deliverable-context")
+        mart_table = MartTable(
+            project_id=fixture["project"].id,
+            table_code="MART_DELIVERABLE_CONTEXT",
+            table_name="交付集市表",
+        )
+        db.add(mart_table)
+        db.flush()
+        mart_field = MartField(
+            project_id=fixture["project"].id,
+            mart_table_id=mart_table.id,
+            field_code="MART_DELIVERABLE_FIELD",
+            field_name="交付集市字段",
+        )
+        db.add(mart_field)
+        db.flush()
+        source_mapping = SourceToMartMapping(
+            project_id=fixture["project"].id,
+            mart_field_id=mart_field.id,
+            mapping_status="draft",
+        )
+        mart_mapping = MartToYbtMapping(
+            project_id=fixture["project"].id,
+            target_field_id=fixture["target_field"].id,
+            mart_field_id=mart_field.id,
+            mapping_status="draft",
+        )
+        db.add_all([source_mapping, mart_mapping])
+        db.commit()
         captures: list[tuple[str, Project, Principal, date | None]] = []
 
         async def fake_business(
@@ -1013,20 +1045,57 @@ def test_deliverable_queued_handler_passes_scoped_context_and_counts_blocks(
             captures.append(("technical", authorized_project, actor, as_of))
             return session.get(ScenarioTechnicalLineage, lineage_id)
 
+        async def fake_source(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None,
+        ) -> SourceToMartMapping:
+            captures.append(("source", authorized_project, actor, as_of))
+            mapping = session.get(SourceToMartMapping, mapping_id)
+            mapping.ai_generated_content = "Governed queued Source draft"
+            return mapping
+
+        async def fake_mart(
+            session: Session,
+            mapping_id: int,
+            *,
+            authorized_project: Project,
+            actor: Principal,
+            as_of: date | None,
+        ) -> MartToYbtMapping:
+            captures.append(("mart", authorized_project, actor, as_of))
+            mapping = session.get(MartToYbtMapping, mapping_id)
+            mapping.ai_generated_content = "Governed queued Mart draft"
+            return mapping
+
         _isolate_deliverable_generation(monkeypatch)
         monkeypatch.setattr(deliverables, "generate_business_draft", fake_business)
         monkeypatch.setattr(deliverables, "generate_technical_draft", fake_technical)
+        monkeypatch.setattr(deliverables, "generate_source_to_mart_draft", fake_source, raising=False)
+        monkeypatch.setattr(deliverables, "generate_mart_to_ybt_draft", fake_mart, raising=False)
         result = deliverables._deliverable_generate_handler(db, job)
 
         assert result["success_count"] == 1
         assert result["failed_count"] == result["blocked_count"] == 0
-        assert [item[0] for item in captures] == ["business", "technical"]
+        assert [item[0] for item in captures] == ["business", "technical", "source", "mart"]
         for _, authorized_project, actor, as_of in captures:
             assert authorized_project is fixture["project"]
             assert actor == _principal(fixture)
             assert actor.is_legacy_system is False
             assert as_of is None
         assert db.get(DeliverablePackage, package.id).status == "draft"
+        source_item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+            BackgroundJobItem.item_key == f"source_to_mart:{source_mapping.id}",
+        ))
+        mart_item = db.scalar(select(BackgroundJobItem).where(
+            BackgroundJobItem.background_job_id == job.id,
+            BackgroundJobItem.item_key == f"mart_to_ybt:{mart_mapping.id}",
+        ))
+        assert source_item.status == mart_item.status == "completed"
 
     with _scenario_service_session(tmp_path, "deliverable-blocked") as (db, _, fixture):
         _, job = _seed_deliverable_job(db, fixture, "deliverable-blocked")
