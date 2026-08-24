@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.models import FieldMappingDraft, TargetField
-from app.schemas import FieldMappingDraftRead, GenerateMappingRequest, GenerateMappingResponse, ReviewDraftRequest, TargetFieldCreate, TargetFieldRead
-from app.services.mapping_generator import generate_mapping_draft
+from app.schemas import FieldMappingDraftRead, GenerateMappingRequest, ReviewDraftRequest, TargetFieldCreate, TargetFieldRead
+from app.services.auth.dependencies import CurrentPrincipal
+from app.services.auth.permission_service import PermissionService
 
 router = APIRouter(prefix="/fields", tags=["fields"])
 
@@ -39,12 +40,31 @@ def get_field(field_id: int, db: Session = Depends(get_db)) -> TargetField:
     return field
 
 
-@router.post("/{field_id}/generate-mapping", response_model=GenerateMappingResponse)
-async def generate_mapping(field_id: int, payload: GenerateMappingRequest | None = None, db: Session = Depends(get_db)) -> GenerateMappingResponse:
-    try:
-        return await generate_mapping_draft(db, field_id=field_id, options=payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+@router.post("/{field_id}/generate-mapping")
+async def generate_mapping(
+    field_id: int,
+    principal: CurrentPrincipal,
+    payload: GenerateMappingRequest | None = None,
+    db: Session = Depends(get_db),
+) -> None:
+    field = db.get(TargetField, field_id)
+    if field is None:
+        raise HTTPException(status_code=404, detail="Target field not found")
+    PermissionService(db, principal).require_project_permission(
+        field.project_id,
+        "technical.edit",
+    )
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy-mapping-generator-retired",
+            "message": "Legacy field mapping generation has been retired",
+            "replacement_routes": [
+                "/api/source-to-mart-mappings/{mapping_id}/generate-draft",
+                "/api/mart-to-ybt-mappings/{mapping_id}/generate-draft",
+            ],
+        },
+    )
 
 
 @router.get("/{field_id}/drafts/latest", response_model=FieldMappingDraftRead | None)

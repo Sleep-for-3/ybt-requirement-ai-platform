@@ -81,6 +81,8 @@ def _permission(method: str, path: str) -> str:
         return "technical.review" if path.endswith(("/confirm", "/reject")) else "technical.edit"
     if "source-to-mart-mappings" in path or "mart-to-ybt-mappings" in path or "source_to_mart" in path or "mart_to_ybt" in path:
         return "technical.review" if path.endswith(("/approve", "/reject")) else "technical.edit"
+    if path.endswith("/generate-mapping") and "/fields/" in path:
+        return "technical.edit"
     if "source-recommendations" in path:
         return "technical.edit"
     return "project.view" if method == "GET" else "project.manage"

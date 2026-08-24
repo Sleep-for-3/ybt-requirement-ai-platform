@@ -17,8 +17,10 @@ from app.models import (
     FieldAnalysisTask,
     FieldMappingDraft,
     Project,
+    ProjectMembership,
     TargetField,
     TargetTable,
+    User,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
 
@@ -78,6 +80,20 @@ def test_missing_and_foreign_fields_do_not_disclose_retirement_detail() -> None:
         )
         assert missing.status_code == 404
         assert missing.json()["detail"] == "Target field not found"
+
+        viewer_id = _seed_viewer(sessions, fixture["project_id"])
+        app.dependency_overrides[get_current_principal] = lambda: Principal(
+            viewer_id,
+            "legacy-retirement-viewer",
+            None,
+        )
+        forbidden = client.post(
+            f"/api/fields/{fixture['field_id']}/generate-mapping",
+            json={},
+        )
+        assert forbidden.status_code == 403
+        assert forbidden.json()["detail"] == "Missing project permission: technical.edit"
+        assert "retired" not in forbidden.text.lower()
 
         app.dependency_overrides[get_current_principal] = lambda: Principal(
             999999,
@@ -256,3 +272,25 @@ def _legacy_state(sessions: sessionmaker) -> tuple[int, int, int, tuple[object, 
                 draft.updated_at,
             ),
         )
+
+
+def _seed_viewer(sessions: sessionmaker, project_id: int) -> int:
+    with sessions() as db:
+        user = User(
+            username="legacy-retirement-viewer",
+            display_name="Legacy retirement viewer",
+            status="active",
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            ProjectMembership(
+                project_id=project_id,
+                user_id=user.id,
+                project_role="viewer",
+                status="active",
+                created_by=user.id,
+            )
+        )
+        db.commit()
+        return int(user.id)
