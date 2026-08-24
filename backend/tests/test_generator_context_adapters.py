@@ -578,6 +578,98 @@ def test_question_merge_preserves_human_bytes_and_is_stable_deduplicated_and_ide
     assert repeated.appended_model_count == 0
 
 
+def test_source_context_adapter_projects_only_open_questions_and_keeps_resolved_closed(
+    db_session: Session,
+) -> None:
+    fixture = _seed_source_to_mart_task(db_session, suffix="QUESTION_STATE")
+    snapshot = snapshot_source_to_mart_generation(fixture["mapping"], fixture["project"])
+    envelope = build_generation_context(
+        db_session,
+        snapshot=snapshot,
+        actor=Principal(None, "legacy-system", "Legacy", True),
+        authorized_project=fixture["project"],
+        explicit_as_of=AS_OF,
+        adapter=SourceToMartContextAdapter().project,
+    )
+    open_question = ContextOpenQuestion(
+        question_code="OPEN_SOURCE_RULE",
+        question_type="governance",
+        priority="high",
+        target_type="source_to_mart",
+        target_id=fixture["mapping"].id,
+        question_text="请确认仍未解决的来源规则。",
+        resolution_state="open",
+    )
+    answered_question = open_question.model_copy(
+        update={"question_code": "ANSWERED_SOURCE_RULE", "question_text": "已回答的问题。", "resolution_state": "answered"}
+    )
+    dismissed_question = open_question.model_copy(
+        update={"question_code": "DISMISSED_SOURCE_RULE", "question_text": "已关闭的问题。", "resolution_state": "dismissed"}
+    )
+    context = envelope.context.model_copy(
+        update={"open_questions": [open_question, answered_question, dismissed_question]}
+    )
+    projection = SourceToMartContextAdapter().project(context, snapshot)
+    assert [item.question_code for item in projection.context_questions] == ["OPEN_SOURCE_RULE"]
+    assert "OPEN_SOURCE_RULE" in projection.prompt_text
+    assert "ANSWERED_SOURCE_RULE" not in projection.prompt_text
+    assert "DISMISSED_SOURCE_RULE" not in projection.prompt_text
+
+    policy = apply_generation_output_policy(
+        projection,
+        {"business_rule": "受治理规则", "confidence_level": "high"},
+        existing_human_questions="人工原始问题",
+    )
+    assert "[CTX:OPEN_SOURCE_RULE]" in policy.merged_questions.text
+    assert "ANSWERED_SOURCE_RULE" not in policy.merged_questions.text
+    assert "DISMISSED_SOURCE_RULE" not in policy.merged_questions.text
+    assert policy.pending_confirmation is True
+    assert policy.merged_questions.appended_context_codes == ["OPEN_SOURCE_RULE"]
+    assert redacted_generation_output_trace(policy).appended_context_codes == ["OPEN_SOURCE_RULE"]
+
+
+def test_source_context_adapter_ignores_only_resolved_questions_for_readiness_and_pending_state(
+    db_session: Session,
+) -> None:
+    fixture = _seed_source_to_mart_task(db_session, suffix="RESOLVED_ONLY")
+    snapshot = snapshot_source_to_mart_generation(fixture["mapping"], fixture["project"])
+    envelope = build_generation_context(
+        db_session,
+        snapshot=snapshot,
+        actor=Principal(None, "legacy-system", "Legacy", True),
+        authorized_project=fixture["project"],
+        explicit_as_of=AS_OF,
+        adapter=SourceToMartContextAdapter().project,
+    )
+    resolved = ContextOpenQuestion(
+        question_code="RESOLVED_SOURCE_RULE",
+        question_type="governance",
+        priority="high",
+        target_type="source_to_mart",
+        target_id=fixture["mapping"].id,
+        question_text="已解决的来源规则。",
+        resolution_state="answered",
+    )
+    dismissed = resolved.model_copy(
+        update={"question_code": "DISMISSED_SOURCE_RULE", "resolution_state": "dismissed"}
+    )
+    context = envelope.context.model_copy(update={"open_questions": [resolved, dismissed]})
+    projection = SourceToMartContextAdapter().project(context, snapshot)
+    policy = apply_generation_output_policy(
+        projection,
+        {"business_rule": "受治理规则", "confidence_level": "high"},
+        existing_human_questions="人工原始问题",
+    )
+    assert projection.context_questions == []
+    assert "RESOLVED_SOURCE_RULE" not in projection.prompt_text
+    assert "DISMISSED_SOURCE_RULE" not in projection.prompt_text
+    assert projection.readiness.warnings == []
+    assert projection.readiness.confidence_cap == "high"
+    assert policy.merged_questions.text == "人工原始问题"
+    assert policy.merged_questions.appended_context_codes == []
+    assert policy.pending_confirmation is False
+
+
 def test_sparse_output_policy_caps_confidence_and_omits_unknown_physical_and_governance_fields(
     db_session: Session,
 ) -> None:
@@ -805,7 +897,7 @@ def _seed_source_to_mart_task(
         quality_check_rule="非空",
         open_questions="人工问题保持原样",
         ai_generated_content="旧 AI 草稿",
-        final_content="人工最终内容",
+        final_content=None,
         confidence_level="medium",
         created_by=user.username,
         lineage_status="not_linked",
