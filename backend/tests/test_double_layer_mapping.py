@@ -27,6 +27,7 @@ from app.models import (
     TargetField,
     TargetTable,
     User,
+    WorkflowInstance,
 )
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
@@ -396,6 +397,165 @@ def test_source_to_mart_blocked_readiness_never_calls_model_or_mutates_task(
             )
         db.expire_all()
         assert _mapping_state(db.get(SourceToMartMapping, fixture["mapping"].id)) == before
+
+
+def test_source_to_mart_approved_generation_blocked_before_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_source_generation_governance_block(
+        tmp_path,
+        monkeypatch,
+        status="approved",
+        final_content="人工批准内容",
+    )
+
+
+def test_source_to_mart_final_generation_blocked_before_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_source_generation_governance_block(
+        tmp_path,
+        monkeypatch,
+        status="draft",
+        final_content="人工最终内容",
+    )
+
+
+def test_source_to_mart_review_locked_generation_blocked_before_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_source_generation_governance_block(
+        tmp_path,
+        monkeypatch,
+        status="draft",
+        final_content=None,
+        review_locked=True,
+    )
+
+
+def test_source_to_mart_governance_race_after_model_is_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _source_service_session(tmp_path, "governance-race") as (db, factory, fixture):
+        actor = _principal(fixture)
+        calls = {"context": 0, "model": 0}
+        monkeypatch.setattr(
+            source_to_mart_generator,
+            "build_generation_context",
+            lambda *args, **kwargs: (
+                calls.__setitem__("context", calls["context"] + 1)
+                or _source_context_envelope(
+                    can_generate=True,
+                    snapshot=kwargs["snapshot"],
+                )
+            ),
+        )
+
+        async def approve_during_model(*args, **kwargs):
+            calls["model"] += 1
+            with factory() as concurrent:
+                current = concurrent.get(SourceToMartMapping, fixture["mapping"].id)
+                current.mapping_status = "approved"
+                current.final_content = "并发人工批准内容"
+                concurrent.commit()
+            return {"business_rule": "不得落库的治理竞态规则", "confidence_level": "high"}
+
+        monkeypatch.setattr(source_to_mart_generator, "execute_runtime_chat", approve_during_model)
+        before_draft = fixture["mapping"].ai_generated_content
+
+        with pytest.raises(HTTPException) as denied:
+            asyncio.run(
+                mapping_rules.generate_source_to_mart_mapping_draft(
+                    fixture["mapping"].id,
+                    principal=actor,
+                    as_of=None,
+                    db=db,
+                )
+            )
+
+        assert denied.value.status_code == 409
+        assert denied.value.detail["code"] == "generation-governance-blocked"
+        assert calls == {"context": 1, "model": 1}
+        with factory() as verify:
+            current = verify.get(SourceToMartMapping, fixture["mapping"].id)
+            assert current.mapping_status == "approved"
+            assert current.final_content == "并发人工批准内容"
+            assert current.ai_generated_content == before_draft
+            assert verify.scalar(
+                select(AuditLog.id).where(
+                    AuditLog.action == "generate_source_to_mart",
+                    AuditLog.result == "success",
+                )
+            ) is None
+
+
+def _assert_source_generation_governance_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status: str,
+    final_content: str | None,
+    review_locked: bool = False,
+) -> None:
+    with _source_service_session(tmp_path, f"governance-{status}-{review_locked}") as (db, _, fixture):
+        mapping = fixture["mapping"]
+        mapping.mapping_status = status
+        mapping.final_content = final_content
+        if review_locked:
+            db.add(
+                WorkflowInstance(
+                    project_id=mapping.project_id,
+                    workflow_key="double_layer_mapping_review",
+                    target_type="source_to_mart",
+                    target_id=mapping.id,
+                    status="in_progress",
+                    current_step="technical_review",
+                    created_by=fixture["user"].id,
+                )
+            )
+        db.commit()
+        before = _mapping_state(mapping)
+        calls = {"context": 0, "model": 0}
+
+        def fake_build(*args, **kwargs):
+            calls["context"] += 1
+            return _source_context_envelope(
+                can_generate=True,
+                snapshot=kwargs["snapshot"],
+            )
+
+        async def fake_model(*args, **kwargs):
+            calls["model"] += 1
+            return {"business_rule": "不得执行的治理规则", "confidence_level": "high"}
+
+        monkeypatch.setattr(source_to_mart_generator, "build_generation_context", fake_build)
+        monkeypatch.setattr(source_to_mart_generator, "execute_runtime_chat", fake_model)
+
+        with pytest.raises(HTTPException) as denied:
+            asyncio.run(
+                mapping_rules.generate_source_to_mart_mapping_draft(
+                    mapping.id,
+                    principal=_principal(fixture),
+                    as_of=None,
+                    db=db,
+                )
+            )
+
+        assert denied.value.status_code == 409
+        assert denied.value.detail["code"] == "generation-governance-blocked"
+        assert calls == {"context": 0, "model": 0}
+        db.expire_all()
+        assert _mapping_state(db.get(SourceToMartMapping, mapping.id)) == before
+        assert db.scalar(
+            select(AuditLog.id).where(
+                AuditLog.action == "generate_source_to_mart",
+                AuditLog.result == "success",
+            )
+        ) is None
 
 
 def test_source_to_mart_rejects_concurrent_snapshot_change_without_draft(
