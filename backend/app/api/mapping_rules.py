@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.services.governance.double_layer_review import MappingGenerationNotEditable
 from app.services.mapping.generator_context import (
     GenerationActorError,
     GenerationBlockedError,
@@ -50,6 +51,16 @@ def _generation_context_http_error() -> HTTPException:
     return HTTPException(
         status_code=409,
         detail={"code": "generation-context-failed"},
+    )
+
+
+def _generation_governance_http_error(exc: MappingGenerationNotEditable) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "generation-governance-blocked",
+            "reason_code": exc.reason_code,
+        },
     )
 
 
@@ -119,6 +130,8 @@ async def generate_source_to_mart_mapping_draft(
         )
     except GenerationActorError as exc:
         raise _generation_actor_http_error(exc) from exc
+    except MappingGenerationNotEditable as exc:
+        raise _generation_governance_http_error(exc) from exc
     except GenerationBlockedError as exc:
         raise HTTPException(
             status_code=409,
@@ -254,6 +267,8 @@ async def generate_mart_to_ybt_mapping_draft(
         )
     except GenerationActorError as exc:
         raise _generation_actor_http_error(exc) from exc
+    except MappingGenerationNotEditable as exc:
+        raise _generation_governance_http_error(exc) from exc
     except GenerationBlockedError as exc:
         raise HTTPException(
             status_code=409,

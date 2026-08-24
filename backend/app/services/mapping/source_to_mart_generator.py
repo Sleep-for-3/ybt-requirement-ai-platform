@@ -19,6 +19,10 @@ from app.models import Project, SourceToMartMapping
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit
+from app.services.governance.double_layer_review import (
+    MappingGenerationNotEditable,
+    ensure_double_layer_mapping_editable,
+)
 from app.services.llm.prompt_runtime import (
     execute_runtime_chat,
     get_prompt_runtime,
@@ -68,6 +72,18 @@ async def generate_source_to_mart_draft(
         raise GenerationStaleError(["task.project_id"])
 
     validate_generation_actor(db, actor)
+    try:
+        ensure_double_layer_mapping_editable(db, "source_to_mart", mapping)
+    except MappingGenerationNotEditable as exc:
+        _record_governance_block(
+            db,
+            mapping,
+            actor=actor,
+            reason_code=exc.reason_code,
+            boundary="pre_context",
+        )
+        db.commit()
+        raise
     snapshot = snapshot_source_to_mart_generation(mapping, authorized_project)
     envelope = build_generation_context(
         db,
@@ -124,6 +140,7 @@ async def generate_source_to_mart_draft(
     db.expire_all()
 
     stale_error: GenerationStaleError | None = None
+    governance_error: MappingGenerationNotEditable | None = None
     result: SourceToMartMapping | None = None
     with db.begin():
         validate_generation_actor(db, actor)
@@ -154,14 +171,31 @@ async def generate_source_to_mart_draft(
         elif locked_mapping.project_id != locked_project.id:
             changed_fields = ["task.project_id"]
         else:
-            current_snapshot = snapshot_source_to_mart_generation(
-                locked_mapping,
-                locked_project,
-            )
-            changed_fields = compare_generation_snapshots(
-                snapshot,
-                current_snapshot,
-            )
+            try:
+                ensure_double_layer_mapping_editable(
+                    db,
+                    "source_to_mart",
+                    locked_mapping,
+                )
+            except MappingGenerationNotEditable as exc:
+                governance_error = exc
+                _record_governance_block(
+                    db,
+                    locked_mapping,
+                    actor=actor,
+                    reason_code=exc.reason_code,
+                    boundary="post_lock",
+                )
+                changed_fields = []
+            else:
+                current_snapshot = snapshot_source_to_mart_generation(
+                    locked_mapping,
+                    locked_project,
+                )
+                changed_fields = compare_generation_snapshots(
+                    snapshot,
+                    current_snapshot,
+                )
 
         if changed_fields:
             stale_error = GenerationStaleError(changed_fields)
@@ -173,7 +207,7 @@ async def generate_source_to_mart_draft(
                 actor=actor,
                 extra={"changed_fields": changed_fields},
             )
-        else:
+        elif governance_error is None:
             policy = apply_generation_output_policy(
                 envelope.projection,
                 output,
@@ -191,6 +225,8 @@ async def generate_source_to_mart_draft(
             )
             result = locked_mapping
 
+    if governance_error is not None:
+        raise governance_error
     if stale_error is not None:
         raise stale_error
     if result is None:  # pragma: no cover - defensive invariant
@@ -286,6 +322,27 @@ def _record_generation_audit(
         project_id=envelope.snapshot.project.id,
         after=after,
         result=result,
+    )
+
+
+def _record_governance_block(
+    db: Session,
+    mapping: SourceToMartMapping,
+    *,
+    actor: Principal,
+    reason_code: str,
+    boundary: str,
+) -> None:
+    record_audit(
+        db,
+        action="generate_source_to_mart_governance_blocked",
+        resource_type="source_to_mart_mapping",
+        resource_id=mapping.id,
+        actor_user_id=actor.user_id,
+        institution_id=None,
+        project_id=mapping.project_id,
+        after={"reason_code": reason_code, "boundary": boundary},
+        result="blocked",
     )
 
 

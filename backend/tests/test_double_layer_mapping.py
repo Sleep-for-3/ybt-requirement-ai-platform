@@ -38,6 +38,7 @@ from app.services.mapping.generator_context import (
     GenerationBlockedError,
     GenerationStaleError,
 )
+from app.services.governance.double_layer_review import MappingGenerationNotEditable
 
 
 def test_double_layer_mapping_end_to_end_api() -> None:
@@ -159,17 +160,18 @@ def test_double_layer_mapping_end_to_end_api() -> None:
 
         source_manual = "人工维护的业务系统到监管集市口径"
         ybt_manual = "人工维护的监管集市到一表通口径"
-        _put(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}", {"final_content": source_manual})
-        _put(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}", {"final_content": ybt_manual})
         source_draft = _post(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}/generate-draft", {})
         ybt_draft = _post(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}/generate-draft", {})
 
-        assert source_draft["final_content"] == source_manual
-        assert ybt_draft["final_content"] == ybt_manual
+        assert source_draft["final_content"] is None
+        assert ybt_draft["final_content"] is None
         assert "select " not in source_draft["ai_generated_content"].lower()
         assert "业务系统到监管集市" in source_draft["ai_generated_content"]
         assert "监管集市到一表通" in ybt_draft["ai_generated_content"]
         assert ybt_draft["mart_field_summary"]
+
+        _put(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}", {"final_content": source_manual})
+        _put(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}", {"final_content": ybt_manual})
 
         no_evidence_mapping = _post(
             client,
@@ -442,6 +444,8 @@ def test_source_to_mart_governance_race_after_model_is_blocked(
 ) -> None:
     with _source_service_session(tmp_path, "governance-race") as (db, factory, fixture):
         actor = _principal(fixture)
+        fixture["mapping"].final_content = None
+        db.commit()
         calls = {"context": 0, "model": 0}
         monkeypatch.setattr(
             source_to_mart_generator,
@@ -575,7 +579,7 @@ def test_source_to_mart_rejects_concurrent_snapshot_change_without_draft(
         async def mutate_while_model_runs(*args, **kwargs):
             with factory() as concurrent:
                 current = concurrent.get(SourceToMartMapping, fixture["mapping"].id)
-                current.final_content = "并发人工最终内容"
+                current.business_rule = "并发人工规则"
                 concurrent.commit()
             return {
                 "business_rule": "不应落库的模型规则",
@@ -598,11 +602,11 @@ def test_source_to_mart_rejects_concurrent_snapshot_change_without_draft(
                     actor=_principal(fixture),
                 )
             )
-        assert "task.final_content" in stale.value.changed_fields
+            assert "task.business_rule" in stale.value.changed_fields
 
         with factory() as verify:
             current = verify.get(SourceToMartMapping, fixture["mapping"].id)
-            assert current.final_content == "并发人工最终内容"
+            assert current.business_rule == "并发人工规则"
             assert current.ai_generated_content == original_draft
             stale_audit = verify.scalar(
                 select(AuditLog).where(
@@ -612,7 +616,7 @@ def test_source_to_mart_rejects_concurrent_snapshot_change_without_draft(
             )
             assert stale_audit is not None
             assert stale_audit.result == "stale"
-            assert "task.final_content" in stale_audit.after_summary_json["changed_fields"]
+            assert "task.business_rule" in stale_audit.after_summary_json["changed_fields"]
             assert verify.scalar(
                 select(AuditLog.id).where(
                     AuditLog.action == "generate_source_to_mart",
@@ -918,6 +922,18 @@ def test_source_to_mart_rejects_every_local_snapshot_category(
         )
 
         for model, row_id, attribute, value, expected_field in mutations:
+            with factory() as reset:
+                current_mapping = reset.get(SourceToMartMapping, fixture["mapping"].id)
+                current_project = reset.get(Project, fixture["project"].id)
+                current_mapping.business_rule = "人工原规则"
+                current_mapping.open_questions = "人工问题保持原样"
+                current_mapping.mapping_status = "draft"
+                current_mapping.final_content = None
+                current_project.confidentiality_level = "internal"
+                current_project.project_status = "active"
+                current_project.governance_workflow_enabled = True
+                reset.commit()
+
             async def mutate_local_snapshot(*args, **kwargs):
                 with factory() as concurrent:
                     current = concurrent.get(model, row_id)
@@ -938,7 +954,12 @@ def test_source_to_mart_rejects_every_local_snapshot_category(
                 SourceToMartMapping,
                 fixture["mapping"].id,
             ).ai_generated_content
-            with pytest.raises(GenerationStaleError) as stale:
+            error_type = (
+                MappingGenerationNotEditable
+                if attribute == "mapping_status"
+                else GenerationStaleError
+            )
+            with pytest.raises(error_type) as stale:
                 asyncio.run(
                     source_to_mart_generator.generate_source_to_mart_draft(
                         db,
@@ -947,7 +968,10 @@ def test_source_to_mart_rejects_every_local_snapshot_category(
                         actor=actor,
                     )
                 )
-            assert expected_field in stale.value.changed_fields
+            if isinstance(stale.value, MappingGenerationNotEditable):
+                assert stale.value.reason_code == "MAPPING_STATUS_NOT_DRAFT"
+            else:
+                assert expected_field in stale.value.changed_fields
             with factory() as verify:
                 assert getattr(verify.get(model, row_id), attribute) == value
                 current = verify.get(SourceToMartMapping, fixture["mapping"].id)
@@ -971,7 +995,16 @@ def test_source_to_mart_rejects_every_local_snapshot_category(
                 ).all()
             )
             assert success_count == 0
-            assert stale_count == len(mutations)
+            assert stale_count == len(mutations) - 1
+            blocked_count = len(
+                verify.scalars(
+                    select(AuditLog.id).where(
+                        AuditLog.action == "generate_source_to_mart_governance_blocked",
+                        AuditLog.result == "blocked",
+                    )
+                ).all()
+            )
+            assert blocked_count == 1
 
 
 def test_source_to_mart_rechecks_permission_after_model_without_draft(
@@ -1298,7 +1331,7 @@ def _seed_source_mapping(db: Session, suffix: str) -> dict[str, object]:
         business_rule="人工原规则",
         open_questions="人工问题保持原样",
         ai_generated_content="旧 AI 草稿",
-        final_content="人工最终内容",
+        final_content=None,
         confidence_level="medium",
         lineage_status="not_linked",
     )
@@ -1353,7 +1386,7 @@ def _seed_mart_to_ybt_mapping(
         business_rule="人工报送规则",
         open_questions="人工 Mart 问题",
         ai_generated_content="旧 Mart AI 草稿",
-        final_content="人工 Mart 最终内容",
+        final_content=None,
         confidence_level="medium",
         lineage_status="not_linked",
     )
