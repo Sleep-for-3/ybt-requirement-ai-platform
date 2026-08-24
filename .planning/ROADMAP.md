@@ -8,7 +8,7 @@
 
 **Goal:** 建立可治理、可查询、隔离安全的 Regulatory Semantic Layer。
 **Requirements:** SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07
-**Plans:** 3 plans
+**Plans:** 4 plans
 **Status:** Complete (2026-08-20)
 **Success Criteria:**
 
@@ -73,11 +73,29 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
+**Plans:** 4 plans
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
 2. binding、relation、knowledge、evidence、lineage 和 governance 状态可追溯。
 3. loading/empty/error/unauthorized/no-binding/conflict/pending-review 均有测试状态。
+
+Plans:
+**Wave 1**
+
+- [ ] 11-01-PLAN.md — Establish authoritative semantic catalog projection and tracer route
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11-02-PLAN.md — Build grouped catalog browsing, filtering, and navigation UI
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 11-04-PLAN.md — Build governed semantic detail backend projections and security contract
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 11-03-PLAN.md — Build governed semantic detail frontend and traceability regions
 
 ### Phase 12: Requirement Workspace V2
 

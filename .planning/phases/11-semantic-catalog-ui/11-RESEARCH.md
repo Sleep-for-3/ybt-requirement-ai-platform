@@ -511,12 +511,11 @@ Security enforcement is enabled because `.planning/config.json` does not set `se
 
 Plan in dependency order so DTO/query policy is locked before presentation work:
 
-1. **Wave 0, contract tests and shared error seam:** Add failing backend projection/security tests and frontend view-model/error tests. Preserve 401 behavior while adding status-bearing errors.
-2. **Wave 1, backend read model:** Add projection schemas/service, catalog endpoint, detail shell, and lazy region endpoints. Reuse batch temporal resolver; implement one-population totals/facets and server redaction.
-3. **Wave 2, pure frontend model and shell:** Implement URL state, partitions, destination validation, request keys, shared async-state helpers, and narrow AppShell navigation patch.
-4. **Wave 3, catalog route:** Build toolbar, grouped directory, comparison table, pagination, accessibility announcements, and catalog states.
-5. **Wave 4, detail route:** Build Overview-first shell, tabs, bindings/relations/evidence/lineage/governance/versions, bounded visualization, and current-only historical labels.
-6. **Wave 5, convergence:** Run the full 28-state matrix, responsive screenshots, keyboard checks, backend/frontend regressions, and inspect network payloads for restricted-data leakage.
+1. **Wave 1, catalog tracer:** Add projection schemas/service, catalog endpoint, secured registration, and one real `/semantics` row using the batch temporal resolver and one-population server contract.
+2. **Wave 2, shared frontend and catalog route:** Extend the authenticated error seam, pure URL/status/destination transforms, toolbar/request orchestration, grouped directory, comparison table, pagination, accessibility announcements, and narrow AppShell navigation patch.
+3. **Wave 3, detail backend:** Add strict detail/lazy DTOs, projection service/routes, HTTP 403 region semantics, audit.read gating, server redaction, bounded chain data, and backend temporal/security regressions.
+4. **Wave 4, detail frontend:** Build Overview-first shell, tabs, bindings/relations/evidence/lineage/governance/versions, bounded visualization, current-only historical labels, and the full frontend detail state matrix against Wave 3 DTOs.
+5. **Convergence:** Run the full 28-state matrix, responsive screenshots, keyboard checks, backend/frontend regressions, query-plan evidence review, and inspect network payloads for restricted-data leakage.
 
 Do not parallelize writes to `AppShell.tsx` with other shell work, and do not assign two writers to the shared API/error layer. Backend projection and pure frontend view-model work can proceed in parallel after DTO fields and error semantics are agreed.
 
@@ -526,31 +525,19 @@ Do not parallelize writes to `AppShell.tsx` with other shell work, and do not as
 |---|-------|---------|---------------|
 | A1 | [ASSUMED] FastAPI, Pydantic, and SQLAlchemy installed versions are compatible with the existing code patterns; exact package versions were not re-queried because no new dependency is proposed. | Standard Stack | Low; implementation uses current repository APIs, but environment lock metadata should remain authoritative. |
 | A2 | [ASSUMED] The recommended new endpoint paths are acceptable additive names; CONTEXT.md leaves endpoint shape to the agent's discretion. | Architecture Patterns | Low; planner may choose a different additive prefix without changing responsibilities. |
-| A3 | [ASSUMED] A distinct region-level forbidden state is preferable to failing the entire detail response for optional permissions. | Permission Projection | Medium; product/security owners may prefer omission or whole-page denial for a particular region. |
-| A4 | [ASSUMED] No database migration is required because all new data is projection-only. | Architecture Patterns | Medium; a performance index may become necessary after query-plan measurement on production-scale data. |
+| A3 | [DECIDED] Optional lazy region endpoints return HTTP 403 and the frontend renders a region-level unauthorized state; restricted-reference DTOs are used only when the binding itself is lawfully visible. | Permission Projection | Low; this is the approved wire contract for optional permissions. |
+| A4 | [DECIDED] No new index or migration is planned before execution evidence; execution may add one only if measured query-plan evidence demonstrates a need. | Architecture Patterns | Low; projection-only behavior remains the default and any schema change requires evidence and explicit plan adjustment. |
 | A5 | [ASSUMED] ASVS category naming and mapping follows the standard taxonomy from training knowledge; official ASVS documentation could not be fetched due provider quota. | Security Domain | Low; the concrete controls are verified against repository code. |
 
-## Open Questions
+## Resolved Decisions
 
-1. **Should optional forbidden regions return HTTP 403, a typed `forbidden` region payload, or be omitted?**
-   - What we know: top-level invisible resources must not leak identity, while D-27 permits type-only restricted binding references.
-   - What's unclear: the uniform wire contract for an entire forbidden Evidence/Lineage/Governance region.
-   - Recommendation: use HTTP 403 for standalone lazy region endpoints and let the client render a region-level unauthorized state; use restricted-reference DTOs only when the binding itself is lawfully visible.
+1. **Optional lazy-region authorization:** Standalone bindings, relations, evidence, lineage, governance, and versions endpoints return HTTP 403 when the visible project lacks the region permission. The detail page keeps the header and renders that region as unauthorized. Type-only restricted references remain available only when the binding itself is lawfully visible. [VERIFIED: backend/app/services/auth/resource_guard.py:67-75]
 
-2. **Which existing destination routes can accept every allowed binding entity type?**
-   - What we know: the entity-type allow-list contains 12 exact values, while D-26 names Target, Mart, Source, Knowledge, and Lineage destinations. [VERIFIED: backend/app/schemas/semantic.py:10-14]
-   - What's unclear: some mapping/scenario types may lack a stable detail route.
-   - Recommendation: define a server/client shared allow-list of canonical destinations; render readable but non-navigable text when no existing route exists rather than inventing a Phase 11 route.
+2. **Destination allow-list:** Server and client use a shared allow-list of existing canonical Target, Mart, Source, Knowledge, Lineage, Scenario, and Review Task routes. A lawful reference without a supported existing route renders readable non-navigable text (`尚无可导航详情`); no new Phase 11 destination is invented. [VERIFIED: backend/app/schemas/semantic.py:10-14] [VERIFIED: .planning/phases/11-semantic-catalog-ui/11-UI-SPEC.md:209-232]
 
-3. **Will query-plan evidence require new composite/search indexes?**
-   - What we know: concept project/status/name and version project/status/effective indexes exist. [VERIFIED: backend/app/models/semantic.py:11-18] [VERIFIED: backend/app/models/semantic.py:45-57]
-   - What's unclear: dataset size, database engine behavior for alias JSON/definition search, and production latency targets.
-   - Recommendation: begin with set-based SQL and measure representative 700+ concept fixtures; add only evidence-backed indexes/migrations.
+3. **Index/migration gate:** No new index or migration is added before execution. The implementation starts with set-based SQL and representative 700+ concept fixtures; only measured query-plan evidence during execution can justify an additive index/migration and a corresponding plan adjustment. Existing semantic indexes remain the baseline. [VERIFIED: backend/app/models/semantic.py:11-18] [VERIFIED: backend/app/models/semantic.py:45-57]
 
-4. **How should audit authorization interact with rejected/deprecated catalog filtering?**
-   - What we know: audit access uses `"audit.read"`; default trusted/candidate sets exclude `"rejected", "deprecated"`. [VERIFIED: backend/app/api/audit.py:16-38] [VERIFIED: backend/app/services/semantic/status_policy.py:14-21]
-   - What's unclear: whether explicit semantic audit filters require `audit.read` or only `project.view` under current product policy.
-   - Recommendation: require `audit.read` for any endpoint/filter that exposes audit-only semantic rows and test both 403 and successful audit paths.
+4. **Audit authorization:** Any explicit catalog/detail filter or endpoint that exposes rejected/deprecated semantic rows requires `audit.read`. Trusted and candidate modes remain limited to their existing status tuples, and both unauthorized and successful audit paths are tested. [VERIFIED: backend/app/api/audit.py:16-38] [VERIFIED: backend/app/services/semantic/status_policy.py:14-21]
 
 ## Sources
 
