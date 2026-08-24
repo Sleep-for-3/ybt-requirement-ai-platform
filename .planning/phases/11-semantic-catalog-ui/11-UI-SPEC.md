@@ -1,10 +1,11 @@
 ---
 phase: 11
 slug: semantic-catalog-ui
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-08-25
+reviewed_at: 2026-08-25T00:23:16+08:00
 ---
 
 # Phase 11 - UI Design Contract
@@ -440,14 +441,14 @@ Applicable state considerations resolved: 8 covered, 0 backstop, 0 unresolved.
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
-| empty | Catalog, bindings, relations, evidence, lineage, versions | Covered | Every list/region has a domain-specific successful-empty state; no-binding, candidate-only, no-formal-version, error, and unauthorized are distinct |
-| loading | Catalog, detail summary, tabs, controls | Covered | Stable-dimension skeletons and region-scoped `aria-busy`; Overview loads first and lazy tabs cannot collapse the page |
-| error | Catalog, detail summary, every lazy tab | Covered | Object-specific reload actions preserve URL/scope; tab errors remain local and are never rendered as empty |
-| populated | Directory, comparison table, detail tabs, timeline | Covered | Typical-volume layouts, server totals, grouped rows, structured lists, and bounded visualizations are specified |
-| partial | Detail/read projections | Covered | Render lawful available facts, mark unavailable subsections, use `未提供`, and never backfill formal truth from legacy or AI content |
-| overflow | Toolbar, rows, table, tabs, definitions, visualization | Covered | Controls wrap; table/tabs own deliberate scroll; text wraps or explicitly expands; 320px behavior is defined |
-| zero-one-many | Groups, results, bindings, relations, evidence, timeline | Covered | Stable footer/layout and Chinese count grammar cover zero, one, and many; bounded visualization reports omitted counts |
-| long-text | Names, Codes, definitions, source titles, excerpts, filters | Covered | Definitions wrap to 80ch; narrow Codes break; table ellipsis requires accessible full text; excerpts have expand/collapse |
+| empty | Catalog, bindings, relations, evidence, lineage, versions | ✅ covered | Every list/region has a domain-specific successful-empty state; no-binding, candidate-only, no-formal-version, error, and unauthorized are distinct |
+| loading | Catalog, detail summary, tabs, controls | ✅ covered | Stable-dimension skeletons and region-scoped `aria-busy`; Overview loads first and lazy tabs cannot collapse the page |
+| error | Catalog, detail summary, every lazy tab | ✅ covered | Object-specific reload actions preserve URL/scope; tab errors remain local and are never rendered as empty |
+| populated | Directory, comparison table, detail tabs, timeline | ✅ covered | Typical-volume layouts, server totals, grouped rows, structured lists, and bounded visualizations are specified |
+| partial | Detail/read projections | ✅ covered | Render lawful available facts, mark unavailable subsections, use `未提供`, and never backfill formal truth from legacy or AI content |
+| overflow | Toolbar, rows, table, tabs, definitions, visualization | ✅ covered | Controls wrap; table/tabs own deliberate scroll; text wraps or explicitly expands; 320px behavior is defined |
+| zero-one-many | Groups, results, bindings, relations, evidence, timeline | ✅ covered | Stable footer/layout and Chinese count grammar cover zero, one, and many; bounded visualization reports omitted counts |
+| long-text | Names, Codes, definitions, source titles, excerpts, filters | ✅ covered | Definitions wrap to 80ch; narrow Codes break; table ellipsis requires accessible full text; excerpts have expand/collapse |
 
 ---
 
@@ -528,11 +529,11 @@ Minimum viewport checks: 320x720, 768x1024, 1280x800, and 1440x900. Verify no in
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved - 2026-08-25
