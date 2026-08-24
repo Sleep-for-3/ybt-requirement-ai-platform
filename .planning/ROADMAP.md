@@ -39,10 +39,10 @@
 
 **Goal:** 让现有 Mapping/Scenario Generator 渐进消费统一 Context，保持旧 API 和治理边界。
 **Requirements:** GEN-01, GEN-02, GEN-03, GEN-04
-**Plans:** 6/8 plans executed
+**Plans:** 7/8 plans executed
 
 - [x] 10-05-PLAN.md
-- [ ] 10-06-PLAN.md
+- [x] 10-06-PLAN.md
 - [x] 10-07-PLAN.md
 - [ ] 10-08-PLAN.md
 
