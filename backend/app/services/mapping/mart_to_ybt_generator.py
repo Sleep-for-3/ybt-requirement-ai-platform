@@ -332,7 +332,6 @@ def _record_governance_block(
         result="blocked",
     )
 
-
 def _first_retrieval_log_id(values: list[int]) -> int | None:
     return values[0] if values else None
 

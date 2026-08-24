@@ -164,8 +164,9 @@ class SourceToMartContextAdapter:
             for item in sorted(
                 context.open_questions,
                 key=lambda item: item.deterministic_sort_key(),
-            )[:MAX_CONTEXT_QUESTIONS]
-        ]
+            )
+            if item.resolution_state == "open"
+        ][:MAX_CONTEXT_QUESTIONS]
         readiness = evaluate_generation_readiness(context, "source_to_mart")
         prompt, truncated = _source_to_mart_prompt(snapshot, selected, questions)
         confidentiality_levels = sorted({
