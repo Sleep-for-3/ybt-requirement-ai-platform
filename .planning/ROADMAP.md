@@ -39,12 +39,12 @@
 
 **Goal:** 让现有 Mapping/Scenario Generator 渐进消费统一 Context，保持旧 API 和治理边界。
 **Requirements:** GEN-01, GEN-02, GEN-03, GEN-04
-**Plans:** 7/8 plans executed
+**Plans:** 8/8 plans complete
 
 - [x] 10-05-PLAN.md
 - [x] 10-06-PLAN.md
 - [x] 10-07-PLAN.md
-- [ ] 10-08-PLAN.md
+- [x] 10-08-PLAN.md
 
 **Wave 1**
 
@@ -62,7 +62,7 @@
 
 - [x] 10-04-PLAN.md
 
-**Status:** In Progress — 4/4 plans complete; ready for verification
+**Status:** Complete (2026-08-24) — 8/8 plans verified; GEN-01 through GEN-04 satisfied
 **Success Criteria:**
 
 1. 两个 Mapping Generator 的共享事实查询从 ContextBuilder 获取。

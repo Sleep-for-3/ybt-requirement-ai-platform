@@ -24,10 +24,10 @@
 
 ### Generator Migration
 
-- [ ] **GEN-01**: Source→Mart Generator 主要消费 RegulatoryContext，同时保留现有 API、structured output 与 task-specific instruction。
-- [ ] **GEN-02**: Mart→YBT Generator 主要消费 RegulatoryContext，同时保留现有 API、structured output 与 Source→Mart 摘要语义。
-- [ ] **GEN-03**: Scenario generators 在适用范围消费同一 Context，confirmed/final 内容不会被 AI draft 覆盖。
-- [ ] **GEN-04**: 缺少证据时生成器产生 open question，不凭空创建不存在的表、字段或正式状态。
+- [x] **GEN-01**: Source→Mart Generator 主要消费 RegulatoryContext，同时保留现有 API、structured output 与 task-specific instruction。
+- [x] **GEN-02**: Mart→YBT Generator 主要消费 RegulatoryContext，同时保留现有 API、structured output 与 Source→Mart 摘要语义。
+- [x] **GEN-03**: Scenario generators 在适用范围消费同一 Context，confirmed/final 内容不会被 AI draft 覆盖。
+- [x] **GEN-04**: 缺少证据时生成器产生 open question，不凭空创建不存在的表、字段或正式状态。
 
 ### Semantic Experience
 
@@ -71,7 +71,7 @@
 |-------------|-------|--------|
 | SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07 | Phase 8 | Complete |
 | CTX-01, CTX-02, CTX-03, CTX-04 | Phase 9 | Complete |
-| GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Pending |
+| GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Complete |
 | SUI-01, SUI-02 | Phase 11 | Pending |
 | WRK-01, WRK-02, WRK-03 | Phase 12 | Pending |
 | DSH-01, DSH-02 | Phase 13 | Pending |
