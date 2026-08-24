@@ -40,10 +40,20 @@
 **Goal:** 让现有 Mapping/Scenario Generator 渐进消费统一 Context，保持旧 API 和治理边界。
 **Requirements:** GEN-01, GEN-02, GEN-03, GEN-04
 **Plans:** 4/4 plans executed
+**Wave 1**
 
 - [x] 10-01-PLAN.md
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [x] 10-02-PLAN.md
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [x] 10-03-PLAN.md
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [x] 10-04-PLAN.md
 
 **Status:** In Progress — 4/4 plans complete; ready for verification
