@@ -143,8 +143,8 @@ Status meaning must be conveyed by text and icon as well as color. Authority is 
 | Unfiltered empty heading | `当前项目还没有可浏览的语义概念` |
 | Unfiltered empty body | `语义概念经治理后会显示在这里。` |
 | Filtered empty heading | `没有符合条件的语义概念` |
-| Filtered empty body | `调整搜索词或筛选条件后重试。` |
-| Catalog error | `语义目录加载失败。请重试；当前搜索和筛选条件已保留。` |
+| Filtered empty body | `调整搜索词或筛选条件后重新搜索。` |
+| Catalog error | `语义目录加载失败。当前搜索和筛选条件已保留。` |
 | Unauthorized | `你没有权限查看当前项目的语义目录。请切换项目或联系项目管理员。` |
 | No binding | `当前语义尚未绑定数据资产。` |
 | Candidate binding | `发现候选关联，但尚未经过人工确认。` |
@@ -160,7 +160,10 @@ Status meaning must be conveyed by text and icon as well as color. Authority is 
 | Current-only historical label | `当前状态，不代表该历史日期` |
 | Restricted binding | `{资产类型} · 受限` |
 | Generic tab error | `{区域名称}加载失败。其他区域仍可查看。` |
-| Retry action | `重试` |
+| Catalog reload action | `重新加载语义目录` |
+| Detail reload action | `重新加载语义详情` |
+| Tab-region reload action | `重新加载{区域名称}` |
+| Historical date action | `查看指定日期` |
 | Return current | `返回当前版本` |
 | Review link | `前往评审任务` |
 | Destructive confirmation | Not applicable: Phase 11 exposes no destructive command or inline lifecycle transition |
@@ -232,7 +235,7 @@ If a destination cannot lawfully be resolved, render non-clickable metadata with
 ### Page Frame
 
 - Use `WorkspaceHeader` with title `语义目录` and meta `共 {total} 个语义概念 · 截至 {date/current}` only after the first successful response. During loading use a stable-width skeleton; do not claim `0`.
-- Main content uses `mx-auto max-w-[1600px] p-4 lg:p-6` and 20-24px vertical gaps.
+- Main content uses `mx-auto max-w-[1600px] p-4 lg:p-6`; vertical gaps are 16px on compact viewports and 24px on desktop.
 - The toolbar is one `.panel` with a first row for search, primary filters, and view mode; a second collapsible `更多筛选` region contains date and boolean filters. Active filters appear as removable text chips below controls, never as colored status badges.
 - Search has a visible label for screen readers, the Lucide `Search` icon, Enter behavior, and a text button label. The view switch is a two-option segmented control with `ListTree` and `TableProperties` icons, `目录` and `对比表` labels, `aria-pressed`, and a fixed 40px height.
 - A right-aligned `清除筛选` text action resets all semantic parameters except project and view mode. It is disabled when nothing can be cleared.
@@ -269,7 +272,7 @@ If a destination cannot lawfully be resolved, render non-clickable metadata with
 - First request loads the concept stable identity, effective canonical version for `as_of` or today, lifecycle/review summary, and conflict summary. This is the only blocking detail request.
 - While it loads, render a summary skeleton with fixed title, metadata, definition, and tab-strip heights. Do not render `暂无正式版本` until the request succeeds.
 - The header is a full-width white band below `WorkspaceHeader`, not a hero or card. It contains a `返回语义目录` link, 20px concept name, monospaced Code, type, lifecycle badge, separate review indicator, definition/empty formal state, domain, owner, and effective version/interval.
-- The `as_of` control sits beside the effective version summary: a labeled native date input, `查看` action, and current/history state. It has a maximum date only if the backend contract supplies one; do not impose an arbitrary limit.
+- The `as_of` control sits beside the effective version summary: a labeled native date input, `查看指定日期` action, and current/history state. It has a maximum date only if the backend contract supplies one; do not impose an arbitrary limit.
 - A real conflict banner appears immediately below the identity row and above the definition. It is persistent, non-dismissible, includes short conflicting source summaries, and links to Governance or a real review task. Never show an AI recommendation.
 - Historical mode adds the gold banner directly below the header. It remains visible on every tab.
 
@@ -278,7 +281,7 @@ If a destination cannot lawfully be resolved, render non-clickable metadata with
 - Tab order is fixed: Overview, Bindings, Relations, Evidence, Lineage, Governance, Versions.
 - Use a single horizontal tab list below the summary. Active tab uses pine text and a 2px bottom border; inactive tabs use slate text. No pill-filled tab bar.
 - Each tab is a link/button with `role=tab`, `aria-selected`, and `aria-controls`. Support Left/Right arrows, Home, End, and Enter/Space. On mobile the tab list scrolls horizontally and active tab is scrolled into view.
-- Overview loads with the header. Every other tab fetches on first activation, caches by `{projectId, conceptId, as_of-or-current}`, and owns its loading, empty, error, and retry state. A tab error never clears the header or another tab's cached content.
+- Overview loads with the header. Every other tab fetches on first activation, caches by `{projectId, conceptId, as_of-or-current}`, and owns its loading, empty, error, and object-specific `重新加载{区域名称}` state. A tab error never clears the header or another tab's cached content.
 - Abort prior requests on project, concept, or `as_of` change. Ignore late responses whose scope key no longer matches.
 
 ### Overview
@@ -364,7 +367,7 @@ Recommended ownership boundaries; names are prescriptive enough for planning but
 | `SemanticStatus.tsx` | Lifecycle label plus separate review indicator; no business-policy inference |
 | `SemanticDetailHeader.tsx` | Identity, effective version/date control, historical/conflict banners |
 | `SemanticTabs.tsx` | URL-backed keyboard tab behavior |
-| `AsyncRegion.tsx` | Region-scoped skeleton, empty, error, retry, `aria-busy` |
+| `AsyncRegion.tsx` | Region-scoped skeleton, empty, error, object-specific reload action, `aria-busy` |
 | `TrustSourceRegion.tsx` | Authority, provenance, source, confirmation, interval definition list |
 | `BindingList.tsx` | Confirmed/candidate split, restricted reference handling |
 | `BindingChain.tsx` | Bounded CSS chain visualization only |
@@ -392,7 +395,7 @@ View-model rules must be unit-testable without React:
 | Populated | Server total, groups/table, pagination | Canonical effective content plus trust region | Region data and lawful links |
 | Empty | Distinguish unfiltered and filtered empty copy | `暂无正式版本` only after successful effective lookup | Region-specific empty copy |
 | Partial | Render available lawful fields, use `未提供`, preserve region warnings | Never backfill canonical fields from legacy/AI | Render successful subsections and identify unavailable subsection |
-| Error | Error region with retry and retained URL; no empty copy | Page-level error with retry/back-to-catalog; no false semantic facts | Local error/retry only |
+| Error | Error region with `重新加载语义目录` and retained URL; no empty copy | Page-level error with `重新加载语义详情`/back-to-catalog; no false semantic facts | Local error with `重新加载{区域名称}` only |
 | Unauthorized | Dedicated 403 state; no counts/facets/results | Dedicated 403 state; no cached identity from another project | Restricted whole region or lawful placeholders per API contract |
 
 Do not infer 403 from a generic error string. The API/error layer must expose a typed status or safe error code for view-state selection while retaining current 401 redirect behavior.
@@ -439,7 +442,7 @@ Applicable state considerations resolved: 8 covered, 0 backstop, 0 unresolved.
 |----------|------------|--------|---------------------|
 | empty | Catalog, bindings, relations, evidence, lineage, versions | Covered | Every list/region has a domain-specific successful-empty state; no-binding, candidate-only, no-formal-version, error, and unauthorized are distinct |
 | loading | Catalog, detail summary, tabs, controls | Covered | Stable-dimension skeletons and region-scoped `aria-busy`; Overview loads first and lazy tabs cannot collapse the page |
-| error | Catalog, detail summary, every lazy tab | Covered | Retry preserves URL/scope; tab errors remain local and are never rendered as empty |
+| error | Catalog, detail summary, every lazy tab | Covered | Object-specific reload actions preserve URL/scope; tab errors remain local and are never rendered as empty |
 | populated | Directory, comparison table, detail tabs, timeline | Covered | Typical-volume layouts, server totals, grouped rows, structured lists, and bounded visualizations are specified |
 | partial | Detail/read projections | Covered | Render lawful available facts, mark unavailable subsections, use `未提供`, and never backfill formal truth from legacy or AI content |
 | overflow | Toolbar, rows, table, tabs, definitions, visualization | Covered | Controls wrap; table/tabs own deliberate scroll; text wraps or explicitly expands; 320px behavior is defined |
@@ -457,7 +460,7 @@ Every row is required automated coverage. Prefer pure Node tests for view-model/
 | SUI-01 | `/semantics`, selected project, delayed list request | Stable catalog skeleton, `aria-busy`, no false `0`, no empty copy before success |
 | SUI-02 | `/semantics`, successful zero total, no filters | Unfiltered empty heading/body and no pagination claim |
 | SUI-03 | `/semantics?q=客户&type=metric`, successful zero total | Filtered empty copy, controls hydrate from URL, clear-filter action works |
-| SUI-04 | `/semantics`, list request 500 then retry success | Error copy and Retry; URL/controls retained; empty state never flashes |
+| SUI-04 | `/semantics`, list request 500 then reload success | Error copy and `重新加载语义目录`; URL/controls retained; empty state never flashes |
 | SUI-05 | `/semantics`, 403 | Dedicated unauthorized copy; no facet, total, row, cached protected name, or generic empty output |
 | SUI-06 | Catalog item lifecycle `draft` plus active review task | Draft lifecycle and Pending Review process indicator both visible as separate dimensions |
 | SUI-07 | Confirmed, Draft, AI Suggested, Rejected, Deprecated fixtures | Default catalog may show the first three with explicit state, excludes Rejected/Deprecated and all audit-only counts; `audit=1&status=rejected` exposes only marked audit rows |
@@ -465,7 +468,7 @@ Every row is required automated coverage. Prefer pure Node tests for view-model/
 | SUI-09 | Server has 700 concepts, current page has 50 | Search/filter is server-side and total remains authoritative; no client-side pretend-global filtering |
 | SUI-10 | Switch Project A to B with A request delayed | A request is aborted/ignored; no A concept or count renders in B scope |
 | SUI-11 | `/semantics/42`, delayed header then delayed Bindings | Header skeleton first; Overview resolves; Bindings has independent skeleton; tab load does not hide header |
-| SUI-12 | Detail header 500 and Bindings-only 500 | Header failure is page-level retry; tab failure is local retry and preserves loaded header/other tabs |
+| SUI-12 | Detail header 500 and Bindings-only 500 | Header failure exposes `重新加载语义详情`; Bindings failure exposes `重新加载绑定`; the local failure preserves the loaded header and other tabs |
 | SUI-13 | `/semantics/42`, 403 or cross-project id | Unauthorized/not-found safe state without leaking concept identity or prior-project cache |
 | SUI-14 | Confirmed version, zero confirmed and zero candidate bindings | Exact no-binding copy; no fabricated graph/path/count |
 | SUI-15 | Zero confirmed bindings plus two AI/draft bindings | No-confirmed statement and separate `待治理候选`; candidate count excluded from confirmed assets and chain |
@@ -478,7 +481,7 @@ Every row is required automated coverage. Prefer pure Node tests for view-model/
 | SUI-22 | One visible restricted binding target | Only translated type and `受限` exist in DOM/accessibility tree; no name, Code, source excerpt, href, title, or serialized render model leak |
 | SUI-23 | Confirmed Target/Mart/Source chain exceeds cap | Exactly one root plus at most four nodes per layer; overflow count shown; keyboard/list fallback complete; candidates excluded |
 | SUI-24 | Long Chinese name, 150-char Code, 12k definition, long source title | No overlap at 320/768/1440px; definition wraps; code breaks on narrow view; accessible expansion/full value available |
-| SUI-25 | Keyboard-only catalog and detail use | Search submit, filter controls, view switch, tabs, version disclosure, retry, links, and horizontal tab access are operable with visible focus |
+| SUI-25 | Keyboard-only catalog and detail use | Search submit, filter controls, view switch, tabs, version disclosure, object-specific reload actions, links, and horizontal tab access are operable with visible focus |
 | SUI-26 | Navigate catalog -> detail -> asset -> return | Catalog `returnTo` restores query; asset link carries `from=semantics&semanticConceptId`; unsafe external `returnTo` is rejected |
 | SUI-27 | Resolved and unresolved question fixtures | Overview count/list contains unresolved only; resolved item appears only in Governance/audit history |
 | SUI-28 | Historical mode with a truly temporal evidence item and current-only lineage | Temporal item may be labeled for selected date; current-only label remains on lineage and is not globally suppressed |
