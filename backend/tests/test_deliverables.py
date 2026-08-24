@@ -110,11 +110,12 @@ def test_direct_source_and_mart_compile_use_governed_generators_and_keep_respons
             mart_id = mart.id
             actor = Principal(actor_row.id, actor_row.username, actor_row.display_name, False)
 
-        captures: list[tuple[str, int, Project, Principal, date | None]] = []
+        captures: list[tuple[str, int, int, Principal, date | None]] = []
 
         async def fake_source(session, mapping_id, *, authorized_project, actor, as_of):
             mapping = session.get(SourceToMartMapping, mapping_id)
-            captures.append(("source", mapping_id, authorized_project, actor, as_of))
+            assert authorized_project is session.get(Project, project["id"])
+            captures.append(("source", mapping_id, authorized_project.id, actor, as_of))
             mapping.ai_generated_content = "Governed Source draft"
             mapping.open_questions = "待确认来源"
             mapping.confidence_level = "medium"
@@ -122,7 +123,8 @@ def test_direct_source_and_mart_compile_use_governed_generators_and_keep_respons
 
         async def fake_mart(session, mapping_id, *, authorized_project, actor, as_of):
             mapping = session.get(MartToYbtMapping, mapping_id)
-            captures.append(("mart", mapping_id, authorized_project, actor, as_of))
+            assert authorized_project is session.get(Project, project["id"])
+            captures.append(("mart", mapping_id, authorized_project.id, actor, as_of))
             mapping.ai_generated_content = "Governed Mart draft"
             mapping.open_questions = None
             mapping.confidence_level = "high"
@@ -155,15 +157,22 @@ def test_direct_source_and_mart_compile_use_governed_generators_and_keep_respons
                 as_of=AS_OF,
                 db=db,
             ))
+        app.dependency_overrides[get_current_principal] = lambda: actor
+        http_result = client.post(
+            f"/api/source-to-mart-mappings/{source_id}/compile",
+            params={"as_of": AS_OF.isoformat()},
+        )
 
         assert set(source_result) == {"mapping_id", "draft", "claim_type", "open_questions"}
         assert set(mart_result) == {"mapping_id", "draft", "claim_type", "open_questions"}
+        assert http_result.status_code == 200, http_result.text
+        assert set(http_result.json()) == {"mapping_id", "draft", "claim_type", "open_questions"}
         assert source_result["draft"] == "Governed Source draft"
         assert source_result["open_questions"] == ["待确认来源"]
         assert mart_result["draft"] == "Governed Mart draft"
-        assert [item[0] for item in captures] == ["source", "mart"]
-        for _, _, authorized_project, captured_actor, as_of in captures:
-            assert authorized_project.id == project["id"]
+        assert [item[0] for item in captures] == ["source", "mart", "source"]
+        for _, _, authorized_project_id, captured_actor, as_of in captures:
+            assert authorized_project_id == project["id"]
             assert captured_actor == actor
             assert captured_actor.is_legacy_system is False
             assert as_of == AS_OF
@@ -221,8 +230,10 @@ def test_legacy_deliverable_compilers_are_removed_from_production() -> None:
     assert not (backend_root / "app/services/deliverables/source_to_mart_compiler.py").exists()
     assert not (backend_root / "app/services/deliverables/mart_to_ybt_compiler.py").exists()
     source = (backend_root / "app/api/deliverables.py").read_text(encoding="utf-8")
-    assert "compile_source_to_mart" not in source
-    assert "compile_mart_to_ybt" not in source
+    assert "services.deliverables.source_to_mart_compiler" not in source
+    assert "services.deliverables.mart_to_ybt_compiler" not in source
+    assert "compile_source_to_mart(" not in source
+    assert "compile_mart_to_ybt(" not in source
 
 
 def test_template_version_render_history_reuse_and_delivery_lifecycle(monkeypatch, tmp_path) -> None:

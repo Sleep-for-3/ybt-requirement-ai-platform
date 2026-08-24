@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from io import BytesIO
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from openpyxl import Workbook
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -32,23 +32,25 @@ from app.schemas.deliverables import (
 )
 from app.services.deliverables.historical import parse_historical_workbook, semantic_diff
 from app.services.deliverables.lineage_records import build_change_impact_records, build_lineage_records
-from app.services.deliverables.mart_to_ybt_compiler import compile_mart_to_ybt
 from app.services.deliverables.readiness_service import field_readiness, table_readiness
-from app.services.deliverables.source_to_mart_compiler import compile_source_to_mart
 from app.services.deliverables.template_validation import validate_template_version
 from app.services.deliverables.validation_service import validate_package
 from app.services.deliverables.workbook import inspect_workbook, render_workbook
 from app.services.governance.audit import record_audit
+from app.services.governance.double_layer_review import MappingGenerationNotEditable
 from app.services.governance.notifications import notify_user
 from app.services.governance.workflow import start_workflow
 from app.services.storage import get_storage_service
 from app.services.security import redact_content
 from app.services.mapping.scenario_draft_generator import generate_business_draft, generate_technical_draft
+from app.services.mapping.mart_to_ybt_generator import generate_mart_to_ybt_draft
+from app.services.mapping.source_to_mart_generator import generate_source_to_mart_draft
 from app.services.mapping.generator_context import (
     GenerationActorError,
     GenerationBlockedError,
     GenerationStaleError,
     recover_queued_actor,
+    validate_generation_actor,
 )
 from app.services.task_queue import get_task_queue
 
@@ -497,7 +499,7 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
                     _record_generation_item(db, job.id, f"business:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
                     db.commit()
                     continue
-                outcome = _run_deliverable_scenario_generation(
+                outcome = _run_deliverable_generation(
                     db,
                     job_id=job.id,
                     mapping_id=mapping.id,
@@ -519,7 +521,7 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
                     _record_generation_item(db, job.id, f"technical:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
                     db.commit()
                     continue
-                outcome = _run_deliverable_scenario_generation(
+                outcome = _run_deliverable_generation(
                     db,
                     job_id=job.id,
                     mapping_id=mapping.id,
@@ -536,24 +538,63 @@ def _deliverable_generate_handler(db: Session, job: BackgroundJob) -> dict:
             db.refresh(job)
             if job.status == "cancelled": break
             ybt_mappings = list(db.scalars(select(MartToYbtMapping).where(MartToYbtMapping.project_id == package.project_id, MartToYbtMapping.target_field_id == item.target_field_id)).all())
-            job.current_step = "compile_source_to_mart_drafts"
-            for ybt_mapping in ybt_mappings:
-                source_mappings = list(db.scalars(select(SourceToMartMapping).where(SourceToMartMapping.project_id == package.project_id, SourceToMartMapping.mart_field_id == ybt_mapping.mart_field_id)).all())
-                for mapping in source_mappings:
-                    if mapping.final_content or mapping.mapping_status == "approved" or mapping.ai_generated_content:
-                        _record_generation_item(db, job.id, f"source_to_mart:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
-                        continue
-                    compile_source_to_mart(db, mapping.id)
-                    _record_generation_item(db, job.id, f"source_to_mart:{mapping.id}", "completed", {"mapping_id": mapping.id})
+            mart_field_ids = sorted({mapping.mart_field_id for mapping in ybt_mappings})
+            source_mappings = list(db.scalars(select(SourceToMartMapping).where(
+                SourceToMartMapping.project_id == package.project_id,
+                SourceToMartMapping.mart_field_id.in_(mart_field_ids),
+            ).order_by(SourceToMartMapping.id)).all()) if mart_field_ids else []
+            job.current_step = "generate_source_to_mart_drafts"
+            for mapping in source_mappings:
+                item_key = f"source_to_mart:{mapping.id}"
+                if item_key in completed:
+                    continue
+                if mapping.final_content or mapping.mapping_status == "approved" or mapping.ai_generated_content:
+                    _record_generation_item(db, job.id, item_key, "skipped", {"reason": "existing_governed_content"})
+                    db.commit()
+                    continue
+                outcome = _run_deliverable_generation(
+                    db,
+                    job_id=job.id,
+                    mapping_id=mapping.id,
+                    item_key=item_key,
+                    actor=actor,
+                    authorized_project=authorized_project,
+                    permission="technical.edit",
+                    generator=generate_source_to_mart_draft,
+                )
+                if outcome == "completed":
+                    completed.add(item_key)
+                elif outcome == "blocked":
+                    blocked_fields.add(item.target_field_id)
+                else:
+                    failed_fields.add(item.target_field_id)
             db.refresh(job)
             if job.status == "cancelled": break
-            job.current_step = "compile_mart_to_ybt_drafts"
+            job.current_step = "generate_mart_to_ybt_drafts"
             for mapping in ybt_mappings:
-                if mapping.final_content or mapping.mapping_status == "approved" or mapping.ai_generated_content:
-                    _record_generation_item(db, job.id, f"mart_to_ybt:{mapping.id}", "skipped", {"reason": "existing_governed_content"})
+                item_key = f"mart_to_ybt:{mapping.id}"
+                if item_key in completed:
                     continue
-                compile_mart_to_ybt(db, mapping.id)
-                _record_generation_item(db, job.id, f"mart_to_ybt:{mapping.id}", "completed", {"mapping_id": mapping.id})
+                if mapping.final_content or mapping.mapping_status == "approved" or mapping.ai_generated_content:
+                    _record_generation_item(db, job.id, item_key, "skipped", {"reason": "existing_governed_content"})
+                    db.commit()
+                    continue
+                outcome = _run_deliverable_generation(
+                    db,
+                    job_id=job.id,
+                    mapping_id=mapping.id,
+                    item_key=item_key,
+                    actor=actor,
+                    authorized_project=authorized_project,
+                    permission="technical.edit",
+                    generator=generate_mart_to_ybt_draft,
+                )
+                if outcome == "completed":
+                    completed.add(item_key)
+                elif outcome == "blocked":
+                    blocked_fields.add(item.target_field_id)
+                else:
+                    failed_fields.add(item.target_field_id)
             db.refresh(job)
             if job.status == "cancelled": break
             job.current_step = "create_pending_questions"
@@ -788,13 +829,41 @@ def download_deliverable_version(version_id: int, principal: CurrentPrincipal, d
 
 
 @router.post("/source-to-mart-mappings/{mapping_id}/compile")
-def compile_source(mapping_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    mapping = _resource_visible(db, principal, SourceToMartMapping, mapping_id, "deliverable.generate"); result = compile_source_to_mart(db, mapping.id); record_audit(db, action="compile_source_to_mart", resource_type="source_to_mart_mapping", resource_id=mapping.id, actor_user_id=principal.user_id, project_id=mapping.project_id); db.commit(); return result
+async def compile_source(
+    mapping_id: int,
+    principal: CurrentPrincipal,
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return await _compile_mapping(
+        db,
+        mapping_id=mapping_id,
+        model=SourceToMartMapping,
+        principal=principal,
+        as_of=as_of,
+        generator=generate_source_to_mart_draft,
+        audit_action="compile_source_to_mart",
+        resource_type="source_to_mart_mapping",
+    )
 
 
 @router.post("/mart-to-ybt-mappings/{mapping_id}/compile")
-def compile_ybt(mapping_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    mapping = _resource_visible(db, principal, MartToYbtMapping, mapping_id, "deliverable.generate"); result = compile_mart_to_ybt(db, mapping.id); record_audit(db, action="compile_mart_to_ybt", resource_type="mart_to_ybt_mapping", resource_id=mapping.id, actor_user_id=principal.user_id, project_id=mapping.project_id); db.commit(); return result
+async def compile_ybt(
+    mapping_id: int,
+    principal: CurrentPrincipal,
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return await _compile_mapping(
+        db,
+        mapping_id=mapping_id,
+        model=MartToYbtMapping,
+        principal=principal,
+        as_of=as_of,
+        generator=generate_mart_to_ybt_draft,
+        audit_action="compile_mart_to_ybt",
+        resource_type="mart_to_ybt_mapping",
+    )
 
 
 def _permission(db, principal, project_id, permission): return PermissionService(db, principal).require_project_permission(project_id, permission)
@@ -978,7 +1047,7 @@ def _ensure_generation_questions(db, package: DeliverablePackage, field_id: int)
         ))
 
 
-def _run_deliverable_scenario_generation(
+def _run_deliverable_generation(
     db: Session,
     *,
     job_id: int,
@@ -1002,7 +1071,7 @@ def _run_deliverable_scenario_generation(
         asyncio.run(generator(
             db,
             mapping_id,
-            authorized_project=authorized_project,
+            authorized_project=checked_project,
             actor=actor,
             as_of=None,
         ))
@@ -1040,12 +1109,101 @@ def _deliverable_generation_block_code(exc: Exception) -> str | None:
         return "generation_readiness_blocked"
     if isinstance(exc, GenerationStaleError):
         return "generation_stale"
+    if isinstance(exc, MappingGenerationNotEditable):
+        return "generation_governance_blocked"
     if isinstance(exc, HTTPException):
         if exc.status_code in {401, 403}:
             return "generation_permission_denied"
         if exc.status_code == 409:
             return "generation_governance_blocked"
     return None
+
+
+async def _compile_mapping(
+    db: Session,
+    *,
+    mapping_id: int,
+    model,
+    principal,
+    as_of: date | None,
+    generator,
+    audit_action: str,
+    resource_type: str,
+) -> dict:
+    mapping = db.get(model, mapping_id)
+    if mapping is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    try:
+        validate_generation_actor(db, principal)
+        authorized_project = PermissionService(
+            db,
+            principal,
+        ).require_project_permission(mapping.project_id, "technical.edit")
+        generated = await generator(
+            db,
+            mapping.id,
+            authorized_project=authorized_project,
+            actor=principal,
+            as_of=as_of,
+        )
+    except HTTPException:
+        raise
+    except GenerationActorError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "generation-actor-invalid"},
+        ) from exc
+    except MappingGenerationNotEditable as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "generation-governance-blocked",
+                "reason_code": exc.reason_code,
+            },
+        ) from exc
+    except GenerationBlockedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "generation-blocked", "reasons": list(exc.reasons)},
+        ) from exc
+    except GenerationStaleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "stale-task", "changed_fields": list(exc.changed_fields)},
+        ) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "generation-context-failed"},
+        ) from exc
+
+    result = _compile_mapping_result(generated)
+    record_audit(
+        db,
+        action=audit_action,
+        resource_type=resource_type,
+        resource_id=generated.id,
+        actor_user_id=principal.user_id,
+        project_id=generated.project_id,
+        after={"mapping_id": generated.id, "claim_type": result["claim_type"]},
+    )
+    db.commit()
+    return result
+
+
+def _compile_mapping_result(mapping) -> dict:
+    questions = [mapping.open_questions] if mapping.open_questions else []
+    confidence = (mapping.confidence_level or "low").lower()
+    return {
+        "mapping_id": mapping.id,
+        "draft": mapping.ai_generated_content or "",
+        "claim_type": (
+            "evidence_supported"
+            if confidence in {"medium", "high", "confirmed"}
+            else "unverified"
+        ),
+        "open_questions": questions,
+    }
 
 
 def _record_generation_item(db: Session, job_id: int, item_key: str, status: str, result: dict) -> None:

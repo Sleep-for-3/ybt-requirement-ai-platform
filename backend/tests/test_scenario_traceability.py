@@ -1155,6 +1155,84 @@ def test_deliverable_queued_handler_blocks_disabled_actor_before_generation(
         assert item.error_message == "queued_actor_invalid"
 
 
+def test_deliverable_source_and_mart_items_block_when_technical_permission_is_revoked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _scenario_service_session(tmp_path, "deliverable-mapping-revoked") as (db, _, fixture):
+        _, job = _seed_deliverable_job(db, fixture, "deliverable-mapping-revoked")
+        fixture["mapping"].ai_generated_content = "已有业务草稿"
+        fixture["lineage"].ai_generated_content = "已有技术草稿"
+        mart_table = MartTable(
+            project_id=fixture["project"].id,
+            table_code="MART_REVOKED",
+            table_name="撤权集市表",
+        )
+        db.add(mart_table)
+        db.flush()
+        mart_field = MartField(
+            project_id=fixture["project"].id,
+            mart_table_id=mart_table.id,
+            field_code="MART_REVOKED_FIELD",
+            field_name="撤权集市字段",
+        )
+        db.add(mart_field)
+        db.flush()
+        source_mapping = SourceToMartMapping(
+            project_id=fixture["project"].id,
+            mart_field_id=mart_field.id,
+            mapping_status="draft",
+        )
+        mart_mapping = MartToYbtMapping(
+            project_id=fixture["project"].id,
+            target_field_id=fixture["target_field"].id,
+            mart_field_id=mart_field.id,
+            mapping_status="draft",
+        )
+        db.add_all([source_mapping, mart_mapping])
+        db.commit()
+
+        _isolate_deliverable_generation(monkeypatch)
+        calls = {"source": 0, "mart": 0}
+
+        def revoke_after_package_authorization(*args, **kwargs):
+            fixture["membership"].project_role = "business_analyst"
+            db.commit()
+            return []
+
+        async def forbidden_source(*args, **kwargs):
+            calls["source"] += 1
+            raise AssertionError("revoked actor reached Source generator")
+
+        async def forbidden_mart(*args, **kwargs):
+            calls["mart"] += 1
+            raise AssertionError("revoked actor reached Mart generator")
+
+        monkeypatch.setattr(deliverables, "build_lineage_records", revoke_after_package_authorization)
+        monkeypatch.setattr(deliverables, "generate_source_to_mart_draft", forbidden_source)
+        monkeypatch.setattr(deliverables, "generate_mart_to_ybt_draft", forbidden_mart)
+
+        result = deliverables._deliverable_generate_handler(db, job)
+
+        assert result["failed_count"] == 0
+        assert result["blocked_count"] == 1
+        assert calls == {"source": 0, "mart": 0}
+        for item_key in (
+            f"source_to_mart:{source_mapping.id}",
+            f"mart_to_ybt:{mart_mapping.id}",
+        ):
+            item = db.scalar(select(BackgroundJobItem).where(
+                BackgroundJobItem.background_job_id == job.id,
+                BackgroundJobItem.item_key == item_key,
+            ))
+            assert item.status == "blocked"
+            assert item.result_summary_json["reason_code"] == "generation_permission_denied"
+            assert item.error_message == "generation_permission_denied"
+        db.expire_all()
+        assert db.get(SourceToMartMapping, source_mapping.id).ai_generated_content is None
+        assert db.get(MartToYbtMapping, mart_mapping.id).ai_generated_content is None
+
+
 def test_product_scenario_crud_and_project_code_uniqueness() -> None:
     with _client() as client:
         project = _post(client, "/api/projects", {"name": "场景口径项目"})
