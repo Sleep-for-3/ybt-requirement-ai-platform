@@ -13,6 +13,13 @@ const FRONTEND_ROOT = path.join(REPOSITORY_ROOT, "frontend");
 const NEXT_BIN = path.join(FRONTEND_ROOT, "node_modules", "next", "dist", "bin", "next");
 const DEFAULT_TIMEOUT_MS = 12_000;
 const STARTUP_TIMEOUT_MS = 60_000;
+const CDP_COMMAND_TIMEOUT_MS = 8_000;
+const CDP_CLEANUP_TIMEOUT_MS = 2_000;
+const PROCESS_EXIT_TIMEOUT_MS = 5_000;
+const PROFILE_CLEANUP_TIMEOUT_MS = 5_000;
+const ACTIVE_RUNTIMES = new Set();
+let signalGuardInstalled = false;
+let signalShutdownPromise = null;
 const API_RESPONSE_HEADERS = [
   { name: "Content-Type", value: "application/json; charset=utf-8" },
   { name: "Access-Control-Allow-Origin", value: "*" },
@@ -32,9 +39,14 @@ export async function createSemanticCatalogBrowser(options = {}) {
     const cdp = await connectTarget(browser.version.webSocketDebuggerUrl);
     const driver = new SemanticCatalogBrowser({ server, browser, cdp, timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS });
     await driver.initialize();
+    registerRuntime(driver);
     return driver;
   } catch (error) {
-    await closeRuntime({ server, browser, cdp: null });
+    try {
+      await closeRuntime({ server, browser, cdp: null });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Semantic catalog browser startup and cleanup failed");
+    }
     throw error;
   }
 }
@@ -359,11 +371,15 @@ class SemanticCatalogBrowser {
   async close() {
     if (this.closed) return;
     this.closed = true;
-    await closeRuntime({
-      server: this.server,
-      browser: this.browser,
-      cdp: { connection: this.cdp, sessionId: this.sessionId, targetId: this.targetId }
-    });
+    try {
+      await closeRuntime({
+        server: this.server,
+        browser: this.browser,
+        cdp: { connection: this.cdp, sessionId: this.sessionId, targetId: this.targetId }
+      });
+    } finally {
+      unregisterRuntime(this);
+    }
   }
 }
 
@@ -463,7 +479,7 @@ async function startBrowser() {
   const started = Date.now();
   while (Date.now() - started < 20_000) {
     if (child.exitCode !== null) {
-      await rm(profile, { recursive: true, force: true }).catch(() => undefined);
+      await removeTempProfile(profile);
       throw new Error(`Headless browser exited with ${child.exitCode}:\n${output.join("")}`);
     }
     try {
@@ -475,7 +491,7 @@ async function startBrowser() {
     await delay(50);
   }
   await terminateProcess(child);
-  await rm(profile, { recursive: true, force: true }).catch(() => undefined);
+  await removeTempProfile(profile);
   throw new Error(`Timed out waiting for installed Edge/Chrome CDP endpoint on ${port}:\n${output.join("")}`);
 }
 
@@ -504,7 +520,10 @@ class CdpConnection {
     this.listeners = new Map();
     socket.addEventListener("message", (event) => { void this.handleMessage(event.data); });
     socket.addEventListener("close", () => {
-      for (const pending of this.pending.values()) pending.reject(new Error("CDP websocket closed"));
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("CDP websocket closed"));
+      }
       this.pending.clear();
     });
   }
@@ -522,6 +541,7 @@ class CdpConnection {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
+      clearTimeout(pending.timer);
       if (message.error) pending.reject(new Error(`${message.error.message || "CDP command failed"} (${message.error.code || "unknown"})`));
       else pending.resolve(message.result || {});
       return;
@@ -531,15 +551,22 @@ class CdpConnection {
     for (const listener of listeners) listener(message);
   }
 
-  send(method, params = {}, sessionId) {
+  send(method, params = {}, sessionId, timeoutMs = CDP_COMMAND_TIMEOUT_MS) {
     const id = ++this.nextId;
     const message = { id, method, params };
     if (sessionId) message.sessionId = sessionId;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id);
+        reject(new Error(`CDP command timed out after ${timeoutMs}ms: ${method}`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
       try {
         this.socket.send(JSON.stringify(message));
       } catch (error) {
+        clearTimeout(timer);
         this.pending.delete(id);
         reject(error);
       }
@@ -552,20 +579,50 @@ class CdpConnection {
 }
 
 async function closeRuntime({ server, browser, cdp }) {
+  const errors = [];
+  const attempt = async (action) => {
+    try {
+      await action();
+    } catch (error) {
+      errors.push(error);
+    }
+  };
+
   if (cdp?.connection) {
-    try {
-      if (cdp.sessionId) await cdp.connection.send("Fetch.disable", {}, cdp.sessionId);
-    } catch { /* browser is already exiting */ }
-    try {
-      if (cdp.targetId) await cdp.connection.send("Target.closeTarget", { targetId: cdp.targetId });
-    } catch { /* browser is already exiting */ }
-    await cdp.connection.close();
+    await attempt(async () => {
+      if (cdp.sessionId) await cdp.connection.send("Fetch.disable", {}, cdp.sessionId, CDP_CLEANUP_TIMEOUT_MS);
+    });
+    await attempt(async () => {
+      if (cdp.targetId) await cdp.connection.send("Target.closeTarget", { targetId: cdp.targetId }, undefined, CDP_CLEANUP_TIMEOUT_MS);
+    });
+    await attempt(() => cdp.connection.close());
   }
   if (browser) {
-    await terminateProcess(browser.child);
-    await rm(browser.profile, { recursive: true, force: true }).catch(() => undefined);
+    await attempt(() => terminateProcess(browser.child));
+    await attempt(() => removeTempProfile(browser.profile));
   }
-  if (server) await terminateProcess(server.child);
+  if (server) await attempt(() => terminateProcess(server.child));
+  if (errors.length > 0) throw new AggregateError(errors, "Semantic catalog browser cleanup failed");
+}
+
+function registerRuntime(runtime) {
+  ACTIVE_RUNTIMES.add(runtime);
+  if (signalGuardInstalled) return;
+  signalGuardInstalled = true;
+  process.on("SIGINT", () => { void shutdownActiveRuntimes(130); });
+  process.on("SIGTERM", () => { void shutdownActiveRuntimes(143); });
+}
+
+function unregisterRuntime(runtime) {
+  ACTIVE_RUNTIMES.delete(runtime);
+}
+
+async function shutdownActiveRuntimes(exitCode) {
+  if (!signalShutdownPromise) {
+    signalShutdownPromise = Promise.allSettled([...ACTIVE_RUNTIMES].map((runtime) => runtime.close()));
+  }
+  await signalShutdownPromise;
+  process.exit(exitCode);
 }
 
 function findBrowser() {
@@ -624,17 +681,55 @@ async function terminateProcess(child) {
   if (!child || child.exitCode !== null) return;
   if (process.platform === "win32" && child.pid) {
     spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    return;
+    if (await waitForProcessExit(child, PROCESS_EXIT_TIMEOUT_MS)) return;
+    try { child.kill(); } catch { /* taskkill may have already stopped it */ }
+    if (await waitForProcessExit(child, PROCESS_EXIT_TIMEOUT_MS)) return;
+    throw new Error(`Timed out terminating child process ${child.pid}`);
   }
-  try { child.kill("SIGTERM"); } catch { return; }
-  await Promise.race([onceExit(child), delay(3_000)]);
+  try { child.kill("SIGTERM"); } catch (error) {
+    if (child.exitCode !== null) return;
+    throw error;
+  }
+  if (await waitForProcessExit(child, PROCESS_EXIT_TIMEOUT_MS)) return;
   if (child.exitCode === null) {
     try { child.kill("SIGKILL"); } catch { /* already exited */ }
+    if (await waitForProcessExit(child, PROCESS_EXIT_TIMEOUT_MS)) return;
+    throw new Error(`Timed out terminating child process ${child.pid || "unknown"}`);
   }
 }
 
-function onceExit(child) {
-  return new Promise((resolve) => child.once("exit", resolve));
+async function waitForProcessExit(child, timeoutMs) {
+  if (!child || child.exitCode !== null) return true;
+  return new Promise((resolve) => {
+    let settled = false;
+    const onExit = () => finish(true);
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      resolve(exited);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", onExit);
+    if (child.exitCode !== null) finish(true);
+  });
+}
+
+async function removeTempProfile(profile) {
+  if (!profile) return;
+  const deadline = Date.now() + PROFILE_CLEANUP_TIMEOUT_MS;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      await rm(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(Math.min(200, Math.max(25, deadline - Date.now())));
+    }
+  }
+  throw new Error(`Timed out removing browser profile ${profile}`, { cause: lastError });
 }
 
 function appendOutput(output, chunk) {

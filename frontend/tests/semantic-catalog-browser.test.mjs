@@ -4,8 +4,25 @@ import test from "node:test";
 import { createSemanticCatalogBrowser } from "./semantic-catalog-browser-harness.mjs";
 
 let browser;
+let suiteTimeout;
+const TEST_TIMEOUT_MS = 60_000;
+const SUITE_TIMEOUT_MS = 180_000;
+
+function browserTest(name, handler) {
+  return test(name, { timeout: TEST_TIMEOUT_MS }, handler);
+}
 
 test.before(async () => {
+  suiteTimeout = setTimeout(() => {
+    console.error(`Semantic catalog browser suite exceeded ${SUITE_TIMEOUT_MS}ms`);
+    void (async () => {
+      try {
+        await browser?.close();
+      } finally {
+        process.exit(1);
+      }
+    })();
+  }, SUITE_TIMEOUT_MS);
   browser = await createSemanticCatalogBrowser();
 });
 
@@ -14,10 +31,11 @@ test.afterEach(async () => {
 });
 
 test.after(async () => {
+  if (suiteTimeout) clearTimeout(suiteTimeout);
   await browser?.close();
 });
 
-test("production browser catalog first paints A then clears it at the real project switch", async () => {
+browserTest("production browser catalog first paints A then clears it at the real project switch", async () => {
   await browser.preserveDeferredCompletions();
   browser.setApiHandler("catalog", () => ({ hold: true }));
   await browser.navigate("/semantics?projectId=1");
@@ -44,7 +62,7 @@ test("production browser catalog first paints A then clears it at the real proje
   assert.match(finalDom, /共 1 个语义概念/);
 });
 
-test("production browser catalog late success cannot repaint stale project A", async () => {
+browserTest("production browser catalog late success cannot repaint stale project A", async () => {
   await browser.preserveDeferredCompletions();
   browser.setApiHandler("catalog", () => ({ hold: true }));
   await browser.navigate("/semantics?projectId=1");
@@ -65,7 +83,7 @@ test("production browser catalog late success cannot repaint stale project A", a
   assert.match(finalDom, /项目 B 晚到测试/);
 });
 
-test("production browser catalog late error cannot replace each current B state", async () => {
+browserTest("production browser catalog late error cannot replace each current B state", async () => {
   await browser.preserveDeferredCompletions();
   const cases = [
     { name: "loading", response: null, expected: "正在加载语义目录" },
@@ -107,7 +125,7 @@ test("production browser catalog late error cannot replace each current B state"
   }
 });
 
-test("production browser catalog exposes truthful loading and both empty variants", async () => {
+browserTest("production browser catalog exposes truthful loading and both empty variants", async () => {
   browser.setApiHandler("catalog", () => ({ hold: true }));
   await browser.navigate("/semantics?projectId=1");
   const loadingRequest = await browser.waitForRequest((request) => request.kind === "catalog");
@@ -125,7 +143,7 @@ test("production browser catalog exposes truthful loading and both empty variant
   assert.equal((await browser.text()).includes("当前项目还没有可浏览的语义概念"), false);
 });
 
-test("production browser catalog retries a real 500 and keeps URL controls while 403 reveals no data", async () => {
+browserTest("production browser catalog retries a real 500 and keeps URL controls while 403 reveals no data", async () => {
   let attempts = 0;
   browser.setApiHandler("catalog", () => {
     attempts += 1;
@@ -153,7 +171,7 @@ test("production browser catalog retries a real 500 and keeps URL controls while
   assert.match(await browser.text('section[aria-label="语义目录筛选"]'), /全部类型/);
 });
 
-test("production browser catalog canonicalizes audit sentinel and drives all pagination boundaries", async () => {
+browserTest("production browser catalog canonicalizes audit sentinel and drives all pagination boundaries", async () => {
   browser.setApiHandler("catalog", (request) => {
     const page = Number(request.query.page || 1);
     const pageSize = Number(request.query.page_size || 10);
@@ -199,7 +217,7 @@ test("production browser catalog canonicalizes audit sentinel and drives all pag
   assert.equal(ax.includes("SECRET_RESTRICTED_MARKER"), false);
 });
 
-test("production browser detail separates shell and lazy-region loading, empty, retry, and forbidden", async () => {
+browserTest("production browser detail separates shell and lazy-region loading, empty, retry, and forbidden", async () => {
   browser.setApiHandler("detail-shell", () => ({ hold: true }));
   browser.setApiHandler("detail-region", () => ({ hold: true }));
   await browser.navigate("/semantics/42?projectId=1&tab=bindings");
@@ -240,7 +258,7 @@ test("production browser detail separates shell and lazy-region loading, empty, 
   assert.equal((await browser.text()).includes("详情测试概念"), true);
 });
 
-test("production browser detail drives real tab keyboard focus and retains focus after deferred region completion", async () => {
+browserTest("production browser detail drives real tab keyboard focus and retains focus after deferred region completion", async () => {
   browser.setApiHandler("detail-shell", () => jsonResponse(detailShell()));
   browser.setApiHandler("detail-region", (request) => request.region === "bindings" ? ({ hold: true }) : jsonResponse(emptyRegion(request.region)));
   await browser.navigate("/semantics/42?projectId=1");
@@ -270,7 +288,7 @@ test("production browser detail drives real tab keyboard focus and retains focus
   assert.equal((await browser.elements('[role="tabpanel"]')).length, 1);
 });
 
-test("production browser detail redacts adversarial restricted references from DOM, attributes, links, and AX", async () => {
+browserTest("production browser detail redacts adversarial restricted references from DOM, attributes, links, and AX", async () => {
   const markers = ["SECRET_IDENTIFIER_MARKER", "SECRET_NAME_MARKER", "SECRET_CODE_MARKER", "SECRET_HREF_MARKER", "SECRET_TITLE_MARKER", "SECRET_SOURCE_MARKER", "SECRET_METADATA_MARKER"];
   browser.setApiHandler("detail-shell", () => jsonResponse(detailShell()));
   browser.setApiHandler("detail-region", (request) => request.region === "bindings" ? jsonResponse(bindingRegion({ markers })) : jsonResponse(emptyRegion(request.region)));
@@ -284,7 +302,7 @@ test("production browser detail redacts adversarial restricted references from D
   for (const marker of markers) assert.equal(serialized.includes(marker), false, `${marker} leaked into browser output`);
 });
 
-test("production browser detail preserves formal truth while keyboard-expanding all conflict sources", async () => {
+browserTest("production browser detail preserves formal truth while keyboard-expanding all conflict sources", async () => {
   const sourceA = "冲突来源 A 的完整原文。".repeat(70);
   const sourceB = "冲突来源 B 的完整原文。".repeat(70);
   const sourceC = "冲突来源 C 的完整原文。".repeat(70);
@@ -311,7 +329,7 @@ test("production browser detail preserves formal truth while keyboard-expanding 
   assert.equal(await browser.exists('section[role="alert"]'), true);
 });
 
-test("production browser detail exposes two independent evidence disclosures with stable controls", async () => {
+browserTest("production browser detail exposes two independent evidence disclosures with stable controls", async () => {
   const first = "证据一的完整可核对原文。".repeat(90);
   const second = "证据二的完整可核对原文。".repeat(90);
   browser.setApiHandler("detail-shell", () => jsonResponse(detailShell()));
@@ -344,7 +362,7 @@ test("production browser detail exposes two independent evidence disclosures wit
   assert.deepEqual(expanded.map((control) => control.expanded), ["true", "true"]);
 });
 
-test("production browser detail keeps 12k formal definitions selectable and long evidence expandable", async () => {
+browserTest("production browser detail keeps 12k formal definitions selectable and long evidence expandable", async () => {
   const longDefinition = "正式定义长文本。".repeat(2_000);
   const longEvidence = "长来源内容。".repeat(1_000);
   browser.setApiHandler("detail-shell", () => jsonResponse(detailShell({ definition: longDefinition })));
