@@ -307,11 +307,18 @@ class SemanticCatalogBrowser {
     const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
     const virtualKeyCodes = { Enter: 13, Home: 36, End: 35, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Escape: 27, Space: 32 };
     await this.cdp.send("Input.dispatchKeyEvent", {
-      type: "keyDown",
+      type: "rawKeyDown",
       key,
       code,
       windowsVirtualKeyCode: virtualKeyCodes[key] || 0
     }, this.sessionId);
+    if (key === "Enter" || key === "Space") {
+      await this.cdp.send("Input.dispatchKeyEvent", {
+        type: "char",
+        key,
+        text: key === "Enter" ? "\r" : " "
+      }, this.sessionId);
+    }
     await this.cdp.send("Input.dispatchKeyEvent", {
       type: "keyUp",
       key,

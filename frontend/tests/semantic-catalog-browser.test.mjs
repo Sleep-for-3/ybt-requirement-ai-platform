@@ -210,7 +210,7 @@ test("production browser detail separates shell and lazy-region loading, empty, 
   await browser.waitForText("详情测试概念");
   const regionRequest = await browser.waitForRequest((request) => request.kind === "detail-region" && request.region === "bindings");
   await browser.waitFor(() => browser.exists('[role="status"][aria-busy="true"]'), undefined, "Bindings loading boundary");
-  assert.match(await browser.text('[role="status"][aria-busy="true"]'), /正在加载Bindings/);
+  assert.equal(await browser.attribute('[role="status"][aria-busy="true"]', "aria-label"), "正在加载Bindings");
   await browser.respond(regionRequest, jsonResponse(emptyBindingRegion()));
   await browser.waitForText("当前语义尚未绑定数据资产。");
 
@@ -354,7 +354,7 @@ test("production browser detail keeps 12k formal definitions selectable and long
   await browser.navigate("/semantics/42?projectId=1");
   await browser.waitForText("详情测试概念");
   assert.equal((await browser.domText()).includes(longDefinition), true);
-  const selectedLength = await browser.evaluate(`(() => { const element = document.querySelector("#semantic-formal-definition p"); if (!element) return 0; const range = document.createRange(); range.selectNodeContents(element); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return selection.toString().length; })()`);
+  const selectedLength = await browser.evaluate(`(() => { const element = document.querySelector('section[aria-labelledby="semantic-formal-definition"] p'); if (!element) return 0; const range = document.createRange(); range.selectNodeContents(element); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return selection.toString().length; })()`);
   assert.equal(selectedLength, longDefinition.length);
 
   await browser.navigate("/semantics/42?projectId=1&tab=evidence");
