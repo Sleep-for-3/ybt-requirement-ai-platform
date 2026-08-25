@@ -1,11 +1,15 @@
 from datetime import UTC, date, datetime
+from time import perf_counter
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import event
+from sqlalchemy import event, text
 
 from app.main import app
 from app.models import (
+    AuditLog,
+    BusinessSystem,
+    MartTable,
     PendingQuestion,
     Project,
     ProjectMembership,
@@ -14,6 +18,7 @@ from app.models import (
     SemanticConcept,
     SemanticConceptVersion,
     SemanticRelation,
+    SourceTable,
     TargetTable,
     User,
     WorkflowInstance,
@@ -822,6 +827,455 @@ def test_catalog_review_questions_and_query_count_are_batched() -> None:
         assert first["review"]["pending"] is True
         assert first["review"]["pending_count"] == 1
         assert first["open_question_count"] == 1
+
+
+def test_detail_isolation_distinguishes_visible_forbidden_and_hidden_projects() -> None:
+    with _semantic_client() as (client, sessions):
+        project_a, project_b = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_a)
+            concept, _ = _seed_concept(
+                db, project, code="DETAIL_SCOPE", name="详情权限边界"
+            )
+            visible_without_permission = User(username="semantic_visible_no_permission")
+            db.add(visible_without_permission)
+            db.flush()
+            db.add(
+                ProjectMembership(
+                    project_id=project_a,
+                    user_id=visible_without_permission.id,
+                    project_role="unsupported_visible_role",
+                    status="active",
+                )
+            )
+            db.commit()
+            concept_id = concept.id
+            principal = Principal(
+                visible_without_permission.id,
+                visible_without_permission.username,
+                None,
+            )
+
+        app.dependency_overrides[get_current_principal] = lambda: principal
+        visible_forbidden = client.get(
+            f"/api/projects/{project_a}/semantic-catalog/{concept_id}"
+        )
+        hidden_project = client.get(
+            f"/api/projects/{project_b}/semantic-catalog/{concept_id}"
+        )
+
+        assert visible_forbidden.status_code == 403
+        assert hidden_project.status_code == 404
+        assert "DETAIL_SCOPE" not in hidden_project.text
+
+
+def test_detail_temporal_candidate_and_question_lifecycle_are_canonical() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            confirmed, effective = _seed_concept(
+                db,
+                project,
+                code="DETAIL_TEMPORAL",
+                name="正式时态详情",
+                definition="正式定义",
+                effective_from=date(2026, 1, 1),
+                effective_to=date(2026, 12, 31),
+            )
+            ai_only, candidate = _seed_concept(
+                db,
+                project,
+                code="DETAIL_AI_ONLY",
+                name="仅 AI 候选",
+                definition="候选定义不得升级为正式事实",
+                status="ai_suggested",
+                version_status="ai_suggested",
+                effective_from=date(2026, 1, 1),
+            )
+            target_table = TargetTable(
+                project_id=project_id,
+                table_code="DETAIL_LIFECYCLE_QUESTION",
+                table_name="详情问题生命周期表",
+            )
+            db.add(target_table)
+            db.flush()
+            db.add_all(
+                [
+                    PendingQuestion(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        target_table_id=target_table.id,
+                        question_type="semantic",
+                        question_text="已分派仍未解决",
+                        question_status="assigned",
+                        source_type="semantic_concept",
+                        source_id=confirmed.id,
+                    ),
+                    PendingQuestion(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        target_table_id=target_table.id,
+                        question_type="semantic",
+                        question_text="已回答待验收仍未解决",
+                        question_status="answered",
+                        source_type="semantic_concept",
+                        source_id=confirmed.id,
+                    ),
+                    PendingQuestion(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        target_table_id=target_table.id,
+                        question_type="semantic",
+                        question_text="已验收必须排除",
+                        question_status="accepted",
+                        source_type="semantic_concept",
+                        source_id=confirmed.id,
+                    ),
+                ]
+            )
+            db.commit()
+            confirmed_id, effective_id = confirmed.id, effective.id
+            ai_only_id, candidate_id = ai_only.id, candidate.id
+
+        confirmed_base = f"/api/projects/{project_id}/semantic-catalog/{confirmed_id}"
+        for boundary in ("2026-01-01", "2026-12-31"):
+            shell = client.get(confirmed_base, params={"as_of": boundary})
+            assert shell.status_code == 200, shell.text
+            assert shell.json()["effective_version"]["id"] == effective_id
+
+        shell = client.get(confirmed_base, params={"as_of": "2026-06-01"}).json()
+        assert [item["question_status"] for item in shell["open_questions"]] == [
+            "assigned",
+            "answered",
+        ]
+        assert "已验收必须排除" not in str(shell)
+
+        ai_shell = client.get(
+            f"/api/projects/{project_id}/semantic-catalog/{ai_only_id}",
+            params={"as_of": "2026-06-01"},
+        )
+        assert ai_shell.status_code == 200, ai_shell.text
+        assert ai_shell.json()["effective_version"] is None
+        assert [row["id"] for row in ai_shell.json()["candidate_versions"]] == [
+            candidate_id
+        ]
+
+        catalog = client.get(
+            f"/api/projects/{project_id}/semantic-catalog",
+            params={"mode": "trusted", "as_of": "2026-06-01"},
+        )
+        assert catalog.status_code == 200, catalog.text
+        temporal_item = next(
+            item for item in catalog.json()["items"] if item["id"] == confirmed_id
+        )
+        assert temporal_item["open_question_count"] == 2
+
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            db.add(
+                SemanticConceptVersion(
+                    semantic_concept_id=confirmed_id,
+                    project_id=project_id,
+                    institution_id=project.institution_id,
+                    version_no=2,
+                    concept_name="歧义详情版本",
+                    definition="不得按浏览器顺序择优",
+                    status="confirmed",
+                    confidence_level="high",
+                    source_type="manual",
+                    effective_from=date(2026, 6, 1),
+                    effective_to=date(2026, 12, 31),
+                )
+            )
+            db.commit()
+
+        ambiguous = client.get(confirmed_base, params={"as_of": "2026-06-01"})
+        assert ambiguous.status_code == 409
+        assert ambiguous.json()["detail"]["code"] == "SEMANTIC_VERSION_AMBIGUOUS"
+
+
+def test_detail_audit_rows_are_isolated_and_successfully_marked_non_current() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            concept, confirmed = _seed_concept(
+                db, project, code="DETAIL_AUDIT", name="审计隔离详情"
+            )
+            rejected_version = SemanticConceptVersion(
+                semantic_concept_id=concept.id,
+                project_id=project_id,
+                institution_id=project.institution_id,
+                version_no=2,
+                concept_name="已拒绝历史版本",
+                definition="仅审计可见",
+                status="rejected",
+                confidence_level="medium",
+                source_type="manual",
+                effective_from=date(2027, 1, 1),
+            )
+            rejected_binding = SemanticBinding(
+                project_id=project_id,
+                institution_id=project.institution_id,
+                semantic_concept_id=concept.id,
+                entity_type="target_table",
+                entity_id=999_001,
+                binding_type="describes",
+                status="rejected",
+            )
+            db.add_all([rejected_version, rejected_binding])
+            db.flush()
+            db.add(
+                AuditLog(
+                    institution_id=project.institution_id,
+                    project_id=project_id,
+                    action="semantic_status_transition",
+                    resource_type="semantic_concept",
+                    resource_id=str(concept.id),
+                    before_summary_json={"status": "draft"},
+                    after_summary_json={"status": "rejected"},
+                    result="success",
+                )
+            )
+            db.commit()
+            concept_id = concept.id
+            confirmed_id = confirmed.id
+            rejected_version_id = rejected_version.id
+            rejected_binding_id = rejected_binding.id
+
+        base = f"/api/projects/{project_id}/semantic-catalog/{concept_id}"
+        trusted_versions = client.get(f"{base}/versions")
+        trusted_bindings = client.get(f"{base}/bindings")
+        assert trusted_versions.status_code == 200, trusted_versions.text
+        assert trusted_bindings.status_code == 200, trusted_bindings.text
+        assert [row["id"] for row in trusted_versions.json()["confirmed"]] == [
+            confirmed_id
+        ]
+        assert trusted_versions.json()["audit"] == []
+        assert trusted_bindings.json()["audit"] == []
+        assert rejected_version_id not in {
+            row["id"] for row in trusted_versions.json()["confirmed"]
+        }
+        assert rejected_binding_id not in {
+            row["id"] for row in trusted_bindings.json()["confirmed"]
+        }
+
+        audit_versions = client.get(f"{base}/versions", params={"audit": "true"})
+        audit_bindings = client.get(f"{base}/bindings", params={"audit": "true"})
+        governance = client.get(f"{base}/governance", params={"audit": "true"})
+        assert audit_versions.status_code == 200, audit_versions.text
+        assert audit_bindings.status_code == 200, audit_bindings.text
+        assert governance.status_code == 200, governance.text
+        assert [row["id"] for row in audit_versions.json()["audit"]] == [
+            rejected_version_id
+        ]
+        assert [row["id"] for row in audit_bindings.json()["audit"]] == [
+            rejected_binding_id
+        ]
+        assert governance.json()["audit_events"][0]["status"] == "rejected"
+        assert governance.json()["audit_events"][0]["non_current"] is True
+
+
+def test_detail_chain_caps_each_family_and_reports_overflow_without_hidden_fields() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            concept, _ = _seed_concept(
+                db, project, code="DETAIL_CHAIN_CAP", name="详情链路上限"
+            )
+            system = BusinessSystem(
+                project_id=project_id,
+                system_code="CHAIN_SOURCE_SYSTEM",
+                system_name="链路源系统",
+            )
+            targets = [
+                TargetTable(
+                    project_id=project_id,
+                    table_code=f"CHAIN_TARGET_{index}",
+                    table_name=f"链路目标 {index}",
+                )
+                for index in range(5)
+            ]
+            marts = [
+                MartTable(
+                    project_id=project_id,
+                    table_code=f"CHAIN_MART_{index}",
+                    table_name=f"链路集市 {index}",
+                )
+                for index in range(5)
+            ]
+            db.add_all([system, *targets, *marts])
+            db.flush()
+            sources = [
+                SourceTable(
+                    project_id=project_id,
+                    business_system_id=system.id,
+                    table_code=f"CHAIN_SOURCE_{index}",
+                    table_name=f"链路来源 {index}",
+                )
+                for index in range(5)
+            ]
+            db.add_all(sources)
+            db.flush()
+            db.add_all(
+                [
+                    SemanticBinding(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        semantic_concept_id=concept.id,
+                        entity_type=entity_type,
+                        entity_id=row.id,
+                        binding_type="describes",
+                        status="confirmed",
+                    )
+                    for entity_type, rows in (
+                        ("target_table", targets),
+                        ("mart_table", marts),
+                        ("source_table", sources),
+                    )
+                    for row in rows
+                ]
+            )
+            viewer = User(username="semantic_chain_redaction_viewer")
+            db.add(viewer)
+            db.flush()
+            db.add(
+                ProjectMembership(
+                    project_id=project_id,
+                    user_id=viewer.id,
+                    project_role="viewer",
+                    status="active",
+                )
+            )
+            db.commit()
+            concept_id = concept.id
+            viewer_principal = Principal(viewer.id, viewer.username, None)
+
+        base = f"/api/projects/{project_id}/semantic-catalog/{concept_id}/bindings"
+        readable = client.get(base)
+        assert readable.status_code == 200, readable.text
+        chain = readable.json()["chains"][0]
+        assert [len(chain[family]) for family in ("targets", "marts", "sources")] == [
+            4,
+            4,
+            4,
+        ]
+        assert readable.json()["chain_meta"] == {
+            "total": 16,
+            "returned": 13,
+            "limit": 13,
+            "overflow": 3,
+            "truncated": True,
+        }
+
+        app.dependency_overrides[get_current_principal] = lambda: viewer_principal
+        restricted = client.get(base)
+        assert restricted.status_code == 200, restricted.text
+        for binding in restricted.json()["confirmed"]:
+            assert binding["target"] == {
+                "entity_type": binding["target"]["entity_type"],
+                "restricted": True,
+            }
+            assert not {
+                "entity_id",
+                "display_name",
+                "display_code",
+                "href",
+                "title",
+                "metadata",
+            } & binding["target"].keys()
+
+
+def test_semantic_catalog_701_concepts_uses_existing_index_with_bounded_queries() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            concepts = [
+                SemanticConcept(
+                    project_id=project_id,
+                    institution_id=project.institution_id,
+                    concept_type="business_term",
+                    concept_code=f"PERF_{index:04d}",
+                    concept_name=f"性能语义 {index:04d}",
+                    status="confirmed",
+                    confidence_level="high",
+                )
+                for index in range(701)
+            ]
+            db.add_all(concepts)
+            db.flush()
+            db.add_all(
+                [
+                    SemanticConceptVersion(
+                        semantic_concept_id=concept.id,
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        version_no=1,
+                        concept_name=concept.concept_name,
+                        definition=f"性能定义 {index:04d}",
+                        status="confirmed",
+                        confidence_level="high",
+                        source_type="manual",
+                        confirmed_by="performance-fixture",
+                        confirmed_at=datetime.now(UTC),
+                        effective_from=date(2026, 1, 1),
+                    )
+                    for index, concept in enumerate(concepts)
+                ]
+            )
+            db.commit()
+            query_plan = [
+                str(row[-1])
+                for row in db.execute(
+                    text(
+                        "EXPLAIN QUERY PLAN SELECT id FROM semantic_concepts "
+                        "WHERE project_id = :project_id AND status IN "
+                        "('confirmed', 'draft', 'ai_suggested') ORDER BY id LIMIT 100"
+                    ),
+                    {"project_id": project_id},
+                ).all()
+            ]
+
+        path = f"/api/projects/{project_id}/semantic-catalog"
+        params = {
+            "mode": "trusted",
+            "as_of": "2026-08-25",
+            "page_size": 100,
+        }
+        warm = client.get(path, params=params)
+        assert warm.status_code == 200, warm.text
+
+        engine = sessions.kw["bind"]
+        statements: list[str] = []
+
+        def collect_statement(*args) -> None:
+            statements.append(str(args[2]))
+
+        event.listen(engine, "before_cursor_execute", collect_statement)
+        started = perf_counter()
+        try:
+            response = client.get(path, params=params)
+        finally:
+            elapsed_ms = (perf_counter() - started) * 1000
+            event.remove(engine, "before_cursor_execute", collect_statement)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 701
+        assert len(response.json()["items"]) == 100
+        assert len(statements) <= 12
+        assert elapsed_ms < 2_000
+        assert any(
+            "ix_semantic_concept_project_status" in detail for detail in query_plan
+        )
+        print(
+            "SEMANTIC_CATALOG_PERF_EVIDENCE "
+            f"dialect=sqlite concepts=701 page_size=100 statements={len(statements)} "
+            f"latency_ms={elapsed_ms:.2f} threshold_ms=2000 "
+            f"plan={' | '.join(query_plan)}"
+        )
 
 
 def _seed_concept(
