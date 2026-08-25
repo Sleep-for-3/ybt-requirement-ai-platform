@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 6/9 plans executed; 5 gap-closure plans ready
+**Plans:** 7/9 plans executed; 5 gap-closure plans ready
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -107,7 +107,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 11-07-PLAN.md — Complete lawful lineage links, conflict provenance, and accessible evidence disclosure
+- [x] 11-07-PLAN.md — Complete lawful lineage links, conflict provenance, and accessible evidence disclosure
 
 **Wave 8** *(blocked on Wave 7 completion)*
 

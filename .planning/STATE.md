@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 11
 current_phase_name: semantic-catalog-ui
 status: executing
-stopped_at: Gap closure planned; ready to execute 11-05-PLAN.md
-last_updated: "2026-08-25T08:47:05.085Z"
+stopped_at: Completed 11-07-PLAN.md
+last_updated: "2026-08-25T11:01:24.723Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 11 gap-closure plans verified and ready to execute
 progress:
   total_phases: 4
-  completed_phases: 4
+  completed_phases: 3
   total_plans: 24
-  completed_plans: 19
+  completed_plans: 22
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 11 (semantic-catalog-ui) — EXECUTING
-Plan: 4 of 9
-Status: Ready to execute
-Last activity: 2026-08-25 — Phase 11 gap-closure plans verified and ready to execute
+Plan: 8 of 9
+Status: Executing Phase 11
+Last activity: 2026-08-25 — Phase 11 execution started
 
-Progress: [████░░░░░░] 44%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [████░░░░░░] 44%
 | Phase 11-semantic-catalog-ui P02 | 27min | 3 tasks | 14 files |
 | Phase 11-semantic-catalog-ui P04 | 26min | 3 tasks | 4 files |
 | Phase 11-semantic-catalog-ui P03 | 29min | 3 tasks | 14 files |
+| Phase 11 P07 | 47min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,9 @@ Progress: [████░░░░░░] 44%
 - [Phase 11]: Bind every shell and region response to project, concept, date, audit mode, and region identity before committing or rendering it.
 - [Phase 11]: Use the backend discriminated restricted reference as a type-only render branch so protected identifiers and metadata never enter links or accessibility text.
 - [Phase 11]: Share tab, panel, retry, disclosure, redaction, and chain contracts between production React components and direct Node tests.
+- [Phase ?]: Phase 11: Exact /lineage query authorization requires one selector plus from=semantics and a matching semanticConceptId, with approved href bytes preserved unchanged.
+- [Phase ?]: Phase 11: Restricted detail references render from entity_type and restricted=true only; readable unsupported destinations remain separate nonnavigable text.
+- [Phase ?]: Phase 11: Conflict and evidence disclosures derive stable IDs from domain keys and keep independent component-local expansion state with exact expanded text.
 
 ### Pending Todos
 
@@ -142,6 +146,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-25T06:36:45.224Z
-Stopped at: Completed 11-03-PLAN.md
+Last session: 2026-08-25T11:01:24.673Z
+Stopped at: Completed 11-07-PLAN.md
 Resume file: None

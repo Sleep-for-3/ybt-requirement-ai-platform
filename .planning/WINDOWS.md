@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 4
 waived_count: 0
-fixed_count: 8
-total_count: 12
-last_updated: 2026-08-25T10:06:04.785Z
+fixed_count: 9
+total_count: 13
+last_updated: 2026-08-25T11:00:17.109Z
 ---
 
 # Broken Windows Ledger
@@ -27,6 +27,7 @@ last_updated: 2026-08-25T10:06:04.785Z
 | 10 | 11 | unrun-verify | frontend/app/semantics/[id]/page.tsx |  | Live human viewport inspection is deferred to phase UI review; deterministic DOM and keyboard checks passed. | open |  | 2026-08-25T06:35:45.749Z |  |
 | 11 | 11 | deviation | frontend/lib/semantic-catalog-dom-contract.mjs |  | Removed the duplicate incomplete DOM entity-label table so catalog and detail references share the exhaustive production source. | fixed |  | 2026-08-25T10:05:56.488Z | 2026-08-25T10:06:03.902Z |
 | 12 | 11 | deviation | frontend/lib/semantic-entity-types.d.mts |  | Corrected the shared entity-label constant declaration syntax discovered by the frontend lint gate. | fixed |  | 2026-08-25T10:05:57.281Z | 2026-08-25T10:06:04.785Z |
+| 13 | 11 | deviation | frontend/components/semantic-catalog/SemanticDetailHeader.tsx |  | Scoped conflict source disclosure IDs across multiple banners | fixed |  | 2026-08-25T10:59:48.339Z | 2026-08-25T11:00:17.109Z |
 
 ````json
 [
@@ -173,6 +174,18 @@ last_updated: 2026-08-25T10:06:04.785Z
     "reason": "",
     "recorded_at": "2026-08-25T10:05:57.281Z",
     "resolved_at": "2026-08-25T10:06:04.785Z"
+  },
+  {
+    "id": 13,
+    "kind": "deviation",
+    "phase": "11",
+    "file": "frontend/components/semantic-catalog/SemanticDetailHeader.tsx",
+    "line": null,
+    "description": "Scoped conflict source disclosure IDs across multiple banners",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-25T10:59:48.339Z",
+    "resolved_at": "2026-08-25T11:00:17.109Z"
   }
 ]
 ````
