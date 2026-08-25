@@ -966,7 +966,7 @@ class SemanticCatalogQueryService:
             PendingQuestion.project_id == self.project.id,
             PendingQuestion.source_type == "semantic_concept",
             PendingQuestion.source_id.in_(concept_ids),
-            PendingQuestion.question_status == "open",
+            PendingQuestion.question_status.in_(_OPEN_QUESTION_STATUSES),
         )).all()
         return Counter(int(source_id) for (source_id,) in rows if source_id is not None)
 

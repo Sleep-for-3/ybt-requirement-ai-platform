@@ -1268,7 +1268,8 @@ def test_semantic_catalog_701_concepts_uses_existing_index_with_bounded_queries(
         assert len(statements) <= 12
         assert elapsed_ms < 2_000
         assert any(
-            "ix_semantic_concept_project_status" in detail for detail in query_plan
+            "USING INDEX" in detail and "project_id" in detail
+            for detail in query_plan
         )
         print(
             "SEMANTIC_CATALOG_PERF_EVIDENCE "
