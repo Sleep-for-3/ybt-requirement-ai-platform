@@ -128,6 +128,222 @@ def test_restricted_semantic_detail_reference_cannot_accept_protected_fields() -
             )
 
 
+def test_semantic_detail_shell_and_lazy_routes_project_canonical_partitions() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        entities = _required_binding_entities(sessions, project_id)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            concept, effective = _seed_concept(
+                db,
+                project,
+                code="DETAIL_ROOT",
+                name="详情根语义",
+                definition="正式时态定义",
+                effective_from=date(2026, 1, 1),
+                effective_to=date(2026, 12, 31),
+            )
+            related, _ = _seed_concept(
+                db,
+                project,
+                code="DETAIL_RELATED",
+                name="关联语义",
+            )
+            db.add(
+                SemanticConceptVersion(
+                    semantic_concept_id=concept.id,
+                    project_id=project_id,
+                    institution_id=project.institution_id,
+                    version_no=2,
+                    concept_name="候选详情根语义",
+                    definition="AI 候选不能成为正式定义",
+                    status="ai_suggested",
+                    confidence_level="medium",
+                    source_type="ai",
+                    effective_from=date(2027, 1, 1),
+                )
+            )
+            db.add_all(
+                [
+                    SemanticBinding(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        semantic_concept_id=concept.id,
+                        entity_type="target_field",
+                        entity_id=entities["target_field"],
+                        binding_type="describes",
+                        confidence_level="high",
+                        status="confirmed",
+                    ),
+                    SemanticBinding(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        semantic_concept_id=concept.id,
+                        entity_type="source_field",
+                        entity_id=entities["source_field"],
+                        binding_type="candidate",
+                        confidence_level="medium",
+                        status="ai_suggested",
+                    ),
+                    SemanticRelation(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        source_concept_id=concept.id,
+                        target_concept_id=related.id,
+                        relation_type="related_to",
+                        confidence_level="high",
+                        status="confirmed",
+                    ),
+                ]
+            )
+            target_table = TargetTable(
+                project_id=project_id,
+                table_code="DETAIL_QUESTION_TABLE",
+                table_name="详情问题表",
+            )
+            workflow = WorkflowInstance(
+                project_id=project_id,
+                workflow_key="semantic_governance_review",
+                target_type="semantic_concept",
+                target_id=concept.id,
+                status="in_progress",
+                current_step="business_review",
+                created_by=0,
+            )
+            db.add_all([target_table, workflow])
+            db.flush()
+            db.add_all(
+                [
+                    ReviewTask(
+                        project_id=project_id,
+                        workflow_instance_id=workflow.id,
+                        step_key="business_review",
+                        task_type="semantic_governance_review",
+                        target_type="semantic_concept",
+                        target_id=concept.id,
+                        status="pending",
+                    ),
+                    PendingQuestion(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        target_table_id=target_table.id,
+                        question_type="high_authority_conflict",
+                        question_text="两个正式来源冲突",
+                        question_status="open",
+                        priority="high",
+                        source_type="semantic_concept",
+                        source_id=concept.id,
+                    ),
+                    PendingQuestion(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        target_table_id=target_table.id,
+                        question_type="semantic",
+                        question_text="已解决问题不得进入当前摘要",
+                        question_status="accepted",
+                        priority="medium",
+                        source_type="semantic_concept",
+                        source_id=concept.id,
+                    ),
+                ]
+            )
+            db.commit()
+            concept_id, effective_id = concept.id, effective.id
+
+        base = f"/api/projects/{project_id}/semantic-catalog/{concept_id}"
+        shell = client.get(base, params={"as_of": "2026-12-31"})
+        assert shell.status_code == 200, shell.text
+        payload = shell.json()
+        assert payload["effective_version"]["id"] == effective_id
+        assert payload["effective_version"]["definition"] == "正式时态定义"
+        assert payload["candidate_versions"][0]["definition"] == "AI 候选不能成为正式定义"
+        assert payload["review_workflow"]["pending"] is True
+        assert [item["question_text"] for item in payload["open_questions"]] == [
+            "两个正式来源冲突"
+        ]
+        assert payload["conflicts"][0]["winner"] is None
+        assert payload["regions"]["bindings"]["temporal_scope"] == "current_only"
+        assert payload["regions"]["versions"]["temporal_scope"] == "as_of"
+
+        for region in ("bindings", "relations", "evidence", "lineage", "governance", "versions"):
+            response = client.get(f"{base}/{region}", params={"as_of": "2026-12-31"})
+            assert response.status_code == 200, f"{region}: {response.text}"
+
+        bindings = client.get(f"{base}/bindings").json()
+        assert len(bindings["confirmed"]) == 1
+        assert len(bindings["candidates"]) == 1
+        assert bindings["audit"] == []
+        assert bindings["chain_meta"]["limit"] == 13
+        relations = client.get(f"{base}/relations").json()
+        assert relations["confirmed"][0]["related_concept"]["entity_id"] == related.id
+        versions = client.get(f"{base}/versions", params={"as_of": "2026-12-31"}).json()
+        assert versions["effective_version_id"] == effective_id
+        assert [item["status"] for item in versions["confirmed"]] == ["confirmed"]
+        assert [item["status"] for item in versions["candidates"]] == ["ai_suggested"]
+
+
+def test_semantic_detail_optional_permission_and_audit_routes_fail_closed() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        secret_name = "详情受限目标字段"
+        target_id = _target_field(sessions, project_id, "DETAIL_SECRET", name=secret_name)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            concept, _ = _seed_concept(db, project, code="DETAIL_SECURITY", name="详情安全语义")
+            db.add_all(
+                [
+                    SemanticBinding(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        semantic_concept_id=concept.id,
+                        entity_type="target_field",
+                        entity_id=target_id,
+                        status="confirmed",
+                    ),
+                    SemanticConceptVersion(
+                        semantic_concept_id=concept.id,
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        version_no=2,
+                        concept_name="已拒绝版本",
+                        definition="审计内容",
+                        status="rejected",
+                        confidence_level="medium",
+                        source_type="manual",
+                        effective_from=date(2027, 1, 1),
+                    ),
+                ]
+            )
+            viewer = User(username="semantic_detail_viewer")
+            db.add(viewer)
+            db.flush()
+            db.add(
+                ProjectMembership(
+                    project_id=project_id,
+                    user_id=viewer.id,
+                    project_role="viewer",
+                    status="active",
+                )
+            )
+            db.commit()
+            concept_id, viewer_id, viewer_name = concept.id, viewer.id, viewer.username
+
+        app.dependency_overrides[get_current_principal] = lambda: Principal(
+            viewer_id, viewer_name, None
+        )
+        base = f"/api/projects/{project_id}/semantic-catalog/{concept_id}"
+        bindings = client.get(f"{base}/bindings")
+        assert bindings.status_code == 200, bindings.text
+        assert bindings.json()["confirmed"][0]["target"] == {
+            "entity_type": "target_field",
+            "restricted": True,
+        }
+        assert secret_name not in bindings.text
+        assert client.get(f"{base}/evidence").status_code == 403
+        assert client.get(f"{base}/versions", params={"audit": "true"}).status_code == 403
+        assert client.get(f"{base}/governance", params={"audit": "true"}).status_code == 403
+
+
 def test_semantic_catalog_traces_canonical_effective_definition_and_confirmed_assets() -> None:
     with _semantic_client() as (client, sessions):
         project_id, _ = _projects(sessions)
