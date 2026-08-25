@@ -1,20 +1,10 @@
 import { createElement } from "react";
 
+import { restrictedSemanticEntityLabel } from "./semantic-entity-types.mjs";
+
 export const DETAIL_TAB_IDS = Object.freeze([
   "overview", "bindings", "relations", "evidence", "lineage", "governance", "versions"
 ]);
-
-const ENTITY_LABELS = Object.freeze({
-  target_table: "目标表",
-  target_field: "目标字段",
-  mart_table: "集市表",
-  mart_field: "集市字段",
-  source_table: "来源表",
-  source_field: "来源字段",
-  scenario: "业务场景",
-  knowledge_unit: "知识单元",
-  semantic_concept: "语义概念"
-});
 
 export function tabId(tab) { return `semantic-tab-${validTab(tab)}`; }
 export function panelId(tab) { return `semantic-panel-${validTab(tab)}`; }
@@ -80,7 +70,7 @@ export function restrictedReferenceContract(reference) {
   return {
     entity_type: entityType,
     restricted: true,
-    label: `${ENTITY_LABELS[entityType] || "数据资产"} · 受限`
+    label: restrictedSemanticEntityLabel(entityType)
   };
 }
 

@@ -1,3 +1,8 @@
+import {
+  restrictedSemanticEntityLabel,
+  semanticEntityLabel
+} from "./semantic-entity-types.mjs";
+
 const CONCEPT_TYPES = new Set([
   "business_term",
   "metric",
@@ -13,21 +18,6 @@ const UNCATEGORIZED_DOMAIN = "__uncategorized__";
 const DETAIL_TABS = new Set(["overview", "bindings", "relations", "evidence", "lineage", "governance", "versions"]);
 const DEFAULT_PAGE_SIZE = 50;
 const CURRENT_ONLY_LABEL = "当前状态，不代表该历史日期";
-
-const ENTITY_LABELS = {
-  target_table: "目标表",
-  target_field: "目标字段",
-  mart_table: "集市表",
-  mart_field: "集市字段",
-  source_table: "来源表",
-  source_field: "来源字段",
-  scenario: "业务场景",
-  knowledge_unit: "知识单元",
-  source_to_mart_mapping: "来源到集市映射",
-  mart_to_ybt_mapping: "集市到一表通映射",
-  scenario_business_mapping: "场景业务映射",
-  scenario_technical_lineage: "场景技术血缘"
-};
 
 export function parseCatalogQuery(input = "") {
   const params = toSearchParams(input);
@@ -330,8 +320,8 @@ export function isSemanticQuestionOpen(question) {
 
 export function semanticReferenceLabel(reference) {
   const entityType = String(reference?.entity_type || "");
-  if (reference?.restricted === true) return `${ENTITY_LABELS[entityType] || "数据资产"} · 受限`;
-  const name = cleanText(reference?.display_name) || ENTITY_LABELS[entityType] || "数据资产";
+  if (reference?.restricted === true) return restrictedSemanticEntityLabel(entityType);
+  const name = cleanText(reference?.display_name) || semanticEntityLabel(entityType);
   const code = cleanText(reference?.display_code);
   return code ? `${name} · ${code}` : name;
 }
@@ -365,7 +355,7 @@ export function redactSemanticReference(reference, semanticConceptId) {
     return {
       entity_type: entityType,
       restricted: true,
-      label: `${ENTITY_LABELS[entityType] || "数据资产"} · 受限`,
+      label: restrictedSemanticEntityLabel(entityType),
       destination: null
     };
   }
