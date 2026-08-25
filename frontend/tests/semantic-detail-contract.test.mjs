@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   boundedDisclosureModel,
   conflictSourceCollectionModel,
+  evidenceDisclosureModel,
   lawfulSemanticDetailHref,
   semanticDetailReferenceModel
 } from "../lib/semantic-detail-contract.mjs";
@@ -123,4 +124,35 @@ test("conflict source overflow reports remaining count and disclosure exposes al
   assert.deepEqual(collapsed.visibleSources.map((source) => source.source_id), [1, 2]);
   assert.equal(expanded.remainingCount, 2);
   assert.deepEqual(expanded.visibleSources.map((source) => source.source_id), [1, 2, 3, 4]);
+});
+
+test("bounded evidence disclosure is compact by default and expands to exact original text", () => {
+  const fullText = `证据原文起点\n${"原始文本".repeat(180)}\n证据原文结尾`;
+  const collapsed = evidenceDisclosureModel({ evidence_type: "knowledge", id: 101, excerpt: fullText }, false);
+  const expanded = evidenceDisclosureModel({ evidence_type: "knowledge", id: 101, excerpt: fullText }, true);
+  assert.equal(collapsed.lines, 6);
+  assert.equal(collapsed.ariaExpanded, false);
+  assert.notEqual(collapsed.visibleText, fullText);
+  assert.equal(expanded.ariaExpanded, true);
+  assert.equal(expanded.visibleText, fullText);
+});
+
+test("evidence disclosure controls have associated stable IDs and independent state", () => {
+  const text = "证据".repeat(300);
+  const firstCollapsed = evidenceDisclosureModel({ evidence_type: "regulation", id: 201, excerpt: text }, false);
+  const secondCollapsed = evidenceDisclosureModel({ evidence_type: "knowledge", id: 202, excerpt: text }, false);
+  const firstExpanded = evidenceDisclosureModel({ evidence_type: "regulation", id: 201, excerpt: text }, true);
+  assert.equal(firstCollapsed.controlId, "semantic-evidence-regulation-201-control");
+  assert.equal(firstCollapsed.panelId, "semantic-evidence-regulation-201-panel");
+  assert.notEqual(firstCollapsed.panelId, secondCollapsed.panelId);
+  assert.equal(firstExpanded.ariaExpanded, true);
+  assert.equal(secondCollapsed.ariaExpanded, false);
+});
+
+test("bounded evidence keeps short text exact and omits empty disclosure content", () => {
+  const short = evidenceDisclosureModel({ evidence_type: "knowledge", id: 301, excerpt: "短证据原文" }, false);
+  const empty = evidenceDisclosureModel({ evidence_type: "knowledge", id: 302, excerpt: "   " }, false);
+  assert.equal(short.isLong, false);
+  assert.equal(short.visibleText, "短证据原文");
+  assert.equal(empty.hasText, false);
 });
