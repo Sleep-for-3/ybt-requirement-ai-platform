@@ -25,6 +25,14 @@ const FIELD_LABELS = {
 const UNSAFE_ERROR_PATTERN =
   /traceback|sqlalchemy|(?:postgres(?:ql)?|mysql|mssql|mongodb|redis):\/\/|authorization\s*:|cookie\s*:|api[_ -]?key\s*[:=]\s*\S+|\bsk-[a-z0-9_-]+|bearer\s+[a-z0-9._~-]+|(?:[a-z]:\\|\/(?:home|users?|app|var|opt)\/)|(?:完整|system|raw)\s*prompt/i;
 
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 function safeMessage(message, status) {
   const text = String(message || "").trim();
   if (!text || UNSAFE_ERROR_PATTERN.test(text)) {
@@ -67,6 +75,7 @@ export function formatApiErrorText(text, status) {
 }
 
 export function normalizeRequestError(error) {
+  if (error instanceof ApiError) return error;
   if (error instanceof Error && error.name === "AbortError") {
     return new Error("请求超时，请稍后重试");
   }
@@ -87,7 +96,7 @@ export async function throwApiError(response, path, environment) {
     // 页面即将整体跳转；保持原请求 pending，避免调用方在跳转完成前产生未处理 rejection。
     return new Promise(() => undefined);
   }
-  throw new Error(formatApiErrorText(await response.text(), response.status));
+  throw new ApiError(formatApiErrorText(await response.text(), response.status), response.status);
 }
 
 export async function readApiResponse(response, path, environment) {

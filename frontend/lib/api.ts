@@ -60,8 +60,8 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  return request<T>(path, { cache: "no-store", headers: authHeaders() });
+export async function apiGet<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
+  return request<T>(path, { cache: "no-store", headers: authHeaders(), signal: init?.signal });
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
