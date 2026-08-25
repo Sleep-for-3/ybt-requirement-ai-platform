@@ -81,6 +81,58 @@ export function buildCatalogRequestKey(projectId, input) {
   return `${positiveInteger(projectId, 0)}:${serializeCatalogQuery(input)}`;
 }
 
+export function buildCatalogApiQuery(input) {
+  const state = normalizeCatalogState(input);
+  const params = new URLSearchParams();
+  params.set("mode", state.audit ? "audit" : "candidate");
+  setText(params, "q", state.q);
+  setText(params, "type", state.type);
+  setText(params, "domain", state.domain);
+  setText(params, "status", state.status);
+  setText(params, "owner", state.owner);
+  setText(params, "as_of", state.as_of);
+  if (state.has_binding !== null) params.set("has_binding", String(state.has_binding));
+  if (state.has_relation !== null) params.set("has_relation", String(state.has_relation));
+  if (state.pending_review !== null) params.set("pending_review", String(state.pending_review));
+  if (state.audit) params.set("audit", "true");
+  params.set("page", String(state.page));
+  params.set("page_size", String(state.page_size));
+  return params.toString();
+}
+
+export function commitCatalogSearch(current, draft) {
+  return applyCatalogQueryChange(current, { q: cleanText(draft) });
+}
+
+export function createCatalogRequestCoordinator() {
+  let active = null;
+  return {
+    begin(key) {
+      active?.controller.abort();
+      const controller = new AbortController();
+      const request = {
+        key: String(key),
+        controller,
+        signal: controller.signal,
+        accept: () => active === request && !controller.signal.aborted
+      };
+      active = request;
+      return request;
+    },
+    clear() {
+      active?.controller.abort();
+      active = null;
+    }
+  };
+}
+
+export function catalogResponseKind(input) {
+  if (input?.phase === "loading") return "loading";
+  if (input?.phase === "error") return Number(input?.error?.status) === 403 ? "forbidden" : "error";
+  if (input?.phase === "success") return Number(input?.page?.total) === 0 ? "empty" : "populated";
+  return "idle";
+}
+
 export function parseDetailQuery(input = "") {
   const params = toSearchParams(input);
   const tab = enumParam(params, "tab", DETAIL_TABS) || "overview";

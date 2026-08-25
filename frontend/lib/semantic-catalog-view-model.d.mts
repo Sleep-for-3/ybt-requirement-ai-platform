@@ -30,6 +30,13 @@ export function serializeCatalogQuery(input: Partial<CatalogQueryState>): string
 export function applyCatalogQueryChange(current: CatalogQueryState, changes: Partial<CatalogQueryState>, options?: { resetPage?: boolean }): CatalogQueryState;
 export function catalogHasFilters(input: Partial<CatalogQueryState>): boolean;
 export function buildCatalogRequestKey(projectId: number, input: Partial<CatalogQueryState>): string;
+export function buildCatalogApiQuery(input: Partial<CatalogQueryState>): string;
+export function commitCatalogSearch(current: CatalogQueryState, draft: string): CatalogQueryState;
+export function createCatalogRequestCoordinator(): {
+  begin(key: string): { key:string;signal:AbortSignal;accept:()=>boolean };
+  clear(): void;
+};
+export function catalogResponseKind(input: { phase?:string;error?:{status?:number};page?:{total?:number;items?:unknown[]} }): "idle" | "loading" | "forbidden" | "error" | "empty" | "populated";
 export function parseDetailQuery(input?: string | URLSearchParams | Record<string, unknown>): DetailQueryState;
 export function serializeDetailQuery(input: Partial<DetailQueryState>): string;
 export function safeSemanticReturnTo(value?: string | null): string;

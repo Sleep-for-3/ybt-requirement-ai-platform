@@ -2,6 +2,7 @@
 
 import {
   Bell,
+  BookOpenCheck,
   BrainCircuit,
   Building2,
   ChartNoAxesCombined,
@@ -71,6 +72,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/mart", label: "监管集市", icon: Layers3 },
       { href: "/datasources", label: "数据源", icon: Database },
       { href: "/catalog", label: "数据目录", icon: LibraryBig },
+      { href: "/semantics", label: "语义目录", icon: BookOpenCheck },
       { href: "/lineage", label: "脚本血缘", icon: GitBranch }
     ]
   },
