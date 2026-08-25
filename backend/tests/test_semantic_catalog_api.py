@@ -834,6 +834,301 @@ def test_catalog_and_detail_reject_same_project_foreign_institution_versions() -
         assert inclusive[concept_id].id == authorized_version_id
 
 
+def test_foreign_institution_subordinate_rows_are_excluded_from_all_regions() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, project_b = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            foreign_institution_id = db.get(Project, project_b).institution_id
+            root, root_version = _seed_concept(
+                db, project, code="SUBORDINATE_SCOPE_ROOT", name="机构隔离根语义"
+            )
+            related, _ = _seed_concept(
+                db, project, code="SUBORDINATE_SCOPE_RELATED", name="合法关联语义"
+            )
+            allowed_target = TargetTable(
+                project_id=project_id,
+                table_code="ALLOWED_SUBORDINATE_TARGET",
+                table_name="合法机构目标表",
+            )
+            foreign_target = TargetTable(
+                project_id=project_id,
+                table_code="FOREIGN_SUBORDINATE_TARGET",
+                table_name="FOREIGN_INSTITUTION_BINDING_TARGET",
+            )
+            db.add_all([allowed_target, foreign_target])
+            db.flush()
+
+            allowed_binding = SemanticBinding(
+                project_id=project_id,
+                institution_id=project.institution_id,
+                semantic_concept_id=root.id,
+                entity_type="target_table",
+                entity_id=allowed_target.id,
+                binding_type="describes",
+                status="confirmed",
+            )
+            foreign_binding = SemanticBinding(
+                project_id=project_id,
+                institution_id=foreign_institution_id,
+                semantic_concept_id=root.id,
+                entity_type="target_table",
+                entity_id=foreign_target.id,
+                binding_type="describes",
+                status="confirmed",
+            )
+            allowed_relation = SemanticRelation(
+                project_id=project_id,
+                institution_id=project.institution_id,
+                source_concept_id=root.id,
+                target_concept_id=related.id,
+                relation_type="related_to",
+                status="confirmed",
+            )
+            foreign_relation = SemanticRelation(
+                project_id=project_id,
+                institution_id=foreign_institution_id,
+                source_concept_id=root.id,
+                target_concept_id=related.id,
+                relation_type="uses",
+                status="confirmed",
+            )
+            foreign_candidate_version = SemanticConceptVersion(
+                semantic_concept_id=root.id,
+                project_id=project_id,
+                institution_id=foreign_institution_id,
+                version_no=2,
+                concept_name="外机构候选版本",
+                definition="FOREIGN_INSTITUTION_CANDIDATE_VERSION",
+                status="ai_suggested",
+                confidence_level="medium",
+                source_type="ai",
+                effective_from=date(2027, 1, 1),
+            )
+            foreign_audit_version = SemanticConceptVersion(
+                semantic_concept_id=root.id,
+                project_id=project_id,
+                institution_id=foreign_institution_id,
+                version_no=3,
+                concept_name="外机构审计版本",
+                definition="FOREIGN_INSTITUTION_AUDIT_VERSION",
+                status="rejected",
+                confidence_level="medium",
+                source_type="manual",
+                effective_from=date(2028, 1, 1),
+            )
+            db.add_all(
+                [
+                    allowed_binding,
+                    foreign_binding,
+                    allowed_relation,
+                    foreign_relation,
+                    foreign_candidate_version,
+                    foreign_audit_version,
+                ]
+            )
+            db.flush()
+
+            allowed_question = PendingQuestion(
+                project_id=project_id,
+                institution_id=project.institution_id,
+                target_table_id=allowed_target.id,
+                question_type="high_authority_conflict",
+                question_text="合法机构冲突问题",
+                question_status="open",
+                priority="high",
+                source_type="semantic_concept",
+                source_id=root.id,
+            )
+            foreign_question = PendingQuestion(
+                project_id=project_id,
+                institution_id=foreign_institution_id,
+                target_table_id=foreign_target.id,
+                question_type="high_authority_conflict",
+                question_text="FOREIGN_INSTITUTION_PENDING_QUESTION",
+                question_status="open",
+                priority="high",
+                source_type="semantic_concept",
+                source_id=root.id,
+            )
+            allowed_audit = AuditLog(
+                institution_id=project.institution_id,
+                project_id=project_id,
+                action="authorized_semantic_event",
+                resource_type="semantic_concept",
+                resource_id=str(root.id),
+                result="success",
+            )
+            foreign_audit = AuditLog(
+                institution_id=foreign_institution_id,
+                project_id=project_id,
+                action="FOREIGN_INSTITUTION_AUDIT_EVENT",
+                resource_type="semantic_concept",
+                resource_id=str(root.id),
+                result="success",
+            )
+            db.add_all(
+                [allowed_question, foreign_question, allowed_audit, foreign_audit]
+            )
+            db.commit()
+            root_id = root.id
+            root_version_id = root_version.id
+            allowed_binding_id = allowed_binding.id
+            foreign_binding_id = foreign_binding.id
+            allowed_relation_id = allowed_relation.id
+            foreign_relation_id = foreign_relation.id
+            foreign_candidate_version_id = foreign_candidate_version.id
+            foreign_audit_version_id = foreign_audit_version.id
+            allowed_audit_id = allowed_audit.id
+            foreign_audit_id = foreign_audit.id
+
+        base = f"/api/projects/{project_id}/semantic-catalog/{root_id}"
+        catalog = client.get(
+            f"/api/projects/{project_id}/semantic-catalog", params={"mode": "trusted"}
+        )
+        shell = client.get(base)
+        bindings = client.get(f"{base}/bindings", params={"audit": "true"})
+        relations = client.get(f"{base}/relations", params={"audit": "true"})
+        governance = client.get(f"{base}/governance", params={"audit": "true"})
+        versions = client.get(f"{base}/versions", params={"audit": "true"})
+        for response in (catalog, shell, bindings, relations, governance, versions):
+            assert response.status_code == 200, response.text
+            assert "FOREIGN_INSTITUTION" not in response.text
+
+        catalog_item = next(
+            item for item in catalog.json()["items"] if item["id"] == root_id
+        )
+        assert catalog_item["related_asset_count"] == 1
+        assert catalog_item["has_relation"] is True
+        assert catalog_item["open_question_count"] == 1
+        assert shell.json()["effective_version"]["id"] == root_version_id
+        assert shell.json()["candidate_versions"] == []
+        assert [row["id"] for row in bindings.json()["confirmed"]] == [
+            allowed_binding_id
+        ]
+        assert foreign_binding_id not in {
+            row["id"] for partition in ("confirmed", "candidates", "audit")
+            for row in bindings.json()[partition]
+        }
+        assert [row["id"] for row in relations.json()["confirmed"]] == [
+            allowed_relation_id
+        ]
+        assert foreign_relation_id not in {
+            row["id"] for partition in ("confirmed", "candidates", "audit")
+            for row in relations.json()[partition]
+        }
+        assert [row["id"] for row in versions.json()["confirmed"]] == [
+            root_version_id
+        ]
+        assert foreign_candidate_version_id not in {
+            row["id"] for partition in ("confirmed", "candidates", "audit")
+            for row in versions.json()[partition]
+        }
+        assert foreign_audit_version_id not in {
+            row["id"] for partition in ("confirmed", "candidates", "audit")
+            for row in versions.json()[partition]
+        }
+        assert [row["id"] for row in governance.json()["audit_events"]] == [
+            allowed_audit_id
+        ]
+        assert foreign_audit_id not in {
+            row["id"] for row in governance.json()["audit_events"]
+        }
+
+
+def test_confirmed_relation_aggregates_require_confirmed_same_institution_endpoints() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, project_b = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            foreign_institution_id = db.get(Project, project_b).institution_id
+            root, _ = _seed_concept(
+                db, project, code="RELATION_SCOPE_ROOT", name="关系聚合根语义"
+            )
+            confirmed, _ = _seed_concept(
+                db, project, code="RELATION_SCOPE_CONFIRMED", name="合法已确认语义"
+            )
+            draft, _ = _seed_concept(
+                db,
+                project,
+                code="RELATION_SCOPE_DRAFT",
+                name="草稿端点语义",
+                status="draft",
+            )
+            deprecated, _ = _seed_concept(
+                db,
+                project,
+                code="RELATION_SCOPE_DEPRECATED",
+                name="废弃端点语义",
+                status="deprecated",
+            )
+            foreign, _ = _seed_concept(
+                db,
+                project,
+                code="RELATION_SCOPE_FOREIGN",
+                name="外机构端点语义",
+                institution_id=foreign_institution_id,
+            )
+            db.add_all(
+                [
+                    SemanticRelation(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        source_concept_id=root.id,
+                        target_concept_id=confirmed.id,
+                        relation_type="related_to",
+                        status="confirmed",
+                    ),
+                    SemanticRelation(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        source_concept_id=root.id,
+                        target_concept_id=draft.id,
+                        relation_type="uses",
+                        status="confirmed",
+                    ),
+                    SemanticRelation(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        source_concept_id=root.id,
+                        target_concept_id=deprecated.id,
+                        relation_type="part_of",
+                        status="confirmed",
+                    ),
+                    SemanticRelation(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        source_concept_id=root.id,
+                        target_concept_id=foreign.id,
+                        relation_type="governed_by",
+                        status="confirmed",
+                    ),
+                ]
+            )
+            db.commit()
+            root_id = root.id
+            confirmed_id = confirmed.id
+            draft_id = draft.id
+
+        catalog = client.get(
+            f"/api/projects/{project_id}/semantic-catalog",
+            params={"mode": "candidate", "has_relation": "true"},
+        )
+        relations = client.get(
+            f"/api/projects/{project_id}/semantic-catalog/{root_id}/relations"
+        )
+        assert catalog.status_code == 200, catalog.text
+        assert relations.status_code == 200, relations.text
+        relation_catalog_ids = {item["id"] for item in catalog.json()["items"]}
+        assert root_id in relation_catalog_ids
+        assert confirmed_id in relation_catalog_ids
+        assert draft_id not in relation_catalog_ids
+        assert [
+            row["related_concept"]["entity_id"]
+            for row in relations.json()["confirmed"]
+        ] == [confirmed_id]
+
+
 def test_catalog_review_questions_and_query_count_are_batched() -> None:
     with _semantic_client() as (client, sessions):
         project_id, _ = _projects(sessions)
