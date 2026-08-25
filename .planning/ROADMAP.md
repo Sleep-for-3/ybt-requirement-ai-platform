@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 5/9 plans executed; 5 gap-closure plans ready
+**Plans:** 6/9 plans executed; 5 gap-closure plans ready
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -103,7 +103,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 11-06-PLAN.md — Make catalog project switching, URL state, pagination, and entity labels truthful
+- [x] 11-06-PLAN.md — Make catalog project switching, URL state, pagination, and entity labels truthful
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
