@@ -95,7 +95,7 @@ function ConflictSources({ conflict }: { conflict:SemanticDetailConflict }) {
           {model.visibleSources.map((source, index) => (
             <li className="border-l-2 border-coral-200 pl-3" key={`${source.source_type}-${source.source_id ?? index}`}>
               <div className="flex flex-wrap gap-2 text-xs text-coral-700"><span>{source.source_type}</span>{source.authority ? <span>· {source.authority}</span> : null}</div>
-              <EvidenceDisclosure className="mt-1 text-coral-800" disclosureType={source.source_type} itemId={source.source_id ?? `${conflict.conflict_key}-${index}`} lines={3} scope="conflict-source" text={source.summary} />
+              <EvidenceDisclosure className="mt-1 text-coral-800" disclosureType={`${conflict.conflict_key}-${source.source_type}`} itemId={source.source_id ?? index} lines={3} scope="conflict-source" text={source.summary} />
             </li>
           ))}
         </ul>
