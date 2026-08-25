@@ -5,11 +5,16 @@ import {
   applyCatalogQueryChange,
   buildCatalogApiQuery,
   buildCatalogRequestKey,
+  buildDetailApiQuery,
+  buildDetailRequestKey,
   catalogHasFilters,
   catalogResponseKind,
   commitCatalogSearch,
   confirmedRelatedAssetCount,
   createCatalogRequestCoordinator,
+  createDetailRegionState,
+  detailRegionResponseKind,
+  detailShellResponseKind,
   groupCatalogItems,
   markCurrentOnly,
   parseCatalogQuery,
@@ -20,7 +25,9 @@ import {
   resolveSemanticDestination,
   safeSemanticReturnTo,
   serializeCatalogQuery,
-  serializeDetailQuery
+  serializeDetailQuery,
+  returnToCurrentDetail,
+  transitionDetailRegion
 } from "../lib/semantic-catalog-view-model.mjs";
 
 test("semantic-catalog URL state canonicalizes defaults, invalid values, and durable filters", () => {
@@ -208,4 +215,62 @@ test("semantic-catalog response states distinguish loading, forbidden, retryable
   assert.equal(catalogResponseKind({ phase: "error", error: { status: 500 } }), "error");
   assert.equal(catalogResponseKind({ phase: "success", page: { total: 0, items: [] } }), "empty");
   assert.equal(catalogResponseKind({ phase: "success", page: { total: 1, items: [{ id: 1 }] } }), "populated");
+});
+
+test("semantic-detail shell keeps safe 404 separate from visible-project 403 and canonical success", () => {
+  assert.equal(detailShellResponseKind({ phase: "loading" }), "loading");
+  assert.equal(detailShellResponseKind({ phase: "error", error: { status: 404 } }), "not-found");
+  assert.equal(detailShellResponseKind({ phase: "error", error: { status: 403 } }), "forbidden");
+  assert.equal(detailShellResponseKind({ phase: "error", error: { status: 409 } }), "conflict");
+  assert.equal(detailShellResponseKind({ phase: "error", error: { status: 500 } }), "error");
+  assert.equal(detailShellResponseKind({ phase: "success", shell: { id: 7 } }), "success");
+});
+
+test("semantic-detail URL return-current clears only temporal and selected version state", () => {
+  const historical = parseDetailQuery(
+    "tab=versions&as_of=2024-06-30&version=12&returnTo=%2Fsemantics%3Fq%3Dcapital"
+  );
+  const current = returnToCurrentDetail(historical);
+  assert.deepEqual(current, {
+    tab: "versions",
+    as_of: "",
+    version: null,
+    returnTo: "/semantics?q=capital"
+  });
+  assert.equal(
+    serializeDetailQuery(current),
+    "tab=versions&returnTo=%2Fsemantics%3Fq%3Dcapital"
+  );
+});
+
+test("semantic-detail request identity scopes shell and lazy regions to project, concept, date, and audit state", () => {
+  const query = parseDetailQuery("tab=evidence&as_of=2024-02-29&version=8&returnTo=%2Fsemantics");
+  assert.equal(buildDetailApiQuery(query), "as_of=2024-02-29");
+  assert.equal(buildDetailApiQuery(query, { audit: true }), "as_of=2024-02-29&audit=true");
+  assert.equal(
+    buildDetailRequestKey(4, 9, "evidence", query, { audit: true }),
+    "4:9:evidence:as_of=2024-02-29&audit=true"
+  );
+  assert.equal(
+    buildDetailRequestKey(4, 9, "shell", query),
+    "4:9:shell:as_of=2024-02-29"
+  );
+});
+
+test("semantic-detail lazy regions keep explicit independent forbidden, error, empty, and retry transitions", () => {
+  const bindings = transitionDetailRegion(createDetailRegionState(), { type: "load", requestKey: "bindings:1" });
+  const evidence = transitionDetailRegion(createDetailRegionState(), { type: "load", requestKey: "evidence:1" });
+  const forbiddenEvidence = transitionDetailRegion(evidence, { type: "reject", requestKey: "evidence:1", error: { status: 403 } });
+  const populatedBindings = transitionDetailRegion(bindings, { type: "resolve", requestKey: "bindings:1", data: { confirmed: [{ id: 1 }] } });
+
+  assert.equal(detailRegionResponseKind(forbiddenEvidence), "forbidden");
+  assert.equal(detailRegionResponseKind(populatedBindings), "success-populated");
+  assert.equal(detailRegionResponseKind(transitionDetailRegion(bindings, { type: "resolve", requestKey: "bindings:1", data: { confirmed: [] } })), "success-empty");
+  assert.equal(detailRegionResponseKind(transitionDetailRegion(evidence, { type: "reject", requestKey: "evidence:1", error: { status: 500 } })), "error");
+  assert.deepEqual(transitionDetailRegion(evidence, { type: "resolve", requestKey: "stale", data: { confirmed: [] } }), evidence);
+
+  const retry = transitionDetailRegion(forbiddenEvidence, { type: "retry" });
+  assert.equal(retry.phase, "idle");
+  assert.equal(retry.attempt, 1);
+  assert.equal(populatedBindings.data.confirmed[0].id, 1);
 });
