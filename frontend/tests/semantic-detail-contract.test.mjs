@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  boundedDisclosureModel,
+  conflictSourceCollectionModel,
   lawfulSemanticDetailHref,
   semanticDetailReferenceModel
 } from "../lib/semantic-detail-contract.mjs";
@@ -74,4 +76,51 @@ test("restricted reference render model contains translated type and restricted 
   for (const secret of ["98", "PROTECTED_NAME", "SECRET_CODE", "nodeId", "private title", "private source", "vault"]) {
     assert.doesNotMatch(serialized, new RegExp(secret));
   }
+});
+
+test("conflict source collection keeps two attributed summaries in stable order", () => {
+  const sources = [
+    { source_type: "regulation", source_id: 7, summary: "监管原文口径", authority: "regulatory" },
+    { source_type: "business", source_id: 8, summary: "业务确认口径", authority: "business_confirmed" }
+  ];
+  const model = conflictSourceCollectionModel("capital-rule", sources, false);
+  assert.equal(model.hasSources, true);
+  assert.equal(model.remainingCount, 0);
+  assert.deepEqual(model.visibleSources.map((source) => [source.source_type, source.summary]), [
+    ["regulation", "监管原文口径"],
+    ["business", "业务确认口径"]
+  ]);
+});
+
+test("conflict source collection omits empty landmarks and never fabricates evidence", () => {
+  assert.deepEqual(conflictSourceCollectionModel("capital-rule", [], false), {
+    id: "semantic-conflict-sources-capital-rule",
+    hasSources: false,
+    expanded: false,
+    remainingCount: 0,
+    visibleSources: []
+  });
+  assert.equal(Object.hasOwn(conflictSourceCollectionModel("capital-rule", [], false), "formalDefinition"), false);
+});
+
+test("conflict source long summary has stable controls and exact expanded text", () => {
+  const fullText = `监管原文。${"完整口径".repeat(100)}\n结尾保留。`;
+  const collapsed = boundedDisclosureModel({ scope: "conflict-source", type: "regulation", id: 7, text: fullText, lines: 3, expanded: false });
+  const expanded = boundedDisclosureModel({ scope: "conflict-source", type: "regulation", id: 7, text: fullText, lines: 3, expanded: true });
+  assert.equal(collapsed.controlId, "semantic-conflict-source-regulation-7-control");
+  assert.equal(collapsed.panelId, "semantic-conflict-source-regulation-7-panel");
+  assert.equal(collapsed.ariaExpanded, false);
+  assert.notEqual(collapsed.visibleText, fullText);
+  assert.equal(expanded.ariaExpanded, true);
+  assert.equal(expanded.visibleText, fullText);
+});
+
+test("conflict source overflow reports remaining count and disclosure exposes all sources", () => {
+  const sources = [1, 2, 3, 4].map((id) => ({ source_type: `source-${id}`, source_id: id, summary: `summary-${id}` }));
+  const collapsed = conflictSourceCollectionModel("capital-rule", sources, false);
+  const expanded = conflictSourceCollectionModel("capital-rule", sources, true);
+  assert.equal(collapsed.remainingCount, 2);
+  assert.deepEqual(collapsed.visibleSources.map((source) => source.source_id), [1, 2]);
+  assert.equal(expanded.remainingCount, 2);
+  assert.deepEqual(expanded.visibleSources.map((source) => source.source_id), [1, 2, 3, 4]);
 });
