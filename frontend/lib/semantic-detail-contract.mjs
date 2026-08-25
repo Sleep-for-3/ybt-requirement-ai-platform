@@ -100,6 +100,17 @@ export function boundedDisclosureModel({ scope, type, id, text, lines = 6, expan
   };
 }
 
+export function evidenceDisclosureModel(evidence, expanded = false) {
+  return boundedDisclosureModel({
+    scope: "evidence",
+    type: evidence?.evidence_type,
+    id: evidence?.id,
+    text: evidence?.excerpt,
+    lines: 6,
+    expanded
+  });
+}
+
 function lawfulLineageQuery(parsed, semanticConceptId) {
   const entries = [...parsed.searchParams.entries()];
   if (entries.length !== 3) return false;

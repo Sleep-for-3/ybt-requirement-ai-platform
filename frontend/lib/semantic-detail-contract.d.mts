@@ -48,3 +48,4 @@ export function lawfulSemanticDetailHref(value: unknown, semanticConceptId: unkn
 export function semanticDetailReferenceModel(reference: SemanticDetailReference | Record<string, unknown>, semanticConceptId: unknown): SemanticReferenceRenderModel;
 export function conflictSourceCollectionModel(conflictKey: unknown, sources?: Array<{source_type?:unknown;source_id?:unknown;summary?:unknown;authority?:unknown}>, expanded?: boolean): ConflictSourceCollectionModel;
 export function boundedDisclosureModel(input?: {scope?:unknown;type?:unknown;id?:unknown;text?:unknown;lines?:3|6;expanded?:boolean}): BoundedDisclosureModel;
+export function evidenceDisclosureModel(evidence?: {evidence_type?:unknown;id?:unknown;excerpt?:unknown}, expanded?: boolean): BoundedDisclosureModel;
