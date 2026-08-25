@@ -53,6 +53,7 @@ from app.api import (
     deliverables,
     uat,
     semantic,
+    semantic_catalog,
 )
 from app.core.database import engine
 from app.core.settings import get_settings
@@ -181,4 +182,5 @@ app.include_router(lineage.router, prefix=settings.api_prefix, dependencies=secu
 app.include_router(deliverables.router, prefix=settings.api_prefix)
 app.include_router(uat.router, prefix=settings.api_prefix)
 app.include_router(semantic.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(semantic_catalog.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(regulatory_context.router, prefix=settings.api_prefix, dependencies=secured)
