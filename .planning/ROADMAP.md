@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 4/9 plans executed; 5 gap-closure plans ready
+**Plans:** 5/9 plans executed; 5 gap-closure plans ready
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -99,7 +99,7 @@ Plans:
 
 **Wave 5** *(gap closure; blocked on Wave 4 completion)*
 
-- [ ] 11-05-PLAN.md — Close institution-isolation, trusted relation aggregate, and uncategorized-filter gaps
+- [x] 11-05-PLAN.md — Close institution-isolation, trusted relation aggregate, and uncategorized-filter gaps
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
