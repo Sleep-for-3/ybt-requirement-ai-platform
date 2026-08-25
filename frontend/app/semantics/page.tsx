@@ -2,7 +2,7 @@
 
 import { BookOpenCheck, RotateCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useReducer, useState } from "react";
 
 import { CatalogToolbar } from "@/components/semantic-catalog/CatalogToolbar";
 import { GroupedSemanticDirectory } from "@/components/semantic-catalog/GroupedSemanticDirectory";
@@ -12,22 +12,22 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
 import type { SemanticCatalogPage as SemanticCatalogResponse } from "@/lib/api";
 import {
+  catalogPaginationModel,
+  catalogStateForScope,
+  createCatalogState,
+  transitionCatalogState
+} from "@/lib/semantic-catalog-controller.mjs";
+import {
   applyCatalogQueryChange,
   buildCatalogApiQuery,
   buildCatalogRequestKey,
   catalogHasFilters,
   catalogResponseKind,
   commitCatalogSearch,
-  createCatalogRequestCoordinator,
   parseCatalogQuery,
   serializeCatalogQuery
 } from "@/lib/semantic-catalog-view-model.mjs";
 import type { CatalogQueryState } from "@/lib/semantic-catalog-view-model.mjs";
-
-type CatalogState =
-  | { phase: "idle" | "loading" }
-  | { phase: "success"; page: SemanticCatalogResponse }
-  | { phase: "error"; error: Error & { status?: number } };
 
 export default function SemanticCatalogPage() {
   return <Suspense fallback={<CatalogRouteSkeleton />}><SemanticCatalogContent /></Suspense>;
@@ -39,10 +39,11 @@ function SemanticCatalogContent() {
   const { projectId } = useProjectWorkspace();
   const query = useMemo(() => parseCatalogQuery(searchParams.toString()), [searchParams]);
   const [searchDraft, setSearchDraft] = useState(query.q);
-  const [state, setState] = useState<CatalogState>({ phase: "idle" });
-  const [reloadToken, setReloadToken] = useState(0);
-  const coordinator = useRef(createCatalogRequestCoordinator());
+  const [state, dispatch] = useReducer(transitionCatalogState, undefined, createCatalogState);
   const queryString = serializeCatalogQuery(query);
+  const requestKey = projectId ? buildCatalogRequestKey(projectId, query) : "";
+  const visibleState = catalogStateForScope(state, requestKey);
+  const requestAttempt = visibleState.attempt;
 
   useEffect(() => { setSearchDraft(query.q); }, [query.q]);
 
@@ -55,29 +56,31 @@ function SemanticCatalogContent() {
 
   useEffect(() => {
     if (!projectId) {
-      coordinator.current.clear();
-      setState({ phase: "idle" });
+      dispatch({ type: "scope-change", requestKey: "" });
       return;
     }
-    const requestCoordinator = coordinator.current;
     const requestQuery = parseCatalogQuery(queryString);
-    const request = requestCoordinator.begin(`${buildCatalogRequestKey(projectId, requestQuery)}:${reloadToken}`);
-    setState({ phase: "loading" });
+    const controller = new AbortController();
+    dispatch({ type: "scope-change", requestKey });
+    dispatch({ type: "begin", requestKey, attempt: requestAttempt });
     void apiGet<SemanticCatalogResponse>(
       `/projects/${projectId}/semantic-catalog?${buildCatalogApiQuery(requestQuery)}`,
-      { signal: request.signal }
+      { signal: controller.signal }
     ).then((page) => {
-      if (request.accept()) setState({ phase: "success", page });
+      dispatch({ type: "resolve", requestKey, attempt: requestAttempt, page });
     }).catch((error: unknown) => {
-      if (!request.accept()) return;
       const normalized = error instanceof Error ? error : new Error("请求失败");
-      setState({ phase: "error", error: normalized });
+      dispatch({ type: "reject", requestKey, attempt: requestAttempt, error: normalized });
     });
-    return () => requestCoordinator.clear();
-  }, [projectId, queryString, reloadToken]);
+    return () => controller.abort();
+  }, [projectId, queryString, requestAttempt, requestKey]);
 
-  const responseKind = catalogResponseKind(state);
-  const page = state.phase === "success" ? state.page : null;
+  const responseKind = catalogResponseKind({
+    phase: visibleState.phase,
+    error: visibleState.error || undefined,
+    page: visibleState.page || undefined
+  });
+  const page = visibleState.phase === "success" ? visibleState.page : null;
   const meta = page ? `共 ${page.total} 个语义概念 · 截至 ${page.as_of}` : responseKind === "loading" ? "正在加载语义目录" : "项目监管语义";
 
   function navigate(next: CatalogQueryState, mode: "push" | "replace" = "replace") {
@@ -97,7 +100,7 @@ function SemanticCatalogContent() {
         {responseKind === "idle" ? <CatalogIdle /> : null}
         {responseKind === "loading" ? <CatalogSkeleton /> : null}
         {responseKind === "forbidden" ? <CatalogForbidden /> : null}
-        {responseKind === "error" && state.phase === "error" ? <CatalogError message={state.error.message} onRetry={() => setReloadToken((value) => value + 1)} /> : null}
+        {responseKind === "error" && visibleState.phase === "error" ? <CatalogError message={visibleState.error?.message || "请求失败"} onRetry={() => dispatch({ type: "retry", requestKey })} /> : null}
         {responseKind === "empty" ? <CatalogEmpty filtered={catalogHasFilters(query)} /> : null}
         {responseKind === "populated" && page ? (
           <CatalogResults
@@ -138,16 +141,14 @@ function CatalogResults({ page, query, auditMode, onPage }: { page:SemanticCatal
       <p className="sr-only">{page.total} 个结果</p>
       {auditMode ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-4 py-3 text-sm text-coral-800" role="status">当前为审计筛选，结果均为非当前事实。</p> : null}
       {query.view === "directory" ? <GroupedSemanticDirectory auditMode={auditMode} items={page.items} returnTo={returnTo} /> : <SemanticComparisonTable auditMode={auditMode} items={page.items} returnTo={returnTo} />}
-      <CatalogPagination page={query.page} pageSize={query.page_size} total={page.total} onPage={onPage} />
+      <CatalogPagination page={page.page} pageSize={page.page_size} total={page.total} onPage={onPage} />
     </div>
   );
 }
 
 function CatalogPagination({ page, pageSize, total, onPage }: { page:number;pageSize:number;total:number;onPage:(page:number)=>void }) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const start = total ? (page - 1) * pageSize + 1 : 0;
-  const end = Math.min(total, page * pageSize);
-  return <nav aria-label="语义目录分页" className="flex min-h-12 items-center justify-between gap-3 text-sm text-slate-600"><button className="button-secondary min-h-11" disabled={page <= 1} onClick={() => onPage(page - 1)} type="button">上一页</button><span>第 {start}-{end} 条，共 {total} 条</span><button className="button-secondary min-h-11" disabled={page >= pages} onClick={() => onPage(page + 1)} type="button">下一页</button></nav>;
+  const model = catalogPaginationModel({ page, pageSize, total });
+  return <nav aria-label="语义目录分页" className="flex min-h-12 flex-wrap items-center justify-between gap-3 text-sm text-slate-600"><div className="flex gap-2">{model.showEdges ? <button className="button-secondary min-h-11" disabled={model.first.disabled} onClick={() => onPage(model.first.page)} type="button">首页</button> : null}<button className="button-secondary min-h-11" disabled={model.previous.disabled} onClick={() => onPage(model.previous.page)} type="button">上一页</button></div><span>第 {model.start}-{model.end} 条，共 {total} 条</span><div className="flex gap-2"><button className="button-secondary min-h-11" disabled={model.next.disabled} onClick={() => onPage(model.next.page)} type="button">下一页</button>{model.showEdges ? <button className="button-secondary min-h-11" disabled={model.last.disabled} onClick={() => onPage(model.last.page)} type="button">末页</button> : null}</div></nav>;
 }
 
 function preserveProject(params: URLSearchParams, catalogQuery: string) {
