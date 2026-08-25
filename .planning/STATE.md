@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 11
 current_phase_name: semantic-catalog-ui
 status: executing
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-08-25T04:55:39.596Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-08-25T05:28:32.194Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 19
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 11 (semantic-catalog-ui) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-25 — Phase 11 execution started
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [████████░░] 84%
 | Phase 10 P07 | 9 min | 2 tasks | 5 files |
 | Phase 10 P06 | 16 min | 2 tasks | 5 files |
 | Phase 11-semantic-catalog-ui P01 | 16min | 2 tasks | 7 files |
+| Phase 11-semantic-catalog-ui P02 | 27min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -107,6 +108,9 @@ Progress: [████████░░] 84%
 - [Phase 11]: Resolve canonical confirmed versions once for the project-scoped population, then derive search, filters, facets, and pagination from that same population.
 - [Phase 11]: Require audit.read before audit DTO construction and replace unreadable binding targets with a type-only restricted union before serialization.
 - [Phase 11]: Keep lifecycle status, review workflow state, and open-question counts as separate catalog fields.
+- [Phase 11]: Keep the browser URL as durable catalog state: search commits on submit while filters, view, audit, and pagination update canonically.
+- [Phase 11]: Include every server-affecting parameter in request identity, abort superseded work, and reject late responses before state commit.
+- [Phase 11]: Keep server totals and facets authoritative while lifecycle, pending review, and explicit server-confirmed audit mode remain separate UI signals.
 
 ### Pending Todos
 
@@ -127,6 +131,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-25T04:55:39.534Z
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-08-25T05:28:32.145Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
