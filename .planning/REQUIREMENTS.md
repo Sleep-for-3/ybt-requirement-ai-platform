@@ -32,7 +32,7 @@
 ### Semantic Experience
 
 - [x] **SUI-01**: 用户可通过 `/semantics` 浏览、筛选语义目录并看到 loading/empty/error/unauthorized/pending 状态。
-- [ ] **SUI-02**: 用户可在 `/semantics/{id}` 浏览定义、绑定、关系、知识、证据、血缘、版本和治理状态。
+- [x] **SUI-02**: 用户可在 `/semantics/{id}` 浏览定义、绑定、关系、知识、证据、血缘、版本和治理状态。
 - [ ] **WRK-01**: 需求工作台默认展示结构化口径，并提供血缘、证据、待确认和文档预览 tabs。
 - [ ] **WRK-02**: 结构化口径能链接 SemanticConcept、Source/Mart/Target、Evidence、Knowledge 与 Lineage，旧 routes 保持可用。
 - [ ] **WRK-03**: Deliverables 从同一份 Structured Requirement Snapshot 渲染现有 Excel/Word/Markdown 能力，渲染产物不是事实源。
@@ -72,7 +72,7 @@
 | SEM-01, SEM-02, SEM-03, SEM-04, SEM-05, SEM-06, SEM-07 | Phase 8 | Complete |
 | CTX-01, CTX-02, CTX-03, CTX-04 | Phase 9 | Complete |
 | GEN-01, GEN-02, GEN-03, GEN-04 | Phase 10 | Complete |
-| SUI-01, SUI-02 | Phase 11 | Pending |
+| SUI-01, SUI-02 | Phase 11 | Complete |
 | WRK-01, WRK-02, WRK-03 | Phase 12 | Pending |
 | DSH-01, DSH-02 | Phase 13 | Pending |
 | DQA-01, DQA-02 | Phase 14 | Pending |

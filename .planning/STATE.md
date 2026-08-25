@@ -4,16 +4,16 @@ milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
 current_phase: 11
 current_phase_name: semantic-catalog-ui
-status: executing
-stopped_at: Completed 11-04-PLAN.md
-last_updated: "2026-08-25T06:00:36.168Z"
+status: verifying
+stopped_at: Completed 11-03-PLAN.md
+last_updated: "2026-08-25T06:36:45.270Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 19
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 Phase: 11 (semantic-catalog-ui) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-25 — Phase 11 execution started
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [██████████] 95%
 | Phase 11-semantic-catalog-ui P01 | 16min | 2 tasks | 7 files |
 | Phase 11-semantic-catalog-ui P02 | 27min | 3 tasks | 14 files |
 | Phase 11-semantic-catalog-ui P04 | 26min | 3 tasks | 4 files |
+| Phase 11-semantic-catalog-ui P03 | 29min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -117,6 +118,10 @@ Progress: [██████████] 95%
 - [Phase 11]: Construct type-only restricted semantic references before serialization so protected identifiers and metadata never enter response DTOs.
 - [Phase 11]: Keep rejected and deprecated semantic rows audit-only behind audit.read and mark audit events non-current.
 - [Phase 11]: Retain existing semantic indexes because the measured 701-concept SQLite plan used an existing project index with seven statements and sub-threshold latency.
+- [Phase 11]: Keep formal meaning exclusively on the server-selected confirmed SemanticConceptVersion; candidate and AI content render only in explicit non-formal regions.
+- [Phase 11]: Bind every shell and region response to project, concept, date, audit mode, and region identity before committing or rendering it.
+- [Phase 11]: Use the backend discriminated restricted reference as a type-only render branch so protected identifiers and metadata never enter links or accessibility text.
+- [Phase 11]: Share tab, panel, retry, disclosure, redaction, and chain contracts between production React components and direct Node tests.
 
 ### Pending Todos
 
@@ -137,6 +142,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-25T06:00:36.128Z
-Stopped at: Completed 11-04-PLAN.md
+Last session: 2026-08-25T06:36:45.224Z
+Stopped at: Completed 11-03-PLAN.md
 Resume file: None

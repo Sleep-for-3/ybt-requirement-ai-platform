@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 0
-fixed_count: 4
-total_count: 7
-last_updated: 2026-08-25T05:59:43.598Z
+fixed_count: 6
+total_count: 10
+last_updated: 2026-08-25T06:36:23.711Z
 ---
 
 # Broken Windows Ledger
@@ -22,6 +22,9 @@ last_updated: 2026-08-25T05:59:43.598Z
 | 5 | 10 | deviation | backend/app/services/mapping/context_adapters.py |  | Metadata catalog compatibility required bounded current-task candidate profile evidence in the frozen Scenario technical projection without restoring a shared-fact fallback. | fixed |  | 2026-08-23T11:34:50.912Z | 2026-08-23T11:35:15.542Z |
 | 6 | 11 | deviation | backend/tests/test_semantic_catalog_api.py |  | Preserved related concept ID before fixture session close to avoid DetachedInstanceError | fixed |  | 2026-08-25T05:59:11.554Z | 2026-08-25T05:59:42.594Z |
 | 7 | 11 | deviation | backend/app/services/semantic/catalog_query_service.py |  | Aligned catalog unresolved-question aggregate with open assigned and answered lifecycle | fixed |  | 2026-08-25T05:59:12.444Z | 2026-08-25T05:59:43.598Z |
+| 8 | 11 | deviation | frontend/app/semantics/[id]/page.tsx |  | Auto-fixed stale prior-project semantic shell render by binding state to full request identity. | fixed |  | 2026-08-25T06:35:43.480Z | 2026-08-25T06:36:22.797Z |
+| 9 | 11 | deviation | frontend/lib/semantic-catalog-dom-contract.mjs |  | Runtime-only DOM contract uses tested import-site type suppressions because plan scope excludes a declaration peer. | fixed |  | 2026-08-25T06:35:44.651Z | 2026-08-25T06:36:23.711Z |
+| 10 | 11 | unrun-verify | frontend/app/semantics/[id]/page.tsx |  | Live human viewport inspection is deferred to phase UI review; deterministic DOM and keyboard checks passed. | open |  | 2026-08-25T06:35:45.749Z |  |
 
 ````json
 [
@@ -108,6 +111,42 @@ last_updated: 2026-08-25T05:59:43.598Z
     "reason": "",
     "recorded_at": "2026-08-25T05:59:12.444Z",
     "resolved_at": "2026-08-25T05:59:43.598Z"
+  },
+  {
+    "id": 8,
+    "kind": "deviation",
+    "phase": "11",
+    "file": "frontend/app/semantics/[id]/page.tsx",
+    "line": null,
+    "description": "Auto-fixed stale prior-project semantic shell render by binding state to full request identity.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-25T06:35:43.480Z",
+    "resolved_at": "2026-08-25T06:36:22.797Z"
+  },
+  {
+    "id": 9,
+    "kind": "deviation",
+    "phase": "11",
+    "file": "frontend/lib/semantic-catalog-dom-contract.mjs",
+    "line": null,
+    "description": "Runtime-only DOM contract uses tested import-site type suppressions because plan scope excludes a declaration peer.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-25T06:35:44.651Z",
+    "resolved_at": "2026-08-25T06:36:23.711Z"
+  },
+  {
+    "id": 10,
+    "kind": "unrun-verify",
+    "phase": "11",
+    "file": "frontend/app/semantics/[id]/page.tsx",
+    "line": null,
+    "description": "Live human viewport inspection is deferred to phase UI review; deterministic DOM and keyboard checks passed.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-25T06:35:45.749Z",
+    "resolved_at": null
   }
 ]
 ````
