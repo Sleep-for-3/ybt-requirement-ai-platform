@@ -24,6 +24,7 @@ from app.models import (
     WorkflowInstance,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
+from app.services.semantic.version_service import resolve_effective_versions
 from app.schemas.semantic_catalog import (
     BoundedRegionMetadata,
     RestrictedSemanticDetailReference,
@@ -731,6 +732,106 @@ def test_catalog_project_institution_scope_and_restricted_reference_are_safe() -
             f"/api/projects/{project_a}/semantic-catalog", params={"audit": "true"}
         )
         assert denied_audit.status_code == 403
+
+
+def test_catalog_and_detail_reject_same_project_foreign_institution_versions() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, project_b = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            foreign_institution_id = db.get(Project, project_b).institution_id
+            concept, authorized_version = _seed_concept(
+                db,
+                project,
+                code="FOREIGN_VERSION_SCOPE",
+                name="机构隔离版本",
+                definition="授权机构正式定义",
+                effective_from=date(2026, 1, 1),
+                effective_to=date(2026, 12, 31),
+            )
+            foreign_version = SemanticConceptVersion(
+                semantic_concept_id=concept.id,
+                project_id=project_id,
+                institution_id=foreign_institution_id,
+                version_no=2,
+                concept_name="外机构污染版本",
+                definition="FOREIGN_INSTITUTION_FORMAL_DEFINITION",
+                status="confirmed",
+                confidence_level="high",
+                source_type="manual",
+                confirmed_by="foreign-reviewer",
+                confirmed_at=datetime.now(UTC),
+                effective_from=date(2027, 1, 1),
+            )
+            db.add(foreign_version)
+
+            null_project = Project(name="无机构语义解析项目", institution_id=None)
+            db.add(null_project)
+            db.flush()
+            null_concept, null_version = _seed_concept(
+                db,
+                null_project,
+                code="NULL_INSTITUTION_VERSION_SCOPE",
+                name="无机构正式版本",
+                definition="仅显式空机构可见",
+                effective_from=date(2027, 1, 1),
+            )
+            db.commit()
+            concept_id = concept.id
+            authorized_institution_id = project.institution_id
+            foreign_version_id = foreign_version.id
+            null_concept_id = null_concept.id
+            null_version_id = null_version.id
+            authorized_version_id = authorized_version.id
+
+        catalog = client.get(
+            f"/api/projects/{project_id}/semantic-catalog",
+            params={"mode": "trusted", "as_of": "2027-06-01"},
+        )
+        shell = client.get(
+            f"/api/projects/{project_id}/semantic-catalog/{concept_id}",
+            params={"as_of": "2027-06-01"},
+        )
+        assert catalog.status_code == 200, catalog.text
+        assert shell.status_code == 200, shell.text
+        catalog_item = next(
+            item for item in catalog.json()["items"] if item["id"] == concept_id
+        )
+        assert catalog_item["effective_version"] is None
+        assert shell.json()["effective_version"] is None
+        assert "FOREIGN_INSTITUTION_FORMAL_DEFINITION" not in catalog.text
+        assert "FOREIGN_INSTITUTION_FORMAL_DEFINITION" not in shell.text
+
+        with sessions() as db:
+            omitted = resolve_effective_versions(
+                db, [concept_id], date(2027, 6, 1), project_id=project_id
+            )
+            integer_scoped = resolve_effective_versions(
+                db,
+                [concept_id],
+                date(2027, 6, 1),
+                project_id=project_id,
+                institution_id=authorized_institution_id,
+            )
+            explicit_null = resolve_effective_versions(
+                db,
+                [null_concept_id, concept_id],
+                date(2027, 6, 1),
+                institution_id=None,
+            )
+            inclusive = resolve_effective_versions(
+                db,
+                [concept_id],
+                date(2026, 12, 31),
+                project_id=project_id,
+                institution_id=authorized_institution_id,
+            )
+
+        assert omitted[concept_id].id == foreign_version_id
+        assert concept_id not in integer_scoped
+        assert explicit_null[null_concept_id].id == null_version_id
+        assert concept_id not in explicit_null
+        assert inclusive[concept_id].id == authorized_version_id
 
 
 def test_catalog_review_questions_and_query_count_are_batched() -> None:
