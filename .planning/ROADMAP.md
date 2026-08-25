@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 8/9 plans executed; 5 gap-closure plans ready
+**Plans:** 9/9 plans executed; 5 gap-closure plans ready
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -115,7 +115,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 11-09-PLAN.md — Record full gap qualification and route dedicated security, UI, and human verification gates
+- [x] 11-09-PLAN.md — Record full gap qualification and route dedicated security, UI, and human verification gates
 
 ### Phase 12: Requirement Workspace V2
 
