@@ -26,13 +26,14 @@ test("lineage query rejects duplicate unknown mismatched external and malformed 
     "/lineage?nodeId=91&from=semantic&semanticConceptId=42",
     "/lineage?nodeId=91&from=semantics&semanticConceptId=41",
     "/lineage?nodeId=91&from=semantics&semanticConceptId=",
-    "/lineage/fields/91?from=semantics&semanticConceptId=42",
     "/lineage?nodeId=91&from=semantics&semanticConceptId=42#private",
     "https://example.com/lineage?nodeId=91&from=semantics&semanticConceptId=42",
     "//example.com/lineage?nodeId=91&from=semantics&semanticConceptId=42",
     "/lineage?nodeId=%E0%A4%A&from=semantics&semanticConceptId=42"
   ];
   for (const href of rejected) assert.equal(lawfulSemanticDetailHref(href, 42), null, href);
+  const existingFieldDestination = "/lineage/fields/91?from=semantics&semanticConceptId=42";
+  assert.equal(lawfulSemanticDetailHref(existingFieldDestination, 42), existingFieldDestination);
 });
 
 test("lineage query keeps readable unsupported references useful but nonnavigable", () => {
