@@ -37,6 +37,13 @@ _VERSION_FIELDS = {
 }
 
 
+class _UnscopedInstitution:
+    __slots__ = ()
+
+
+UNSCOPED_INSTITUTION = _UnscopedInstitution()
+
+
 def _error(code: str, message: str, **extra: object) -> HTTPException:
     return HTTPException(status_code=409, detail={"code": code, "message": message, **extra})
 
@@ -360,6 +367,7 @@ def resolve_effective_versions(
     as_of: date | datetime | str,
     *,
     project_id: int | None = None,
+    institution_id: int | None | _UnscopedInstitution = UNSCOPED_INSTITUTION,
 ) -> dict[int, SemanticConceptVersion]:
     """Resolve many concepts with the exact trusted inclusive-date policy."""
 
@@ -383,6 +391,17 @@ def resolve_effective_versions(
     )
     if project_id is not None:
         statement = statement.where(SemanticConceptVersion.project_id == project_id)
+    if institution_id is not UNSCOPED_INSTITUTION:
+        if institution_id is None:
+            statement = statement.where(
+                SemanticConcept.institution_id.is_(None),
+                SemanticConceptVersion.institution_id.is_(None),
+            )
+        else:
+            statement = statement.where(
+                SemanticConcept.institution_id == institution_id,
+                SemanticConceptVersion.institution_id == institution_id,
+            )
     matches_by_concept: dict[int, list[SemanticConceptVersion]] = {}
     for version in db.scalars(statement).all():
         matches_by_concept.setdefault(int(version.semantic_concept_id), []).append(version)
@@ -408,12 +427,14 @@ def resolve_effective_version(
     as_of: date | datetime | str,
     *,
     project_id: int | None = None,
+    institution_id: int | None | _UnscopedInstitution = UNSCOPED_INSTITUTION,
 ) -> SemanticConceptVersion | None:
     return resolve_effective_versions(
         db,
         [concept_id],
         as_of,
         project_id=project_id,
+        institution_id=institution_id,
     ).get(int(concept_id))
 
 
@@ -457,6 +478,7 @@ def transition_concept_status(
 
 
 __all__ = [
+    "UNSCOPED_INSTITUTION",
     "_assert_confirmed_interval_available",
     "create_concept_with_initial_version",
     "create_concept_version",

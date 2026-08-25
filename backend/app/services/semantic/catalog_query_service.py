@@ -81,7 +81,8 @@ class SemanticCatalogQueryService:
     ) -> SemanticDetailShell:
         concept = self._detail_concept(concept_id, include_audit=include_audit)
         effective = resolve_effective_versions(
-            self.db, [concept.id], as_of, project_id=self.project.id
+            self.db, [concept.id], as_of, project_id=self.project.id,
+            institution_id=self.project.institution_id,
         ).get(concept.id)
         candidates = list(self.db.scalars(select(SemanticConceptVersion).where(
             SemanticConceptVersion.project_id == self.project.id,
@@ -398,10 +399,12 @@ class SemanticCatalogQueryService:
             ),
         )
         effective = resolve_effective_versions(
-            self.db, [concept.id], as_of, project_id=self.project.id
+            self.db, [concept.id], as_of, project_id=self.project.id,
+            institution_id=self.project.institution_id,
         ).get(concept.id)
         current = resolve_effective_versions(
-            self.db, [concept.id], date.today(), project_id=self.project.id
+            self.db, [concept.id], date.today(), project_id=self.project.id,
+            institution_id=self.project.institution_id,
         ).get(concept.id)
         projected = {
             name: [self._detail_version(row) for row in rows]
@@ -450,7 +453,8 @@ class SemanticCatalogQueryService:
         concept_ids = [concept.id for concept in concepts]
 
         effective = resolve_effective_versions(
-            self.db, concept_ids, as_of, project_id=self.project.id
+            self.db, concept_ids, as_of, project_id=self.project.id,
+            institution_id=self.project.institution_id,
         )
         bindings = self._confirmed_bindings(concept_ids)
         binding_counts = Counter(binding.semantic_concept_id for binding in bindings)
