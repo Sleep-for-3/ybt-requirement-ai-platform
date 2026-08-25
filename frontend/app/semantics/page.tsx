@@ -1,15 +1,16 @@
 "use client";
 
 import { BookOpenCheck, RotateCw } from "lucide-react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { CatalogToolbar } from "@/components/semantic-catalog/CatalogToolbar";
+import { GroupedSemanticDirectory } from "@/components/semantic-catalog/GroupedSemanticDirectory";
+import { SemanticComparisonTable } from "@/components/semantic-catalog/SemanticComparisonTable";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
-import type { SemanticCatalogItem, SemanticCatalogPage as SemanticCatalogResponse } from "@/lib/api";
+import type { SemanticCatalogPage as SemanticCatalogResponse } from "@/lib/api";
 import {
   applyCatalogQueryChange,
   buildCatalogApiQuery,
@@ -98,7 +99,14 @@ function SemanticCatalogContent() {
         {responseKind === "forbidden" ? <CatalogForbidden /> : null}
         {responseKind === "error" && state.phase === "error" ? <CatalogError message={state.error.message} onRetry={() => setReloadToken((value) => value + 1)} /> : null}
         {responseKind === "empty" ? <CatalogEmpty filtered={catalogHasFilters(query)} /> : null}
-        {responseKind === "populated" && page ? <CatalogDirectory items={page.items} query={query} total={page.total} onPage={(pageNumber) => navigate(applyCatalogQueryChange(query, { page: pageNumber }, { resetPage: false }))} /> : null}
+        {responseKind === "populated" && page ? (
+          <CatalogResults
+            auditMode={query.audit && page.mode === "audit"}
+            page={page}
+            query={query}
+            onPage={(pageNumber) => navigate(applyCatalogQueryChange(query, { page: pageNumber }, { resetPage: false }))}
+          />
+        ) : null}
       </div>
     </main>
   );
@@ -123,22 +131,14 @@ function CatalogEmpty({ filtered }: { filtered:boolean }) {
   return <section className="empty-state" aria-live="polite"><BookOpenCheck aria-hidden className="text-slate-300" size={32} /><h2 className="text-base font-semibold text-ink">{filtered ? "没有符合条件的语义概念" : "当前项目还没有可浏览的语义概念"}</h2><p>{filtered ? "调整搜索词或筛选条件后重新搜索。" : "语义概念经治理后会显示在这里。"}</p></section>;
 }
 
-function CatalogDirectory({ items, query, total, onPage }: { items:SemanticCatalogItem[];query:CatalogQueryState;total:number;onPage:(page:number)=>void }) {
+function CatalogResults({ page, query, auditMode, onPage }: { page:SemanticCatalogResponse;query:CatalogQueryState;auditMode:boolean;onPage:(page:number)=>void }) {
+  const returnTo = `/semantics${queryToSuffix(query)}`;
   return (
     <div className="space-y-4" aria-live="polite">
-      <p className="sr-only">{total} 个结果</p>
-      <div className="overflow-hidden rounded-lg border border-line bg-white">
-        {items.map((item) => (
-          <article className="grid min-h-[68px] gap-3 border-b border-line p-4 last:border-0 md:grid-cols-[minmax(220px,1.6fr)_120px_120px_minmax(130px,1fr)_100px] md:items-center" key={item.id}>
-            <div className="min-w-0"><Link className="font-semibold text-pine-700 hover:underline" href={`/semantics/${item.id}?returnTo=${encodeURIComponent(`/semantics${queryToSuffix(query)}`)}`}>{item.concept_name}</Link><div className="mt-1 break-all font-mono text-xs text-slate-500">{item.concept_code}</div></div>
-            <span className="text-sm text-slate-600">{item.concept_type}</span>
-            <span className="text-sm text-slate-600">{item.effective_version ? `v${item.effective_version.version_no}` : "暂无正式版本"}</span>
-            <div className="text-sm text-slate-600"><span>{item.status}</span>{item.review.pending ? <span className="ml-2 text-gold-700">待评审</span> : null}</div>
-            <span className="text-sm text-slate-600">{item.related_asset_count} 个资产</span>
-          </article>
-        ))}
-      </div>
-      <CatalogPagination page={query.page} pageSize={query.page_size} total={total} onPage={onPage} />
+      <p className="sr-only">{page.total} 个结果</p>
+      {auditMode ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-4 py-3 text-sm text-coral-800" role="status">当前为审计筛选，结果均为非当前事实。</p> : null}
+      {query.view === "directory" ? <GroupedSemanticDirectory auditMode={auditMode} items={page.items} returnTo={returnTo} /> : <SemanticComparisonTable auditMode={auditMode} items={page.items} returnTo={returnTo} />}
+      <CatalogPagination page={query.page} pageSize={query.page_size} total={page.total} onPage={onPage} />
     </div>
   );
 }
