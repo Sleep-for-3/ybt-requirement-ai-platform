@@ -1607,6 +1607,68 @@ def test_detail_chain_caps_each_family_and_reports_overflow_without_hidden_field
             } & binding["target"].keys()
 
 
+def test_uncategorized_facet_round_trips_null_and_blank_domains() -> None:
+    with _semantic_client() as (client, sessions):
+        project_id, _ = _projects(sessions)
+        with sessions() as db:
+            project = db.get(Project, project_id)
+            _seed_concept(
+                db,
+                project,
+                code="UNCATEGORIZED_NULL",
+                name="空值未分类语义",
+                domain=None,
+            )
+            _seed_concept(
+                db,
+                project,
+                code="UNCATEGORIZED_BLANK",
+                name="空白未分类语义",
+                domain="   ",
+            )
+            _seed_concept(
+                db,
+                project,
+                code="NAMED_DOMAIN",
+                name="命名域语义",
+                domain="客户",
+            )
+            db.commit()
+
+        path = f"/api/projects/{project_id}/semantic-catalog"
+        first = client.get(
+            path,
+            params={
+                "mode": "trusted",
+                "domain": "__uncategorized__",
+                "page": 1,
+                "page_size": 1,
+            },
+        )
+        second = client.get(
+            path,
+            params={
+                "mode": "trusted",
+                "domain": "__uncategorized__",
+                "page": 2,
+                "page_size": 1,
+            },
+        )
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        for payload in (first.json(), second.json()):
+            assert payload["total"] == 2
+            assert payload["facets"]["business_domains"] == {
+                "__uncategorized__": 2
+            }
+            assert payload["page_size"] == 1
+            assert "NAMED_DOMAIN" not in str(payload)
+        assert [first.json()["items"][0]["concept_code"], second.json()["items"][0]["concept_code"]] == [
+            "UNCATEGORIZED_BLANK",
+            "UNCATEGORIZED_NULL",
+        ]
+
+
 def test_semantic_catalog_701_concepts_uses_existing_index_with_bounded_queries() -> None:
     with _semantic_client() as (client, sessions):
         project_id, _ = _projects(sessions)
