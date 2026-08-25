@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -91,7 +91,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 11-04-PLAN.md — Build governed semantic detail backend projections and security contract
+- [x] 11-04-PLAN.md — Build governed semantic detail backend projections and security contract
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

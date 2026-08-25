@@ -5,15 +5,15 @@ milestone_name: Regulatory Data Intelligence V2
 current_phase: 11
 current_phase_name: semantic-catalog-ui
 status: executing
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-08-25T05:28:32.194Z"
+stopped_at: Completed 11-04-PLAN.md
+last_updated: "2026-08-25T06:00:36.168Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: `.planning/PROJECT.md` (updated 2026-08-20)
 ## Current Position
 
 Phase: 11 (semantic-catalog-ui) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-25 — Phase 11 execution started
 
-Progress: [█████████░] 89%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [█████████░] 89%
 | Phase 10 P06 | 16 min | 2 tasks | 5 files |
 | Phase 11-semantic-catalog-ui P01 | 16min | 2 tasks | 7 files |
 | Phase 11-semantic-catalog-ui P02 | 27min | 3 tasks | 14 files |
+| Phase 11-semantic-catalog-ui P04 | 26min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,11 @@ Progress: [█████████░] 89%
 - [Phase 11]: Keep the browser URL as durable catalog state: search commits on submit while filters, view, audit, and pagination update canonically.
 - [Phase 11]: Include every server-affecting parameter in request identity, abort superseded work, and reject late responses before state commit.
 - [Phase 11]: Keep server totals and facets authoritative while lifecycle, pending review, and explicit server-confirmed audit mode remain separate UI signals.
+- [Phase 11]: Resolve semantic detail formal meaning only from canonical SemanticConceptVersion; keep missing confirmed meaning null and candidates separate.
+- [Phase 11]: Authorize optional semantic detail regions independently and preserve safe visible-project 403 versus hidden-project 404 behavior.
+- [Phase 11]: Construct type-only restricted semantic references before serialization so protected identifiers and metadata never enter response DTOs.
+- [Phase 11]: Keep rejected and deprecated semantic rows audit-only behind audit.read and mark audit events non-current.
+- [Phase 11]: Retain existing semantic indexes because the measured 701-concept SQLite plan used an existing project index with seven statements and sub-threshold latency.
 
 ### Pending Todos
 
@@ -131,6 +137,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-25T05:28:32.145Z
-Stopped at: Completed 11-02-PLAN.md
+Last session: 2026-08-25T06:00:36.128Z
+Stopped at: Completed 11-04-PLAN.md
 Resume file: None
