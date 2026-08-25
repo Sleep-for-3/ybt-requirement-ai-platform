@@ -87,6 +87,7 @@ export function detailRegionResponseKind(input: DetailRegionState): "idle"|"load
 export function sortSemanticVersions<T extends {effective_from?:string|null;version_no?:number|null;id?:number|null}>(versions?:T[]):T[];
 export function isSemanticQuestionOpen(question?:{question_status?:string|null}):boolean;
 export function semanticReferenceLabel(reference:SemanticDetailReference):string;
+export function catalogDomainLabel(value?:string|null):string;
 export function safeSemanticReturnTo(value?: string | null): string;
 export function partitionSemanticRows<T extends { status?: SemanticLifecycleStatus | string | null }>(rows?: T[]): SemanticStatusPartitions<T>;
 export function confirmedRelatedAssetCount(bindings?: Array<{ status?: string | null; reference?: SemanticAssetReference }>): number;

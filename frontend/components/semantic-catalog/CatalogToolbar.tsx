@@ -4,6 +4,7 @@ import { ListTree, Search, TableProperties, X } from "lucide-react";
 import { FormEvent } from "react";
 
 import type { SemanticCatalogFacets } from "@/lib/api";
+import { catalogDomainLabel } from "@/lib/semantic-catalog-view-model.mjs";
 import type { CatalogQueryState } from "@/lib/semantic-catalog-view-model.mjs";
 
 type CatalogToolbarProps = {
@@ -54,7 +55,7 @@ export function CatalogToolbar({ query, searchDraft, facets, onSearchDraft, onSe
             <option value="">全部类型</option>{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </LabeledSelect>
           <LabeledSelect label="业务域" value={query.domain} onChange={(value) => onChange({ domain: value })}>
-            <option value="">全部业务域</option>{facetOptions(facets?.business_domains).map(([value, count]) => <option key={value} value={value}>{value}（{count}）</option>)}
+            <option value="">全部业务域</option>{facetOptions(facets?.business_domains).map(([value, count]) => <option key={value} value={value}>{catalogDomainLabel(value)}（{count}）</option>)}
           </LabeledSelect>
           <LabeledSelect label="治理状态" value={query.status} onChange={changeStatus}>
             <option value="">全部状态</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -101,7 +102,7 @@ function filterChips(query: CatalogQueryState) {
   const chips: Array<{ key:string;label:string;clear:Partial<CatalogQueryState> }> = [];
   if (query.q) chips.push({ key: "q", label: `搜索：${query.q}`, clear: { q: "" } });
   if (query.type) chips.push({ key: "type", label: `类型：${TYPE_LABELS[query.type] || query.type}`, clear: { type: "" } });
-  if (query.domain) chips.push({ key: "domain", label: `业务域：${query.domain}`, clear: { domain: "" } });
+  if (query.domain) chips.push({ key: "domain", label: `业务域：${catalogDomainLabel(query.domain)}`, clear: { domain: "" } });
   if (query.status) chips.push({ key: "status", label: `状态：${STATUS_LABELS[query.status] || query.status}`, clear: { status: "", audit: false } });
   if (query.owner) chips.push({ key: "owner", label: `Owner：${query.owner}`, clear: { owner: "" } });
   if (query.as_of) chips.push({ key: "as_of", label: `截至：${query.as_of}`, clear: { as_of: "" } });

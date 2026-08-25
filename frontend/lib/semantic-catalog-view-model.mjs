@@ -7,6 +7,9 @@ const CONCEPT_TYPES = new Set([
   "regulatory_rule"
 ]);
 const LIFECYCLE_STATUSES = new Set(["draft", "ai_suggested", "confirmed", "rejected", "deprecated"]);
+const AUDIT_STATUSES = new Set(["rejected", "deprecated"]);
+const DEFAULT_AUDIT_STATUS = "rejected";
+const UNCATEGORIZED_DOMAIN = "__uncategorized__";
 const DETAIL_TABS = new Set(["overview", "bindings", "relations", "evidence", "lineage", "governance", "versions"]);
 const DEFAULT_PAGE_SIZE = 50;
 const CURRENT_ONLY_LABEL = "当前状态，不代表该历史日期";
@@ -66,7 +69,17 @@ export function serializeCatalogQuery(input) {
 
 export function applyCatalogQueryChange(current, changes, options = {}) {
   const resetPage = options.resetPage !== false && !Object.prototype.hasOwnProperty.call(changes, "page");
-  return normalizeCatalogState({ ...current, ...changes, page: resetPage ? 1 : changes.page ?? current.page });
+  const next = { ...current, ...changes, page: resetPage ? 1 : changes.page ?? current.page };
+  if (
+    changes.audit === false &&
+    !Object.prototype.hasOwnProperty.call(changes, "status") &&
+    AUDIT_STATUSES.has(String(current?.status || ""))
+  ) next.status = "";
+  if (Object.prototype.hasOwnProperty.call(changes, "status")) {
+    const status = String(changes.status || "");
+    if (AUDIT_STATUSES.has(status)) next.audit = true;
+  }
+  return normalizeCatalogState(next);
 }
 
 export function catalogHasFilters(input) {
@@ -323,6 +336,11 @@ export function semanticReferenceLabel(reference) {
   return code ? `${name} · ${code}` : name;
 }
 
+export function catalogDomainLabel(value) {
+  const domain = cleanText(value);
+  return domain === UNCATEGORIZED_DOMAIN ? "未分类" : domain;
+}
+
 export function groupCatalogItems(items = []) {
   const groups = new Map();
   for (const item of items) {
@@ -422,17 +440,21 @@ export function resolveSemanticDestination(reference, semanticConceptId) {
 }
 
 function normalizeCatalogState(input = {}) {
+  let status = LIFECYCLE_STATUSES.has(String(input.status || "")) ? String(input.status) : "";
+  let audit = input.audit === true;
+  if (audit && !AUDIT_STATUSES.has(status)) status = DEFAULT_AUDIT_STATUS;
+  else if (!audit && AUDIT_STATUSES.has(status)) audit = true;
   return {
     q: cleanText(input.q),
     type: CONCEPT_TYPES.has(String(input.type || "")) ? String(input.type) : "",
     domain: cleanText(input.domain),
-    status: LIFECYCLE_STATUSES.has(String(input.status || "")) ? String(input.status) : "",
+    status,
     owner: cleanText(input.owner),
     as_of: isIsoDate(input.as_of) ? String(input.as_of) : "",
     has_binding: normalizeNullableBoolean(input.has_binding),
     has_relation: normalizeNullableBoolean(input.has_relation),
     pending_review: normalizeNullableBoolean(input.pending_review),
-    audit: input.audit === true,
+    audit,
     view: input.view === "table" ? "table" : "directory",
     page: positiveInteger(input.page, 1),
     page_size: boundedPageSize(input.page_size)
