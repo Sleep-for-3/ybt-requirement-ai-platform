@@ -235,6 +235,7 @@ export function transitionDetailRegion(state, event) {
 
 export function detailRegionHasContent(data) {
   if (!data || typeof data !== "object") return false;
+  if (typeof data.lifecycle_status === "string") return true;
   const contentKeys = [
     "confirmed", "candidates", "audit", "chains", "verified", "open_questions",
     "conflicts", "audit_events", "evidence", "knowledge"
@@ -297,6 +298,28 @@ export function resolveFormalDefinition(item) {
 export function markCurrentOnly(asOf, temporal) {
   const currentOnly = Boolean(isIsoDate(asOf) && !temporal);
   return { currentOnly, label: currentOnly ? CURRENT_ONLY_LABEL : "" };
+}
+
+export function sortSemanticVersions(versions = []) {
+  return [...versions].sort((left, right) => {
+    const byDate = String(left?.effective_from || "").localeCompare(String(right?.effective_from || ""));
+    if (byDate) return byDate;
+    const byVersion = Number(left?.version_no || 0) - Number(right?.version_no || 0);
+    if (byVersion) return byVersion;
+    return Number(left?.id || 0) - Number(right?.id || 0);
+  });
+}
+
+export function isSemanticQuestionOpen(question) {
+  return ["open", "assigned", "answered"].includes(String(question?.question_status || "").toLowerCase());
+}
+
+export function semanticReferenceLabel(reference) {
+  const entityType = String(reference?.entity_type || "");
+  if (reference?.restricted === true) return `${ENTITY_LABELS[entityType] || "数据资产"} · 受限`;
+  const name = cleanText(reference?.display_name) || ENTITY_LABELS[entityType] || "数据资产";
+  const code = cleanText(reference?.display_code);
+  return code ? `${name} · ${code}` : name;
 }
 
 export function groupCatalogItems(items = []) {

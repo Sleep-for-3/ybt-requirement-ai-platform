@@ -5,8 +5,13 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { AsyncRegion } from "@/components/semantic-catalog/AsyncRegion";
+import { BindingChain } from "@/components/semantic-catalog/BindingChain";
+import { BindingList, SemanticReference } from "@/components/semantic-catalog/BindingList";
+import { RelationList } from "@/components/semantic-catalog/RelationList";
 import { SemanticDetailHeader } from "@/components/semantic-catalog/SemanticDetailHeader";
 import { SemanticTabs } from "@/components/semantic-catalog/SemanticTabs";
+import { TrustSourceRegion } from "@/components/semantic-catalog/TrustSourceRegion";
+import { VersionTimeline } from "@/components/semantic-catalog/VersionTimeline";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
@@ -16,6 +21,7 @@ import {
   createCatalogRequestCoordinator,
   createDetailRegionState,
   detailAuditRequested,
+  isSemanticQuestionOpen,
   detailShellResponseKind,
   parseDetailQuery,
   returnToCurrentDetail,
@@ -25,8 +31,15 @@ import {
 import type {
   DetailQueryState,
   DetailRegionState,
+  SemanticBindingRegion,
   SemanticDetailRegionName,
-  SemanticDetailShell
+  SemanticDetailShell,
+  SemanticEvidencePartition,
+  SemanticEvidenceRegion,
+  SemanticGovernanceRegion,
+  SemanticLineageRegion,
+  SemanticRelationRegion,
+  SemanticVersionRegion
 } from "@/lib/semantic-catalog-view-model.mjs";
 
 type ShellState =
@@ -136,22 +149,38 @@ function SemanticDetailContent() {
       <SemanticDetailHeader shell={shell} query={query} onAsOf={(as_of) => navigate({ ...query, as_of, version: null }, "push")} onReturnCurrent={() => navigate(returnToCurrentDetail(query), "push")} />
       <SemanticTabs activeTab={query.tab} onTab={(tab) => navigate({ ...query, tab }, "push")}>
         <div className="mx-auto max-w-[1600px] p-4 lg:p-6">
-          {query.tab === "overview" ? <Overview shell={shell} /> : null}
-          {activeRegion ? <AsyncRegion emptyText={emptyText(activeRegion)} label={REGION_LABELS[activeRegion]} onRetry={() => retryRegion(activeRegion)} state={regions[activeRegion]}>{(data) => <LoadedRegionSummary data={data} label={REGION_LABELS[activeRegion]} />}</AsyncRegion> : null}
+          {query.tab === "overview" ? <Overview historical={Boolean(query.as_of)} shell={shell} /> : null}
+          {activeRegion ? <AsyncRegion emptyText={emptyText(activeRegion)} label={REGION_LABELS[activeRegion]} onRetry={() => retryRegion(activeRegion)} state={regions[activeRegion]}>{(data) => renderRegion(activeRegion, data, shell, query, (version) => navigate({ ...query, version }, "push"))}</AsyncRegion> : null}
         </div>
       </SemanticTabs>
     </main>
   );
 }
 
-function Overview({ shell }: { shell:SemanticDetailShell }) {
-  return <div className="space-y-6"><section aria-labelledby="semantic-overview-heading"><h2 className="text-base font-semibold text-ink" id="semantic-overview-heading">概览</h2><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">本页首先展示服务器按请求日期解析的正式版本。Bindings、Relations、Evidence、Lineage、Governance 和 Versions 在选中时独立加载。</p></section><section aria-labelledby="semantic-open-questions"><div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-base font-semibold text-ink" id="semantic-open-questions">待确认问题</h2><span className="text-xs text-slate-500">{shell.open_questions.length} 个未闭环</span></div>{shell.open_questions.length ? <ul className="mt-3 divide-y divide-line border-y border-line">{shell.open_questions.map((question) => <li className="py-3 text-sm" key={question.id}><div className="flex flex-wrap items-center gap-2"><span className="badge-warning">{question.priority}</span><span className="text-xs text-slate-500">{question.question_status}</span></div><p className="mt-2 whitespace-pre-wrap break-words text-slate-700">{question.question_text}</p></li>)}</ul> : <p className="mt-3 text-sm text-slate-600">当前没有未闭环待确认问题。</p>}</section></div>;
+function Overview({ shell, historical }: { shell:SemanticDetailShell;historical:boolean }) {
+  return <div className="space-y-8"><section aria-labelledby="semantic-overview-heading"><h2 className="text-base font-semibold text-ink" id="semantic-overview-heading">概览</h2><p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">本页首先展示服务器按请求日期解析的正式版本。Bindings、Relations、Evidence、Lineage、Governance 和 Versions 在选中时独立加载。</p></section><TrustSourceRegion historical={historical} shell={shell} /><QuestionList questions={shell.open_questions.filter(isSemanticQuestionOpen)} /></div>;
 }
 
-function LoadedRegionSummary({ label, data }: { label:string;data:unknown }) {
-  const entries = data && typeof data === "object" ? Object.entries(data as Record<string, unknown>).filter(([, value]) => Array.isArray(value)) : [];
-  return <section aria-labelledby="loaded-region-heading"><h2 className="text-base font-semibold text-ink" id="loaded-region-heading">{label}</h2><dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{entries.map(([key, value]) => <div className="border-b border-line py-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="mt-1 text-sm tabular-nums text-slate-700">{(value as unknown[]).length} 项</dd></div>)}</dl></section>;
+function renderRegion(region:SemanticDetailRegionName, data:unknown, shell:SemanticDetailShell, query:DetailQueryState, onVersion:(version:number|null)=>void) {
+  switch (region) {
+    case "bindings": { const value = data as SemanticBindingRegion; return <div className="space-y-8"><BindingList historical={Boolean(query.as_of)} region={value} /><BindingChain chains={value.chains} meta={value.chain_meta} /></div>; }
+    case "relations": return <RelationList historical={Boolean(query.as_of)} region={data as SemanticRelationRegion} />;
+    case "evidence": return <EvidenceRegion historical={Boolean(query.as_of)} region={data as SemanticEvidenceRegion} />;
+    case "lineage": return <LineageRegion historical={Boolean(query.as_of)} region={data as SemanticLineageRegion} />;
+    case "governance": { const value = data as SemanticGovernanceRegion; return <div className="space-y-8"><TrustSourceRegion governance={value} historical={Boolean(query.as_of)} shell={shell} /><QuestionList questions={value.open_questions.filter(isSemanticQuestionOpen)} /><GovernanceAudit region={value} /></div>; }
+    case "versions": return <VersionTimeline onVersion={onVersion} region={data as SemanticVersionRegion} selectedVersion={query.version} />;
+  }
 }
+
+function EvidenceRegion({ region, historical }: {region:SemanticEvidenceRegion;historical:boolean}) { return <div className="space-y-8">{historical && region.current_only ? <CurrentOnlyNotice /> : null}<EvidencePartition heading="已确认证据与知识" partition={region.confirmed} /><EvidencePartition candidate heading="候选证据与知识" partition={region.candidates} /><EvidencePartition audit heading="审计历史证据" partition={region.audit} /></div>; }
+function EvidencePartition({heading,partition,candidate=false,audit=false}:{heading:string;partition:SemanticEvidencePartition;candidate?:boolean;audit?:boolean}) { const items=[...partition.evidence,...partition.knowledge]; if (!items.length && (candidate||audit)) return null; return <section aria-label={heading} className={candidate ? "rounded-lg border border-gold-200 bg-gold-50 p-4" : ""}><div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className={`text-base font-semibold ${candidate ? "text-gold-900" : "text-ink"}`}>{heading}</h2><span className="text-xs text-slate-500">{items.length} 项{audit ? " · 非当前事实" : ""}</span></div>{candidate ? <p className="mt-1 text-sm text-gold-800">候选材料不会填充正式定义。</p> : null}{items.length ? <ul className="mt-3 divide-y divide-line border-y border-line">{items.map((item) => <li className="py-3 text-sm" key={`${item.evidence_type}-${item.id}`}><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="break-words font-semibold text-ink">{item.title}</h3><span className="text-xs text-slate-500">{item.evidence_type} · {item.authority || item.status}</span></div>{item.location ? <p className="mt-1 text-xs text-slate-500">{item.location}</p> : null}{item.excerpt ? <p className="mt-2 whitespace-pre-wrap break-words text-slate-700">{item.excerpt}</p> : null}{item.reference ? <div className="mt-2"><SemanticReference reference={item.reference} /></div> : null}{item.observed_at ? <p className="mt-2 text-xs text-slate-500">观测时间 {item.observed_at}</p> : null}</li>)}</ul> : <p className="mt-3 text-sm text-slate-600">当前语义尚无可查看的证据或知识。</p>}</section>; }
+
+function LineageRegion({region,historical}:{region:SemanticLineageRegion;historical:boolean}) { return <div className="space-y-8">{historical && region.current_only ? <CurrentOnlyNotice /> : null}<LineageSection heading="已验证血缘" items={region.verified} /><LineageSection candidate heading="待确认血缘" items={region.candidates} /><LineageSection audit heading="审计历史血缘" items={region.audit} /></div>; }
+function LineageSection({heading,items,candidate=false,audit=false}:{heading:string;items:SemanticLineageRegion["verified"];candidate?:boolean;audit?:boolean}) { if (!items.length && (candidate||audit)) return null; return <section aria-label={heading} className={candidate ? "rounded-lg border border-gold-200 bg-gold-50 p-4" : ""}><div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className={`text-base font-semibold ${candidate ? "text-gold-900" : "text-ink"}`}>{heading}</h2><span className="text-xs text-slate-500">{items.length} 条{audit ? " · 非当前事实" : ""}</span></div>{items.length ? <ol className="mt-3 divide-y divide-line border-y border-line">{items.map((path) => <li className="py-3 text-sm" key={path.id}><div className="grid gap-2 md:grid-cols-[1fr_auto_1fr] md:items-center"><SemanticReference reference={path.source} /><span className="text-xs text-slate-500">{path.relation} →</span><SemanticReference reference={path.target} /></div><div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500"><span>{path.status}</span>{path.transformation ? <span className="break-all font-mono">{path.transformation}</span> : null}</div></li>)}</ol> : <p className="mt-3 text-sm text-slate-600">当前语义尚无已验证血缘。</p>}</section>; }
+
+function QuestionList({questions}:{questions:SemanticDetailShell["open_questions"]}) { return <section aria-labelledby="semantic-open-questions"><div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-base font-semibold text-ink" id="semantic-open-questions">待确认问题</h2><span className="text-xs text-slate-500">{questions.length} 个未闭环</span></div>{questions.length ? <ul className="mt-3 divide-y divide-line border-y border-line">{questions.map((question) => <li className="py-3 text-sm" key={question.id}><div className="flex flex-wrap items-center gap-2"><span className="badge-warning">{question.priority}</span><span className="text-xs text-slate-500">{question.question_status}</span></div><p className="mt-2 whitespace-pre-wrap break-words text-slate-700">{question.question_text}</p>{question.review_href ? <a className="mt-2 inline-flex min-h-11 items-center text-pine-700 hover:underline" href={question.review_href}>前往现有评审流程</a> : null}</li>)}</ul> : <p className="mt-3 text-sm text-slate-600">当前没有未闭环待确认问题。</p>}</section>; }
+function GovernanceAudit({region}:{region:SemanticGovernanceRegion}) { if (!region.audit_events.length) return null; return <section aria-labelledby="governance-audit-heading"><h2 className="text-base font-semibold text-ink" id="governance-audit-heading">审计历史</h2><p className="mt-1 text-sm text-slate-600">以下事件均为非当前事实。</p><ol className="mt-3 divide-y divide-line border-y border-line">{region.audit_events.map((event) => <li className="py-3 text-sm" key={event.id}><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold text-ink">{event.event_type}</span><time className="text-xs text-slate-500" dateTime={event.occurred_at}>{event.occurred_at}</time></div><p className="mt-1 break-words text-slate-700">{event.summary}</p></li>)}</ol></section>; }
+function CurrentOnlyNotice() { return <p className="rounded-lg border border-gold-200 bg-gold-50 px-4 py-3 text-sm text-gold-800" role="status">当前状态，不代表该历史日期</p>; }
 
 function DetailRouteSkeleton() { return <main><WorkspaceHeader title="语义详情" meta="正在解析正式版本" /><div aria-busy="true" aria-label="正在加载语义详情" className="mx-auto max-w-[1600px] space-y-4 p-4 lg:p-6"><div aria-hidden className="h-28 animate-pulse rounded-lg border border-line bg-white" /><div aria-hidden className="h-64 animate-pulse rounded-lg border border-line bg-white" /></div></main>; }
 function DetailIdle() { return <main><WorkspaceHeader title="语义详情" meta="项目监管语义" /><section className="empty-state"><BookOpenCheck aria-hidden className="text-slate-300" size={32} /><p>请先选择项目</p></section></main>; }
