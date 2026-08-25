@@ -157,6 +157,98 @@ export function serializeDetailQuery(input) {
   return params.toString();
 }
 
+export function returnToCurrentDetail(input) {
+  return {
+    ...parseDetailQuery(serializeDetailQuery(input || {})),
+    as_of: "",
+    version: null
+  };
+}
+
+export function detailAuditRequested(input) {
+  const returnTo = safeSemanticReturnTo(input?.returnTo || "");
+  if (!returnTo) return false;
+  const queryIndex = returnTo.indexOf("?");
+  if (queryIndex === -1) return false;
+  return booleanParam(new URLSearchParams(returnTo.slice(queryIndex + 1)), "audit") === true;
+}
+
+export function buildDetailApiQuery(input, options = {}) {
+  const state = parseDetailQuery(serializeDetailQuery(input || {}));
+  const params = new URLSearchParams();
+  setText(params, "as_of", state.as_of);
+  if (options.audit === true || detailAuditRequested(state)) params.set("audit", "true");
+  return params.toString();
+}
+
+export function buildDetailRequestKey(projectId, conceptId, region, input, options = {}) {
+  return [
+    positiveInteger(projectId, 0),
+    positiveInteger(conceptId, 0),
+    DETAIL_TABS.has(String(region || "")) || region === "shell" ? String(region) : "overview",
+    buildDetailApiQuery(input, options)
+  ].join(":");
+}
+
+export function detailShellResponseKind(input) {
+  if (input?.phase === "loading") return "loading";
+  if (input?.phase === "success") return "success";
+  if (input?.phase === "error") {
+    const status = Number(input?.error?.status);
+    if (status === 404) return "not-found";
+    if (status === 403) return "forbidden";
+    if (status === 409) return "conflict";
+    return "error";
+  }
+  return "idle";
+}
+
+export function createDetailRegionState() {
+  return { phase: "idle", attempt: 0, requestKey: "", data: null, error: null };
+}
+
+export function transitionDetailRegion(state, event) {
+  const current = state || createDetailRegionState();
+  if (event?.type === "retry") {
+    return { ...createDetailRegionState(), attempt: Number(current.attempt || 0) + 1 };
+  }
+  if (event?.type === "load") {
+    return {
+      phase: "loading",
+      attempt: Number(current.attempt || 0),
+      requestKey: String(event.requestKey || ""),
+      data: null,
+      error: null
+    };
+  }
+  if ((event?.type === "resolve" || event?.type === "reject") && event.requestKey !== current.requestKey) {
+    return current;
+  }
+  if (event?.type === "resolve") {
+    return { ...current, phase: "success", data: event.data ?? null, error: null };
+  }
+  if (event?.type === "reject") {
+    return { ...current, phase: "error", data: null, error: event.error || new Error("请求失败") };
+  }
+  return current;
+}
+
+export function detailRegionHasContent(data) {
+  if (!data || typeof data !== "object") return false;
+  const contentKeys = [
+    "confirmed", "candidates", "audit", "chains", "verified", "open_questions",
+    "conflicts", "audit_events", "evidence", "knowledge"
+  ];
+  return contentKeys.some((key) => nestedCollectionHasItems(data[key]));
+}
+
+export function detailRegionResponseKind(input) {
+  if (input?.phase === "loading") return "loading";
+  if (input?.phase === "error") return Number(input?.error?.status) === 403 ? "forbidden" : "error";
+  if (input?.phase === "success") return detailRegionHasContent(input.data) ? "success-populated" : "success-empty";
+  return "idle";
+}
+
 export function safeSemanticReturnTo(value) {
   let candidate = String(value || "").trim();
   for (let index = 0; index < 2; index += 1) {
@@ -391,4 +483,10 @@ function setText(params, key, value) {
 function setBoolean(params, key, value) {
   if (value === true) params.set(key, "1");
   if (value === false) params.set(key, "0");
+}
+
+function nestedCollectionHasItems(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (!value || typeof value !== "object") return false;
+  return Object.values(value).some((item) => nestedCollectionHasItems(item));
 }
