@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ApiError,
   formatApiErrorText,
   normalizeRequestError,
   readApiResponse
@@ -122,4 +123,24 @@ test("request transport failures become understandable Chinese messages", () => 
     normalizeRequestError(new TypeError("Failed to fetch")).message,
     "无法连接服务器，请检查服务是否已启动"
   );
+});
+
+test("http-response keeps 403 and 500 status values without changing safe messages", async () => {
+  for (const [status, detail] of [[403, "没有权限查看语义目录"], [500, "服务器处理失败"]]) {
+    const response = {
+      ok: false,
+      status,
+      text: async () => JSON.stringify({ detail })
+    };
+    await assert.rejects(
+      readApiResponse(response, "/projects/1/semantic-catalog"),
+      (error) => error instanceof ApiError && error.status === status && error.message === detail
+    );
+  }
+});
+
+test("http-response normalization preserves status-bearing ApiError instances", () => {
+  const forbidden = new ApiError("没有操作权限", 403);
+  assert.equal(normalizeRequestError(forbidden), forbidden);
+  assert.equal(normalizeRequestError(forbidden).status, 403);
 });
