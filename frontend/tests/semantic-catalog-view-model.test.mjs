@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { restrictedReferenceContract } from "../lib/semantic-catalog-dom-contract.mjs";
 import {
   catalogStateForScope,
   catalogPaginationModel,
@@ -31,6 +32,7 @@ import {
   resolveFormalDefinition,
   resolveSemanticDestination,
   safeSemanticReturnTo,
+  semanticReferenceLabel,
   serializeCatalogQuery,
   serializeDetailQuery,
   returnToCurrentDetail,
@@ -437,4 +439,40 @@ test("uncategorized remains the wire value but uses a localized human label", ()
   assert.equal(state.domain, "__uncategorized__");
   assert.equal(serializeCatalogQuery(state), "domain=__uncategorized__");
   assert.equal(buildCatalogApiQuery(state), "mode=candidate&domain=__uncategorized__&page=1&page_size=50");
+});
+
+test("every API entity type uses one production entity label table", async () => {
+  const entityTypes = await import("../lib/semantic-entity-types.mjs").catch(() => null);
+  assert.ok(entityTypes, "the shared production entity-label module must exist");
+  const expected = {
+    target_table: "目标表",
+    target_field: "目标字段",
+    mart_table: "集市表",
+    mart_field: "集市字段",
+    source_table: "来源表",
+    source_field: "来源字段",
+    scenario: "业务场景",
+    knowledge_unit: "知识单元",
+    source_to_mart_mapping: "来源到集市映射",
+    mart_to_ybt_mapping: "集市到一表通映射",
+    scenario_business_mapping: "场景业务映射",
+    scenario_technical_lineage: "场景技术血缘",
+    semantic_concept: "语义概念"
+  };
+
+  assert.deepEqual(entityTypes.SEMANTIC_ENTITY_TYPE_LABELS, expected);
+  for (const [entityType, label] of Object.entries(expected)) {
+    assert.equal(entityTypes.semanticEntityLabel(entityType), label);
+    assert.equal(entityTypes.restrictedSemanticEntityLabel(entityType), `${label} · 受限`);
+    assert.equal(semanticReferenceLabel({ entity_type: entityType, restricted: true }), `${label} · 受限`);
+    assert.equal(restrictedReferenceContract({ entity_type: entityType, restricted: true }).label, `${label} · 受限`);
+  }
+});
+
+test("restricted reference label requires entity type alone and readable unknown types fail safe", async () => {
+  const entityTypes = await import("../lib/semantic-entity-types.mjs").catch(() => null);
+  assert.ok(entityTypes, "the shared production entity-label module must exist");
+  assert.equal(entityTypes.restrictedSemanticEntityLabel("source_to_mart_mapping"), "来源到集市映射 · 受限");
+  assert.equal(entityTypes.semanticEntityLabel("future_asset"), "数据资产");
+  assert.equal(semanticReferenceLabel({ entity_type: "future_asset", restricted: false, display_name: "" }), "数据资产");
 });
