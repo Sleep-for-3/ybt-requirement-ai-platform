@@ -190,7 +190,8 @@ export function buildDetailRequestKey(projectId, conceptId, region, input, optio
   ].join(":");
 }
 
-export function detailShellResponseKind(input) {
+export function detailShellResponseKind(input, currentRequestKey = "") {
+  if (currentRequestKey && input?.phase !== "idle" && input?.requestKey !== currentRequestKey) return "loading";
   if (input?.phase === "loading") return "loading";
   if (input?.phase === "success") return "success";
   if (input?.phase === "error") {

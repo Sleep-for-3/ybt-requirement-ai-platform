@@ -79,7 +79,7 @@ export function returnToCurrentDetail(input: Partial<DetailQueryState>): DetailQ
 export function detailAuditRequested(input: Partial<DetailQueryState>): boolean;
 export function buildDetailApiQuery(input: Partial<DetailQueryState>, options?: { audit?:boolean }): string;
 export function buildDetailRequestKey(projectId:number, conceptId:number, region:SemanticDetailEndpoint|"overview", input:Partial<DetailQueryState>, options?:{audit?:boolean}):string;
-export function detailShellResponseKind(input: {phase?:string;error?:{status?:number};shell?:unknown}): "idle"|"loading"|"success"|"not-found"|"forbidden"|"conflict"|"error";
+export function detailShellResponseKind(input: {phase?:string;requestKey?:string;error?:{status?:number};shell?:unknown}, currentRequestKey?:string): "idle"|"loading"|"success"|"not-found"|"forbidden"|"conflict"|"error";
 export function createDetailRegionState<T = unknown>(): DetailRegionState<T>;
 export function transitionDetailRegion<T = unknown>(state: DetailRegionState<T>, event: DetailRegionEvent<T>): DetailRegionState<T>;
 export function detailRegionHasContent(data: unknown): boolean;

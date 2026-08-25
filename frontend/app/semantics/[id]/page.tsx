@@ -43,9 +43,10 @@ import type {
 } from "@/lib/semantic-catalog-view-model.mjs";
 
 type ShellState =
-  | { phase:"idle"|"loading" }
-  | { phase:"success";shell:SemanticDetailShell }
-  | { phase:"error";error:Error & {status?:number} };
+  | { phase:"idle" }
+  | { phase:"loading";requestKey:string }
+  | { phase:"success";requestKey:string;shell:SemanticDetailShell }
+  | { phase:"error";requestKey:string;error:Error & {status?:number} };
 
 const REGION_LABELS: Record<SemanticDetailRegionName, string> = {
   bindings: "Bindings",
@@ -69,6 +70,7 @@ function SemanticDetailContent() {
   const query = useMemo(() => parseDetailQuery(searchParams.toString()), [searchParams]);
   const canonicalQuery = serializeDetailQuery(query);
   const apiQuery = buildDetailApiQuery(query, { audit: detailAuditRequested(query) });
+  const shellRequestKey = projectId && conceptId ? buildDetailRequestKey(projectId, conceptId, "shell", query, { audit: detailAuditRequested(query) }) : "";
   const [shellState, setShellState] = useState<ShellState>({ phase: "idle" });
   const [shellRetry, setShellRetry] = useState(0);
   const [regions, setRegions] = useState<Record<SemanticDetailRegionName, DetailRegionState<unknown>>>(() => initialRegions());
@@ -92,13 +94,14 @@ function SemanticDetailContent() {
       return;
     }
     const requestCoordinator = shellCoordinator.current;
-    const request = requestCoordinator.begin(`${buildDetailRequestKey(projectId, conceptId, "shell", query, { audit: detailAuditRequested(query) })}:${shellRetry}`);
-    setShellState({ phase: "loading" });
+    const requestKey = buildDetailRequestKey(projectId, conceptId, "shell", query, { audit: detailAuditRequested(query) });
+    const request = requestCoordinator.begin(`${requestKey}:${shellRetry}`);
+    setShellState({ phase: "loading", requestKey });
     void apiGet<SemanticDetailShell>(withQuery(`/projects/${projectId}/semantic-catalog/${conceptId}`, apiQuery), { signal: request.signal })
-      .then((shell) => { if (request.accept()) setShellState({ phase: "success", shell }); })
+      .then((shell) => { if (request.accept()) setShellState({ phase: "success", requestKey, shell }); })
       .catch((error: unknown) => {
         if (!request.accept()) return;
-        setShellState({ phase: "error", error: normalizeError(error) });
+        setShellState({ phase: "error", requestKey, error: normalizeError(error) });
       });
     return () => requestCoordinator.clear();
   // query.tab and query.version are presentation-only and intentionally excluded.
@@ -135,7 +138,7 @@ function SemanticDetailContent() {
     setRegions((current) => ({ ...current, [region]: transitionDetailRegion(current[region], { type: "retry" }) }));
   }
 
-  const shellKind = detailShellResponseKind(shellState);
+  const shellKind = detailShellResponseKind(shellState, shellRequestKey);
   if (!projectId) return <DetailIdle />;
   if (!conceptId) return <DetailFailure title="未找到语义概念" message="该地址不包含有效的语义概念标识。" />;
   if (shellKind === "idle" || shellKind === "loading") return <DetailRouteSkeleton />;

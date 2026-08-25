@@ -224,6 +224,10 @@ test("semantic-detail shell keeps safe 404 separate from visible-project 403 and
   assert.equal(detailShellResponseKind({ phase: "error", error: { status: 409 } }), "conflict");
   assert.equal(detailShellResponseKind({ phase: "error", error: { status: 500 } }), "error");
   assert.equal(detailShellResponseKind({ phase: "success", shell: { id: 7 } }), "success");
+  assert.equal(
+    detailShellResponseKind({ phase: "success", requestKey: "1:7:shell:", shell: { id: 7 } }, "2:7:shell:"),
+    "loading"
+  );
 });
 
 test("semantic-detail URL return-current clears only temporal and selected version state", () => {
