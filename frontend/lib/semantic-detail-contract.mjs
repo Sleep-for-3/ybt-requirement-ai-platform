@@ -63,6 +63,43 @@ export function semanticDetailReferenceModel(reference, semanticConceptId) {
   };
 }
 
+export function conflictSourceCollectionModel(conflictKey, sources = [], expanded = false) {
+  const normalized = Array.isArray(sources) ? sources.map((source) => ({
+    source_type: cleanDisplayText(source?.source_type),
+    source_id: positiveInteger(source?.source_id),
+    summary: typeof source?.summary === "string" ? source.summary : "",
+    authority: cleanDisplayText(source?.authority) || null
+  })) : [];
+  const isExpanded = expanded === true;
+  return {
+    id: `semantic-conflict-sources-${stableIdSegment(conflictKey)}`,
+    hasSources: normalized.length > 0,
+    expanded: isExpanded,
+    remainingCount: Math.max(0, normalized.length - 2),
+    visibleSources: isExpanded ? normalized : normalized.slice(0, 2)
+  };
+}
+
+export function boundedDisclosureModel({ scope, type, id, text, lines = 6, expanded = false } = {}) {
+  const fullText = typeof text === "string" ? text : "";
+  const boundedLines = lines === 3 ? 3 : 6;
+  const characterLimit = boundedLines * 80;
+  const hasText = fullText.trim().length > 0;
+  const isLong = hasText && (fullText.length > characterLimit || fullText.split(/\r?\n/).length > boundedLines);
+  const baseId = `semantic-${stableIdSegment(scope)}-${stableIdSegment(type)}-${stableIdSegment(id)}`;
+  const isExpanded = isLong && expanded === true;
+  return {
+    controlId: `${baseId}-control`,
+    panelId: `${baseId}-panel`,
+    hasText,
+    isLong,
+    lines: boundedLines,
+    ariaExpanded: isExpanded,
+    fullText,
+    visibleText: isLong && !isExpanded ? `${fullText.slice(0, characterLimit)}…` : fullText
+  };
+}
+
 function lawfulLineageQuery(parsed, semanticConceptId) {
   const entries = [...parsed.searchParams.entries()];
   if (entries.length !== 3) return false;
@@ -80,6 +117,11 @@ function lawfulLineageQuery(parsed, semanticConceptId) {
 
 function cleanDisplayText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stableIdSegment(value) {
+  const text = String(value ?? "unknown");
+  return encodeURIComponent(text).replaceAll("%", "_") || "unknown";
 }
 
 function positiveInteger(value) {

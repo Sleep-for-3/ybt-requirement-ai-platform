@@ -2,8 +2,12 @@
 
 import { ArrowLeft, CalendarDays, CircleAlert } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
+import { EvidenceDisclosure } from "@/components/semantic-catalog/EvidenceDisclosure";
 import { SemanticLifecycle, SemanticReview, semanticConceptTypeLabel } from "@/components/semantic-catalog/SemanticStatus";
+import { conflictSourceCollectionModel } from "@/lib/semantic-detail-contract.mjs";
+import type { SemanticDetailConflict } from "@/lib/semantic-catalog-view-model.mjs";
 import type { DetailQueryState, SemanticDetailShell } from "@/lib/semantic-catalog-view-model.mjs";
 
 export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: {
@@ -48,6 +52,7 @@ export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: 
         {shell.conflicts.map((conflict) => (
           <section className="rounded-lg border border-coral-200 bg-coral-50 p-4 text-sm text-coral-800" key={conflict.conflict_key} role="alert">
             <div className="flex items-start gap-2"><CircleAlert aria-hidden className="mt-0.5 shrink-0" size={17} /><div><h2 className="font-semibold">高权威事实存在冲突</h2><p className="mt-1 whitespace-pre-wrap break-words">{conflict.summary}</p></div></div>
+            <ConflictSources conflict={conflict} />
             <p className="mt-2">多个高权威事实无法由系统自动裁决，未选择任何胜出方。</p>
             {conflict.review_href ? <Link className="mt-3 inline-flex min-h-11 items-center text-pine-700 hover:underline" href={conflict.review_href}>前往人工评审</Link> : null}
           </section>
@@ -75,6 +80,38 @@ export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: 
         ) : null}
       </div>
     </header>
+  );
+}
+
+function ConflictSources({ conflict }: { conflict:SemanticDetailConflict }) {
+  const [expanded, setExpanded] = useState(false);
+  const model = conflictSourceCollectionModel(conflict.conflict_key, conflict.sources, expanded);
+  if (!model.hasSources) return null;
+  return (
+    <div className="mt-3 border-t border-coral-200 pt-3">
+      <div id={model.id}>
+        <h3 className="text-xs font-semibold text-coral-800">冲突来源</h3>
+        <ul className="mt-2 space-y-3">
+          {model.visibleSources.map((source, index) => (
+            <li className="border-l-2 border-coral-200 pl-3" key={`${source.source_type}-${source.source_id ?? index}`}>
+              <div className="flex flex-wrap gap-2 text-xs text-coral-700"><span>{source.source_type}</span>{source.authority ? <span>· {source.authority}</span> : null}</div>
+              <EvidenceDisclosure className="mt-1 text-coral-800" disclosureType={source.source_type} itemId={source.source_id ?? `${conflict.conflict_key}-${index}`} lines={3} scope="conflict-source" text={source.summary} />
+            </li>
+          ))}
+        </ul>
+      </div>
+      {model.remainingCount ? (
+        <button
+          aria-controls={model.id}
+          aria-expanded={model.expanded}
+          className="mt-3 min-h-11 rounded-lg text-sm text-pine-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine-500/25"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          {model.expanded ? "收起完整来源" : `查看全部来源（另有 ${model.remainingCount} 项）`}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
