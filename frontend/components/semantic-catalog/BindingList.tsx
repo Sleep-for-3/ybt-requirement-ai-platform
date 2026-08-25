@@ -3,6 +3,8 @@
 import Link from "next/link";
 
 import { SemanticLifecycle } from "@/components/semantic-catalog/SemanticStatus";
+// @ts-expect-error The planned runtime .mjs contract is verified directly by Node DOM tests.
+import { restrictedReferenceContract } from "@/lib/semantic-catalog-dom-contract.mjs";
 import { semanticReferenceLabel } from "@/lib/semantic-catalog-view-model.mjs";
 import type { SemanticBindingProjection, SemanticBindingRegion, SemanticDetailReference } from "@/lib/semantic-catalog-view-model.mjs";
 
@@ -19,7 +21,7 @@ function BindingSection({ heading, items, empty }: { heading:string;items:Semant
 function BindingRows({ items }: { items:SemanticBindingProjection[] }) { return <ul className="mt-3 divide-y divide-line border-y border-line">{items.map((item) => <li className="grid gap-3 py-3 text-sm md:grid-cols-[minmax(220px,1fr)_160px_180px] md:items-center" key={item.id}><SemanticReference reference={item.target} /><span className="text-slate-600">{item.binding_type} · {item.confidence_level}</span><SemanticLifecycle status={item.status} /></li>)}</ul>; }
 
 export function SemanticReference({ reference }: { reference:SemanticDetailReference }) {
-  if (reference.restricted) return <span className="inline-flex min-h-6 items-center text-sm text-slate-600">{semanticReferenceLabel(reference)}</span>;
+  if (reference.restricted) { const model = restrictedReferenceContract(reference); return <span className="inline-flex min-h-6 items-center text-sm text-slate-600">{model.label}</span>; }
   const href = lawfulHref(reference.href);
   return <span className="min-w-0">{href ? <Link className="break-words text-pine-700 hover:underline" href={href}>{semanticReferenceLabel(reference)}</Link> : <><span className="break-words text-slate-700">{semanticReferenceLabel(reference)}</span><span className="ml-2 text-xs text-slate-500">尚无可导航详情</span></>}</span>;
 }
