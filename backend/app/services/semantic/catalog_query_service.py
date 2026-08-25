@@ -1034,10 +1034,19 @@ class SemanticCatalogQueryService:
         reviews: dict[int, SemanticCatalogReviewSummary],
     ) -> bool:
         business_domain = version.business_domain if version is not None else concept.business_domain
+        normalized_domain = (
+            business_domain.strip()
+            if isinstance(business_domain, str) and business_domain.strip()
+            else None
+        )
         owner = version.owner_department if version is not None else concept.owner_department
         if concept_types and concept.concept_type not in concept_types:
             return False
-        if domains and business_domain not in domains:
+        if domains and not any(
+            (domain == "__uncategorized__" and normalized_domain is None)
+            or domain == normalized_domain
+            for domain in domains
+        ):
             return False
         if owners and owner not in owners:
             return False
@@ -1063,9 +1072,14 @@ class SemanticCatalogQueryService:
     @staticmethod
     def _sort_key(concept: SemanticConcept, version: Any) -> tuple[Any, ...]:
         business_domain = version.business_domain if version is not None else concept.business_domain
+        normalized_domain = (
+            business_domain.strip()
+            if isinstance(business_domain, str) and business_domain.strip()
+            else None
+        )
         return (
-            business_domain is None or not business_domain.strip(),
-            (business_domain or "").casefold(), concept.concept_code.casefold(),
+            normalized_domain is None,
+            (normalized_domain or "").casefold(), concept.concept_code.casefold(),
             concept.concept_name.casefold(), concept.id,
         )
 
@@ -1165,7 +1179,12 @@ class SemanticCatalogQueryService:
         return SemanticCatalogFacets(
             concept_types=dict(sorted(Counter(item.concept_type for item in items).items())),
             business_domains=dict(sorted(Counter(
-                item.business_domain or "__uncategorized__" for item in items
+                (
+                    item.business_domain.strip()
+                    if isinstance(item.business_domain, str) and item.business_domain.strip()
+                    else "__uncategorized__"
+                )
+                for item in items
             ).items())),
             owners=dict(sorted(Counter(
                 item.owner_department or "__unowned__" for item in items
