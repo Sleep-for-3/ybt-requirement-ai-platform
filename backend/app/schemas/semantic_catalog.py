@@ -70,7 +70,9 @@ class SemanticCatalogItem(StrictCatalogModel):
     owner_department: str | None
     effective_version: SemanticCatalogEffectiveVersion | None = None
     related_asset_count: int = Field(default=0, ge=0)
+    related_assets: list[SemanticAssetReference] = Field(default_factory=list)
     has_relation: bool = False
+    open_question_count: int = Field(default=0, ge=0)
     review: SemanticCatalogReviewSummary = Field(default_factory=SemanticCatalogReviewSummary)
     updated_at: datetime
 
@@ -90,4 +92,3 @@ class SemanticCatalogPage(StrictCatalogModel):
     as_of: date
     mode: CatalogMode
     facets: SemanticCatalogFacets = Field(default_factory=SemanticCatalogFacets)
-

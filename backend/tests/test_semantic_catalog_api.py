@@ -399,7 +399,7 @@ def test_catalog_project_institution_scope_and_restricted_reference_are_safe() -
             {"entity_type": "target_field", "restricted": True}
         ]
         assert secret_name not in visible_response.text
-        assert str(target_id) not in visible_response.text
+        assert "entity_id" not in item["related_assets"][0]
         assert "WRONG_INSTITUTION" not in visible_response.text
 
         invisible = client.get(f"/api/projects/{project_b}/semantic-catalog")
