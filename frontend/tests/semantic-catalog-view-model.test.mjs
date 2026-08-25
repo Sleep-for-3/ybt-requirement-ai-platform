@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  catalogStateForScope,
+  catalogPaginationModel,
+  createCatalogState,
+  transitionCatalogState
+} from "../lib/semantic-catalog-controller.mjs";
+
+import {
   applyCatalogQueryChange,
   buildCatalogApiQuery,
   buildCatalogRequestKey,
@@ -277,4 +284,117 @@ test("semantic-detail lazy regions keep explicit independent forbidden, error, e
   assert.equal(retry.phase, "idle");
   assert.equal(retry.attempt, 1);
   assert.equal(populatedBindings.data.confirmed[0].id, 1);
+});
+
+test("catalog request key rejects an out-of-order project A completion after project B", async () => {
+  let state = createCatalogState();
+  state = transitionCatalogState(state, { type: "begin", requestKey: "project-a:q=A", attempt: 0 });
+  state = transitionCatalogState(state, { type: "scope-change", requestKey: "project-b:q=B" });
+  state = transitionCatalogState(state, { type: "begin", requestKey: "project-b:q=B", attempt: 0 });
+
+  let resolveA;
+  let resolveB;
+  const projectA = new Promise((resolve) => { resolveA = resolve; });
+  const projectB = new Promise((resolve) => { resolveB = resolve; });
+  resolveB({ total: 1, items: [{ id: 2, concept_name: "项目 B" }] });
+  state = transitionCatalogState(state, {
+    type: "resolve",
+    requestKey: "project-b:q=B",
+    attempt: 0,
+    page: await projectB
+  });
+  resolveA({ total: 1, items: [{ id: 1, concept_name: "项目 A" }] });
+  state = transitionCatalogState(state, {
+    type: "resolve",
+    requestKey: "project-a:q=A",
+    attempt: 0,
+    page: await projectA
+  });
+
+  assert.equal(state.phase, "success");
+  assert.equal(state.requestKey, "project-b:q=B");
+  assert.equal(state.page.items[0].concept_name, "项目 B");
+});
+
+test("stale catalog success and error cannot replace current loading success empty or error", () => {
+  const currentKey = "project-b:q=B";
+  const staleKey = "project-a:q=A";
+  const currentStates = [
+    transitionCatalogState(createCatalogState(), { type: "begin", requestKey: currentKey, attempt: 0 }),
+    transitionCatalogState(
+      transitionCatalogState(createCatalogState(), { type: "begin", requestKey: currentKey, attempt: 0 }),
+      { type: "resolve", requestKey: currentKey, attempt: 0, page: { total: 1, items: [{ id: 2 }] } }
+    ),
+    transitionCatalogState(
+      transitionCatalogState(createCatalogState(), { type: "begin", requestKey: currentKey, attempt: 0 }),
+      { type: "resolve", requestKey: currentKey, attempt: 0, page: { total: 0, items: [] } }
+    ),
+    transitionCatalogState(
+      transitionCatalogState(createCatalogState(), { type: "begin", requestKey: currentKey, attempt: 0 }),
+      { type: "reject", requestKey: currentKey, attempt: 0, error: Object.assign(new Error("B failed"), { status: 500 }) }
+    )
+  ];
+
+  for (const current of currentStates) {
+    const afterStaleSuccess = transitionCatalogState(current, {
+      type: "resolve",
+      requestKey: staleKey,
+      attempt: 0,
+      page: { total: 1, items: [{ id: 1 }] }
+    });
+    const afterStaleError = transitionCatalogState(current, {
+      type: "reject",
+      requestKey: staleKey,
+      attempt: 0,
+      error: new Error("stale failure")
+    });
+    assert.deepEqual(afterStaleSuccess, current);
+    assert.deepEqual(afterStaleError, current);
+  }
+});
+
+test("stale catalog rows hide synchronously and current transitions preserve retry identity", () => {
+  const projectA = transitionCatalogState(
+    transitionCatalogState(createCatalogState(), { type: "begin", requestKey: "project-a", attempt: 0 }),
+    { type: "resolve", requestKey: "project-a", attempt: 0, page: { total: 1, items: [{ id: 1 }] } }
+  );
+  const hidden = catalogStateForScope(projectA, "project-b");
+  assert.equal(hidden.phase, "loading");
+  assert.equal(hidden.requestKey, "project-b");
+  assert.equal(hidden.page, null);
+
+  const loading = transitionCatalogState(projectA, { type: "begin", requestKey: "project-b", attempt: 0 });
+  const forbidden = transitionCatalogState(loading, {
+    type: "reject",
+    requestKey: "project-b",
+    attempt: 0,
+    error: Object.assign(new Error("forbidden"), { status: 403 })
+  });
+  const retry = transitionCatalogState(forbidden, { type: "retry", requestKey: "project-b" });
+  assert.equal(loading.phase, "loading");
+  assert.equal(forbidden.phase, "error");
+  assert.equal(forbidden.error.status, 403);
+  assert.equal(retry.phase, "loading");
+  assert.equal(retry.requestKey, "project-b");
+  assert.equal(retry.attempt, 1);
+});
+
+test("catalog pagination exposes first previous next and last without out-of-range targets", () => {
+  const first = catalogPaginationModel({ page: 1, pageSize: 10, total: 70 });
+  const middle = catalogPaginationModel({ page: 4, pageSize: 10, total: 70 });
+  const last = catalogPaginationModel({ page: 7, pageSize: 10, total: 70 });
+
+  assert.deepEqual(first, {
+    page: 1, pages: 7, start: 1, end: 10, showEdges: true,
+    first: { page: 1, disabled: true }, previous: { page: 1, disabled: true },
+    next: { page: 2, disabled: false }, last: { page: 7, disabled: false }
+  });
+  assert.equal(middle.first.page, 1);
+  assert.equal(middle.previous.page, 3);
+  assert.equal(middle.next.page, 5);
+  assert.equal(middle.last.page, 7);
+  assert.equal(last.next.page, 7);
+  assert.equal(last.next.disabled, true);
+  assert.equal(last.last.page, 7);
+  assert.equal(last.last.disabled, true);
 });
