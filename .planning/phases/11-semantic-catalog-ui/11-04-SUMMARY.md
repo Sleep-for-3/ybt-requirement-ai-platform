@@ -177,7 +177,7 @@ The latency is a representative local regression measurement, not a production b
 **Total deviations:** 2 auto-fixed bugs and 1 test-command environment adjustment.
 **Impact on plan:** Both fixes were narrow correctness changes inside the allowed files. No dependency, schema, index, mutation API, or architecture change was introduced.
 
-## Verification Results
+## Automated Test Results
 
 - `PYTHONPATH=backend python -m pytest backend/tests/test_semantic_catalog_api.py -q -s` - **16 passed**; emitted the 701-concept SQLite evidence above.
 - `PYTHONPATH=backend python -m pytest backend/tests/test_semantic_catalog_api.py backend/tests/test_semantic_layer.py -q` - **34 passed, 0 failed, 0 skipped** in 29.44 seconds.
