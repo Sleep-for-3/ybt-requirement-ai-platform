@@ -36,6 +36,7 @@ import {
   returnToCurrentDetail,
   transitionDetailRegion
 } from "../lib/semantic-catalog-view-model.mjs";
+import * as catalogViewModel from "../lib/semantic-catalog-view-model.mjs";
 
 test("semantic-catalog URL state canonicalizes defaults, invalid values, and durable filters", () => {
   const state = parseCatalogQuery(
@@ -397,4 +398,43 @@ test("catalog pagination exposes first previous next and last without out-of-ran
   assert.equal(last.next.disabled, true);
   assert.equal(last.last.page, 7);
   assert.equal(last.last.disabled, true);
+});
+
+test("catalog audit and status canonicalize to API-valid URL state", () => {
+  const auditDefault = parseCatalogQuery("audit=1");
+  assert.equal(auditDefault.audit, true);
+  assert.equal(auditDefault.status, "rejected");
+  assert.equal(serializeCatalogQuery(auditDefault), "status=rejected&audit=1");
+  assert.equal(
+    buildCatalogApiQuery(auditDefault),
+    "mode=audit&status=rejected&audit=true&page=1&page_size=50"
+  );
+
+  const incompatible = parseCatalogQuery("audit=1&status=confirmed");
+  assert.equal(incompatible.audit, true);
+  assert.equal(incompatible.status, "rejected");
+
+  const directAuditStatus = parseCatalogQuery("status=deprecated");
+  assert.equal(directAuditStatus.audit, true);
+  assert.equal(directAuditStatus.status, "deprecated");
+});
+
+test("leaving catalog audit mode removes its incompatible status deterministically", () => {
+  const auditState = parseCatalogQuery("audit=1&status=deprecated&page=4");
+  const trustedState = applyCatalogQueryChange(auditState, { audit: false });
+  assert.equal(trustedState.audit, false);
+  assert.equal(trustedState.status, "");
+  assert.equal(trustedState.page, 1);
+  assert.equal(serializeCatalogQuery(trustedState), "");
+  assert.equal(buildCatalogApiQuery(trustedState), "mode=candidate&page=1&page_size=50");
+});
+
+test("uncategorized remains the wire value but uses a localized human label", () => {
+  assert.equal(typeof catalogViewModel.catalogDomainLabel, "function");
+  assert.equal(catalogViewModel.catalogDomainLabel("__uncategorized__"), "未分类");
+  assert.equal(catalogViewModel.catalogDomainLabel("零售"), "零售");
+  const state = parseCatalogQuery("domain=__uncategorized__");
+  assert.equal(state.domain, "__uncategorized__");
+  assert.equal(serializeCatalogQuery(state), "domain=__uncategorized__");
+  assert.equal(buildCatalogApiQuery(state), "mode=candidate&domain=__uncategorized__&page=1&page_size=50");
 });
