@@ -248,7 +248,7 @@ def test_semantic_detail_shell_and_lazy_routes_project_canonical_partitions() ->
                 ]
             )
             db.commit()
-            concept_id, effective_id = concept.id, effective.id
+            concept_id, effective_id, related_id = concept.id, effective.id, related.id
 
         base = f"/api/projects/{project_id}/semantic-catalog/{concept_id}"
         shell = client.get(base, params={"as_of": "2026-12-31"})
@@ -275,7 +275,7 @@ def test_semantic_detail_shell_and_lazy_routes_project_canonical_partitions() ->
         assert bindings["audit"] == []
         assert bindings["chain_meta"]["limit"] == 13
         relations = client.get(f"{base}/relations").json()
-        assert relations["confirmed"][0]["related_concept"]["entity_id"] == related.id
+        assert relations["confirmed"][0]["related_concept"]["entity_id"] == related_id
         versions = client.get(f"{base}/versions", params={"as_of": "2026-12-31"}).json()
         assert versions["effective_version_id"] == effective_id
         assert [item["status"] for item in versions["confirmed"]] == ["confirmed"]
