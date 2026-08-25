@@ -3,9 +3,13 @@ import test from "node:test";
 
 import {
   applyCatalogQueryChange,
+  buildCatalogApiQuery,
   buildCatalogRequestKey,
   catalogHasFilters,
+  catalogResponseKind,
+  commitCatalogSearch,
   confirmedRelatedAssetCount,
+  createCatalogRequestCoordinator,
   groupCatalogItems,
   markCurrentOnly,
   parseCatalogQuery,
@@ -161,4 +165,47 @@ test("semantic-catalog immediate query changes reset pages and request keys incl
     buildCatalogRequestKey(23, changed),
     "23:q=%E5%AE%A2%E6%88%B7&type=metric&owner=%E6%95%B0%E6%8D%AE%E6%B2%BB%E7%90%86%E9%83%A8&view=table&page_size=100"
   );
+});
+
+test("semantic-catalog search drafts do not change the committed query until submit", () => {
+  const committed = parseCatalogQuery("q=%E6%97%A7%E8%AF%8D&page=3&view=table");
+  const draft = "  新的监管语义  ";
+  assert.equal(committed.q, "旧词");
+  assert.equal(committed.page, 3);
+  const submitted = commitCatalogSearch(committed, draft);
+  assert.equal(submitted.q, "新的监管语义");
+  assert.equal(submitted.page, 1);
+  assert.equal(submitted.view, "table");
+});
+
+test("semantic-catalog server query includes every authoritative filter but excludes presentation-only view", () => {
+  const state = parseCatalogQuery(
+    "q=capital&type=metric&domain=Risk&status=rejected&owner=Finance&as_of=2024-12-31&has_binding=1&has_relation=0&pending_review=1&audit=1&view=table&page=2&page_size=100"
+  );
+  assert.equal(
+    buildCatalogApiQuery(state),
+    "mode=audit&q=capital&type=metric&domain=Risk&status=rejected&owner=Finance&as_of=2024-12-31&has_binding=true&has_relation=false&pending_review=true&audit=true&page=2&page_size=100"
+  );
+  assert.match(buildCatalogRequestKey(4, state), /^4:.*view=table.*page=2.*page_size=100$/);
+});
+
+test("semantic-catalog project changes abort old work and reject late responses", () => {
+  const coordinator = createCatalogRequestCoordinator();
+  const projectA = coordinator.begin(buildCatalogRequestKey(1, parseCatalogQuery("q=A")));
+  const projectB = coordinator.begin(buildCatalogRequestKey(2, parseCatalogQuery("q=B")));
+  assert.equal(projectA.signal.aborted, true);
+  assert.equal(projectA.accept(), false);
+  assert.equal(projectB.signal.aborted, false);
+  assert.equal(projectB.accept(), true);
+  coordinator.clear();
+  assert.equal(projectB.signal.aborted, true);
+  assert.equal(projectB.accept(), false);
+});
+
+test("semantic-catalog response states distinguish loading, forbidden, retryable error, and successful empty", () => {
+  assert.equal(catalogResponseKind({ phase: "loading" }), "loading");
+  assert.equal(catalogResponseKind({ phase: "error", error: { status: 403 } }), "forbidden");
+  assert.equal(catalogResponseKind({ phase: "error", error: { status: 500 } }), "error");
+  assert.equal(catalogResponseKind({ phase: "success", page: { total: 0, items: [] } }), "empty");
+  assert.equal(catalogResponseKind({ phase: "success", page: { total: 1, items: [{ id: 1 }] } }), "populated");
 });
