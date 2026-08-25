@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
 current_phase: 11
-current_phase_name: Semantic Catalog UI
+current_phase_name: semantic-catalog-ui
 status: executing
-stopped_at: Phase 11 UI-SPEC approved
-last_updated: "2026-08-24T18:12:33.077Z"
-last_activity: 2026-08-24
-last_activity_desc: Phase 10 verified complete; transitioned to Phase 11 planning boundary
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-08-25T04:55:39.596Z"
+last_activity: 2026-08-25
+last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 19
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 **Core value:** 监管语义、口径、证据、血缘和治理关系是核心资产，AI 不能越过人工确认。
-**Current focus:** Phase 11 — Semantic Catalog UI planning
+**Current focus:** Phase 11 — semantic-catalog-ui
 
 ## Current Position
 
-Phase: 11 — Semantic Catalog UI
-Plan: Not started
+Phase: 11 (semantic-catalog-ui) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-24 — Phase 10 complete, transitioned to Phase 11
+Last activity: 2026-08-25 — Phase 11 execution started
 
-Progress: [█████████░] 93%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [█████████░] 93%
 | Phase 10 P05 | 38 min | 2 tasks | 7 files |
 | Phase 10 P07 | 9 min | 2 tasks | 5 files |
 | Phase 10 P06 | 16 min | 2 tasks | 5 files |
+| Phase 11-semantic-catalog-ui P01 | 16min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,9 @@ Progress: [█████████░] 93%
 - [Phase 10]: Scenario technical profile evidence remains bounded resolver-candidate provenance frozen into the current-lineage typed projection; it never becomes trusted evidence or a shared-fact fallback.
 - [Phase 10]: Only the two exact documented Windows node IDs with matching signatures qualify as pre-existing; the maximum backend suite may deselect those nodes and nothing broader.
 - [Phase 10]: SQLite qualification does not imply PostgreSQL parity; live production-driver row-lock and concurrent-commit behavior remains an explicit staging gate while PostgreSQL is unavailable.
+- [Phase 11]: Resolve canonical confirmed versions once for the project-scoped population, then derive search, filters, facets, and pagination from that same population.
+- [Phase 11]: Require audit.read before audit DTO construction and replace unreadable binding targets with a type-only restricted union before serialization.
+- [Phase 11]: Keep lifecycle status, review workflow state, and open-question counts as separate catalog fields.
 
 ### Pending Todos
 
@@ -123,6 +127,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-08-24T16:24:48.171Z
-Stopped at: Phase 11 UI-SPEC approved
-Resume file: .planning/phases/11-semantic-catalog-ui/11-UI-SPEC.md
+Last session: 2026-08-25T04:55:39.534Z
+Stopped at: Completed 11-01-PLAN.md
+Resume file: None

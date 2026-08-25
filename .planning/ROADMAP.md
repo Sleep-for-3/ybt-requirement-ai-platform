@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -83,7 +83,7 @@
 Plans:
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — Establish authoritative semantic catalog projection and tracer route
+- [x] 11-01-PLAN.md — Establish authoritative semantic catalog projection and tracer route
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

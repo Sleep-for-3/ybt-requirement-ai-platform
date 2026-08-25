@@ -31,7 +31,7 @@
 
 ### Semantic Experience
 
-- [ ] **SUI-01**: 用户可通过 `/semantics` 浏览、筛选语义目录并看到 loading/empty/error/unauthorized/pending 状态。
+- [x] **SUI-01**: 用户可通过 `/semantics` 浏览、筛选语义目录并看到 loading/empty/error/unauthorized/pending 状态。
 - [ ] **SUI-02**: 用户可在 `/semantics/{id}` 浏览定义、绑定、关系、知识、证据、血缘、版本和治理状态。
 - [ ] **WRK-01**: 需求工作台默认展示结构化口径，并提供血缘、证据、待确认和文档预览 tabs。
 - [ ] **WRK-02**: 结构化口径能链接 SemanticConcept、Source/Mart/Target、Evidence、Knowledge 与 Lineage，旧 routes 保持可用。
