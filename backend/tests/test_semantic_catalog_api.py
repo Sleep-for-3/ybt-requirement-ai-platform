@@ -463,6 +463,12 @@ def test_catalog_search_filters_and_audit_mode_are_server_authoritative() -> Non
                 owner="风险部",
                 status="draft",
             )
+            confirmed_related, _ = _seed_concept(
+                db,
+                project,
+                code="CONFIRMED_RELATED",
+                name="已确认关联语义",
+            )
             rejected, _ = _seed_concept(
                 db,
                 project,
@@ -487,6 +493,14 @@ def test_catalog_search_filters_and_audit_mode_are_server_authoritative() -> Non
                         source_concept_id=confirmed.id,
                         relation_type="related_to",
                         target_concept_id=draft.id,
+                        status="confirmed",
+                    ),
+                    SemanticRelation(
+                        project_id=project_id,
+                        institution_id=project.institution_id,
+                        source_concept_id=confirmed.id,
+                        relation_type="uses",
+                        target_concept_id=confirmed_related.id,
                         status="confirmed",
                     ),
                 ]
@@ -514,7 +528,9 @@ def test_catalog_search_filters_and_audit_mode_are_server_authoritative() -> Non
                 )
             )
             db.commit()
-            confirmed_id, draft_id, rejected_id = confirmed.id, draft.id, rejected.id
+            confirmed_id = confirmed.id
+            confirmed_related_id = confirmed_related.id
+            draft_id, rejected_id = draft.id, rejected.id
 
         for query in ("统一客户号", "监管统一标识"):
             searched = client.get(
@@ -541,9 +557,16 @@ def test_catalog_search_filters_and_audit_mode_are_server_authoritative() -> Non
         trusted = client.get(
             f"/api/projects/{project_id}/semantic-catalog", params={"mode": "trusted"}
         ).json()
-        assert {item["id"] for item in trusted["items"]} == {confirmed_id}
+        assert {item["id"] for item in trusted["items"]} == {
+            confirmed_id,
+            confirmed_related_id,
+        }
         current = client.get(f"/api/projects/{project_id}/semantic-catalog").json()
-        assert {item["id"] for item in current["items"]} == {confirmed_id, draft_id}
+        assert {item["id"] for item in current["items"]} == {
+            confirmed_id,
+            confirmed_related_id,
+            draft_id,
+        }
         audit = client.get(
             f"/api/projects/{project_id}/semantic-catalog",
             params={"audit": "true", "status": "rejected"},

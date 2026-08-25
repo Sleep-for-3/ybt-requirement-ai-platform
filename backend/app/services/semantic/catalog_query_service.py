@@ -3,7 +3,7 @@ from datetime import date
 from typing import Any
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.models import (
     AuditLog, KnowledgeUnit, LineageEdge, LineageNode, MappingEvidenceReference,
@@ -84,11 +84,15 @@ class SemanticCatalogQueryService:
             self.db, [concept.id], as_of, project_id=self.project.id,
             institution_id=self.project.institution_id,
         ).get(concept.id)
-        candidates = list(self.db.scalars(select(SemanticConceptVersion).where(
+        candidate_statement = select(SemanticConceptVersion).where(
             SemanticConceptVersion.project_id == self.project.id,
             SemanticConceptVersion.semantic_concept_id == concept.id,
             SemanticConceptVersion.status.in_(_CANDIDATE_STATUSES),
-        ).order_by(
+        )
+        candidate_statement = self._institution_scope(
+            candidate_statement, SemanticConceptVersion
+        )
+        candidates = list(self.db.scalars(candidate_statement.order_by(
             SemanticConceptVersion.version_no,
             SemanticConceptVersion.id,
         ).limit(20)).all())
@@ -265,7 +269,7 @@ class SemanticCatalogQueryService:
 
     def get_lineage(self, concept_id: int, *, as_of: date) -> SemanticLineageRegion:
         concept = self._detail_concept(concept_id, include_audit=False)
-        bindings = list(self.db.scalars(select(SemanticBinding).where(
+        binding_statement = select(SemanticBinding).where(
             SemanticBinding.project_id == self.project.id,
             SemanticBinding.semantic_concept_id == concept.id,
             SemanticBinding.status == "confirmed",
@@ -273,7 +277,13 @@ class SemanticCatalogQueryService:
                 "target_table", "target_field", "mart_table", "mart_field",
                 "source_table", "source_field",
             )),
-        ).order_by(SemanticBinding.id).limit(_REGION_LIMIT)).all())
+        )
+        binding_statement = self._institution_scope(
+            binding_statement, SemanticBinding
+        )
+        bindings = list(self.db.scalars(
+            binding_statement.order_by(SemanticBinding.id).limit(_REGION_LIMIT)
+        ).all())
         node_conditions = []
         column_by_entity = {
             "target_table": LineageNode.target_table_id,
@@ -302,12 +312,16 @@ class SemanticCatalogQueryService:
         edges: list[LineageEdge] = []
         if node_by_id:
             node_ids = list(node_by_id)
-            edges = list(self.db.scalars(select(LineageEdge).where(
+            edge_statement = select(LineageEdge).where(
                 LineageEdge.project_id == self.project.id,
                 LineageEdge.enabled.is_(True),
                 LineageEdge.source_node_id.in_(node_ids),
                 LineageEdge.target_node_id.in_(node_ids),
-            ).order_by(LineageEdge.id).limit(_REGION_LIMIT)).all())
+            )
+            edge_statement = self._institution_scope(edge_statement, LineageEdge)
+            edges = list(self.db.scalars(
+                edge_statement.order_by(LineageEdge.id).limit(_REGION_LIMIT)
+            ).all())
         verified: list[SemanticLineagePath] = []
         candidates: list[SemanticLineagePath] = []
         for edge in edges:
@@ -351,6 +365,7 @@ class SemanticCatalogQueryService:
                 AuditLog.resource_type == "semantic_concept",
                 AuditLog.resource_id == str(concept.id),
             )
+            event_statement = self._institution_scope(event_statement, AuditLog)
             total_events = int(self.db.scalar(select(func.count()).select_from(
                 event_statement.subquery()
             )) or 0)
@@ -530,9 +545,11 @@ class SemanticCatalogQueryService:
         include_audit: bool,
         order_by: tuple[Any, ...] | None = None,
     ) -> tuple[dict[str, list[Any]], dict[str, int]]:
-        count_rows = self.db.execute(select(
+        count_statement = select(
             model.status, func.count(model.id)
-        ).where(*conditions).group_by(model.status)).all()
+        ).where(*conditions).group_by(model.status)
+        count_statement = self._institution_scope(count_statement, model)
+        count_rows = self.db.execute(count_statement).all()
         status_counts = {str(status): int(count) for status, count in count_rows}
         groups = {
             "confirmed": ("confirmed",),
@@ -547,10 +564,14 @@ class SemanticCatalogQueryService:
             if not group_statuses:
                 rows[name] = []
                 continue
-            rows[name] = list(self.db.scalars(select(model).where(
+            row_statement = select(model).where(
                 *conditions,
                 model.status.in_(group_statuses),
-            ).order_by(*stable_order).limit(_REGION_LIMIT)).all())
+            )
+            row_statement = self._institution_scope(row_statement, model)
+            rows[name] = list(self.db.scalars(
+                row_statement.order_by(*stable_order).limit(_REGION_LIMIT)
+            ).all())
         return rows, totals
 
     @staticmethod
@@ -614,12 +635,20 @@ class SemanticCatalogQueryService:
         )
 
     def _detail_questions(self, concept_id: int) -> list[SemanticDetailQuestionSummary]:
-        rows = list(self.db.scalars(select(PendingQuestion).where(
+        question_statement = select(PendingQuestion).where(
             PendingQuestion.project_id == self.project.id,
             PendingQuestion.source_type == "semantic_concept",
             PendingQuestion.source_id == concept_id,
             PendingQuestion.question_status.in_(_OPEN_QUESTION_STATUSES),
-        ).order_by(PendingQuestion.priority.desc(), PendingQuestion.id).limit(_REGION_LIMIT)).all())
+        )
+        question_statement = self._institution_scope(
+            question_statement, PendingQuestion
+        )
+        rows = list(self.db.scalars(
+            question_statement.order_by(
+                PendingQuestion.priority.desc(), PendingQuestion.id
+            ).limit(_REGION_LIMIT)
+        ).all())
         return [SemanticDetailQuestionSummary(
             id=row.id,
             question_type=row.question_type,
@@ -914,25 +943,43 @@ class SemanticCatalogQueryService:
     def _confirmed_bindings(self, concept_ids: list[int]) -> list[SemanticBinding]:
         if not concept_ids:
             return []
-        return list(self.db.scalars(select(SemanticBinding).where(
+        statement = select(SemanticBinding).where(
             SemanticBinding.project_id == self.project.id,
             SemanticBinding.semantic_concept_id.in_(concept_ids),
             SemanticBinding.status == "confirmed",
-        )).all())
+        )
+        statement = self._institution_scope(statement, SemanticBinding)
+        return list(self.db.scalars(statement).all())
 
     def _confirmed_relation_ids(self, concept_ids: list[int]) -> set[int]:
         if not concept_ids:
             return set()
-        rows = self.db.execute(select(
+        source_concept = aliased(SemanticConcept)
+        target_concept = aliased(SemanticConcept)
+        statement = select(
             SemanticRelation.source_concept_id, SemanticRelation.target_concept_id,
+        ).join(
+            source_concept,
+            source_concept.id == SemanticRelation.source_concept_id,
+        ).join(
+            target_concept,
+            target_concept.id == SemanticRelation.target_concept_id,
         ).where(
             SemanticRelation.project_id == self.project.id,
             SemanticRelation.status == "confirmed",
+            source_concept.project_id == self.project.id,
+            target_concept.project_id == self.project.id,
+            source_concept.status == "confirmed",
+            target_concept.status == "confirmed",
             or_(
                 SemanticRelation.source_concept_id.in_(concept_ids),
                 SemanticRelation.target_concept_id.in_(concept_ids),
             ),
-        )).all()
+        )
+        statement = self._institution_scope(statement, SemanticRelation)
+        statement = self._institution_scope(statement, source_concept)
+        statement = self._institution_scope(statement, target_concept)
+        rows = self.db.execute(statement).all()
         visible_ids = set(concept_ids)
         return {
             concept_id for source_id, target_id in rows
@@ -966,12 +1013,14 @@ class SemanticCatalogQueryService:
     def _open_question_counts(self, concept_ids: list[int]) -> Counter[int]:
         if not concept_ids:
             return Counter()
-        rows = self.db.execute(select(PendingQuestion.source_id).where(
+        statement = select(PendingQuestion.source_id).where(
             PendingQuestion.project_id == self.project.id,
             PendingQuestion.source_type == "semantic_concept",
             PendingQuestion.source_id.in_(concept_ids),
             PendingQuestion.question_status.in_(_OPEN_QUESTION_STATUSES),
-        )).all()
+        )
+        statement = self._institution_scope(statement, PendingQuestion)
+        rows = self.db.execute(statement).all()
         return Counter(int(source_id) for (source_id,) in rows if source_id is not None)
 
     @staticmethod
