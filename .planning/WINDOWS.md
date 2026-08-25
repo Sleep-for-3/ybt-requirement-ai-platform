@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 4
 waived_count: 0
-fixed_count: 6
-total_count: 10
-last_updated: 2026-08-25T06:36:23.711Z
+fixed_count: 8
+total_count: 12
+last_updated: 2026-08-25T10:06:04.785Z
 ---
 
 # Broken Windows Ledger
@@ -25,6 +25,8 @@ last_updated: 2026-08-25T06:36:23.711Z
 | 8 | 11 | deviation | frontend/app/semantics/[id]/page.tsx |  | Auto-fixed stale prior-project semantic shell render by binding state to full request identity. | fixed |  | 2026-08-25T06:35:43.480Z | 2026-08-25T06:36:22.797Z |
 | 9 | 11 | deviation | frontend/lib/semantic-catalog-dom-contract.mjs |  | Runtime-only DOM contract uses tested import-site type suppressions because plan scope excludes a declaration peer. | fixed |  | 2026-08-25T06:35:44.651Z | 2026-08-25T06:36:23.711Z |
 | 10 | 11 | unrun-verify | frontend/app/semantics/[id]/page.tsx |  | Live human viewport inspection is deferred to phase UI review; deterministic DOM and keyboard checks passed. | open |  | 2026-08-25T06:35:45.749Z |  |
+| 11 | 11 | deviation | frontend/lib/semantic-catalog-dom-contract.mjs |  | Removed the duplicate incomplete DOM entity-label table so catalog and detail references share the exhaustive production source. | fixed |  | 2026-08-25T10:05:56.488Z | 2026-08-25T10:06:03.902Z |
+| 12 | 11 | deviation | frontend/lib/semantic-entity-types.d.mts |  | Corrected the shared entity-label constant declaration syntax discovered by the frontend lint gate. | fixed |  | 2026-08-25T10:05:57.281Z | 2026-08-25T10:06:04.785Z |
 
 ````json
 [
@@ -147,6 +149,30 @@ last_updated: 2026-08-25T06:36:23.711Z
     "reason": "",
     "recorded_at": "2026-08-25T06:35:45.749Z",
     "resolved_at": null
+  },
+  {
+    "id": 11,
+    "kind": "deviation",
+    "phase": "11",
+    "file": "frontend/lib/semantic-catalog-dom-contract.mjs",
+    "line": null,
+    "description": "Removed the duplicate incomplete DOM entity-label table so catalog and detail references share the exhaustive production source.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-25T10:05:56.488Z",
+    "resolved_at": "2026-08-25T10:06:03.902Z"
+  },
+  {
+    "id": 12,
+    "kind": "deviation",
+    "phase": "11",
+    "file": "frontend/lib/semantic-entity-types.d.mts",
+    "line": null,
+    "description": "Corrected the shared entity-label constant declaration syntax discovered by the frontend lint gate.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-25T10:05:57.281Z",
+    "resolved_at": "2026-08-25T10:06:04.785Z"
   }
 ]
 ````
