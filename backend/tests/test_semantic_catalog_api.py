@@ -1,5 +1,7 @@
 from datetime import UTC, date, datetime
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import event
 
 from app.main import app
@@ -17,6 +19,15 @@ from app.models import (
     WorkflowInstance,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
+from app.schemas.semantic_catalog import (
+    BoundedRegionMetadata,
+    RestrictedSemanticDetailReference,
+    SemanticBindingRegion,
+    SemanticDetailConflictSummary,
+    SemanticDetailRegionCapability,
+    SemanticDetailReviewWorkflow,
+    SemanticDetailShell,
+)
 from backend.tests.test_semantic_layer import (
     _post,
     _projects,
@@ -24,6 +35,97 @@ from backend.tests.test_semantic_layer import (
     _semantic_client,
     _target_field,
 )
+
+
+def test_semantic_detail_dtos_keep_formal_temporal_and_governance_dimensions_explicit() -> None:
+    shell = SemanticDetailShell(
+        id=7,
+        project_id=3,
+        concept_type="business_term",
+        concept_code="CUSTOMER_ID",
+        concept_name="客户统一编号",
+        lifecycle_status="ai_suggested",
+        effective_as_of=date(2026, 8, 25),
+        effective_version=None,
+        review_workflow=SemanticDetailReviewWorkflow(
+            pending=True,
+            task_id=41,
+            status="pending",
+            current_step="business_review",
+            href="/tasks/41?from=semantics&semanticConceptId=7",
+        ),
+        open_questions=[],
+        conflicts=[
+            SemanticDetailConflictSummary(
+                conflict_key="definition",
+                summary="两个高权威定义冲突",
+                sources=[],
+                review_href="/review-tasks?from=semantics&semanticConceptId=7",
+            )
+        ],
+        regions={
+            "bindings": SemanticDetailRegionCapability(temporal_scope="current_only"),
+            "versions": SemanticDetailRegionCapability(temporal_scope="as_of"),
+        },
+    )
+
+    assert shell.effective_version is None
+    assert shell.lifecycle_status == "ai_suggested"
+    assert shell.review_workflow.pending is True
+    assert shell.conflicts[0].winner is None
+    assert shell.regions["bindings"].temporal_scope == "current_only"
+
+    with pytest.raises(ValidationError):
+        SemanticDetailShell.model_validate({**shell.model_dump(), "legacy_definition": "forbidden"})
+
+
+def test_semantic_lazy_region_dtos_have_explicit_partitions_and_bounded_metadata() -> None:
+    region = SemanticBindingRegion(
+        concept_id=7,
+        as_of=date(2026, 8, 25),
+        current_only=True,
+        confirmed=[],
+        candidates=[],
+        audit=[],
+        confirmed_meta=BoundedRegionMetadata(total=0, returned=0, limit=100),
+        candidate_meta=BoundedRegionMetadata(total=0, returned=0, limit=100),
+        audit_meta=BoundedRegionMetadata(total=0, returned=0, limit=100),
+        chains=[],
+        chain_meta=BoundedRegionMetadata(total=0, returned=0, limit=13),
+    )
+
+    assert region.confirmed == []
+    assert region.candidates == []
+    assert region.audit == []
+    assert region.chain_meta.overflow == 0
+    assert region.chain_meta.truncated is False
+
+    with pytest.raises(ValidationError):
+        BoundedRegionMetadata(total=2, returned=2, limit=1)
+
+
+def test_restricted_semantic_detail_reference_cannot_accept_protected_fields() -> None:
+    restricted = RestrictedSemanticDetailReference(
+        entity_type="target_field",
+        restricted=True,
+    )
+    assert restricted.model_dump() == {
+        "entity_type": "target_field",
+        "restricted": True,
+    }
+
+    for protected in (
+        {"entity_id": 99},
+        {"display_name": "秘密字段"},
+        {"display_code": "SECRET"},
+        {"href": "/fields/99/scenarios"},
+        {"title": "秘密标题"},
+        {"metadata": {"source": "hidden"}},
+    ):
+        with pytest.raises(ValidationError):
+            RestrictedSemanticDetailReference.model_validate(
+                {"entity_type": "target_field", "restricted": True, **protected}
+            )
 
 
 def test_semantic_catalog_traces_canonical_effective_definition_and_confirmed_assets() -> None:
