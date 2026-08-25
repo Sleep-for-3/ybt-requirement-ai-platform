@@ -73,7 +73,7 @@
 
 **Goal:** 在现有 Next.js 与 Design Tokens 中提供完整语义目录和详情体验。
 **Requirements:** SUI-01, SUI-02
-**Plans:** 4/4 plans executed
+**Plans:** 4/9 plans executed; 5 gap-closure plans ready
 **Success Criteria:**
 
 1. `/semantics` 和 `/semantics/{id}` 可浏览真实 API 数据。
@@ -96,6 +96,26 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 11-03-PLAN.md — Build governed semantic detail frontend and traceability regions
+
+**Wave 5** *(gap closure; blocked on Wave 4 completion)*
+
+- [ ] 11-05-PLAN.md — Close institution-isolation, trusted relation aggregate, and uncategorized-filter gaps
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 11-06-PLAN.md — Make catalog project switching, URL state, pagination, and entity labels truthful
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 11-07-PLAN.md — Complete lawful lineage links, conflict provenance, and accessible evidence disclosure
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 11-08-PLAN.md — Exercise production routes and components through a real-browser interaction harness
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 11-09-PLAN.md — Record full gap qualification and route dedicated security, UI, and human verification gates
 
 ### Phase 12: Requirement Workspace V2
 
