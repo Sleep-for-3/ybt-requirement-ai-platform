@@ -34,13 +34,24 @@ from app.schemas.semantic_catalog import (
     SemanticDetailReviewWorkflow,
     SemanticDetailShell,
 )
-from backend.tests.test_semantic_layer import (
-    _post,
-    _projects,
-    _required_binding_entities,
-    _semantic_client,
-    _target_field,
-)
+try:
+    # CI runs pytest from ``backend/`` while some local tooling runs from the
+    # repository root; support both import roots without changing test logic.
+    from tests.test_semantic_layer import (
+        _post,
+        _projects,
+        _required_binding_entities,
+        _semantic_client,
+        _target_field,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised by root-level pytest
+    from backend.tests.test_semantic_layer import (
+        _post,
+        _projects,
+        _required_binding_entities,
+        _semantic_client,
+        _target_field,
+    )
 
 
 def test_semantic_detail_dtos_keep_formal_temporal_and_governance_dimensions_explicit() -> None:
