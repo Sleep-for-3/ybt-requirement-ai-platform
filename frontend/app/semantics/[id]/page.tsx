@@ -97,14 +97,23 @@ function SemanticDetailContent() {
     const requestCoordinator = shellCoordinator.current;
     const requestKey = buildDetailRequestKey(projectId, conceptId, "shell", query, { audit: detailAuditRequested(query) });
     const request = requestCoordinator.begin(`${requestKey}:${shellRetry}`);
+    let disposed = false;
     setShellState({ phase: "loading", requestKey });
-    void apiGet<SemanticDetailShell>(withQuery(`/projects/${projectId}/semantic-catalog/${conceptId}`, apiQuery), { signal: request.signal })
-      .then((shell) => { if (request.accept()) setShellState({ phase: "success", requestKey, shell }); })
-      .catch((error: unknown) => {
-        if (!request.accept()) return;
-        setShellState({ phase: "error", requestKey, error: normalizeError(error) });
-      });
-    return () => requestCoordinator.clear();
+    // See the catalog route: skip React development Strict Mode's discarded
+    // effect probe before it can issue and immediately cancel a real request.
+    queueMicrotask(() => {
+      if (disposed) return;
+      void apiGet<SemanticDetailShell>(withQuery(`/projects/${projectId}/semantic-catalog/${conceptId}`, apiQuery), { signal: request.signal })
+        .then((shell) => { if (!disposed && request.accept()) setShellState({ phase: "success", requestKey, shell }); })
+        .catch((error: unknown) => {
+          if (disposed || !request.accept()) return;
+          setShellState({ phase: "error", requestKey, error: normalizeError(error) });
+        });
+    });
+    return () => {
+      disposed = true;
+      requestCoordinator.clear();
+    };
   // query.tab and query.version are presentation-only and intentionally excluded.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiQuery, conceptId, projectId, shellRetry]);

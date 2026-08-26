@@ -212,20 +212,28 @@ function ShellContent({ children }: { children: React.ReactNode }) {
       setRunningJobs(0);
       return;
     }
+    const controller = new AbortController();
     let active = true;
+    let timer: number | undefined;
     async function loadJobCount() {
       try {
-        const jobs = await apiGet<BackgroundJobSummary[]>(`/jobs?project_id=${projectId}`);
-        if (active) setRunningJobs(jobs.filter((job) => ["queued", "running"].includes(job.status)).length);
+        const jobs = await apiGet<BackgroundJobSummary[]>(`/jobs?project_id=${projectId}`, { signal: controller.signal });
+        if (!active) return;
+        const count = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
+        setRunningJobs(count);
+        // Avoid a permanent five-second poll when nothing is active. Active
+        // jobs remain responsive without turning every open page into a poller.
+        timer = window.setTimeout(() => void loadJobCount(), count ? 5_000 : 60_000);
       } catch {
-        // 导航计数失败不打断当前页面，任务中心仍可手工打开。
+        if (!active || controller.signal.aborted) return;
+        timer = window.setTimeout(() => void loadJobCount(), 60_000);
       }
     }
     void loadJobCount();
-    const timer = window.setInterval(() => void loadJobCount(), 5000);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      controller.abort();
+      if (timer) window.clearTimeout(timer);
     };
   }, [projectId]);
 
@@ -289,8 +297,16 @@ function ShellContent({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
-        <div className="flex-1">{children}</div>
+        <ProjectContentBoundary>{children}</ProjectContentBoundary>
       </div>
     </div>
   );
+}
+
+function ProjectContentBoundary({ children }: { children: React.ReactNode }) {
+  const { projectId } = useProjectWorkspace();
+  // A project switch must never leave the previous project's page state mounted
+  // while the next project starts loading. The keyed boundary immediately drops
+  // rendered sensitive state; page fetches then begin from their empty state.
+  return <div className="flex-1" key={`project-scope-${projectId ?? "none"}`}>{children}</div>;
 }

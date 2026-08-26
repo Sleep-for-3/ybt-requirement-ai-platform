@@ -61,18 +61,30 @@ function SemanticCatalogContent() {
     }
     const requestQuery = parseCatalogQuery(queryString);
     const controller = new AbortController();
+    let disposed = false;
     dispatch({ type: "scope-change", requestKey });
     dispatch({ type: "begin", requestKey, attempt: requestAttempt });
-    void apiGet<SemanticCatalogResponse>(
-      `/projects/${projectId}/semantic-catalog?${buildCatalogApiQuery(requestQuery)}`,
-      { signal: controller.signal }
-    ).then((page) => {
-      dispatch({ type: "resolve", requestKey, attempt: requestAttempt, page });
-    }).catch((error: unknown) => {
-      const normalized = error instanceof Error ? error : new Error("请求失败");
-      dispatch({ type: "reject", requestKey, attempt: requestAttempt, error: normalized });
+    // In React development Strict Mode an effect is intentionally mounted,
+    // cleaned up, and mounted again. Deferring the network start one microtask
+    // means the discarded probe cannot create a real request that is then
+    // aborted immediately. Production still starts exactly one scoped request.
+    queueMicrotask(() => {
+      if (disposed) return;
+      void apiGet<SemanticCatalogResponse>(
+        `/projects/${projectId}/semantic-catalog?${buildCatalogApiQuery(requestQuery)}`,
+        { signal: controller.signal }
+      ).then((page) => {
+        if (!disposed) dispatch({ type: "resolve", requestKey, attempt: requestAttempt, page });
+      }).catch((error: unknown) => {
+        if (disposed) return;
+        const normalized = error instanceof Error ? error : new Error("请求失败");
+        dispatch({ type: "reject", requestKey, attempt: requestAttempt, error: normalized });
+      });
     });
-    return () => controller.abort();
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
   }, [projectId, queryString, requestAttempt, requestKey]);
 
   const responseKind = catalogResponseKind({

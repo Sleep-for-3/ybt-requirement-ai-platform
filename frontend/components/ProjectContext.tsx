@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import { Project, apiGet } from "@/lib/api";
 
@@ -59,11 +60,25 @@ export function useProjectWorkspace() {
 
 export function ProjectSelector({ className = "w-56" }: { className?: string }) {
   const { projects, projectId, selectProject } = useProjectWorkspace();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  function changeProject(nextProjectId: number | null) {
+    // Make the project identity durable in a deep link without discarding
+    // page-owned filters, pagination or tab state already held in the URL.
+    const next = new URLSearchParams(window.location.search);
+    if (nextProjectId) next.set("projectId", String(nextProjectId));
+    else next.delete("projectId");
+    selectProject(nextProjectId);
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
+
   return (
     <select
       aria-label="当前项目"
       className={`control ${className}`}
-      onChange={(event) => selectProject(Number(event.target.value) || null)}
+      onChange={(event) => changeProject(Number(event.target.value) || null)}
       value={projectId || ""}
     >
       <option value="">选择项目</option>
