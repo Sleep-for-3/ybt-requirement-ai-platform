@@ -116,6 +116,7 @@ All plan-time threats are closed. The nine accepted low-severity supply-chain en
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-08-26 | 46 | 46 | 0 | `gsd-security-auditor` + primary orchestrator |
+| 2026-08-26 | 46 | 46 | 0 | Primary orchestrator — ASVS L1 short-circuit re-verification |
 
 ---
 
