@@ -392,12 +392,14 @@ function Get-DockerComposeArguments {
     if ([string]$Runtime.kind -eq "wsl") {
         return @(
             "compose",
+            "--project-name", "ybt-requirement-ai-platform",
             "--project-directory", (ConvertTo-WslPath -WindowsPath $repoRoot),
             "--env-file", (ConvertTo-WslPath -WindowsPath $semanticComposeEnvPath)
         )
     }
     return @(
         "compose",
+        "--project-name", "ybt-requirement-ai-platform",
         "--project-directory", $repoRoot,
         "--env-file", $semanticComposeEnvPath
     )
@@ -532,9 +534,32 @@ function Initialize-Postgres {
     }
 }
 
+function Move-StalePostgresPidFile {
+    $pidPath = Join-Path $postgresDataRoot "postmaster.pid"
+    if (-not (Test-Path -LiteralPath $pidPath)) {
+        return
+    }
+
+    $recordedPid = (Get-Content -LiteralPath $pidPath -TotalCount 1 -ErrorAction Stop).Trim()
+    if ($recordedPid -notmatch "^\d+$") {
+        return
+    }
+    if ($null -ne (Get-PortOwner -Port $PostgresPort)) {
+        return
+    }
+    if ($null -ne (Get-Process -Id ([int]$recordedPid) -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    $backupName = "postmaster.pid.stale-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    Move-Item -LiteralPath $pidPath -Destination (Join-Path $postgresDataRoot $backupName) -ErrorAction Stop
+    Write-Host "PostgreSQL 陈旧 PID 文件已移至备份：$backupName"
+}
+
 function Start-Postgres {
     param([object]$Tools, [object]$Secrets, [string]$LogPath)
     Initialize-Postgres -Tools $Tools -Secrets $Secrets
+    Move-StalePostgresPidFile
     & $Tools.pgCtl `
         "-D" $postgresDataRoot `
         "-l" $LogPath `
@@ -793,12 +818,16 @@ function Invoke-SqliteDataMigration {
     }
     if (-not $DatabaseCreatedNow) {
         $protectedTables = Get-PostgresProtectedDataTables
+        if ($targetProjectCount -gt 0 -or $protectedTables.Count -gt 0) {
+            Write-Host "检测到已有 PostgreSQL 业务数据，PostgreSQL 作为权威数据源；跳过 SQLite 自动迁移。"
+            return
+        }
         $detail = if ($protectedTables.Count -gt 0) {
             "；已检测到：$($protectedTables -join ', ')"
         } else {
             ""
         }
-        throw "PostgreSQL 不是本次启动新建的专用空库且没有完整迁移标记，禁止自动覆盖$detail。请先备份并手工迁移。"
+        throw "PostgreSQL 不是本次启动新建的专用空库且没有业务数据或完整迁移标记，禁止自动覆盖$detail。请先备份并手工核验。"
     }
     Write-Host "正在将 backend\$DatabaseFile 的有效数据迁移到 PostgreSQL..."
     $previousMigrationUrl = [Environment]::GetEnvironmentVariable("MIGRATION_DATABASE_URL", "Process")
@@ -1122,7 +1151,20 @@ function Stop-ManagedProcess {
         }
         $candidate = $owner
     }
-    if ($candidate -le 0 -or -not (Test-ManagedOwner -ProcessId $candidate -Service $Name -State $State)) {
+    if ($candidate -le 0) {
+        Write-Host "$Name 已停止（没有有效的记录 PID）。"
+        return
+    }
+    $existingProcess = Get-Process -Id $candidate -ErrorAction SilentlyContinue
+    if ($null -eq $existingProcess) {
+        Write-Host "$Name 已停止（PID $candidate 不存在）。"
+        return
+    }
+    if (-not (Test-ManagedOwner -ProcessId $candidate -Service $Name -State $State)) {
+        if ($Port -le 0) {
+            Write-Host "$Name 已停止（记录的 PID 已不属于此项目，按已停止处理）。"
+            return
+        }
         throw "无法确认 $Name 进程归属，已跳过停止。"
     }
     Stop-Process -Id $candidate -Force
@@ -1188,12 +1230,16 @@ function Stop-Project {
             if ($expectedDataRoot -ne $recordedDataRoot) {
                 throw "PostgreSQL 数据目录与项目目录不匹配。"
             }
-            $tools = Get-PostgresTools
-            & $tools.pgCtl "-D" $postgresDataRoot "-m" "fast" "-w" "stop" | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw "PostgreSQL 未能正常停止。"
+            if ($null -eq (Get-PortOwner -Port ([int]$state.postgresPort))) {
+                Write-Host "postgres 已停止。"
+            } else {
+                $tools = Get-PostgresTools
+                & $tools.pgCtl "-D" $postgresDataRoot "-m" "fast" "-w" "stop" | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "PostgreSQL 未能正常停止。"
+                }
+                Write-Host "postgres 已停止。"
             }
-            Write-Host "postgres 已停止。"
         } catch {
             $errors += $_.Exception.Message
         }
@@ -1253,7 +1299,11 @@ function Show-ProjectStatus {
     if ($isProduction) {
         $postgresOwner = Get-PortOwner -Port ([int]$state.postgresPort)
         $redisOwner = Get-PortOwner -Port ([int]$state.redisPort)
-        $worker = Get-Process -Id ([int]$state.workerPid) -ErrorAction SilentlyContinue
+        $worker = if (Test-ManagedOwner -ProcessId ([int]$state.workerPid) -Service "worker" -State $state) {
+            Get-Process -Id ([int]$state.workerPid) -ErrorAction SilentlyContinue
+        } else {
+            $null
+        }
     }
     $fullyRunning = $hasManagedState -and
         $null -ne $frontendOwner -and

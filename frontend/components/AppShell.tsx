@@ -50,58 +50,57 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "工作台",
     items: [
+      { href: "/workspace", label: "需求文档工作台", icon: FileSpreadsheet },
       { href: "/projects", label: "项目", icon: FolderKanban },
-      { href: "/review-tasks", label: "我的待办", icon: ClipboardCheck },
-      { href: "/notifications", label: "通知", icon: Bell }
+      { href: "/review-tasks", label: "我的待办", icon: ClipboardCheck }
     ]
   },
   {
-    label: "需求与口径",
+    label: "需求文档",
     items: [
-      { href: "/templates", label: "一表通模板", icon: FileSpreadsheet },
-      { href: "/fields", label: "字段场景", icon: ListTree },
+      { href: "/fields", label: "字段与口径", icon: ListTree },
       { href: "/questions", label: "待确认问题", icon: ListChecks },
-      { href: "/traceability-templates", label: "历史口径", icon: TableProperties },
-      { href: "/historical-calibers", label: "历史口径库", icon: History }
+      { href: "/templates", label: "监管模板", icon: TableProperties }
     ]
   },
   {
     label: "数据资产",
     items: [
-      { href: "/business-systems", label: "业务系统", icon: Building2 },
-      { href: "/mart", label: "监管集市", icon: Layers3 },
       { href: "/datasources", label: "数据源", icon: Database },
       { href: "/catalog", label: "数据目录", icon: LibraryBig },
       { href: "/semantics", label: "语义目录", icon: BookOpenCheck },
-      { href: "/lineage", label: "脚本血缘", icon: GitBranch }
+      { href: "/business-systems", label: "业务系统", icon: Building2 },
+      { href: "/mart", label: "监管集市", icon: Layers3 }
     ]
   },
   {
-    label: "智能与知识",
+    label: "知识库",
     items: [
-      { href: "/knowledge", label: "知识库", icon: BrainCircuit },
-      { href: "/evaluations", label: "RAG 评测", icon: ChartNoAxesCombined },
-      { href: "/tasks", label: "安全查询", icon: Workflow }
+      { href: "/knowledge", label: "知识检索", icon: BrainCircuit },
+      { href: "/historical-calibers", label: "历史口径库", icon: History }
     ]
   },
   {
-    label: "交付与验收",
+    label: "交付中心",
     items: [
-      { href: "/export", label: "Excel 导出", icon: FileOutput },
       { href: "/deliverables", label: "正式交付", icon: PackageCheck },
-      { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet },
-      { href: "/uat", label: "UAT 验收", icon: ShieldCheck }
-    ]
-  },
-  {
-    label: "系统",
-    items: [
-      { href: "/jobs", label: "后台任务", icon: History },
-      { href: "/audit", label: "审计", icon: ScrollText },
-      { href: "/admin/institutions", label: "管理", icon: Settings2, match: "/admin" },
-      { href: "/legacy", label: "综合工作台", icon: LayoutGrid }
+      { href: "/export", label: "Excel 导出", icon: FileOutput }
     ]
   }
+];
+
+const SECONDARY_NAV: NavItem[] = [
+  { href: "/traceability-templates", label: "历史口径模板", icon: TableProperties },
+  { href: "/lineage", label: "脚本血缘", icon: GitBranch },
+  { href: "/evaluations", label: "RAG 评测", icon: ChartNoAxesCombined },
+  { href: "/tasks", label: "安全查询", icon: Workflow },
+  { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet },
+  { href: "/uat", label: "UAT 验收", icon: ShieldCheck },
+  { href: "/notifications", label: "通知", icon: Bell },
+  { href: "/jobs", label: "后台任务", icon: History },
+  { href: "/audit", label: "审计", icon: ScrollText },
+  { href: "/admin/institutions", label: "系统管理", icon: Settings2, match: "/admin" },
+  { href: "/legacy", label: "Legacy 综合工作台", icon: LayoutGrid }
 ];
 
 function isActive(pathname: string, item: NavItem) {
@@ -116,6 +115,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function SidebarNav({ pathname, runningJobs = 0 }: { pathname: string; runningJobs?: number }) {
+  const secondaryActive = SECONDARY_NAV.some((item) => isActive(pathname, item));
+  const [secondaryOpen, setSecondaryOpen] = useState(secondaryActive);
+  useEffect(() => { if (secondaryActive) setSecondaryOpen(true); }, [secondaryActive]);
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
       {NAV_GROUPS.map((group) => (
@@ -146,13 +148,31 @@ function SidebarNav({ pathname, runningJobs = 0 }: { pathname: string; runningJo
           </div>
         </div>
       ))}
+      <details className="group border-t border-white/[0.06] pt-3" onToggle={(event) => setSecondaryOpen(event.currentTarget.open)} open={secondaryOpen}>
+        <summary className="mx-1 flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-emerald-50/45 hover:bg-white/[0.05] hover:text-white">
+          <Settings2 size={15} />系统管理与低频工具
+          <span className="ml-auto text-[10px] transition group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="mt-1 space-y-0.5">
+          {SECONDARY_NAV.map((item) => {
+            const active = isActive(pathname, item);
+            const Icon = item.icon;
+            return (
+              <Link className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-[12px] transition ${active ? "bg-white/[0.09] text-white" : "text-emerald-50/55 hover:bg-white/[0.05] hover:text-white"}`} href={item.href} key={item.href}>
+                <Icon size={15} />{item.label}
+                {item.href === "/jobs" && runningJobs > 0 ? <span className="ml-auto rounded-full bg-amber-300 px-1.5 text-[9px] font-bold text-amber-950">{runningJobs}</span> : null}
+              </Link>
+            );
+          })}
+        </div>
+      </details>
     </nav>
   );
 }
 
 function SidebarBrand() {
   return (
-    <Link className="flex items-center gap-3 px-5 pb-4 pt-5" href="/projects">
+    <Link className="flex h-[70px] items-center gap-3 border-b border-white/[0.06] px-5" href="/workspace">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-pine-500 text-white shadow-md shadow-pine-950/40">
         <Landmark size={18} />
       </span>
@@ -167,7 +187,7 @@ function SidebarBrand() {
 function SidebarFooter() {
   return (
     <div className="border-t border-white/5 px-5 py-3 text-[11px] leading-relaxed text-emerald-100/35">
-      仅限脱敏模拟数据环境
+      银行内网业务系统 · 人工确认优先
     </div>
   );
 }
@@ -218,7 +238,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-mist">
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-gradient-to-b from-[#102620] to-[#0a1b16] lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col bg-gradient-to-b from-[#102a30] to-[#0a1f22] lg:flex">
         <SidebarBrand />
         <SidebarNav pathname={pathname} runningJobs={runningJobs} />
         <SidebarFooter />
@@ -241,8 +261,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur">
-          <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
+        <header className="sticky top-0 z-40 border-b border-line bg-white/95 backdrop-blur">
+          <div className="flex h-[70px] items-center gap-3 px-4 lg:px-6">
             <button aria-label="打开导航" className="button-ghost h-9 w-9 px-0 lg:hidden" onClick={() => setDrawerOpen(true)} type="button">
               <Menu size={18} />
             </button>
@@ -251,6 +271,10 @@ function ShellContent({ children }: { children: React.ReactNode }) {
               {selectedProject ? <span className="truncate text-xs text-slate-400">{selectedProject.name}</span> : null}
             </div>
             <div className="flex-1" />
+            <Link className="hidden items-center gap-2 rounded-full border border-pine-100 bg-pine-50 px-3 py-1.5 text-[11px] font-medium text-pine-700 xl:flex" href="/jobs">
+              <span className={`h-1.5 w-1.5 rounded-full ${runningJobs ? "bg-gold-500" : "bg-pine-400"}`} />
+              {runningJobs ? `${runningJobs} 个后台任务运行中` : "后台任务正常"}
+            </Link>
             <ProjectSelector className="w-44 sm:w-52" />
             <div className="flex items-center gap-2 border-l border-line pl-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pine-100 text-sm font-semibold text-pine-700">

@@ -237,6 +237,7 @@ def test_windows_lifecycle_manages_persistent_milvus_without_deleting_volumes() 
     for expected in (
         "Start-SemanticInfrastructure",
         "Stop-SemanticInfrastructure",
+        '"--project-name", "ybt-requirement-ai-platform"',
         '"etcd", "milvus-minio", "milvus"',
         "semantic-compose.env",
         '$env:VECTOR_STORE_PROVIDER = "milvus"',
@@ -302,6 +303,31 @@ def test_windows_lifecycle_migration_marker_allows_new_postgres_projects_safely(
     assert "sourceLength" in lifecycle_source
     assert "sourceLastWriteTime" in lifecycle_source
     assert "SQLite 源文件已变化" in lifecycle_source
+
+
+def test_windows_lifecycle_preserves_existing_postgres_as_authoritative() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "$targetProjectCount -gt 0 -or $protectedTables.Count -gt 0" in lifecycle_source
+    assert "PostgreSQL 作为权威数据源" in lifecycle_source
+    assert "跳过 SQLite 自动迁移" in lifecycle_source
+
+
+def test_windows_lifecycle_recovers_only_verified_stale_postgres_pid() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "Move-StalePostgresPidFile" in lifecycle_source
+    assert "Get-PortOwner -Port $PostgresPort" in lifecycle_source
+    assert "PostgreSQL 陈旧 PID 文件已移至备份" in lifecycle_source
+
+
+def test_windows_lifecycle_treats_missing_managed_process_as_already_stopped() -> None:
+    lifecycle_source = (ROOT / "scripts" / "项目启停.ps1").read_text(encoding="utf-8")
+
+    assert "$existingProcess = Get-Process -Id $candidate -ErrorAction SilentlyContinue" in lifecycle_source
+    assert "$Name 已停止（PID $candidate 不存在）。" in lifecycle_source
+    assert "记录的 PID 已不属于此项目，按已停止处理）。" in lifecycle_source
+    assert "Test-ManagedOwner -ProcessId ([int]$state.workerPid) -Service \"worker\"" in lifecycle_source
 
 
 def test_full_smoke_workflow_is_manual_scheduled_and_uploads_sanitized_evidence() -> None:

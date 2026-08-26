@@ -68,7 +68,7 @@ docker compose --profile milvus up --build
 .\scripts\项目启停.ps1 stop
 ```
 
-默认 `production` 模式会启动本机 PostgreSQL、Redis、Celery Worker、FastAPI、Next.js 和本地 FastEmbed，同时通过 WSL/Windows Docker 启动持久化 Milvus。脚本自动执行 Alembic，并在首次成功启动时把 `backend/<DatabaseFile>` 中的 SQLite 历史数据完整迁入 PostgreSQL。迁移标记会核对 SQLite 源文件和原始项目数；迁移完成后允许 PostgreSQL 正常新增项目，但不会覆盖或回迁数据。
+默认 `production` 模式会启动本机 PostgreSQL、Redis、Celery Worker、FastAPI、Next.js 和本地 FastEmbed，同时通过 WSL/Windows Docker 启动持久化 Milvus。脚本自动执行 Alembic，并在首次成功启动时把 `backend/<DatabaseFile>` 中的 SQLite 历史数据完整迁入 PostgreSQL。迁移标记会核对 SQLite 源文件和原始项目数；迁移完成后允许 PostgreSQL 正常新增项目，但不会覆盖或回迁数据。恢复已有且包含业务数据的 PostgreSQL 数据簇时，PostgreSQL 被视为权威数据源，脚本会跳过 SQLite 自动迁移。
 
 没有显式配置正式 Embedding 时，脚本使用 `BAAI/bge-small-zh-v1.5` 生成真实 512 维中文向量，模型缓存位于 `.local-run/fastembed-cache/`；首次启动约下载 90 MB。Milvus、etcd 和 Milvus MinIO 使用 Docker named volume 持久化，普通停止或重启不会删除向量数据。Redis 只负责任务 broker/result backend，不冒充向量数据库。
 
