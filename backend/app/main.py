@@ -13,6 +13,7 @@ from app.api import (
     ai_runtime,
     auth,
     governance,
+    global_search,
     notifications,
     jobs,
     storage_files,
@@ -184,3 +185,4 @@ app.include_router(uat.router, prefix=settings.api_prefix)
 app.include_router(semantic.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(semantic_catalog.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(regulatory_context.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(global_search.router, prefix=settings.api_prefix, dependencies=secured)

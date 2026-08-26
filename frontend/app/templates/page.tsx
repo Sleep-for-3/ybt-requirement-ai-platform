@@ -5,6 +5,8 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { TemplateDocument, TemplateUploadResponse, apiGet, apiPost, uploadForm } from "@/lib/api";
 
 const PARSE_BADGE: Record<string, string> = {
@@ -22,6 +24,11 @@ export default function Page() {
   const { projectId } = useProjectWorkspace();
   const [items, setItems] = useState<TemplateDocument[]>([]);
   const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   async function reload() {
     if (projectId) setItems(await apiGet(`/projects/${projectId}/templates`));
@@ -36,13 +43,30 @@ export default function Page() {
     if (!projectId) return;
     const form = new FormData(event.currentTarget);
     form.set("project_id", String(projectId));
+    setFormError("");
+    setUploading(true);
     try {
       const result = await uploadForm<TemplateUploadResponse>("/templates/upload", form);
       setMessage(`已解析 ${result.field_count} 个字段`);
+      setDirty(false);
+      setUploadOpen(false);
       await reload();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "上传失败");
+      setFormError(error instanceof Error ? error.message : "上传失败");
+    } finally {
+      setUploading(false);
     }
+  }
+
+  function requestCloseUpload() {
+    if (uploading) return;
+    if (dirty) { setDiscardOpen(true); return; }
+    setUploadOpen(false);
+  }
+
+  function openUpload() {
+    setFormError("");
+    setUploadOpen(true);
   }
 
   async function apply(id: number) {
@@ -56,24 +80,9 @@ export default function Page() {
 
   return (
     <main>
-      <WorkspaceHeader title="一表通模板" meta="上传、解析预览后显式 apply" />
-      <div className="mx-auto grid max-w-[1400px] gap-5 p-4 lg:grid-cols-[360px_1fr] lg:p-6">
-        <form className="panel h-fit" onSubmit={upload}>
-          <div className="panel-header">
-            <h2 className="text-[15px] font-semibold text-ink">上传模板</h2>
-          </div>
-          <div className="panel-body space-y-3">
-            <input accept=".xlsx" className="control" name="file" required type="file" />
-            <button className="button-primary w-full">
-              <FileUp size={16} />
-              上传模板
-            </button>
-            {message ? (
-              <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
-            ) : null}
-          </div>
-        </form>
-
+      <WorkspaceHeader title="一表通模板" meta="上传、解析预览后显式 apply" actions={<button className="button-primary" disabled={!projectId} onClick={openUpload} type="button"><FileUp size={16} />上传模板</button>} />
+      <div className="mx-auto max-w-[1400px] p-4 lg:p-6">
+        {message ? <p className="mb-4 rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p> : null}
         {items.length ? (
           <section className="panel h-fit overflow-hidden">
             <div className="grid-head grid grid-cols-[1fr_140px_120px]">
@@ -103,10 +112,19 @@ export default function Page() {
         ) : (
           <div className="empty-state h-fit">
             <FileSpreadsheet className="text-slate-300" size={28} />
-            <p>还没有模板记录，先在左侧上传一表通模板 Excel</p>
+            <p>还没有模板记录，从右上角上传一表通模板 Excel</p>
+            <button className="button-primary" disabled={!projectId} onClick={openUpload} type="button"><FileUp size={16} />上传模板</button>
           </div>
         )}
       </div>
+      <ModalDialog description="上传后先解析预览，只有显式 Apply 才会写入字段和场景。" onClose={requestCloseUpload} open={uploadOpen} title="上传一表通模板">
+        <form className="space-y-4" onChange={() => setDirty(true)} onSubmit={upload}>
+          {formError ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{formError}</p> : null}
+          <label className="block text-sm font-medium text-ink">模板 Excel<input accept=".xlsx" className="control mt-1.5" name="file" required type="file" /></label>
+          <div className="flex justify-end gap-2"><button className="button-secondary" disabled={uploading} onClick={requestCloseUpload} type="button">取消</button><button className="button-primary" disabled={uploading} type="submit"><FileUp size={16} />{uploading ? "上传中…" : "上传并解析"}</button></div>
+        </form>
+      </ModalDialog>
+      <ConfirmDialog danger confirmText="放弃上传" description="已选择的模板文件不会上传。" onCancel={() => setDiscardOpen(false)} onConfirm={() => { setDiscardOpen(false); setDirty(false); setUploadOpen(false); }} open={discardOpen} title="放弃未提交的模板？" />
     </main>
   );
 }

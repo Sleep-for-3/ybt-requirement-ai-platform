@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { NaturalLanguageTask, NaturalLanguageTaskCreateResponse, apiGet, apiPost } from "@/lib/api";
 
@@ -88,9 +89,9 @@ export default function Page() {
                   </span>
                   <span className="text-slate-500">{item.due_at || "未设置到期时间"}</span>
                   <span className="text-right">
-                    <Link className="button-primary" href={`/tasks/${item.id}`}>
+                    <StatefulLink className="button-primary" href={`/tasks/${item.id}`}>
                       处理
-                    </Link>
+                    </StatefulLink>
                   </span>
                 </div>
               ))}

@@ -9,6 +9,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { apiGet, apiPost } from "@/lib/api";
+import { detailHrefWithReturnTo } from "@/lib/navigation-contract.mjs";
 
 type EvaluationCase = {
   id?: number;
@@ -42,7 +43,7 @@ export default function Page() {
       run_name: `${retrievalMode}-${Date.now()}`,
       retrieval_config_json: { retrieval_mode: retrievalMode, top_k: 10 }
     }));
-    if (run) router.push(`/evaluations/${run.id}`);
+    if (run) router.push(detailHrefWithReturnTo(`/evaluations/${run.id}`, "/evaluations", window.location.search.slice(1)));
   }
 
   return (

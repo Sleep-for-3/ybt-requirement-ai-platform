@@ -50,6 +50,17 @@ class AuthMe(UserRead):
     effective_project_permissions: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class AdminInstitutionMembershipRead(BaseModel):
+    institution_id: int
+    institution_name: str
+    role: str
+    status: str
+
+
+class AdminUserRead(UserRead):
+    institution_memberships: list[AdminInstitutionMembershipRead] = Field(default_factory=list)
+
+
 class BootstrapResponse(BaseModel):
     institution_id: int
     user: UserRead

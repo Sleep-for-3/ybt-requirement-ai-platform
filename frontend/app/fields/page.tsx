@@ -1,10 +1,10 @@
 "use client";
 
 import { ArrowRight, Table2 } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ProductScenario, TargetField, apiGet } from "@/lib/api";
 
@@ -43,9 +43,9 @@ export default function FieldsPage() {
                   </div>
                 </div>
                 <span>{field.data_format || field.field_type || "-"}</span>
-                <Link className="button-secondary" href={`/fields/${field.id}/scenarios`} title="进入场景工作台">
+                <StatefulLink className="button-secondary" href={`/fields/${field.id}/scenarios`} title="进入场景工作台">
                   <ArrowRight size={16} />
-                </Link>
+                </StatefulLink>
               </div>
             ))}
           </div>

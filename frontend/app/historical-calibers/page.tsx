@@ -1,10 +1,10 @@
 "use client";
 
 import { History, Upload } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { HistoricalCaliberImport, apiGet, uploadForm } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
@@ -102,7 +102,7 @@ export default function Page() {
         {items.length ? (
           <section className="grid gap-4 md:grid-cols-2">
             {items.map((item) => (
-              <Link
+              <StatefulLink
                 className="panel flex flex-col p-4 transition hover:shadow-pop"
                 href={`/historical-calibers/${item.id}`}
                 key={item.id}
@@ -135,7 +135,7 @@ export default function Page() {
                 <p className="mt-2 text-xs text-slate-400">
                   {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
                 </p>
-              </Link>
+              </StatefulLink>
             ))}
           </section>
         ) : (

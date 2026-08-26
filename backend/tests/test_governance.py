@@ -146,6 +146,105 @@ def test_auth_me_returns_backend_computed_effective_project_permissions(monkeypa
         assert client.get(f"/api/projects/{project['id']}/readiness", headers=_bearer(auditor_token)).status_code == 200
 
 
+def test_admin_user_directory_is_scoped_to_managed_institutions(monkeypatch) -> None:
+    with _governance_client(monkeypatch) as client:
+        platform_headers = _bootstrap_platform(client)
+        bank_a = client.post("/api/admin/institutions", headers=platform_headers, json={
+            "institution_code": "BANK_USER_A", "institution_name": "用户目录甲行", "institution_type": "bank",
+        }).json()
+        bank_b = client.post("/api/admin/institutions", headers=platform_headers, json={
+            "institution_code": "BANK_USER_B", "institution_name": "用户目录乙行", "institution_type": "bank",
+        }).json()
+
+        passwords = {}
+        for username, institution_id, institution_role in (
+            ("directory_admin_a", bank_a["id"], "institution_admin"),
+            ("directory_member_a", bank_a["id"], "member"),
+            ("directory_member_b", bank_b["id"], "member"),
+        ):
+            passwords[username] = f"test-only-{username}-password"
+            response = client.post("/api/admin/users", headers=platform_headers, json={
+                "username": username,
+                "display_name": username,
+                "email": f"{username}@example.invalid",
+                "password": passwords[username],
+                "institution_id": institution_id,
+                "institution_role": institution_role,
+            })
+            assert response.status_code == 201, response.text
+
+        admin_token = client.post("/api/auth/login", json={
+            "username": "directory_admin_a", "password": passwords["directory_admin_a"],
+        }).json()["access_token"]
+        directory = client.get("/api/admin/users", headers=_bearer(admin_token))
+        assert directory.status_code == 200, directory.text
+        rows = directory.json()
+        assert {row["username"] for row in rows} == {"directory_admin_a", "directory_member_a"}
+        assert all({membership["institution_id"] for membership in row["institution_memberships"]} == {bank_a["id"]} for row in rows)
+        assert "password" not in directory.text.lower()
+
+        member_token = client.post("/api/auth/login", json={
+            "username": "directory_member_a", "password": passwords["directory_member_a"],
+        }).json()["access_token"]
+        assert client.get("/api/admin/users", headers=_bearer(member_token)).status_code == 403
+
+
+def test_global_search_returns_project_scoped_production_destinations(monkeypatch) -> None:
+    with _governance_client(monkeypatch) as client:
+        headers = _bootstrap_platform(client)
+        bank_a = client.post("/api/admin/institutions", headers=headers, json={
+            "institution_code": "BANK_SEARCH_A", "institution_name": "全局搜索甲行", "institution_type": "bank",
+        }).json()
+        bank_b = client.post("/api/admin/institutions", headers=headers, json={
+            "institution_code": "BANK_SEARCH_B", "institution_name": "全局搜索乙行", "institution_type": "bank",
+        }).json()
+        project_a = client.post("/api/projects", headers=headers, json={"name": "搜索甲项目", "institution_id": bank_a["id"]}).json()
+        project_b = client.post("/api/projects", headers=headers, json={"name": "搜索乙项目", "institution_id": bank_b["id"]}).json()
+
+        table_a = client.post("/api/target-tables", headers=headers, json={
+            "project_id": project_a["id"], "table_code": "SEARCH_CUSTOMER_A", "table_name": "甲行客户表",
+        }).json()
+        field_a = client.post("/api/fields", headers=headers, json={
+            "project_id": project_a["id"], "target_table_id": table_a["id"],
+            "field_code": "SEARCH_CUSTOMER_ID_A", "field_name": "甲行客户编号",
+        }).json()
+        table_b = client.post("/api/target-tables", headers=headers, json={
+            "project_id": project_b["id"], "table_code": "SEARCH_CUSTOMER_B", "table_name": "乙行客户密表",
+        }).json()
+        client.post("/api/fields", headers=headers, json={
+            "project_id": project_b["id"], "target_table_id": table_b["id"],
+            "field_code": "SEARCH_CUSTOMER_SECRET", "field_name": "乙行客户秘密字段",
+        })
+        concept = client.post(f"/api/projects/{project_a['id']}/semantic-concepts", headers=headers, json={
+            "concept_type": "business_term", "concept_code": "SEARCH_CUSTOMER_CONCEPT", "concept_name": "客户统一语义",
+        })
+        assert concept.status_code == 201, concept.text
+        knowledge = client.post(f"/api/projects/{project_a['id']}/knowledge/items", headers=headers, json={
+            "knowledge_type": "manual_note", "question_text": "SEARCH & PROOF 客户证据",
+        })
+        assert knowledge.status_code == 200, knowledge.text
+
+        response = client.get(f"/api/projects/{project_a['id']}/global-search?q=SEARCH_CUSTOMER", headers=headers)
+        assert response.status_code == 200, response.text
+        items = response.json()["items"]
+        assert {item["entity_type"] for item in items} >= {"target_table", "target_field", "semantic_concept"}
+        assert any(item["href"] == f"/fields/{field_a['id']}/scenarios" for item in items)
+        assert all("乙行" not in f"{item['title']} {item.get('subtitle') or ''}" for item in items)
+
+        encoded = client.get(
+            f"/api/projects/{project_a['id']}/global-search",
+            headers=headers,
+            params={"q": "SEARCH & PROOF"},
+        )
+        assert encoded.status_code == 200, encoded.text
+        assert any(item["href"] == "/knowledge/search?q=SEARCH%20%26%20PROOF" for item in encoded.json()["items"])
+        assert client.get(
+            f"/api/projects/{project_a['id']}/global-search",
+            headers=headers,
+            params={"q": "  "},
+        ).status_code == 422
+
+
 def test_project_member_cannot_read_another_institutions_project(monkeypatch) -> None:
     with _governance_client(monkeypatch) as client:
         admin_password = "test-only-" + "platform-admin-password"

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { StatefulLink } from "@/components/StatefulLink";
 import { JobStatusBadge } from "@/components/jobs/JobStatusBadge";
 import { BackgroundJobSummary } from "@/lib/api";
 import { formatApiErrorText } from "@/lib/http-response.mjs";
@@ -88,7 +89,7 @@ export function JobProgressPanel({
       )}
       {safeError ? <p className="mt-3 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{safeError}</p> : null}
       <div className="mt-3 flex gap-3 text-sm">
-        {showDetailsLink ? <Link className="font-medium text-pine-700 hover:underline" href={jobDetailsHref(job.id)}>查看任务详情</Link> : null}
+        {showDetailsLink ? <StatefulLink className="font-medium text-pine-700 hover:underline" href={jobDetailsHref(job.id)}>查看任务详情</StatefulLink> : null}
         {resultHref && ["completed", "partially_completed"].includes(job.status) ? <Link className="font-medium text-pine-700 hover:underline" href={resultHref}>查看结果</Link> : null}
       </div>
     </section>

@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, Upload } from "lucide-react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { DeliverableTemplate, apiGet, uploadForm } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
 
@@ -72,7 +72,7 @@ export default function Page() {
 
         <section className="grid gap-4 md:grid-cols-2">
           {items.map(item => (
-            <Link
+            <StatefulLink
               className="panel p-4 transition hover:border-pine hover:shadow-pop"
               href={`/deliverable-templates/${item.id}`}
               key={item.id}
@@ -119,7 +119,7 @@ export default function Page() {
                   </>
                 )}
               </div>
-            </Link>
+            </StatefulLink>
           ))}
           {!items.length ? (
             <div className="empty-state md:col-span-2">

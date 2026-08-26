@@ -5,6 +5,8 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { apiGet, apiPost } from "@/lib/api";
 
 type Institution = {
@@ -18,6 +20,11 @@ type Institution = {
 export default function Page() {
   const [items, setItems] = useState<Institution[]>([]);
   const [msg, setMsg] = useState("");
+  const [formError, setFormError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   async function reload() {
     try {
@@ -34,6 +41,8 @@ export default function Page() {
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    setFormError("");
+    setCreating(true);
     try {
       await apiPost("/admin/institutions", {
         institution_code: form.get("code"),
@@ -41,33 +50,33 @@ export default function Page() {
         institution_type: form.get("type")
       });
       event.currentTarget.reset();
+      setDirty(false);
+      setCreateOpen(false);
+      setMsg("机构已创建");
       await reload();
     } catch (error) {
-      setMsg(error instanceof Error ? error.message : "创建失败");
+      setFormError(error instanceof Error ? error.message : "创建失败");
+    } finally {
+      setCreating(false);
     }
+  }
+
+  function requestCloseCreate() {
+    if (creating) return;
+    if (dirty) { setDiscardOpen(true); return; }
+    setCreateOpen(false);
+  }
+
+  function openCreate() {
+    setFormError("");
+    setCreateOpen(true);
   }
 
   return (
     <main>
-      <WorkspaceHeader title="机构管理" meta="银行、咨询公司与平台运营机构" />
-      <div className="mx-auto grid max-w-[1300px] gap-5 p-4 lg:grid-cols-[360px_1fr] lg:p-6">
-        <form className="panel h-fit" onSubmit={create}>
-          <div className="panel-header">
-            <h2 className="text-[15px] font-semibold text-ink">新建机构</h2>
-          </div>
-          <div className="panel-body space-y-3">
-            <input className="control" name="code" placeholder="机构代码" required />
-            <input className="control" name="name" placeholder="机构名称" required />
-            <select className="control" name="type">
-              <option value="bank">银行</option>
-              <option value="consulting_company">咨询公司</option>
-              <option value="platform_operator">平台运营方</option>
-            </select>
-            <button className="button-primary w-full">
-              <Plus size={16} />
-              创建机构
-            </button>
-            <div className="flex gap-2 border-t border-line pt-3">
+      <WorkspaceHeader title="机构管理" meta="银行、咨询公司与平台运营机构" actions={<button className="button-primary" onClick={openCreate} type="button"><Plus size={16} />新建机构</button>} />
+      <div className="mx-auto max-w-[1300px] p-4 lg:p-6">
+            <div className="mb-4 flex gap-2">
               <Link className="button-secondary" href="/admin/users">
                 用户
               </Link>
@@ -75,12 +84,7 @@ export default function Page() {
                 权限矩阵
               </Link>
             </div>
-            {msg ? (
-              <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{msg}</p>
-            ) : null}
-          </div>
-        </form>
-
+        {msg ? <p className="mb-4 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{msg}</p> : null}
         {items.length ? (
           <section className="panel h-fit overflow-hidden">
             <div className="grid-head grid grid-cols-[1fr_auto]">
@@ -102,10 +106,21 @@ export default function Page() {
         ) : (
           <div className="empty-state h-fit">
             <Building2 className="text-slate-300" size={28} />
-            <p>还没有机构，先在左侧创建银行、咨询公司或平台运营方</p>
+            <p>还没有机构，从右上角创建银行、咨询公司或平台运营方</p>
+            <button className="button-primary" onClick={openCreate} type="button"><Plus size={16} />新建机构</button>
           </div>
         )}
       </div>
+      <ModalDialog description="创建机构会建立新的数据与权限隔离边界。" onClose={requestCloseCreate} open={createOpen} title="新建机构">
+        <form className="space-y-4" onChange={() => setDirty(true)} onSubmit={create}>
+          {formError ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{formError}</p> : null}
+          <input className="control" name="code" placeholder="机构代码" required />
+          <input className="control" name="name" placeholder="机构名称" required />
+          <select className="control" name="type"><option value="bank">银行</option><option value="consulting_company">咨询公司</option><option value="platform_operator">平台运营方</option></select>
+          <div className="flex justify-end gap-2"><button className="button-secondary" disabled={creating} onClick={requestCloseCreate} type="button">取消</button><button className="button-primary" disabled={creating} type="submit"><Plus size={16} />{creating ? "创建中…" : "创建机构"}</button></div>
+        </form>
+      </ModalDialog>
+      <ConfirmDialog danger confirmText="放弃修改" description="尚未保存的机构信息将丢失。" onCancel={() => setDiscardOpen(false)} onConfirm={() => { setDiscardOpen(false); setDirty(false); setCreateOpen(false); }} open={discardOpen} title="放弃新建机构？" />
     </main>
   );
 }

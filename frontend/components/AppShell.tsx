@@ -34,12 +34,20 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
+import { GlobalSearch } from "@/components/GlobalSearch";
 import { BackgroundJobSummary, apiGet, clearSession } from "@/lib/api";
+import {
+  canViewNavigationAudience,
+  navigationAccessForProject,
+  type NavigationAccess,
+  type NavigationAudience
+} from "@/lib/navigation-contract.mjs";
 
 type NavItem = {
   href: string;
   label: string;
   icon: typeof Bell;
+  audience?: NavigationAudience;
   /** Prefix used for the active check when it differs from href. */
   match?: string;
 };
@@ -66,11 +74,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "数据资产",
     items: [
-      { href: "/datasources", label: "数据源", icon: Database },
-      { href: "/catalog", label: "数据目录", icon: LibraryBig },
+      { href: "/datasources", label: "数据源", icon: Database, audience: "technical" },
+      { href: "/catalog", label: "数据目录", icon: LibraryBig, audience: "technical" },
       { href: "/semantics", label: "语义目录", icon: BookOpenCheck },
-      { href: "/business-systems", label: "业务系统", icon: Building2 },
-      { href: "/mart", label: "监管集市", icon: Layers3 }
+      { href: "/business-systems", label: "业务系统", icon: Building2, audience: "technical" },
+      { href: "/mart", label: "监管集市", icon: Layers3, audience: "technical" }
     ]
   },
   {
@@ -90,17 +98,17 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const SECONDARY_NAV: NavItem[] = [
-  { href: "/traceability-templates", label: "历史口径模板", icon: TableProperties },
-  { href: "/lineage", label: "脚本血缘", icon: GitBranch },
-  { href: "/evaluations", label: "RAG 评测", icon: ChartNoAxesCombined },
-  { href: "/tasks", label: "安全查询", icon: Workflow },
-  { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet },
-  { href: "/uat", label: "UAT 验收", icon: ShieldCheck },
+  { href: "/traceability-templates", label: "历史口径模板", icon: TableProperties, audience: "technical" },
+  { href: "/lineage", label: "脚本血缘", icon: GitBranch, audience: "technical" },
+  { href: "/evaluations", label: "RAG 评测", icon: ChartNoAxesCombined, audience: "admin" },
+  { href: "/tasks", label: "安全查询", icon: Workflow, audience: "technical" },
+  { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet, audience: "admin" },
+  { href: "/uat", label: "UAT 验收", icon: ShieldCheck, audience: "admin" },
   { href: "/notifications", label: "通知", icon: Bell },
-  { href: "/jobs", label: "后台任务", icon: History },
-  { href: "/audit", label: "审计", icon: ScrollText },
-  { href: "/admin/institutions", label: "系统管理", icon: Settings2, match: "/admin" },
-  { href: "/legacy", label: "Legacy 综合工作台", icon: LayoutGrid }
+  { href: "/jobs", label: "后台任务", icon: History, audience: "technical" },
+  { href: "/audit", label: "审计", icon: ScrollText, audience: "admin" },
+  { href: "/admin/institutions", label: "系统管理", icon: Settings2, match: "/admin", audience: "admin" },
+  { href: "/legacy", label: "Legacy 综合工作台", icon: LayoutGrid, audience: "admin" }
 ];
 
 function isActive(pathname: string, item: NavItem) {
@@ -114,13 +122,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return <ProjectProvider><ShellContent>{children}</ShellContent></ProjectProvider>;
 }
 
-function SidebarNav({ pathname, runningJobs = 0 }: { pathname: string; runningJobs?: number }) {
-  const secondaryActive = SECONDARY_NAV.some((item) => isActive(pathname, item));
+function SidebarNav({ access, pathname, runningJobs = 0 }: { access: NavigationAccess; pathname: string; runningJobs?: number }) {
+  const canSee = (item: NavItem) => canViewNavigationAudience(item.audience, access);
+  const primaryGroups = NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter(canSee) })).filter((group) => group.items.length);
+  const secondaryItems = SECONDARY_NAV.filter(canSee);
+  const secondaryActive = secondaryItems.some((item) => isActive(pathname, item));
   const [secondaryOpen, setSecondaryOpen] = useState(secondaryActive);
   useEffect(() => { if (secondaryActive) setSecondaryOpen(true); }, [secondaryActive]);
   return (
     <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
-      {NAV_GROUPS.map((group) => (
+      {primaryGroups.map((group) => (
         <div key={group.label}>
           <div className="px-3 pb-1.5 pt-2 text-[11px] font-medium tracking-wider text-emerald-100/40">{group.label}</div>
           <div className="space-y-0.5">
@@ -148,13 +159,13 @@ function SidebarNav({ pathname, runningJobs = 0 }: { pathname: string; runningJo
           </div>
         </div>
       ))}
-      <details className="group border-t border-white/[0.06] pt-3" onToggle={(event) => setSecondaryOpen(event.currentTarget.open)} open={secondaryOpen}>
+      {secondaryItems.length ? <details className="group border-t border-white/[0.06] pt-3" onToggle={(event) => setSecondaryOpen(event.currentTarget.open)} open={secondaryOpen}>
         <summary className="mx-1 flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-emerald-50/45 hover:bg-white/[0.05] hover:text-white">
           <Settings2 size={15} />系统管理与低频工具
           <span className="ml-auto text-[10px] transition group-open:rotate-180">⌄</span>
         </summary>
         <div className="mt-1 space-y-0.5">
-          {SECONDARY_NAV.map((item) => {
+          {secondaryItems.map((item) => {
             const active = isActive(pathname, item);
             const Icon = item.icon;
             return (
@@ -165,7 +176,7 @@ function SidebarNav({ pathname, runningJobs = 0 }: { pathname: string; runningJo
             );
           })}
         </div>
-      </details>
+      </details> : null}
     </nav>
   );
 }
@@ -196,12 +207,17 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { projectId, selectedProject } = useProjectWorkspace();
-  const [user, setUser] = useState<{ display_name?: string | null; username: string } | null>(null);
+  const [user, setUser] = useState<{
+    display_name?: string | null;
+    username: string;
+    effective_project_permissions?: Record<string, string[]>;
+    institution_memberships?: Array<{ institution_id?: number; role?: string; status?: string }>;
+  } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [runningJobs, setRunningJobs] = useState(0);
 
   useEffect(() => {
-    apiGet<{ display_name?: string | null; username: string }>("/auth/me").then(setUser).catch(() => setUser(null));
+    apiGet<NonNullable<typeof user>>("/auth/me").then(setUser).catch(() => setUser(null));
   }, []);
 
   useEffect(() => {
@@ -238,6 +254,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   }, [projectId]);
 
   const displayName = user?.display_name || user?.username || "未登录";
+  const navigationAccess = navigationAccessForProject(user, projectId);
 
   function logout() {
     clearSession();
@@ -248,7 +265,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-mist">
       <aside className="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col bg-gradient-to-b from-[#102a30] to-[#0a1f22] lg:flex">
         <SidebarBrand />
-        <SidebarNav pathname={pathname} runningJobs={runningJobs} />
+        <SidebarNav access={navigationAccess} pathname={pathname} runningJobs={runningJobs} />
         <SidebarFooter />
       </aside>
 
@@ -262,7 +279,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
                 <X size={18} />
               </button>
             </div>
-            <SidebarNav pathname={pathname} runningJobs={runningJobs} />
+            <SidebarNav access={navigationAccess} pathname={pathname} runningJobs={runningJobs} />
             <SidebarFooter />
           </aside>
         </div>
@@ -279,13 +296,14 @@ function ShellContent({ children }: { children: React.ReactNode }) {
               {selectedProject ? <span className="truncate text-xs text-slate-400">{selectedProject.name}</span> : null}
             </div>
             <div className="flex-1" />
+            <GlobalSearch projectId={projectId} />
             <Link className="hidden items-center gap-2 rounded-full border border-pine-100 bg-pine-50 px-3 py-1.5 text-[11px] font-medium text-pine-700 xl:flex" href="/jobs">
               <span className={`h-1.5 w-1.5 rounded-full ${runningJobs ? "bg-gold-500" : "bg-pine-400"}`} />
               {runningJobs ? `${runningJobs} 个后台任务运行中` : "后台任务正常"}
             </Link>
-            <ProjectSelector className="w-44 sm:w-52" />
-            <div className="flex items-center gap-2 border-l border-line pl-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pine-100 text-sm font-semibold text-pine-700">
+            <ProjectSelector className="w-32 sm:w-52" />
+            <div className="flex items-center gap-1 sm:gap-2 sm:border-l sm:border-line sm:pl-3">
+              <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pine-100 text-sm font-semibold text-pine-700 sm:flex">
                 {displayName.slice(0, 1)}
               </span>
               <span className="hidden max-w-32 truncate text-sm font-medium text-ink sm:block">{displayName}</span>

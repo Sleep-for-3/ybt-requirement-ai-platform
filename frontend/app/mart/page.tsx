@@ -5,12 +5,19 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
+import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { MartTable, apiGet, apiPost } from "@/lib/api";
 
 export default function Page() {
   const { projectId } = useProjectWorkspace();
   const [items, setItems] = useState<MartTable[]>([]);
   const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   async function reload() {
     if (projectId) setItems(await apiGet(`/projects/${projectId}/mart-tables`));
@@ -24,6 +31,8 @@ export default function Page() {
     event.preventDefault();
     if (!projectId) return;
     const form = new FormData(event.currentTarget);
+    setFormError("");
+    setCreating(true);
     try {
       await apiPost(`/projects/${projectId}/mart-tables`, {
         table_code: form.get("code"),
@@ -34,39 +43,32 @@ export default function Page() {
       });
       event.currentTarget.reset();
       setMessage("监管集市表已创建");
+      setDirty(false);
+      setCreateOpen(false);
       await reload();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建失败");
+      setFormError(error instanceof Error ? error.message : "创建失败");
+    } finally {
+      setCreating(false);
     }
+  }
+
+  function requestCloseCreate() {
+    if (creating) return;
+    if (dirty) { setDiscardOpen(true); return; }
+    setCreateOpen(false);
+  }
+
+  function openCreate() {
+    setFormError("");
+    setCreateOpen(true);
   }
 
   return (
     <main>
-      <WorkspaceHeader title="监管集市层" meta={`${items.length} 张集市表`} />
-      <div className="mx-auto grid max-w-[1400px] gap-5 p-4 lg:grid-cols-[360px_1fr] lg:p-6">
-        <form className="panel h-fit" onSubmit={create}>
-          <div className="panel-header">
-            <h2 className="text-[15px] font-semibold text-ink">新增监管集市表</h2>
-          </div>
-          <div className="panel-body space-y-3">
-            <input className="control" name="code" placeholder="表英文名" required />
-            <input className="control" name="name" placeholder="表中文名" required />
-            <input className="control" name="subject" placeholder="主题域" />
-            <textarea className="control" name="comment" placeholder="表说明" />
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input name="existing" type="checkbox" />
-              已有集市表
-            </label>
-            <button className="button-primary w-full">
-              <Plus size={16} />
-              新增
-            </button>
-            {message ? (
-              <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
-            ) : null}
-          </div>
-        </form>
-
+      <WorkspaceHeader title="监管集市层" meta={`${items.length} 张集市表`} actions={<button className="button-primary" disabled={!projectId} onClick={openCreate} type="button"><Plus size={16} />新增集市表</button>} />
+      <div className="mx-auto max-w-[1400px] p-4 lg:p-6">
+        {message ? <p className="mb-4 rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p> : null}
         {items.length ? (
           <section className="panel h-fit overflow-hidden">
             <div className="grid-head grid grid-cols-[1.2fr_1.2fr_1fr_96px] gap-3">
@@ -91,10 +93,23 @@ export default function Page() {
         ) : (
           <div className="empty-state h-fit">
             <Database className="text-slate-300" size={28} />
-            <p>还没有集市表，先在左侧登记第一张监管集市表</p>
+            <p>还没有集市表，从右上角登记第一张监管集市表</p>
+            <button className="button-primary" disabled={!projectId} onClick={openCreate} type="button"><Plus size={16} />新增集市表</button>
           </div>
         )}
       </div>
+      <ModalDialog description="登记监管集市资产，不会自动改变现有映射和血缘。" onClose={requestCloseCreate} open={createOpen} title="新增监管集市表">
+        <form className="space-y-4" onChange={() => setDirty(true)} onSubmit={create}>
+          {formError ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{formError}</p> : null}
+          <input className="control" name="code" placeholder="表英文名" required />
+          <input className="control" name="name" placeholder="表中文名" required />
+          <input className="control" name="subject" placeholder="主题域" />
+          <textarea className="control min-h-24" name="comment" placeholder="表说明" />
+          <label className="flex items-center gap-2 text-sm text-slate-600"><input name="existing" type="checkbox" />已有集市表</label>
+          <div className="flex justify-end gap-2"><button className="button-secondary" disabled={creating} onClick={requestCloseCreate} type="button">取消</button><button className="button-primary" disabled={creating} type="submit"><Plus size={16} />{creating ? "创建中…" : "新增集市表"}</button></div>
+        </form>
+      </ModalDialog>
+      <ConfirmDialog danger confirmText="放弃修改" description="尚未保存的集市表信息将丢失。" onCancel={() => setDiscardOpen(false)} onConfirm={() => { setDiscardOpen(false); setDirty(false); setCreateOpen(false); }} open={discardOpen} title="放弃新增集市表？" />
     </main>
   );
 }

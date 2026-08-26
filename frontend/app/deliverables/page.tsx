@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Package, PackagePlus, RefreshCw } from "lucide-react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { DeliverablePackage, DeliverableTemplate, TargetTable, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
@@ -102,7 +102,7 @@ export default function Page() {
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map(item => (
-            <Link className="panel p-4 transition hover:border-pine hover:shadow-pop" href={`/deliverables/${item.id}`} key={item.id}>
+            <StatefulLink className="panel p-4 transition hover:border-pine hover:shadow-pop" href={`/deliverables/${item.id}`} key={item.id}>
               <div className="flex justify-between gap-3">
                 <b className="text-ink">{item.package_name}</b>
                 <Status value={item.status} />
@@ -119,7 +119,7 @@ export default function Page() {
                 <div>生成任务：{jobLabel(item.generation_job)}</div>
                 <div className="mt-1">渲染任务：{jobLabel(item.render_job)}</div>
               </div>
-            </Link>
+            </StatefulLink>
           ))}
           {!items.length ? (
             <div className="empty-state md:col-span-2 xl:col-span-3">

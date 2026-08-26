@@ -1,10 +1,10 @@
 "use client";
 
 import { History, ListChecks, Package, Play, RefreshCw, Upload } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { UatMetric, UatStatus, readError } from "@/components/uat/UatUi";
 import { UatPack, UatRun, UatSuite, apiGet, apiPost, uploadForm } from "@/lib/api";
@@ -149,7 +149,7 @@ export default function UatPage() {
               {suites.length ? (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {suites.map(item => (
-                    <Link className="panel p-4 transition hover:border-pine" href={`/uat/suites/${item.id}`} key={item.id}>
+                    <StatefulLink className="panel p-4 transition hover:border-pine" href={`/uat/suites/${item.id}`} key={item.id}>
                       <div className="flex justify-between gap-3">
                         <b>{item.suite_name}</b>
                         <span className="text-xs text-slate-500">{item.cases.length} Cases</span>
@@ -159,7 +159,7 @@ export default function UatPage() {
                         <Play size={14} />
                         进入套件
                       </span>
-                    </Link>
+                    </StatefulLink>
                   ))}
                 </div>
               ) : !loading ? (
@@ -175,7 +175,7 @@ export default function UatPage() {
               {runs.length ? (
                 <div className="panel divide-y divide-line overflow-hidden">
                   {runs.slice(0, 20).map(item => (
-                    <Link className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:bg-mist" href={`/uat/runs/${item.id}`} key={item.id}>
+                    <StatefulLink className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:bg-mist" href={`/uat/runs/${item.id}`} key={item.id}>
                       <div>
                         <b>{item.run_name}</b>
                         <div className="mt-1 text-xs text-slate-500">
@@ -183,7 +183,7 @@ export default function UatPage() {
                         </div>
                       </div>
                       <UatStatus value={item.status} />
-                    </Link>
+                    </StatefulLink>
                   ))}
                 </div>
               ) : !loading ? (

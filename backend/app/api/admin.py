@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import Institution, InstitutionMembership, User
-from app.schemas.governance import AdminUserCreate, BootstrapRequest, BootstrapResponse, InstitutionCreate, InstitutionRead, UserRead
+from app.schemas.governance import AdminUserCreate, AdminUserRead, BootstrapRequest, BootstrapResponse, InstitutionCreate, InstitutionRead, UserRead
 from app.services.auth.dependencies import RealPrincipal
 from app.services.auth.permission_service import INSTITUTION_ROLES, PROJECT_ROLE_PERMISSIONS, PermissionService
 from app.services.auth.password import hash_password
@@ -99,6 +99,50 @@ def create_user(payload: AdminUserCreate, principal: RealPrincipal, db: Session 
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.get("/users", response_model=list[AdminUserRead])
+def list_users(principal: RealPrincipal, db: Session = Depends(get_db)) -> list[dict]:
+    permissions = PermissionService(db, principal)
+    visible_institution_ids: list[int] | None = None
+    if not permissions.is_platform_admin():
+        visible_institution_ids = list(db.scalars(select(InstitutionMembership.institution_id).where(
+            InstitutionMembership.user_id == principal.user_id,
+            InstitutionMembership.status == "active",
+            InstitutionMembership.role.in_(("institution_admin", "security_admin")),
+        )).all())
+        if not visible_institution_ids:
+            raise HTTPException(status_code=403, detail="Institution administrator required")
+
+    statement = select(User, InstitutionMembership, Institution).join(
+        InstitutionMembership, InstitutionMembership.user_id == User.id,
+    ).join(
+        Institution, Institution.id == InstitutionMembership.institution_id,
+    ).where(
+        InstitutionMembership.status == "active",
+        Institution.status == "active",
+    ).order_by(User.display_name, User.username, Institution.institution_name)
+    if visible_institution_ids is not None:
+        statement = statement.where(InstitutionMembership.institution_id.in_(visible_institution_ids))
+
+    directory: dict[int, dict] = {}
+    for user, membership, institution in db.execute(statement).all():
+        item = directory.setdefault(user.id, {
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.display_name,
+            "email": user.email,
+            "status": user.status,
+            "last_login_at": user.last_login_at,
+            "institution_memberships": [],
+        })
+        item["institution_memberships"].append({
+            "institution_id": institution.id,
+            "institution_name": institution.institution_name,
+            "role": membership.role,
+            "status": membership.status,
+        })
+    return list(directory.values())
 
 
 @router.get("/permissions")

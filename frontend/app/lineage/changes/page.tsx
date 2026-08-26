@@ -1,10 +1,10 @@
 "use client";
 
 import { GitCompare } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ScriptChange, apiGet } from "@/lib/api";
 
@@ -34,7 +34,7 @@ export default function Page() {
                 <span className="text-right">风险等级</span>
               </div>
               {items.map((item) => (
-                <Link
+                <StatefulLink
                   className="grid-row grid grid-cols-[minmax(0,1fr)_110px] items-center"
                   href={`/lineage/changes/${item.id}`}
                   key={item.id}
@@ -50,7 +50,7 @@ export default function Page() {
                   <span className="justify-self-end">
                     <span className={severityBadge(item.severity)}>{item.severity}</span>
                   </span>
-                </Link>
+                </StatefulLink>
               ))}
             </>
           ) : (

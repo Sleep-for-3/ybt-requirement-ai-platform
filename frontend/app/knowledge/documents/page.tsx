@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
@@ -259,7 +260,7 @@ export default function Page() {
               <span>状态</span>
             </div>
             {items.map((item) => (
-              <Link
+              <StatefulLink
                 className={`grid-row grid ${GRID_COLS} items-center`}
                 href={`/knowledge/documents/${item.id}`}
                 key={item.id}
@@ -271,7 +272,7 @@ export default function Page() {
                 <span>
                   <span className={STATUS_BADGE[item.document_status] || "badge-neutral"}>{item.document_status}</span>
                 </span>
-              </Link>
+              </StatefulLink>
             ))}
           </section>
         ) : (

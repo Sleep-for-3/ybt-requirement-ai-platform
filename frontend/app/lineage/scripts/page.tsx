@@ -1,10 +1,10 @@
 "use client";
 
 import { FileCode2, GitPullRequest, Upload } from "lucide-react";
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
@@ -192,7 +192,7 @@ export default function Page() {
                 <span className="text-right">状态</span>
               </div>
               {items.map((item) => (
-                <Link
+                <StatefulLink
                   className="grid-row grid grid-cols-[minmax(0,1fr)_110px] items-center"
                   href={`/lineage/scripts/${item.id}`}
                   key={item.id}
@@ -208,7 +208,7 @@ export default function Page() {
                       {item.enabled ? "enabled" : "deleted"}
                     </span>
                   </span>
-                </Link>
+                </StatefulLink>
               ))}
             </>
           ) : (
