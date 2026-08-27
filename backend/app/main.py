@@ -3,7 +3,7 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -109,16 +109,49 @@ app.add_middleware(
 )
 
 
+def _error_contract(request: Request, status_code: int, detail, *, error_code: str | None = None, technical_message: str | None = None) -> dict:
+    code = error_code or {
+        400: "invalid_request", 401: "authentication_required", 403: "permission_denied",
+        404: "resource_not_found", 409: "state_conflict", 422: "validation_failed",
+        429: "rate_limited", 503: "dependency_unavailable",
+    }.get(status_code, "internal_error")
+    user_message = detail if isinstance(detail, str) and status_code < 500 else {
+        400: "请求内容不正确", 401: "登录状态已失效", 403: "没有操作权限",
+        404: "资源不存在或不可见", 409: "资源状态冲突", 422: "输入数据不完整或格式不正确",
+        429: "请求过于频繁，请稍后重试", 503: "依赖服务暂不可用",
+    }.get(status_code, "服务器处理失败")
+    return {
+        "detail": detail,
+        "error_code": code,
+        "user_message": user_message,
+        "technical_message": technical_message,
+        "trace_id": getattr(request.state, "request_id", None),
+        "retryable": status_code in {429, 503},
+        "suggested_actions": ["稍后重试"] if status_code in {429, 503} else ["检查输入或联系项目管理员"],
+    }
+
+
+@app.exception_handler(HTTPException)
+async def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content=_error_contract(request, exc.status_code, exc.detail), headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception(json.dumps(build_log_event("unhandled_exception", level="ERROR", request_id=getattr(request.state, "request_id", None), error_type=type(exc).__name__), ensure_ascii=False))
+    return JSONResponse(status_code=500, content=_error_contract(request, 500, "服务器处理失败", technical_message=None))
+
+
 @app.exception_handler(LLMRuntimeError)
-async def llm_runtime_error_handler(_, exc: LLMRuntimeError) -> JSONResponse:
+async def llm_runtime_error_handler(request: Request, exc: LLMRuntimeError) -> JSONResponse:
     return JSONResponse(
         status_code=503,
-        content={"detail": str(exc), "error_type": exc.error_type},
+        content={**_error_contract(request, 503, str(exc), error_code=exc.error_type), "error_type": exc.error_type},
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(_, exc: RequestValidationError) -> JSONResponse:
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     safe_errors = [
         {key: value for key, value in error.items() if key not in {"input", "ctx"}}
         for error in exc.errors()
@@ -127,9 +160,9 @@ async def validation_error_handler(_, exc: RequestValidationError) -> JSONRespon
     if config_payload_rejected:
         return JSONResponse(
             status_code=400,
-            content={"detail": "Model profile config must not contain credentials or unsupported fields"},
+            content=_error_contract(request, 400, "Model profile config must not contain credentials or unsupported fields"),
         )
-    return JSONResponse(status_code=422, content={"detail": safe_errors})
+    return JSONResponse(status_code=422, content=_error_contract(request, 422, safe_errors))
 
 
 @app.get(f"{settings.api_prefix}/health")
