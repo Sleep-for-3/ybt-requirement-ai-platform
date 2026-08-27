@@ -1,27 +1,51 @@
-# Release Qualification — RC Hardening
+# Release Qualification — v2.0.0-rc1 Staging Qualification
 
-RC 基线：`origin/main = e872a6533b7edeaf58905c6a71342f172b6f8932`  
-本轮范围：认证门禁、CI、发布资格证据；不新增 Dashboard、Requirement、Semantic、Quality、Impact 产品功能。
+## RC identity
 
-状态定义：已验证 = 有自动化或真实环境证据；部分 = 有局部证据但未满足发布条件；未验证 = 仍需 staging/人工演练。
+- Requested source: GitHub `main` / tag `v2.0.0-rc1`.
+- Remote verification on 2026-08-27: `origin/main` resolves to `e872a6533b7edeaf58905c6a71342f172b6f8932`; no `v2.0.0-rc1` tag is published.
+- This report therefore qualifies only the public `main` commit `e872a653…`. Local hardening `dd569cb` is not treated as the RC because it is not on GitHub `main`.
+- Only `PASS`, `FAIL`, `BLOCKED`, `NOT VALIDATED`, or `N/A` are used.
 
-| Release gate | 状态 | 证据 / 下一步 |
+## Qualification evidence
+
+| Gate | Status | Evidence / blocker |
 |---|---|---|
-| 自动测试 | 已验证（本地） | 后端现有回归、RC auth/isolation smoke；GitHub CI 在 PR/main push 执行 full tests、前端 tests、TS、lint、build、migration、production auth/isolation。 |
-| staging PostgreSQL | 未验证 | 需在与生产拓扑接近的 staging 执行迁移、启动、健康检查和关键浏览器路径。 |
-| concurrency / locking | 未验证 | SQLite/单进程测试不能证明 PostgreSQL 锁语义；需 staging 多 worker 并发创建/领取/审批/幂等任务演练。 |
-| backup / restore | 未验证 | 需完成 PostgreSQL、对象存储/本地 storage、Redis/Celery 配置的备份恢复演练并记录 RPO/RTO。 |
-| datasource driver matrix | 部分验证 | SQLite、PostgreSQL 有本地/集成证据；MySQL、Oracle、SQL Server、DB2、GBase 仍需真实 driver、只读校验和 metadata discovery 验证。 |
-| security | 部分验证 | production auth gate、项目/机构隔离、metrics 门禁已自动验证；仍需 staging secret rotation、TLS、网络边界、依赖漏洞和渗透测试。 |
-| performance | 部分验证 | 已有本地小规模 baseline；尚未在 staging 数据量和并发下确认 API p95、首屏 waterfall、后台任务延迟预算。 |
-| browser UAT | 部分验证 | 已完成登录、项目切换、workspace、dashboard、quality、impact 等本地真实浏览器路径；首次接入、完整交付闭环、staging 浏览器回归仍未完成。 |
+| Clean install / fresh clone | PASS | New shallow clone of GitHub `main` in a fresh temporary directory; clean tree and HEAD `e872a653…`. No repository `.env`, local DB, cache, `.next`, virtualenv, or storage reused. |
+| Fresh Alembic empty database | NOT VALIDATED | Docker unavailable; no isolated staging PostgreSQL credentials. Local PostgreSQL 5432 is occupied by an existing development process. |
+| Startup / health endpoints | PASS (local only) | Existing local PostgreSQL/Redis/backend/frontend returned live 200, ready 200, and health details 200. This is not staging evidence. |
+| PostgreSQL qualification | BLOCKED | No isolated staging PostgreSQL endpoint/credentials; SQLite is not used as a substitute. |
+| Rollback / FK / unique / semantic constraints | BLOCKED | Must execute against isolated staging PostgreSQL. |
+| Concurrency / locking A–F | BLOCKED | No staging PostgreSQL and multi-worker environment; no lost-update, optimistic-conflict, deadlock, governance-lock or idempotency result claimed. |
+| Backup / restore disaster drill | BLOCKED | No isolated staging database/object-storage target; RTO/RPO cannot be measured honestly. |
+| Security staging | NOT VALIDATED | TLS, encryption at rest, rotation, disabled-user/revoked-membership staging checks, network boundary and external penetration testing remain open. |
+| Dependency vulnerability scan | NOT VALIDATED | `npm audit` endpoint unavailable on configured mirror; `pip-audit` not installed. |
+| Datasource driver matrix | NOT VALIDATED | No real Oracle/MySQL/SQL Server/DB2/GBase server was connected. |
+| Performance qualification | NOT VALIDATED | Existing local synthetic baseline is not near-production scale and does not close requested p50/p95/p99 budgets. |
+| Real browser UAT | NOT VALIDATED | Existing local browser evidence is not the requested production frontend + staging backend end-to-end path. |
 
-## 当前结论
+## Driver matrix
 
-本提交达到“RC hardening complete / internal UAT candidate”，不等同于生产上线批准。阻塞生产放行的主要 gate 是 staging PostgreSQL、并发锁、备份恢复、完整 driver matrix、安全测试和性能预算证据。
+Only a real connection may change a row to `PASS`. Current status is `NOT VALIDATED` for every external database driver.
 
-## 自动化入口
+| Priority | Database | Driver / version | Connection | Readonly | Metadata / schema | Safe query | Sync | Validated environment | Known limitations |
+|---|---|---|---|---|---|---|---|---|---|
+| P0 | PostgreSQL | psycopg 3.x (requirements range) | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | None | Isolated staging server required |
+| P1 | SQLite | stdlib sqlite3 | PASS (automated/local) | PASS (automated/local) | PASS (automated/local) | PASS (automated/local) | PASS (automated/local) | CI/local test databases | Not evidence for production PostgreSQL |
+| P1 | MySQL/MySQL-compatible | PyMySQL 1.x (requirements range) | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | None | No real server supplied |
+| P1 | Oracle | No enabled production driver configured | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | None | Driver/server/version unknown |
+| P1 | SQL Server | No enabled production driver configured | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | None | Driver/server/version unknown |
+| P1 | DB2 | No enabled production driver configured | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | None | Driver/server/version unknown |
+| P2 | GBase | Product/version unknown | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | NOT VALIDATED | None | Do not infer compatibility from SQLAlchemy |
 
-- `.github/workflows/ci.yml`：PR 与 `main` push。
-- `.github/workflows/smoke.yml`：既有完整 smoke / provider / artifact 流程，保留不变。
-- `backend/tests/test_release_hardening.py`：生产认证、合法登录、机构/项目隔离、metrics 门禁。
+## Performance checklist
+
+Status: `NOT VALIDATED`. Required near-realistic data and staging measurements are missing for ordinary API p50/p95/p99, workspace request count/latency, semantic catalog, dashboard aggregation, project-switch cancellation/clearance, and background queue/execution latency. No hidden loading or synthetic cache is used to claim success.
+
+## Browser UAT checklist
+
+Status: `NOT VALIDATED`. Staging still needs the production frontend and real backend path: login → dashboard → project → datasource/connection/schema discovery/metadata sync → catalog → target table/field/scenario → workspace → AI draft/evidence/lineage → human final/review → deliverable → SQL/metadata change → semantic impact/review task → dashboard drill-down. Return links, breadcrumbs, URL restoration, deep links, project switch, restricted/error/conflict/long-text/large-table states must be recorded.
+
+## Go / No-Go
+
+**NO-GO for production.** Clean clone identity is known, but staging PostgreSQL, concurrency/locking, backup/restore, security deployment, driver matrix, performance and real browser UAT are not validated. Qualification stops here; no production release or tag is created.
