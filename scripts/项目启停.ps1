@@ -701,7 +701,11 @@ function Set-ProjectEnvironment {
     param([int]$Port, [string]$DatabaseUrl)
     $env:DATABASE_URL = $DatabaseUrl
     $env:STORAGE_DIR = "./dev_storage_local"
-    $env:AUTH_MODE = "optional"
+    # Production must never start in legacy-system mode.  SQLite is the
+    # explicitly local-development profile and is the only launcher mode
+    # allowed to retain optional authentication.
+    $env:ENVIRONMENT = if ($Mode -eq "production") { "production" } else { "development" }
+    $env:AUTH_MODE = if ($Mode -eq "production") { "required" } else { "optional" }
     $env:CORS_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
     $env:LOCAL_BACKEND_PORT = [string]$Port
     # Keep the long-running dev server isolated from `next build`'s production `.next` output.
@@ -1002,7 +1006,7 @@ function Start-Project {
         frontendErr = Join-Path $logRoot "frontend-$timestamp.stderr.log"
     }
     $environmentNames = @(
-        "DATABASE_URL", "STORAGE_DIR", "AUTH_MODE", "TASK_QUEUE_PROVIDER",
+        "DATABASE_URL", "STORAGE_DIR", "ENVIRONMENT", "AUTH_MODE", "TASK_QUEUE_PROVIDER",
         "REDIS_URL", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND",
         "LLM_PROVIDER", "EMBEDDING_PROVIDER", "VECTOR_STORE_PROVIDER",
         "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION",

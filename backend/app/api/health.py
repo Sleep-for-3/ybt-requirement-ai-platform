@@ -45,7 +45,19 @@ def details(
 
 
 @router.get("/metrics")
-def metrics(db: Session = Depends(get_db)) -> Response:
+def metrics(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    # Metrics contain operational volume and route information.  Keep the
+    # development surface compatible, but require a platform administrator in
+    # production so an unauthenticated caller cannot enumerate system activity.
+    settings = get_settings()
+    if settings.environment.lower() == "production":
+        principal = get_current_principal(request, credentials, db)
+        if not PermissionService(db, principal).is_platform_admin():
+            raise HTTPException(status_code=403, detail="Platform administrator permission is required")
     rows = db.execute(select(BackgroundJob.status, func.count(BackgroundJob.id)).group_by(BackgroundJob.status)).all()
     set_job_metrics({key: count for key, count in rows})
     return Response(render_metrics(), media_type="text/plain; version=0.0.4")
