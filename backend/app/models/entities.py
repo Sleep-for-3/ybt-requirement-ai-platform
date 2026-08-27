@@ -736,6 +736,8 @@ class DataSource(Base, TimestampMixin):
     last_test_status: Mapped[str | None] = mapped_column(String(50))
     last_test_message: Mapped[str | None] = mapped_column(Text)
     last_test_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    last_database_version: Mapped[str | None] = mapped_column(String(300))
+    last_discovered_schemas_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
 
     @property
     def password_configured(self) -> bool:
@@ -808,6 +810,29 @@ class MetadataSyncTask(Base, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text)
     warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     created_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class MetadataDriftEvent(Base, TimestampMixin):
+    __tablename__ = "metadata_drift_events"
+    __table_args__ = (
+        Index("ix_metadata_drift_events_datasource_created", "datasource_id", "created_at"),
+        Index("ix_metadata_drift_events_task_change", "sync_task_id", "change_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), index=True)
+    sync_task_id: Mapped[int] = mapped_column(ForeignKey("metadata_sync_tasks.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(30), index=True)
+    entity_key: Mapped[str] = mapped_column(String(800))
+    change_type: Mapped[str] = mapped_column(String(30), index=True)
+    schema_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    table_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    column_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    changed_attributes_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    previous_snapshot_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    current_snapshot_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    rename_candidate_key: Mapped[str | None] = mapped_column(String(800))
 
 
 class CatalogSchema(Base, TimestampMixin):

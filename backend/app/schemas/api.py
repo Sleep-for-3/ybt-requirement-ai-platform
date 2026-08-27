@@ -353,6 +353,8 @@ class DataSourceRead(OrmModel):
     last_test_status: str | None
     last_test_message: str | None
     last_test_at: datetime | None
+    last_database_version: str | None
+    last_discovered_schemas_json: list[str]
     created_at: datetime
     updated_at: datetime
 
@@ -365,6 +367,12 @@ class DataSourceRead(OrmModel):
 class DataSourceTestResponse(BaseModel):
     status: str
     message: str
+    error_code: str | None = None
+    driver: str | None = None
+    database_version: str | None = None
+    schemas: list[str] = Field(default_factory=list)
+    readonly_validation: str | None = None
+    steps: list[dict[str, str]] = Field(default_factory=list)
 
 
 class SafeSqlRequest(BaseModel):

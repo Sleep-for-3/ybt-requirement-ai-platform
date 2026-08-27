@@ -15,6 +15,13 @@ class MetadataSyncTaskRead(OrmMetadataModel):
     started_at: datetime | None; finished_at: datetime | None; schema_count: int; table_count: int; column_count: int
     error_message: str | None; warnings_json: list[Any]; created_at: datetime; updated_at: datetime; created_by: str | None
 
+class MetadataDriftEventRead(OrmMetadataModel):
+    id: int; project_id: int; datasource_id: int; sync_task_id: int
+    entity_type: str; entity_key: str; change_type: str
+    schema_name: str | None; table_name: str | None; column_name: str | None
+    changed_attributes_json: list[str]; previous_snapshot_json: dict[str, Any]; current_snapshot_json: dict[str, Any]
+    rename_candidate_key: str | None; created_at: datetime; updated_at: datetime
+
 class CatalogSchemaRead(OrmMetadataModel):
     id: int; project_id: int; datasource_id: int; schema_name: str; schema_comment: str | None; enabled: bool; last_synced_at: datetime | None
 

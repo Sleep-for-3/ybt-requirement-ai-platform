@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     enable_mysql_datasource: bool = False
     enable_db2_datasource: bool = False
     enable_hive_datasource: bool = False
+    enable_sqlserver_datasource: bool = False
+    enable_gbase_datasource: bool = False
 
     coze_enabled: bool = False
     coze_base_url: str = "http://coze-studio:8888"

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import CatalogColumn, DataSource, Project
+from app.models import CatalogColumn, DataSource, MetadataDriftEvent, Project
 from app.services.metadata.base import ColumnMetadata, SchemaMetadata, TableMetadata
 from app.services.metadata.sync_service import synchronize_metadata
 import app.services.metadata.sync_service as sync_service
@@ -25,9 +25,16 @@ def test_sqlite_metadata_sync_search_pagination_and_import(tmp_path: Path) -> No
         connection.executemany("insert into ecif_customer values (?,?,?)",[(1,"01","张三"),(2,"01","李四"),(3,"02","王五"),(4,None,"赵六")])
     with _client() as client:
         project=_post(client,"/api/projects",{"name":"元数据目录项目"})
+        connectors=_get(client,f"/api/projects/{project['id']}/datasource-connectors")
+        assert next(item for item in connectors if item["engine_type"]=="sqlite")["status"]=="available"
+        diagnostic=_post(client,f"/api/projects/{project['id']}/datasources/connection-inspect",{"name":"preflight_catalog","db_type":"sqlite","database_name":str(source_db),"readonly_flag":True})
+        assert diagnostic["status"]=="success";assert diagnostic["schemas"]==["main"];assert diagnostic["database_version"]
         datasource=_post(client,f"/api/projects/{project['id']}/datasources",{"name":"ecif_catalog","db_type":"sqlite","database_name":str(source_db),"readonly_flag":True})
+        tested=_post(client,f"/api/datasources/{datasource['id']}/test",{});assert tested["status"]=="success";assert tested["database_version"]
         task=_post(client,f"/api/datasources/{datasource['id']}/metadata-sync",{"sync_mode":"full","schema_names":[],"include_views":True})
         assert task["status"]=="completed"; assert task["table_count"]==1; assert task["column_count"]==3
+        initial_drift=_get(client,f"/api/metadata-sync-tasks/{task['id']}/drift");assert len(initial_drift)==4;assert {item["change_type"] for item in initial_drift}=={"added"}
+        drift_page=_get(client,f"/api/metadata-sync-tasks/{task['id']}/drift?limit=2&offset=2");assert len(drift_page)==2;assert {item["id"] for item in drift_page}.isdisjoint({item["id"] for item in initial_drift[:2]})
         tables=_get(client,f"/api/projects/{project['id']}/catalog/tables?page=1&page_size=1")
         assert tables["total"]==1; table=tables["items"][0]; assert table["table_name"]=="ecif_customer"; assert table["primary_key_columns_json"]==["customer_id"]
         columns=_get(client,f"/api/catalog/tables/{table['id']}/columns?page=1&page_size=2")
@@ -146,6 +153,25 @@ def test_full_sync_preserves_a_failed_tables_existing_columns(db_session,monkeyp
     assert columns["healthy.current"] is True
     assert columns["healthy.removed"] is False
     assert columns["fragile.kept"] is True
+
+def test_full_sync_records_column_drift_and_rename_candidates(db_session,monkeypatch)->None:
+    project=Project(name="漂移事件");db_session.add(project);db_session.flush();datasource=DataSource(project_id=project.id,name="drift_source",db_type="sqlite",database_name=":memory:");db_session.add(datasource);db_session.commit()
+    class Adapter:
+        column_name="customer_name"
+        def list_schemas(self):return [SchemaMetadata("main")]
+        def list_tables(self,schema_names=None,include_views=True):return [TableMetadata("main","customer")]
+        def list_columns(self,schema_name,table_name):return [ColumnMetadata("main","customer",self.column_name,data_type="VARCHAR",database_native_type="VARCHAR(100)",nullable=True,ordinal_position=1,character_max_length=100)]
+    adapter=Adapter();monkeypatch.setattr(sync_service,"create_metadata_adapter",lambda datasource:adapter)
+    first=synchronize_metadata(db_session,datasource)
+    assert {(event.entity_type,event.change_type) for event in db_session.query(MetadataDriftEvent).filter_by(sync_task_id=first.id)}=={("table","added"),("column","added")}
+    adapter.column_name="customer_full_name"
+    second=synchronize_metadata(db_session,datasource)
+    events=db_session.query(MetadataDriftEvent).filter_by(sync_task_id=second.id).all()
+    added=next(event for event in events if event.change_type=="added")
+    removed=next(event for event in events if event.change_type=="removed")
+    assert added.rename_candidate_key==removed.entity_key
+    assert removed.rename_candidate_key==added.entity_key
+    assert "character_max_length" in added.changed_attributes_json
 
 @contextmanager
 def _client()->Iterator[TestClient]:

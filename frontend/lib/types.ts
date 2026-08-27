@@ -182,7 +182,8 @@ export type SemanticAssetReference = ReadableSemanticAssetReference | Restricted
 export type SemanticCatalogItem = { id:number;project_id:number;concept_type:SemanticConceptType;concept_code:string;concept_name:string;status:SemanticLifecycleStatus;business_domain?:string|null;owner_department?:string|null;effective_version?:SemanticCatalogEffectiveVersion|null;related_asset_count:number;related_assets:SemanticAssetReference[];has_relation:boolean;open_question_count:number;review:SemanticCatalogReviewSummary;updated_at:string };
 export type SemanticCatalogFacets = { concept_types:Record<string,number>;business_domains:Record<string,number>;owners:Record<string,number>;statuses:Record<string,number> };
 export type SemanticCatalogPage = { items:SemanticCatalogItem[];total:number;page:number;page_size:number;as_of:string;mode:"trusted"|"candidate"|"audit";facets:SemanticCatalogFacets };
-export type MetadataSyncTask = { id:number; datasource_id:number; status:string; sync_mode:string; schema_count:number; table_count:number; column_count:number; warnings_json:string[]; error_message?:string|null };
+export type MetadataSyncTask = { id:number; datasource_id:number; status:string; sync_mode:string; started_at?:string|null; finished_at?:string|null; schema_count:number; table_count:number; column_count:number; warnings_json:string[]; error_message?:string|null; created_at?:string; updated_at?:string };
+export type MetadataDriftEvent = { id:number; sync_task_id:number; entity_type:"table"|"column"; entity_key:string; change_type:"added"|"removed"|"modified"; schema_name?:string|null; table_name?:string|null; column_name?:string|null; changed_attributes_json:string[]; previous_snapshot_json:Record<string,unknown>; current_snapshot_json:Record<string,unknown>; rename_candidate_key?:string|null; created_at:string };
 export type ColumnProfileTask = { id:number; status:string; catalog_column_id:number; profile_result_json:Record<string,unknown>; generated_sql_json:Array<{metric:string;sql:string}>; error_message?:string|null };
 export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog_column_id:number; profile_date:string; total_count?:number|null; null_rate?:number|null; distinct_count?:number|null; min_value_text?:string|null; max_value_text?:string|null; min_length?:number|null; max_length?:number|null; average_length?:number|null; top_values_json:unknown[]; warnings_json:unknown[] };
 export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; parse_summary_json:Record<string,unknown>; warnings_json:string[] };
@@ -353,11 +354,46 @@ export type DataSource = {
   database_name?: string | null;
   schema_name?: string | null;
   username?: string | null;
+  connection_params_json: Record<string,unknown>;
   password_configured: boolean;
   readonly_flag: boolean;
   enabled: boolean;
   last_test_status?: string | null;
   last_test_message?: string | null;
+  last_test_at?: string | null;
+  last_database_version?: string | null;
+  last_discovered_schemas_json: string[];
+};
+
+export type DataSourceConnector = {
+  engine_type:string;
+  label:string;
+  aliases:string[];
+  status:"available"|"disabled"|"driver_missing"|"extension_only";
+  enabled:boolean;
+  drivers:Array<{module:string;label:string;installed:boolean}>;
+  default_port?:number|null;
+  required_fields:string[];
+  optional_fields:string[];
+  database_label:string;
+  schema_label:string;
+  service_name_mode:string;
+  ssl_tls_capability:string;
+  readonly_validation:string;
+  metadata_discovery:boolean;
+  safe_query:boolean;
+  implementation:string;
+};
+
+export type DataSourceConnectionDiagnostic = {
+  status:"success"|"failed";
+  message:string;
+  error_code?:string|null;
+  driver?:string|null;
+  database_version?:string|null;
+  schemas:string[];
+  readonly_validation?:string|null;
+  steps:Array<{code:string;status:string;message:string}>;
 };
 
 export type NaturalLanguageTask = {

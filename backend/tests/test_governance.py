@@ -272,6 +272,12 @@ def test_project_member_cannot_read_another_institutions_project(monkeypatch) ->
         foreign_system = client.post(f"/api/projects/{project_b['id']}/business-systems", headers=admin_headers, json={
             "system_code": "BANK_B_CORE", "system_name": "乙行核心系统",
         }).json()
+        foreign_datasource = client.post(f"/api/projects/{project_b['id']}/datasources", headers=admin_headers, json={
+            "name": "bank_b_catalog", "db_type": "sqlite", "database_name": ":memory:", "readonly_flag": True,
+        }).json()
+        foreign_sync = client.post(f"/api/datasources/{foreign_datasource['id']}/metadata-sync", headers=admin_headers, json={
+            "sync_mode": "full", "schema_names": ["main"], "include_views": True,
+        }).json()
         target_table = client.post("/api/target-tables", headers=admin_headers, json={
             "project_id": project_b["id"], "table_code": "RPT_SECRET", "table_name": "乙行监管表",
         }).json()
@@ -290,6 +296,12 @@ def test_project_member_cannot_read_another_institutions_project(monkeypatch) ->
         assert client.get(f"/api/fields?project_id={project_b['id']}", headers=analyst_headers).status_code == 404
         assert client.get(f"/api/target-tables?project_id={project_b['id']}", headers=analyst_headers).status_code == 404
         assert client.get(f"/api/business-systems/{foreign_system['id']}?project_id={project_a['id']}", headers=analyst_headers).status_code == 404
+        assert client.get(f"/api/datasources/{foreign_datasource['id']}", headers=analyst_headers).status_code == 404
+        assert client.post(f"/api/datasources/{foreign_datasource['id']}/test", headers=analyst_headers, json={}).status_code == 404
+        assert client.post(f"/api/datasources/{foreign_datasource['id']}/execute-safe-query", headers=analyst_headers, json={"sql": "select 1"}).status_code == 404
+        assert client.get(f"/api/datasources/{foreign_datasource['id']}/metadata-sync-tasks", headers=analyst_headers).status_code == 404
+        assert client.get(f"/api/metadata-sync-tasks/{foreign_sync['id']}", headers=analyst_headers).status_code == 404
+        assert client.get(f"/api/metadata-sync-tasks/{foreign_sync['id']}/drift", headers=analyst_headers).status_code == 404
 
 
 def test_scenario_review_runs_through_five_separated_roles(monkeypatch) -> None:

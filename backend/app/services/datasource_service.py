@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.crypto import decrypt_secret, encrypt_secret
 from app.models import DataSource
 from app.schemas import DataSourceCreate, DataSourceUpdate
+from app.services.connectors.registry import canonical_engine_type, get_connector
 
 DATASOURCE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
-SUPPORTED_TEST_TYPES = {"sqlite", "postgresql", "mysql", "mysql_compatible"}
 
 
 def ensure_readonly_datasource(datasource: DataSource) -> None:
@@ -28,6 +28,8 @@ def validate_datasource_name(name: str) -> None:
 def create_datasource(db: Session, project_id: int, payload: DataSourceCreate) -> DataSource:
     validate_datasource_name(payload.name)
     validate_connection_params(payload.connection_params_json)
+    engine_type = canonical_engine_type(payload.db_type)
+    _require_available_connector(engine_type)
     existing = db.scalar(select(DataSource).where(DataSource.project_id == project_id, DataSource.name == payload.name))
     if existing:
         raise ValueError("同一项目下 DataSource.name 不能重复")
@@ -36,7 +38,7 @@ def create_datasource(db: Session, project_id: int, payload: DataSourceCreate) -
         name=payload.name,
         display_name=payload.display_name,
         description=payload.description,
-        db_type=payload.db_type.lower(),
+        db_type=engine_type,
         host=payload.host,
         port=payload.port,
         database_name=payload.database_name,
@@ -59,11 +61,12 @@ def update_datasource(db: Session, datasource: DataSource, payload: DataSourceUp
     password = data.pop("password", None)
     if data.get("connection_params_json") is not None:
         validate_connection_params(data["connection_params_json"])
+    if data.get("db_type"):
+        data["db_type"] = canonical_engine_type(data["db_type"])
+        _require_available_connector(data["db_type"])
     if password:
         datasource.encrypted_password = encrypt_secret(password)
     for key, value in data.items():
-        if key == "db_type" and value:
-            value = value.lower()
         setattr(datasource, key, value)
     db.commit()
     db.refresh(datasource)
@@ -75,26 +78,18 @@ def delete_datasource(db: Session, datasource: DataSource) -> None:
     db.commit()
 
 
-def test_datasource_connection(db: Session, datasource: DataSource) -> tuple[str, str]:
+def test_datasource_connection(db: Session, datasource: DataSource) -> dict:
+    from app.services.connectors.diagnostics import diagnose_datasource
+
     ensure_readonly_datasource(datasource)
-    if datasource.db_type not in SUPPORTED_TEST_TYPES:
-        status, message = "unsupported", f"{datasource.db_type} 数据源测试暂未启用"
-    else:
-        try:
-            engine = create_engine(build_database_url(datasource), connect_args=_connect_args(datasource), pool_pre_ping=True)
-            with engine.connect() as connection:
-                connection.execute(text("select 1"))
-            engine.dispose()
-            status, message = "success", "连接测试成功"
-        except Exception as exc:
-            if "engine" in locals():
-                engine.dispose()
-            status, message = "failed", str(exc)
-    datasource.last_test_status = status
-    datasource.last_test_message = message
+    result = diagnose_datasource(datasource)
+    datasource.last_test_status = result["status"]
+    datasource.last_test_message = result["message"]
     datasource.last_test_at = datetime.now(timezone.utc)
+    datasource.last_database_version = result.get("database_version")
+    datasource.last_discovered_schemas_json = result.get("schemas") or []
     db.commit()
-    return status, message
+    return result
 
 
 def build_database_url(datasource: DataSource) -> str:
@@ -114,7 +109,11 @@ def build_database_url(datasource: DataSource) -> str:
         database = datasource.database_name or ""
         username = datasource.username or ""
         password = decrypt_secret(datasource.encrypted_password) or ""
-        return URL.create("postgresql+psycopg", username=username or None, password=password or None, host=host, port=port, database=database).render_as_string(hide_password=False)
+        query = _tls_query(datasource, "sslmode")
+        return URL.create("postgresql+psycopg", username=username or None, password=password or None, host=host, port=port, database=database, query=query).render_as_string(hide_password=False)
+    # Existing installations may still persist the public ``mysql`` alias.
+    # New writes are canonicalized, but connection execution must remain
+    # backward-compatible with already stored datasource rows.
     if datasource.db_type in {"mysql", "mysql_compatible"}:
         host = datasource.host or "localhost"
         port = datasource.port or 3306
@@ -123,6 +122,19 @@ def build_database_url(datasource: DataSource) -> str:
         password = decrypt_secret(datasource.encrypted_password) or ""
         driver = (datasource.connection_params_json or {}).get("driver", "pymysql")
         return URL.create(f"mysql+{driver}", username=username or None, password=password or None, host=host, port=port, database=database).render_as_string(hide_password=False)
+    if datasource.db_type == "oracle":
+        params = datasource.connection_params_json or {}
+        identifier_type = params.get("oracle_identifier_type", "service_name")
+        service = datasource.service_name or datasource.database_name or ""
+        query = {"service_name": service} if identifier_type != "sid" and service else {}
+        return URL.create("oracle+oracledb", username=datasource.username or None, password=decrypt_secret(datasource.encrypted_password) or None, host=datasource.host or "localhost", port=datasource.port or 1521, database=service if identifier_type == "sid" else None, query=query).render_as_string(hide_password=False)
+    if datasource.db_type == "sqlserver":
+        params = datasource.connection_params_json or {}
+        query = {"driver": str(params.get("odbc_driver") or "ODBC Driver 18 for SQL Server")}
+        if params.get("ssl_mode") == "disable": query["Encrypt"] = "no"
+        return URL.create("mssql+pyodbc", username=datasource.username or None, password=decrypt_secret(datasource.encrypted_password) or None, host=datasource.host or "localhost", port=datasource.port or 1433, database=datasource.database_name or "", query=query).render_as_string(hide_password=False)
+    if datasource.db_type == "db2":
+        return URL.create("db2+ibm_db", username=datasource.username or None, password=decrypt_secret(datasource.encrypted_password) or None, host=datasource.host or "localhost", port=datasource.port or 50000, database=datasource.database_name or "").render_as_string(hide_password=False)
     raise ValueError(f"{datasource.db_type} 数据源测试暂未启用")
 
 
@@ -130,6 +142,24 @@ def _connect_args(datasource: DataSource) -> dict:
     if datasource.db_type == "sqlite":
         return {"check_same_thread": False}
     return {}
+
+
+def _tls_query(datasource: DataSource, key: str) -> dict[str, str]:
+    mode = (datasource.connection_params_json or {}).get("ssl_mode")
+    return {key: str(mode)} if mode else {}
+
+
+def _require_available_connector(engine_type: str) -> None:
+    connector = get_connector(engine_type)
+    if connector is None:
+        raise ValueError(f"未注册的数据源类型: {engine_type}")
+    if connector["status"] == "available":
+        return
+    if connector["status"] == "driver_missing":
+        raise ValueError(f"{connector['label']} Driver 未安装")
+    if connector["status"] == "extension_only":
+        raise ValueError("GBase 具体产品未确定，仅保留扩展位，不能创建连接")
+    raise ValueError(f"{connector['label']} Connector 当前未启用")
 
 
 def validate_connection_params(params: dict | None) -> None:
