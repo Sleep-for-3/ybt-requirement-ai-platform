@@ -704,6 +704,9 @@ function Set-ProjectEnvironment {
     $env:AUTH_MODE = "optional"
     $env:CORS_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
     $env:LOCAL_BACKEND_PORT = [string]$Port
+    # Keep the long-running dev server isolated from `next build`'s production `.next` output.
+    # Without this, a build can replace chunks while the dev server is still serving HTML.
+    $env:NEXT_DIST_DIR = ".next-dev"
     $env:KNOWLEDGE_INGESTION_BATCH_SIZE = "200"
     if ($Mode -eq "production") {
         $env:TASK_QUEUE_PROVIDER = "celery"
@@ -1006,7 +1009,7 @@ function Start-Project {
         "EMBEDDING_API_KEY_ENV_NAME", "MILVUS_URI",
         "FASTEMBED_CACHE_PATH", "FASTEMBED_THREADS",
         "CORS_ORIGINS", "LOCAL_BACKEND_PORT", "KNOWLEDGE_INGESTION_BATCH_SIZE",
-        "PGPASSFILE"
+        "PGPASSFILE", "NEXT_DIST_DIR"
     )
     $previousEnvironment = @{}
     foreach ($name in $environmentNames) {
@@ -1145,7 +1148,7 @@ function Start-Project {
         }
         $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
         Write-Host "项目启动成功（$Mode 模式）。"
-        Write-Host "前端：http://localhost:$FrontendPort"
+        Write-Host "前端入口：http://127.0.0.1:$FrontendPort/login"
         Write-Host "后端：http://localhost:$resolvedBackendPort/docs"
         if ($Mode -eq "production") {
             Write-Host "PostgreSQL：127.0.0.1:$PostgresPort/$DatabaseName"
@@ -1365,7 +1368,7 @@ function Show-ProjectStatus {
         Write-Host "总体状态：未完整启动" -ForegroundColor Yellow
     }
     Write-Host "前端服务：$(if ($null -ne $frontendOwner) { "运行中（PID $frontendOwner）" } else { "未运行" })"
-    Write-Host "前端地址：http://127.0.0.1:$statusFrontendPort"
+    Write-Host "前端入口：http://127.0.0.1:$statusFrontendPort/login"
     Write-Host "后端服务：$(if ($null -ne $backendOwner) { "运行中（PID $backendOwner）" } else { "未运行" })"
     Write-Host "接口文档：http://127.0.0.1:$statusBackendPort/docs"
     Write-Host "健康检查：http://127.0.0.1:$statusBackendPort/health/ready（$(if ($backendHealthy) { "正常" } else { "不可用" })）"
