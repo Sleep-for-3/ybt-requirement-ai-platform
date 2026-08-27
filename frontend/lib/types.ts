@@ -548,6 +548,45 @@ export type MappingEvidence = {
   evidence_summary?: string | null;
 };
 
+export type RequirementWorkspaceBusinessSummary = { id:number;status:string;confidence_level:string;has_ai_draft:boolean;has_final:boolean;content_preview?:string|null;locked:boolean };
+export type RequirementWorkspaceLineageSummary = { id:number;status:string;confidence_level:string;has_ai_draft:boolean;has_final:boolean;content_preview?:string|null;source_system_name?:string|null;source_database_name?:string|null;source_schema_name?:string|null;source_table_name?:string|null;source_field_name?:string|null;lineage_status:string;locked:boolean };
+export type RequirementWorkspaceMappingSummary = { id:number;mart_field_id?:number|null;status:string;confidence_level:string;content_preview?:string|null;lineage_status:string;source_system_summary?:string|null };
+export type RequirementWorkspaceFieldSummary = { id:number;project_id:number;target_table_id:number;field_code:string;field_name:string;field_type?:string|null;required_flag:boolean;definition_preview?:string|null };
+export type RequirementWorkspaceRecordSummary = {
+  field:RequirementWorkspaceFieldSummary;
+  business?:RequirementWorkspaceBusinessSummary|null;
+  lineage?:RequirementWorkspaceLineageSummary|null;
+  mart_mappings:RequirementWorkspaceMappingSummary[];
+  source_mappings:Record<string,RequirementWorkspaceMappingSummary[]>;
+  evidence_count:number;
+  question_count:number;
+  readiness_status:"complete"|"incomplete";
+};
+export type RequirementWorkspaceProjection = {
+  project_id:number;
+  selected_target_table_id?:number|null;
+  selected_scenario_id?:number|null;
+  tables:TargetTable[];
+  scenarios:ProductScenario[];
+  business_systems:BusinessSystem[];
+  datasources:DataSource[];
+  mart_tables:MartTable[];
+  mart_fields:MartField[];
+  records:RequirementWorkspaceRecordSummary[];
+  question_summaries:PendingQuestion[];
+  deliverable_summary?:{id:number;target_table_id:number;status:string;version_no:number}|null;
+  recent_jobs:BackgroundJobSummary[];
+  readiness_summary:{field_count:number;complete_field_count:number;open_question_count:number;evidence_count:number};
+  performance_budget:{projection_version:string;initial_api_request_budget:number;bounded_sql_query_budget:number;large_content_deferred:boolean};
+};
+export type RequirementWorkspaceFieldDetail = {
+  field:TargetField;
+  business?:ScenarioBusinessMapping|null;
+  lineage?:ScenarioTechnicalLineage|null;
+  mart_mappings:MartToYbtMapping[];
+  source_mappings:Record<string,SourceToMartMapping[]>;
+};
+
 export type MappingDocumentExport = {
   format: string;
   scope: string;

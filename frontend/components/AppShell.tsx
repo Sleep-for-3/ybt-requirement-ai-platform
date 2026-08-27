@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
@@ -214,7 +215,17 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     institution_memberships?: Array<{ institution_id?: number; role?: string; status?: string }>;
   } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [runningJobs, setRunningJobs] = useState(0);
+  const jobsQuery = useQuery({
+    queryKey:["project-jobs",projectId],
+    queryFn:({signal})=>apiGet<BackgroundJobSummary[]>(`/jobs?project_id=${projectId}`,{signal,cache:"no-cache"}),
+    enabled:Boolean(projectId),
+    staleTime:5_000,
+    refetchInterval:(query)=>{
+      const jobs=(query.state.data as BackgroundJobSummary[]|undefined)||[];
+      return jobs.some((job)=>["queued","running"].includes(job.status))?5_000:60_000;
+    }
+  });
+  const runningJobs = (jobsQuery.data || []).filter((job) => ["queued", "running"].includes(job.status)).length;
 
   useEffect(() => {
     apiGet<NonNullable<typeof user>>("/auth/me").then(setUser).catch(() => setUser(null));
@@ -223,36 +234,6 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
-  useEffect(() => {
-    if (!projectId) {
-      setRunningJobs(0);
-      return;
-    }
-    const controller = new AbortController();
-    let active = true;
-    let timer: number | undefined;
-    async function loadJobCount() {
-      try {
-        const jobs = await apiGet<BackgroundJobSummary[]>(`/jobs?project_id=${projectId}`, { signal: controller.signal });
-        if (!active) return;
-        const count = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
-        setRunningJobs(count);
-        // Avoid a permanent five-second poll when nothing is active. Active
-        // jobs remain responsive without turning every open page into a poller.
-        timer = window.setTimeout(() => void loadJobCount(), count ? 5_000 : 60_000);
-      } catch {
-        if (!active || controller.signal.aborted) return;
-        timer = window.setTimeout(() => void loadJobCount(), 60_000);
-      }
-    }
-    void loadJobCount();
-    return () => {
-      active = false;
-      controller.abort();
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [projectId]);
-
   const displayName = user?.display_name || user?.username || "未登录";
   const navigationAccess = navigationAccessForProject(user, projectId);
 

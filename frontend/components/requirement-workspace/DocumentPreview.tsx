@@ -4,7 +4,6 @@ import { ArrowDown, Check, Download, FileCheck2, Save, ShieldAlert } from "lucid
 import Link from "next/link";
 
 import type {
-  DeliverablePackage,
   MartField,
   MartTable,
   PendingQuestion,
@@ -54,7 +53,7 @@ export function DocumentPreview({
   evidenceCountByField: Record<number, number>;
   evidenceForSelected: number;
   questions: PendingQuestion[];
-  deliverable: DeliverablePackage | null;
+  deliverable: {id:number;target_table_id:number;status:string;version_no:number} | null;
   businessFinal: string;
   technicalFinal: string;
   onBusinessFinalChange: (value: string) => void;

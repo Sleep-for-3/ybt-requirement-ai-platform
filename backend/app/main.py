@@ -41,6 +41,7 @@ from app.api import (
     project_readiness,
     retrieval,
     regulatory_context,
+    requirement_workspace,
     scenarios,
     scenario_mappings,
     source_recommendations,
@@ -186,3 +187,4 @@ app.include_router(semantic.router, prefix=settings.api_prefix, dependencies=sec
 app.include_router(semantic_catalog.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(regulatory_context.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(global_search.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(requirement_workspace.router, prefix=settings.api_prefix, dependencies=secured)

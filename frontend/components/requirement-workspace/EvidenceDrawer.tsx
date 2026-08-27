@@ -16,7 +16,7 @@ const TYPE_LABELS: Record<string, string> = {
   knowledge_unit: "知识库"
 };
 
-export function EvidenceDrawer({ open, items, onClose }: { open: boolean; items: MappingEvidence[]; onClose: () => void }) {
+export function EvidenceDrawer({ open, items, loading, error, onClose }: { open: boolean; items: MappingEvidence[]; loading?:boolean; error?:string; onClose: () => void }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="字段证据">
@@ -31,7 +31,9 @@ export function EvidenceDrawer({ open, items, onClose }: { open: boolean; items:
           <button aria-label="关闭" className="button-ghost ml-auto h-9 w-9 px-0" onClick={onClose} type="button"><X size={18} /></button>
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-5">
-          {items.map((item) => (
+          {loading ? <div className="empty-state"><BookOpenCheck className="animate-pulse text-sky-300" size={30}/><p>正在加载当前字段证据…</p></div> : null}
+          {error ? <div className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-3 text-sm text-coral-700" role="alert">{error}</div> : null}
+          {!loading && !error ? items.map((item) => (
             <article className="rounded-lg border border-line bg-white p-4 shadow-xs" key={item.id}>
               <div className="flex items-start justify-between gap-3">
                 <strong className="text-sm text-ink">{item.source_name}</strong>
@@ -40,8 +42,8 @@ export function EvidenceDrawer({ open, items, onClose }: { open: boolean; items:
               {item.location_text ? <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500"><MapPin className="mt-0.5 shrink-0" size={13} />{item.location_text}</p> : null}
               <p className="mt-3 text-sm leading-6 text-slate-700">{item.evidence_summary || item.quoted_content || "该证据未提供可展示摘要。"}</p>
             </article>
-          ))}
-          {!items.length ? (
+          )) : null}
+          {!loading && !error && !items.length ? (
             <div className="empty-state">
               <BookOpenCheck className="text-slate-300" size={30} />
               <p>当前字段尚未绑定证据</p>

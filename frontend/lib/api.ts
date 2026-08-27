@@ -4,6 +4,7 @@
  */
 
 import { BrowserAuthEnvironment, normalizeRequestError, readApiResponse, throwApiError } from "./http-response.mjs";
+import { clearQueryCache } from "./query-client";
 
 export * from "./types";
 
@@ -20,6 +21,7 @@ export function saveSession(accessToken: string, refreshToken: string) {
 export function clearSession() {
   sessionStorage.removeItem(ACCESS_TOKEN_KEY);
   sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  clearQueryCache();
 }
 
 export function hasSession() {
@@ -60,8 +62,8 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
   }
 }
 
-export async function apiGet<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
-  return request<T>(path, { cache: "no-store", headers: authHeaders(), signal: init?.signal });
+export async function apiGet<T>(path: string, init?: { signal?: AbortSignal; cache?: RequestCache }): Promise<T> {
+  return request<T>(path, { cache: init?.cache || "no-store", headers: authHeaders(), signal: init?.signal });
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
