@@ -78,6 +78,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/datasources", label: "数据源", icon: Database, audience: "technical" },
       { href: "/catalog", label: "数据目录", icon: LibraryBig, audience: "technical" },
       { href: "/semantics", label: "语义目录", icon: BookOpenCheck },
+      { href: "/quality", label: "质量期望", icon: ShieldCheck },
       { href: "/business-systems", label: "业务系统", icon: Building2, audience: "technical" },
       { href: "/mart", label: "监管集市", icon: Layers3, audience: "technical" }
     ]

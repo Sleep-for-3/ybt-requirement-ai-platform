@@ -220,7 +220,10 @@ def test_cross_project_target_is_a_stable_scoped_error() -> None:
         )
 
     assert response.status_code == 400
-    assert response.json() == {"detail": "target field does not belong to the authorized project"}
+    payload = response.json()
+    assert payload["detail"] == "target field does not belong to the authorized project"
+    assert payload["error_code"] == "invalid_request"
+    assert payload["retryable"] is False
 
 
 def test_http_build_does_not_mutate_authoritative_semantic_rows() -> None:

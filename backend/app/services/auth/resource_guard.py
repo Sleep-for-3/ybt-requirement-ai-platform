@@ -11,6 +11,7 @@ from app.models import (
     ProductScenario, RagEvaluationCase, RagEvaluationRun, ScenarioBusinessMapping, ScenarioTechnicalLineage,
     SourceField, SourceTable, SourceToMartMapping, TargetField, TargetTable, TemplateDocument,
     TraceabilityTemplateDocument, CodeRepository, LineageNode, ScriptFile, ScriptChangeSet, ImpactAnalysis,
+    DataQualityExpectation,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
 from app.services.auth.permission_service import PermissionService
@@ -95,6 +96,7 @@ def _path_resource(db: Session, path: str, params: dict):
         ("run_id", RagEvaluationRun), ("case_id", RagEvaluationCase), ("unit_id", KnowledgeUnit),
         ("node_id", LineageNode), ("script_file_id", ScriptFile), ("change_set_id", ScriptChangeSet),
         ("impact_id", ImpactAnalysis),
+        ("expectation_id", DataQualityExpectation),
         ("repository_id", CodeRepository),
     ]
     for key, model in candidates:

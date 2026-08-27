@@ -89,6 +89,7 @@ from app.models.uat import (
     UatCase, UatCaseResult, UatFinding, UatPack, UatPackItem, UatRun, UatSignoff, UatSuite,
 )
 from app.models.semantic import SemanticBinding, SemanticConcept, SemanticConceptVersion, SemanticRelation
+from app.models.quality import DataQualityExpectation, DataQualityExpectationBinding
 
 __all__ = [
     "AuditLog",
@@ -187,6 +188,8 @@ __all__ = [
     "SemanticConcept",
     "SemanticConceptVersion",
     "SemanticRelation",
+    "DataQualityExpectation",
+    "DataQualityExpectationBinding",
     "CaliberComparison",
     "DeliverableEvidenceItem",
     "DeliverableFieldItem",

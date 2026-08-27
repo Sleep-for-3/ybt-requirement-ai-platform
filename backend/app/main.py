@@ -39,6 +39,7 @@ from app.api import (
     profiling,
     nl_tasks,
     projects,
+    quality,
     project_readiness,
     retrieval,
     regulatory_context,
@@ -219,6 +220,7 @@ app.include_router(deliverables.router, prefix=settings.api_prefix)
 app.include_router(uat.router, prefix=settings.api_prefix)
 app.include_router(semantic.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(semantic_catalog.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(quality.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(regulatory_context.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(global_search.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(requirement_workspace.router, prefix=settings.api_prefix, dependencies=secured)

@@ -24,6 +24,7 @@ const SECTIONS = [
   ["/deliverables", "交付成果"],
   ["/evaluations", "RAG 评测"],
   ["/semantics", "监管语义"],
+  ["/quality", "质量期望"],
   ["/questions", "待确认问题"],
   ["/projects", "项目"],
   ["/catalog", "数据目录"],
