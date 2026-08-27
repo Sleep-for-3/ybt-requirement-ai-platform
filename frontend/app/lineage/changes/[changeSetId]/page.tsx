@@ -22,6 +22,8 @@ type Detail = {
   script_file_id: number;
   from_version_id?: number | null;
   to_version_id?: number | null;
+  from_version_no?: number | null;
+  to_version_no?: number | null;
   summary: Record<string, unknown>;
   items: Item[];
   impact?: { id: number; severity: string; status: string } | null;
@@ -45,7 +47,7 @@ export default function Page() {
     <main>
       <WorkspaceHeader
         title={`变更集 #${changeSetId}`}
-        meta={`v${data?.from_version_id || "-"} → v${data?.to_version_id || "-"}`}
+        meta={`v${data?.from_version_no || "-"} → v${data?.to_version_no || "-"}`}
       />
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
         {data?.impact ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleHelp, ClipboardCheck } from "lucide-react";
+import { ArrowRight, CircleHelp, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -28,10 +28,59 @@ export default function Page() {
     <main>
       <WorkspaceHeader title={`影响分析 #${impactId}`} meta={`${data?.severity || "-"} · ${data?.status || "-"}`} />
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
-        <section className="grid gap-4 md:grid-cols-3">
-          <Box label="一表通字段" value={data?.affected_target_field_ids.join(", ") || "无自动绑定"} />
-          <Box label="监管集市字段" value={data?.affected_mart_field_ids.join(", ") || "无自动绑定"} />
-          <Box label="受影响口径" value={data?.affected_mapping_ids.join(", ") || "无自动绑定"} />
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Box label="来源字段" value={count(data?.affected_source_field_ids)} />
+          <Box label="监管集市字段" value={count(data?.affected_mart_field_ids)} />
+          <Box label="需求字段" value={count(data?.affected_requirement_ids)} />
+          <Box label="语义概念" value={count(data?.affected_semantic_concept_ids)} />
+        </section>
+
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink">语义影响链</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                复用现有血缘节点和绑定，追溯到当前有效语义版本、监管规则、需求与评审任务。
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 p-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] lg:items-stretch">
+            <ScopeColumn
+              empty="无受影响血缘字段"
+              items={[
+                `来源字段 ${data?.affected_source_field_ids.length || 0} 项`,
+                `集市字段 ${data?.affected_mart_field_ids.length || 0} 项`,
+                `一表通字段 ${data?.affected_target_field_ids.length || 0} 项`,
+              ]}
+              title="Lineage"
+            />
+            <ChainArrow />
+            <ScopeColumn
+              empty="无受影响语义"
+              items={(data?.impact_scope?.semantic_concepts || []).map((item) => ({
+                href: `/semantics/${item.id}`,
+                label: `${item.concept_name} · ${item.status}`,
+              }))}
+              title={`Semantic · ${data?.affected_semantic_version_ids.length || 0} 个有效版本`}
+            />
+            <ChainArrow />
+            <ScopeColumn
+              empty="无关联监管规则"
+              items={(data?.impact_scope?.semantic_concepts || [])
+                .filter((item) => item.concept_type === "regulatory_rule")
+                .map((item) => ({ href: `/semantics/${item.id}`, label: item.concept_name }))}
+              title={`Regulatory Rule · ${data?.affected_regulatory_knowledge_item_ids.length || 0} 条证据`}
+            />
+            <ChainArrow />
+            <ScopeColumn
+              empty="无受影响需求"
+              items={(data?.impact_scope?.requirements || []).map((item) => ({
+                href: `/fields/${item.id}/scenarios`,
+                label: `${item.field_code} / ${item.field_name}`,
+              }))}
+              title={`Requirement → ReviewTask · ${data?.affected_review_task_ids.length || 0} 项`}
+            />
+          </div>
         </section>
 
         <section className="panel">
@@ -104,6 +153,51 @@ function Box({ label, value }: { label: string; value: string }) {
     <div className="stat-card">
       <div className="stat-label">{label}</div>
       <div className="stat-value break-all text-base">{value}</div>
+    </div>
+  );
+}
+
+function count(items: unknown[] | undefined) {
+  return items?.length ? `${items.length} 项` : "0 项";
+}
+
+function ChainArrow() {
+  return (
+    <div className="hidden items-center justify-center text-slate-300 lg:flex">
+      <ArrowRight size={18} />
+    </div>
+  );
+}
+
+function ScopeColumn({
+  empty,
+  items,
+  title,
+}: {
+  empty: string;
+  items: Array<string | { href: string; label: string }>;
+  title: string;
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-mist/40 p-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {title}
+      </h3>
+      <div className="mt-3 space-y-2 text-sm text-slate-700">
+        {items.length ? (
+          items.map((item, index) =>
+            typeof item === "string" ? (
+              <div key={`${item}-${index}`}>{item}</div>
+            ) : (
+              <Link className="block text-pine-700 hover:underline" href={item.href} key={item.href}>
+                {item.label}
+              </Link>
+            ),
+          )
+        ) : (
+          <span className="text-slate-400">{empty}</span>
+        )}
+      </div>
     </div>
   );
 }

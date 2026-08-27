@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 import base64
+from datetime import date
 from pathlib import Path
 from io import BytesIO
 from types import SimpleNamespace
@@ -14,11 +15,13 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.api.lineage import _impact_scope_dict
 from app.models import (
-    BackgroundJob, CatalogColumn, CatalogSchema, CatalogTable, CodeRepository, DataSource, Institution, LineageEdge, LineageNode,
+    BackgroundJob, BusinessSystem, CatalogColumn, CatalogSchema, CatalogTable, CodeRepository, DataSource, Institution, LineageEdge, LineageNode,
     MartField, MartTable, MartToYbtMapping, ProductScenario, Project, ReviewTask,
+    RegulatoryKnowledgeItem, SemanticBinding, SemanticConcept, SemanticConceptVersion, SemanticRelation,
     ScenarioBusinessMapping, ScenarioTechnicalLineage, ScriptChangeSet, ScriptFile as ScriptFileModel, ScriptFileVersion,
-    SourceToMartMapping, TargetField, TargetTable, TemplateVariable, User,
+    SourceField, SourceTable, SourceToMartMapping, TargetField, TargetTable, TemplateVariable, User,
 )
 from app.services.lineage.resolver import resolve_lineage_node
 from app.services.lineage.impact_analyzer import persist_change_impact
@@ -163,6 +166,49 @@ def test_manual_sql_upload_is_version_idempotent_and_queryable(tmp_path: Path, m
             "MART.TARGET.CERT_TYPE",
         }
         assert storage.read(first.json()["storage_key"]) == sql
+
+
+def test_script_ingestion_recovers_conservatively_when_previous_storage_object_is_missing(
+    tmp_path: Path,
+    db_session: Session,
+) -> None:
+    institution = Institution(institution_code="missing-baseline-bank", institution_name="Missing Baseline Bank")
+    user = User(username="missing-baseline-owner", status="active")
+    db_session.add_all([institution, user])
+    db_session.flush()
+    project = Project(name="missing baseline", institution_id=institution.id)
+    db_session.add(project)
+    db_session.flush()
+    storage = LocalStorageService(tmp_path / "storage")
+    ingestion = ScriptIngestionService(db_session, storage)
+
+    first = ingestion.ingest(
+        project=project,
+        data=b"insert into MART.TARGET (CERT_TYPE) select CERT_TYPE from ODS.CUSTOMER",
+        file_name="load_customer.sql",
+        relative_path="load_customer.sql",
+        dialect="sqlite",
+        actor_user_id=user.id,
+    )
+    storage.delete(first.stored_file.storage_key)
+
+    second = ingestion.ingest(
+        project=project,
+        data=b"insert into MART.TARGET (CERT_TYPE) select case when CERT_TYPE = '01' then 'A' else CERT_TYPE end from ODS.CUSTOMER",
+        file_name="load_customer.sql",
+        relative_path="load_customer.sql",
+        dialect="sqlite",
+        actor_user_id=user.id,
+    )
+
+    assert second.version.version_no == 2
+    assert second.change_set is not None
+    assert second.impact is not None and second.impact.severity == "critical"
+    assert second.change_categories == ("baseline_unavailable",)
+    assert second.change_set.summary_json["baseline_available"] is False
+    assert second.change_set.summary_json["from_version_no"] == 1
+    assert any("baseline unavailable" in warning.lower() for warning in second.version.warnings_json)
+    assert len(second.impact.affected_review_task_ids_json) == 3
 
 
 def test_shell_parser_detects_scripts_sql_clients_and_arguments_without_execution() -> None:
@@ -314,6 +360,8 @@ def test_second_script_version_creates_change_set_and_impact(tmp_path: Path, mon
 
         change = client.get(f"/api/lineage/changes/{payload['change_set_id']}")
         assert change.status_code == 200, change.text
+        assert change.json()["from_version_no"] == 1
+        assert change.json()["to_version_no"] == 2
         assert change.json()["impact"]["severity"] == "critical"
 
 
@@ -604,13 +652,17 @@ def test_critical_impact_marks_mappings_stale_without_overwriting_final_content(
     user = User(username="impact-owner", status="active")
     project = Project(name="impact governance")
     db_session.add_all([user, project]); db_session.flush()
+    source_system = BusinessSystem(project_id=project.id, system_code="ODS", system_name="Source System")
+    db_session.add(source_system); db_session.flush()
     target_table = TargetTable(project_id=project.id, table_code="YBT_T", table_name="YBT")
     mart_table = MartTable(project_id=project.id, table_code="MART_T", table_name="Mart")
+    source_table = SourceTable(project_id=project.id, business_system_id=source_system.id, table_code="ODS_S", table_name="Source")
     scenario = ProductScenario(project_id=project.id, scenario_code="DEFAULT", scenario_name="默认")
-    db_session.add_all([target_table, mart_table, scenario]); db_session.flush()
+    db_session.add_all([target_table, mart_table, source_table, scenario]); db_session.flush()
     target = TargetField(project_id=project.id, target_table_id=target_table.id, field_code="A", field_name="A")
     mart = MartField(project_id=project.id, mart_table_id=mart_table.id, field_code="A", field_name="A")
-    db_session.add_all([target, mart]); db_session.flush()
+    source = SourceField(project_id=project.id, source_table_id=source_table.id, field_code="A", field_name="A")
+    db_session.add_all([target, mart, source]); db_session.flush()
     technical = ScenarioTechnicalLineage(project_id=project.id, target_field_id=target.id, scenario_id=scenario.id, final_content="人工技术口径")
     business = ScenarioBusinessMapping(project_id=project.id, target_field_id=target.id, scenario_id=scenario.id, final_content="人工业务口径")
     source_mapping = SourceToMartMapping(project_id=project.id, mart_field_id=mart.id, final_content="人工入集市口径")
@@ -620,14 +672,57 @@ def test_critical_impact_marks_mappings_stale_without_overwriting_final_content(
     old = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=1, file_hash="a"*64, normalized_hash="b"*64, raw_content_storage_file_id=1, parse_status="parsed", created_by=user.id)
     new = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=2, file_hash="c"*64, normalized_hash="d"*64, raw_content_storage_file_id=2, parse_status="parsed", created_by=user.id)
     db_session.add_all([old, new]); db_session.flush()
+    source_node = LineageNode(project_id=project.id, node_type="column", logical_name="ODS_S.A", table_name="ODS_S", column_name="A", source_field_id=source.id, script_file_id=script.id, script_file_version_id=old.id, unresolved_flag=False)
     mart_node = LineageNode(project_id=project.id, node_type="column", logical_name="MART_T.A", table_name="MART_T", column_name="A", mart_field_id=mart.id, script_file_id=script.id, script_file_version_id=old.id, unresolved_flag=False)
     target_node = LineageNode(project_id=project.id, node_type="column", logical_name="YBT_T.A", table_name="YBT_T", column_name="A", target_field_id=target.id, script_file_id=script.id, script_file_version_id=new.id, unresolved_flag=False)
-    db_session.add_all([mart_node, target_node]); db_session.flush()
+    db_session.add_all([source_node, mart_node, target_node]); db_session.flush()
     db_session.add(LineageEdge(
         project_id=project.id, script_file_version_id=new.id,
         source_node_id=mart_node.id, target_node_id=target_node.id,
         edge_type="derives_from", confidence_level="high", enabled=True,
     ))
+    db_session.flush()
+
+    term = SemanticConcept(
+        project_id=project.id, concept_type="business_rule", concept_code="A_RULE",
+        concept_name="A 口径", status="confirmed",
+    )
+    other_project = Project(name="other impact governance")
+    db_session.add(other_project); db_session.flush()
+    foreign_knowledge_item = RegulatoryKnowledgeItem(
+        project_id=other_project.id, knowledge_type="regulatory_rule",
+        target_table_code="YBT_T", target_field_code="A",
+    )
+    db_session.add(foreign_knowledge_item); db_session.flush()
+    regulatory_rule = SemanticConcept(
+        project_id=project.id, concept_type="regulatory_rule", concept_code="REG_A",
+        concept_name="A 监管规则", status="confirmed",
+        source_type="regulatory_knowledge_item", source_id=foreign_knowledge_item.id,
+    )
+    db_session.add_all([term, regulatory_rule]); db_session.flush()
+    term_version = SemanticConceptVersion(
+        semantic_concept_id=term.id, project_id=project.id, version_no=1,
+        concept_name=term.concept_name, status="confirmed", effective_from=date(2026, 1, 1),
+    )
+    regulatory_version = SemanticConceptVersion(
+        semantic_concept_id=regulatory_rule.id, project_id=project.id, version_no=1,
+        concept_name=regulatory_rule.concept_name, status="confirmed", effective_from=date(2026, 1, 1),
+    )
+    bindings = [
+        SemanticBinding(project_id=project.id, semantic_concept_id=term.id, entity_type="source_field", entity_id=source.id, status="confirmed"),
+        SemanticBinding(project_id=project.id, semantic_concept_id=term.id, entity_type="mart_field", entity_id=mart.id, status="confirmed"),
+        SemanticBinding(project_id=project.id, semantic_concept_id=term.id, entity_type="target_field", entity_id=target.id, status="confirmed"),
+        SemanticBinding(project_id=project.id, semantic_concept_id=regulatory_rule.id, entity_type="scenario_business_mapping", entity_id=business.id, status="confirmed"),
+    ]
+    relation = SemanticRelation(
+        project_id=project.id, source_concept_id=term.id, relation_type="governed_by",
+        target_concept_id=regulatory_rule.id, status="confirmed",
+    )
+    knowledge_item = RegulatoryKnowledgeItem(
+        project_id=project.id, knowledge_type="regulatory_rule", target_table_code="YBT_T",
+        target_field_code="A", target_field_name="A", question_text="A 字段如何报送？",
+    )
+    db_session.add_all([term_version, regulatory_version, *bindings, relation, knowledge_item])
     db_session.flush()
 
     diff = compare_sql_versions("insert into MART_T(A,B) select A,B from ODS_S", "insert into MART_T(A) select A from ODS_S", dialect="sqlite")
@@ -636,13 +731,31 @@ def test_critical_impact_marks_mappings_stale_without_overwriting_final_content(
     assert impact.severity == "critical"
     assert impact.affected_scenario_mapping_ids_json == [business.id]
     assert f"scenario_business:{business.id}" in impact.affected_mapping_ids_json
+    assert impact.affected_source_field_ids_json == [source.id]
+    assert set(impact.affected_semantic_binding_ids_json) == {item.id for item in bindings}
+    assert set(impact.affected_semantic_concept_ids_json) == {term.id, regulatory_rule.id}
+    assert set(impact.affected_semantic_version_ids_json) == {term_version.id, regulatory_version.id}
+    assert impact.affected_regulatory_rule_ids_json == [regulatory_rule.id]
+    assert impact.affected_regulatory_knowledge_item_ids_json == [knowledge_item.id]
+    assert impact.affected_requirement_ids_json == [target.id]
+    scope = _impact_scope_dict(db_session, impact)
+    assert {item["id"] for item in scope["semantic_concepts"]} == {term.id, regulatory_rule.id}
+    assert scope["requirements"] == [{
+        "id": target.id,
+        "target_table_id": target_table.id,
+        "field_code": "A",
+        "field_name": "A",
+    }]
+    assert scope["regulatory_knowledge_items"][0]["id"] == knowledge_item.id
     assert technical.lineage_status == source_mapping.lineage_status == ybt_mapping.lineage_status == "stale"
     assert (technical.final_content, source_mapping.final_content, ybt_mapping.final_content) == ("人工技术口径", "人工入集市口径", "人工上报口径")
     workbook = load_workbook(BytesIO(export_lineage_workbook(db_session, project.id)))
     headers = [cell.value for cell in workbook["字段级血缘"][1]]
     status_column = headers.index("血缘状态") + 1
     assert workbook["字段级血缘"].cell(2, status_column).value == "stale"
-    assert db_session.query(ReviewTask).count() == 3
+    tasks = db_session.scalars(select(ReviewTask).where(ReviewTask.target_type == "impact_analysis", ReviewTask.target_id == impact.id)).all()
+    assert len(tasks) == 3
+    assert set(impact.affected_review_task_ids_json) == {task.id for task in tasks}
 
 
 def test_task_payload_redaction_preserves_safe_storage_keys_but_not_sensitive_text() -> None:

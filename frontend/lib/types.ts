@@ -119,7 +119,22 @@ export type LineageNode = { id:number;node_type:string;logical_name:string;datab
 export type LineageEdge = { id:number;source_node_id:number;target_node_id:number;edge_type:string;transformation_type?:string|null;transformation_expression?:string|null;join_condition?:string|null;filter_condition?:string|null;aggregation_rule?:string|null;code_mapping_rule?:string|null;source_line_start?:number|null;source_line_end?:number|null;confidence_level:string;evidence:Record<string,unknown> };
 export type LineageGraph = { nodes:LineageNode[];edges:LineageEdge[];direction:string;depth:number;truncated:boolean };
 export type ScriptChange = { id:number;script_file_id:number;from_version_id?:number|null;to_version_id?:number|null;change_type:string;status:string;summary:Record<string,unknown>;severity:string;impact_id?:number|null;created_at:string };
-export type ImpactAnalysis = { id:number;project_id:number;change_set_id:number;status:string;severity:string;affected_target_field_ids:number[];affected_mart_field_ids:number[];affected_mapping_ids:string[];summary:Record<string,unknown>;open_questions:string[];workflow?:{id:number;status:string;current_step?:string|null;tasks:Array<{id:number;step_key:string;status:string;assignee_user_id?:number|null;assignee_role?:string|null}>}|null };
+export type ImpactAnalysis = {
+  id:number;project_id:number;change_set_id:number;status:string;severity:string;
+  affected_source_field_ids:number[];affected_target_field_ids:number[];affected_mart_field_ids:number[];
+  affected_mapping_ids:string[];affected_scenario_mapping_ids:number[];affected_lineage_edge_ids:number[];
+  affected_semantic_binding_ids:number[];affected_semantic_concept_ids:number[];affected_semantic_version_ids:number[];
+  affected_regulatory_rule_ids:number[];affected_regulatory_knowledge_item_ids:number[];
+  affected_requirement_ids:number[];affected_review_task_ids:number[];
+  summary:Record<string,unknown>;open_questions:string[];
+  impact_scope?:{
+    semantic_concepts:Array<{id:number;concept_type:string;concept_code:string;concept_name:string;status:string}>;
+    effective_versions:Array<{id:number;semantic_concept_id:number;version_no:number;concept_name:string;effective_from:string;effective_to?:string|null}>;
+    requirements:Array<{id:number;target_table_id:number;field_code:string;field_name:string}>;
+    regulatory_knowledge_items:Array<{id:number;knowledge_type:string;target_table_code?:string|null;target_field_code?:string|null;source_document_name?:string|null}>;
+  };
+  workflow?:{id:number;status:string;current_step?:string|null;tasks:Array<{id:number;step_key:string;status:string;assignee_user_id?:number|null;assignee_role?:string|null}>}|null
+};
 
 export type ScenarioReviewPackageView = {
   id: number;

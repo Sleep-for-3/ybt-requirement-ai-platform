@@ -166,8 +166,31 @@ class ScriptIngestionService:
         if previous_version is not None and script_file.file_type in {"sql", "shell"}:
             previous_stored = self.db.get(StoredFile, previous_version.raw_content_storage_file_id)
             if previous_stored is not None:
-                previous_content = self.storage.read(previous_stored.storage_key).decode("utf-8-sig")
-                diff = compare_sql_versions(previous_content, content, dialect=dialect or previous_version.dialect or "") if script_file.file_type == "sql" else compare_shell_versions(previous_content, content)
+                try:
+                    previous_content = self.storage.read(previous_stored.storage_key).decode("utf-8-sig")
+                except FileNotFoundError:
+                    warning = "Previous version baseline unavailable: the stored content object is missing"
+                    version.warnings_json = [*version.warnings_json, warning]
+                    diff = VersionDiffResult(
+                        semantic_changed=True,
+                        severity="critical",
+                        items=(ChangeItemSpec(
+                            "baseline_unavailable",
+                            "script_version",
+                            {"version_no": previous_version.version_no},
+                            {"version_no": version.version_no},
+                            "critical",
+                        ),),
+                        summary={
+                            "semantic_changed": True,
+                            "categories": ["baseline_unavailable"],
+                            "baseline_available": False,
+                            "from_version_no": previous_version.version_no,
+                            "reason": "storage_object_missing",
+                        },
+                    )
+                else:
+                    diff = compare_sql_versions(previous_content, content, dialect=dialect or previous_version.dialect or "") if script_file.file_type == "sql" else compare_shell_versions(previous_content, content)
                 change_set, impact = persist_change_impact(
                     self.db,
                     script_file=script_file,

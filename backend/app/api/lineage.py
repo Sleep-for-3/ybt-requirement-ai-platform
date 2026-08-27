@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.settings import get_settings
-from app.models import BackgroundJob, BackgroundJobItem, CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate, Project, ReviewTask, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, StoredFile, WorkflowInstance
+from app.models import BackgroundJob, BackgroundJobItem, CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate, Project, RegulatoryKnowledgeItem, ReviewTask, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, SemanticConcept, SemanticConceptVersion, StoredFile, TargetField, WorkflowInstance
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.lineage.archive_ingestion import read_safe_script_archive
@@ -269,12 +269,16 @@ def get_change_set(change_set_id: int, principal: CurrentPrincipal, db: Session 
     row = PermissionService(db, principal).load_project_resource_or_404(ScriptChangeSet, change_set_id, "impact.view")
     items = db.scalars(select(ScriptChangeItem).where(ScriptChangeItem.change_set_id == row.id).order_by(ScriptChangeItem.id)).all()
     impact = db.scalar(select(ImpactAnalysis).where(ImpactAnalysis.change_set_id == row.id))
+    from_version = db.get(ScriptFileVersion, row.from_version_id) if row.from_version_id else None
+    to_version = db.get(ScriptFileVersion, row.to_version_id) if row.to_version_id else None
     return {
         "id": row.id, "project_id": row.project_id, "script_file_id": row.script_file_id,
         "from_version_id": row.from_version_id, "to_version_id": row.to_version_id,
+        "from_version_no": from_version.version_no if from_version else None,
+        "to_version_no": to_version.version_no if to_version else None,
         "change_type": row.change_type, "status": row.status, "summary": row.summary_json,
         "items": [{"id": item.id, "change_category": item.change_category, "entity_type": item.entity_type, "old_value": item.old_value_json, "new_value": item.new_value_json, "severity": item.severity} for item in items],
-        "impact": None if impact is None else {"id": impact.id, "status": impact.status, "severity": impact.severity, "affected_target_field_ids": impact.affected_target_field_ids_json, "affected_mart_field_ids": impact.affected_mart_field_ids_json, "affected_mapping_ids": impact.affected_mapping_ids_json, "summary": impact.summary_json, "open_questions": impact.open_questions_json},
+        "impact": None if impact is None else _impact_dict(impact),
     }
 
 
@@ -298,7 +302,11 @@ def get_impact(impact_id: int, principal: CurrentPrincipal, db: Session = Depend
     row = PermissionService(db, principal).load_project_resource_or_404(ImpactAnalysis, impact_id, "impact.view")
     instance = db.scalar(select(WorkflowInstance).where(WorkflowInstance.workflow_key == "lineage_change_review", WorkflowInstance.target_type == "impact_analysis", WorkflowInstance.target_id == row.id).order_by(WorkflowInstance.id.desc()).limit(1))
     tasks = list(db.scalars(select(ReviewTask).where(ReviewTask.workflow_instance_id == instance.id).order_by(ReviewTask.id)).all()) if instance else []
-    return {**_impact_dict(row), "workflow": None if instance is None else {"id": instance.id, "status": instance.status, "current_step": instance.current_step, "tasks": [{"id": item.id, "step_key": item.step_key, "status": item.status, "assignee_user_id": item.assignee_user_id, "assignee_role": item.assignee_role} for item in tasks]}}
+    return {
+        **_impact_dict(row),
+        "impact_scope": _impact_scope_dict(db, row),
+        "workflow": None if instance is None else {"id": instance.id, "status": instance.status, "current_step": instance.current_step, "tasks": [{"id": item.id, "step_key": item.step_key, "status": item.status, "assignee_user_id": item.assignee_user_id, "assignee_role": item.assignee_role} for item in tasks]},
+    }
 
 
 @router.get("/projects/{project_id}/lineage/unresolved")
@@ -385,7 +393,67 @@ def _repository_dict(row: CodeRepository) -> dict:
 
 
 def _impact_dict(row: ImpactAnalysis) -> dict:
-    return {"id": row.id, "project_id": row.project_id, "change_set_id": row.change_set_id, "status": row.status, "severity": row.severity, "affected_target_field_ids": row.affected_target_field_ids_json, "affected_mart_field_ids": row.affected_mart_field_ids_json, "affected_mapping_ids": row.affected_mapping_ids_json, "affected_scenario_mapping_ids": row.affected_scenario_mapping_ids_json, "affected_lineage_edge_ids": row.affected_lineage_edge_ids_json, "summary": row.summary_json, "open_questions": row.open_questions_json, "created_at": row.created_at, "completed_at": row.completed_at}
+    return {
+        "id": row.id,
+        "project_id": row.project_id,
+        "change_set_id": row.change_set_id,
+        "status": row.status,
+        "severity": row.severity,
+        "affected_source_field_ids": row.affected_source_field_ids_json,
+        "affected_target_field_ids": row.affected_target_field_ids_json,
+        "affected_mart_field_ids": row.affected_mart_field_ids_json,
+        "affected_mapping_ids": row.affected_mapping_ids_json,
+        "affected_scenario_mapping_ids": row.affected_scenario_mapping_ids_json,
+        "affected_lineage_edge_ids": row.affected_lineage_edge_ids_json,
+        "affected_semantic_binding_ids": row.affected_semantic_binding_ids_json,
+        "affected_semantic_concept_ids": row.affected_semantic_concept_ids_json,
+        "affected_semantic_version_ids": row.affected_semantic_version_ids_json,
+        "affected_regulatory_rule_ids": row.affected_regulatory_rule_ids_json,
+        "affected_regulatory_knowledge_item_ids": row.affected_regulatory_knowledge_item_ids_json,
+        "affected_requirement_ids": row.affected_requirement_ids_json,
+        "affected_review_task_ids": row.affected_review_task_ids_json,
+        "summary": row.summary_json,
+        "open_questions": row.open_questions_json,
+        "created_at": row.created_at,
+        "completed_at": row.completed_at,
+    }
+
+
+def _impact_scope_dict(db: Session, row: ImpactAnalysis) -> dict:
+    concepts = list(db.scalars(select(SemanticConcept).where(
+        SemanticConcept.project_id == row.project_id,
+        SemanticConcept.id.in_(row.affected_semantic_concept_ids_json or []),
+    ).order_by(SemanticConcept.id)).all()) if row.affected_semantic_concept_ids_json else []
+    versions = list(db.scalars(select(SemanticConceptVersion).where(
+        SemanticConceptVersion.project_id == row.project_id,
+        SemanticConceptVersion.id.in_(row.affected_semantic_version_ids_json or []),
+    ).order_by(SemanticConceptVersion.id)).all()) if row.affected_semantic_version_ids_json else []
+    requirements = list(db.scalars(select(TargetField).where(
+        TargetField.project_id == row.project_id,
+        TargetField.id.in_(row.affected_requirement_ids_json or []),
+    ).order_by(TargetField.id)).all()) if row.affected_requirement_ids_json else []
+    regulatory_items = list(db.scalars(select(RegulatoryKnowledgeItem).where(
+        RegulatoryKnowledgeItem.project_id == row.project_id,
+        RegulatoryKnowledgeItem.id.in_(row.affected_regulatory_knowledge_item_ids_json or []),
+    ).order_by(RegulatoryKnowledgeItem.id)).all()) if row.affected_regulatory_knowledge_item_ids_json else []
+    return {
+        "semantic_concepts": [
+            {"id": item.id, "concept_type": item.concept_type, "concept_code": item.concept_code, "concept_name": item.concept_name, "status": item.status}
+            for item in concepts
+        ],
+        "effective_versions": [
+            {"id": item.id, "semantic_concept_id": item.semantic_concept_id, "version_no": item.version_no, "concept_name": item.concept_name, "effective_from": item.effective_from, "effective_to": item.effective_to}
+            for item in versions
+        ],
+        "requirements": [
+            {"id": item.id, "target_table_id": item.target_table_id, "field_code": item.field_code, "field_name": item.field_name}
+            for item in requirements
+        ],
+        "regulatory_knowledge_items": [
+            {"id": item.id, "knowledge_type": item.knowledge_type, "target_table_code": item.target_table_code, "target_field_code": item.target_field_code, "source_document_name": item.source_document_name}
+            for item in regulatory_items
+        ],
+    }
 
 
 def _workbook_response(content: bytes, file_name: str) -> Response:
