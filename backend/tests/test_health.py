@@ -74,6 +74,21 @@ def test_health_endpoints_are_bounded_sanitized_and_revision_aware(monkeypatch, 
         get_storage_service.cache_clear()
 
 
+def test_not_found_response_uses_compatible_error_contract() -> None:
+    with _client() as client:
+        response = client.get("/not-a-real-route", headers={"X-Request-ID": "test-error-contract"})
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["detail"] == "Not Found"
+    assert payload["error_code"] == "resource_not_found"
+    assert payload["user_message"] == "Not Found"
+    assert payload["technical_message"] is None
+    assert payload["trace_id"] == "test-error-contract"
+    assert payload["retryable"] is False
+    assert payload["suggested_actions"] == ["检查输入或联系项目管理员"]
+
+
 def test_structured_log_event_has_required_fields_and_redacts_sensitive_input() -> None:
     event = build_log_event(
         "security_test",
