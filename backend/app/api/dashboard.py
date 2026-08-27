@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import (
     BackgroundJob, CatalogColumn, DeliverablePackageVersion, ImpactAnalysis, KnowledgeDocument, MappingEvidenceReference,
-    ProductScenario, Project, ReviewTask, ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField, TargetTable,
+    ProductScenario, Project, ReviewTask, ScenarioBusinessMapping, ScenarioTechnicalLineage, SourceToMartMapping, MartToYbtMapping, TargetField, TargetTable,
     UatRun, WorkflowInstance,
 )
 from app.services.auth.dependencies import RealPrincipal
@@ -44,6 +44,12 @@ def project_dashboard(project_id: int, principal: RealPrincipal, target_table_id
         "scenario_count": _count(db, ProductScenario, ProductScenario.project_id == project_id),
         "missing_business_mapping_count": _missing_mapping_count(db, field_ids, ScenarioBusinessMapping, project_id, scenario_id),
         "missing_technical_lineage_count": _missing_mapping_count(db, field_ids, ScenarioTechnicalLineage, project_id, scenario_id),
+        "business_mapping_count": _count(db, ScenarioBusinessMapping, *business_filter),
+        "technical_lineage_count": _count(db, ScenarioTechnicalLineage, *technical_filter),
+        "business_confirmed_count": _count(db, ScenarioBusinessMapping, *business_filter, ScenarioBusinessMapping.business_confirm_status.in_(("confirmed", "approved"))),
+        "technical_confirmed_count": _count(db, ScenarioTechnicalLineage, *technical_filter, ScenarioTechnicalLineage.tech_confirm_status.in_(("confirmed", "approved"))),
+        "source_mart_mapping_count": _count(db, SourceToMartMapping, SourceToMartMapping.project_id == project_id),
+        "mart_ybt_mapping_count": _count(db, MartToYbtMapping, MartToYbtMapping.project_id == project_id),
         "pending_business_review_count": _count(db, ReviewTask, *task_filter, ReviewTask.step_key == "business_review", ReviewTask.status.in_(["pending", "claimed", "returned"]) if review_status is None else ReviewTask.status == review_status),
         "pending_technical_review_count": _count(db, ReviewTask, *task_filter, ReviewTask.step_key == "technical_review", ReviewTask.status.in_(["pending", "claimed", "returned"]) if review_status is None else ReviewTask.status == review_status),
         "pending_final_review_count": _count(db, ReviewTask, *task_filter, ReviewTask.step_key == "final_review", ReviewTask.status.in_(["pending", "claimed", "returned"]) if review_status is None else ReviewTask.status == review_status),
@@ -54,6 +60,7 @@ def project_dashboard(project_id: int, principal: RealPrincipal, target_table_id
         "overdue_task_count": _count(db, ReviewTask, *task_filter, ReviewTask.due_at < now, ReviewTask.status.in_(["pending", "claimed", "returned"])),
         "knowledge_document_count": _count(db, KnowledgeDocument, KnowledgeDocument.project_id == project_id, KnowledgeDocument.document_status != "archived"),
         "catalog_column_count": _count(db, CatalogColumn, CatalogColumn.project_id == project_id, CatalogColumn.enabled.is_(True)),
+        "evidence_reference_count": _count(db, MappingEvidenceReference, MappingEvidenceReference.project_id == project_id),
     }
     failed = db.scalars(select(BackgroundJob).where(BackgroundJob.project_id == project_id, BackgroundJob.status.in_(["failed", "partially_completed"])).order_by(BackgroundJob.id.desc()).limit(10)).all()
     latest_version = db.scalar(select(DeliverablePackageVersion).where(DeliverablePackageVersion.project_id == project_id).order_by(DeliverablePackageVersion.id.desc()).limit(1))
@@ -62,9 +69,18 @@ def project_dashboard(project_id: int, principal: RealPrincipal, target_table_id
     readiness = build_project_readiness(db, project_id)
     next_dimension = next((item for item in readiness["dimensions"].values() if item["status"] != "ready"), None)
     if evidence_completeness == "complete": counts["without_evidence_count"] = 0
+    eligible = counts["field_count"] * max(counts["scenario_count"], 1)
+    mapping_objects = counts["business_mapping_count"] + counts["technical_lineage_count"] + counts["source_mart_mapping_count"] + counts["mart_ybt_mapping_count"]
     return {
         **counts,
         "readiness": {"status": readiness["overall_status"], "score": readiness["score"], "critical_blocker_count": len(readiness["critical_blockers"])},
+        "as_of": now.isoformat(),
+        "critical_blockers": readiness["critical_blockers"][:10],
+        "metric_definitions": {
+            "regulatory_coverage": {"numerator": min(counts["business_confirmed_count"], eligible), "denominator": eligible, "scope": "当前项目启用场景 × 目标字段", "as_of": now.isoformat()},
+            "technical_lineage_coverage": {"numerator": min(counts["technical_confirmed_count"], eligible), "denominator": eligible, "scope": "当前项目启用场景 × 目标字段", "as_of": now.isoformat()},
+            "evidence_coverage": {"numerator": min(counts["evidence_reference_count"], mapping_objects), "denominator": mapping_objects, "scope": "当前项目全部业务/技术/双层映射对象", "as_of": now.isoformat()},
+        },
         "recent_failed_jobs": [{"id": job.id, "job_type": job.job_type, "status": job.status, "error_message": job.error_message, "finished_at": job.finished_at} for job in failed],
         "latest_formal_version": None if latest_version is None else {"id": latest_version.id, "package_id": latest_version.deliverable_package_id, "version_no": latest_version.version_no, "approved_at": latest_version.approved_at},
         "unreviewed_impact_count": unreviewed_impacts,
