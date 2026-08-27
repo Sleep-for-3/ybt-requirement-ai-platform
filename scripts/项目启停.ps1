@@ -102,6 +102,40 @@ function Wait-Endpoint {
     return $false
 }
 
+function Wait-BackendReady {
+    param([int]$Port, [int]$TimeoutSeconds = 90)
+    $url = "http://127.0.0.1:$Port/health/ready"
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastChecks = ""
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $health = Invoke-RestMethod -Uri $url -UseBasicParsing -TimeoutSec 3
+            if ([string]$health.status -eq "ready") {
+                return $health
+            }
+            if ($null -ne $health.checks) {
+                $lastChecks = (($health.checks.psobject.Properties | ForEach-Object {
+                    "$($_.Name)=$($_.Value)"
+                }) -join ", ")
+            }
+        } catch {
+            # 服务启动期间连接失败或返回 503 属于预期。
+        }
+        Start-Sleep -Seconds 1
+    }
+    $suffix = if ([string]::IsNullOrWhiteSpace($lastChecks)) { "" } else { "；最近检查：$lastChecks" }
+    throw "后端在 $TimeoutSeconds 秒内未通过 /health/ready：$url$suffix"
+}
+
+function Get-BackendReadiness {
+    param([int]$Port)
+    try {
+        return Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/ready" -UseBasicParsing -TimeoutSec 3
+    } catch {
+        return $null
+    }
+}
+
 function Resolve-Executable {
     param([string]$Name, [string[]]$Fallbacks)
     $command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -1058,9 +1092,7 @@ function Start-Project {
             -WindowStyle Hidden `
             -PassThru
 
-        if (-not (Wait-Endpoint -Url "http://127.0.0.1:$resolvedBackendPort/health/ready")) {
-            throw "后端在 90 秒内未就绪，请检查日志：$($logs.backendErr)"
-        }
+        $backendReadiness = Wait-BackendReady -Port $resolvedBackendPort -TimeoutSeconds 90
         if (-not (Wait-Endpoint -Url "http://127.0.0.1:$FrontendPort/")) {
             throw "前端在 90 秒内未就绪，请检查日志：$($logs.frontendErr)"
         }
@@ -1069,6 +1101,12 @@ function Start-Project {
         $frontendOwner = Get-PortOwner -Port $FrontendPort
         if ($null -eq $backendOwner -or $null -eq $frontendOwner) {
             throw "服务已响应，但无法确认监听进程。"
+        }
+        $readinessChecks = @{}
+        if ($null -ne $backendReadiness.checks) {
+            foreach ($property in $backendReadiness.checks.psobject.Properties) {
+                $readinessChecks[[string]$property.Name] = [string]$property.Value
+            }
         }
         $state = [PSCustomObject]@{
             startedAt = (Get-Date).ToString("o")
@@ -1103,6 +1141,7 @@ function Start-Project {
             frontendLog = $logs.frontendErr
             workerLog = $logs.workerErr
             embeddingLog = $logs.embeddingErr
+            readinessChecks = $readinessChecks
         }
         $state | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
         Write-Host "项目启动成功（$Mode 模式）。"
@@ -1262,13 +1301,10 @@ function Show-ProjectStatus {
     $frontendOwner = Get-PortOwner -Port $statusFrontendPort
     $backendOwner = Get-PortOwner -Port $statusBackendPort
     $backendHealthy = $false
+    $backendReadiness = $null
     if ($null -ne $backendOwner) {
-        try {
-            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$statusBackendPort/health/ready" -TimeoutSec 3
-            $backendHealthy = [string]$health.status -eq "ready"
-        } catch {
-            $backendHealthy = $false
-        }
+        $backendReadiness = Get-BackendReadiness -Port $statusBackendPort
+        $backendHealthy = $null -ne $backendReadiness -and [string]$backendReadiness.status -eq "ready"
     }
 
     $dockerSnapshot = Get-DockerStatusSnapshot
@@ -1333,6 +1369,12 @@ function Show-ProjectStatus {
     Write-Host "后端服务：$(if ($null -ne $backendOwner) { "运行中（PID $backendOwner）" } else { "未运行" })"
     Write-Host "接口文档：http://127.0.0.1:$statusBackendPort/docs"
     Write-Host "健康检查：http://127.0.0.1:$statusBackendPort/health/ready（$(if ($backendHealthy) { "正常" } else { "不可用" })）"
+    if ($null -ne $backendReadiness -and $null -ne $backendReadiness.checks) {
+        $checkSummary = (($backendReadiness.checks.psobject.Properties | ForEach-Object {
+            "$($_.Name)=$($_.Value)"
+        }) -join ", ")
+        Write-Host "就绪依赖：$checkSummary"
+    }
     Write-Host "Docker 引擎：$(if ($null -eq $dockerRuntime) { "不可用" } elseif ([string]$dockerRuntime.kind -eq "wsl") { "运行中（WSL $($dockerRuntime.distribution)）" } else { "运行中（Windows）" })"
     Write-Host "Milvus：$(if ($milvusRunning) { "运行中（127.0.0.1:19530）" } else { "未运行" })"
     $embeddingStatusSuffix = if ($null -ne $embeddingOwner) { "（本地 FastEmbed 运行中，PID $embeddingOwner）" } else { "" }
