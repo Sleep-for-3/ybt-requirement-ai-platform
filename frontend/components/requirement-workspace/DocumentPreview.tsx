@@ -13,13 +13,25 @@ import type {
 import { buildLineageLabels, combinedFieldStatus, mappingStatusLabel, mappingStatusTone, preferredMappingContent } from "@/lib/workspace-view-model.mjs";
 import type { FieldWorkspaceRecord, SaveState, SourceMappingIndex } from "@/components/requirement-workspace/types";
 
+type WorkspaceTab = "structured" | "lineage" | "evidence" | "questions" | "document";
+
+const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string }> = [
+  { id: "structured", label: "结构化口径" },
+  { id: "lineage", label: "血缘" },
+  { id: "evidence", label: "证据" },
+  { id: "questions", label: "待确认" },
+  { id: "document", label: "文档预览" }
+];
+
 export function DocumentPreview({
   projectName,
+  activeTab,
   table,
   scenario,
   records,
   selectedFieldId,
   onSelectField,
+  onTabChange,
   martFields,
   martTables,
   sourceMappings,
@@ -42,11 +54,13 @@ export function DocumentPreview({
   exporting
 }: {
   projectName: string;
+  activeTab: WorkspaceTab;
   table: TargetTable | null;
   scenario: ProductScenario | null;
   records: FieldWorkspaceRecord[];
   selectedFieldId: number | null;
   onSelectField: (id: number) => void;
+  onTabChange: (tab: WorkspaceTab) => void;
   martFields: MartField[];
   martTables: MartTable[];
   sourceMappings: SourceMappingIndex;
@@ -105,6 +119,8 @@ export function DocumentPreview({
               <DocMeta label="状态" value={deliverable ? mappingStatusLabel(deliverable.status) : "工作草稿"} last />
             </div>
 
+            <WorkspaceTabs activeTab={activeTab} onChange={onTabChange} />
+            {activeTab === "document" ? <>
             <SectionTitle number="1" title="需求背景与范围" />
             <p className="text-xs leading-6 text-slate-600">{table.description || selected?.field.regulatory_refined_definition || selected?.field.regulatory_description || "当前目标表尚未维护整体说明，字段级监管定义与人工口径见下表。"}</p>
 
@@ -193,11 +209,50 @@ export function DocumentPreview({
               <span>来源：监管目标字段 + 场景口径 + 双层 Mapping + 已绑定证据</span>
               <span>AI 草稿不等于人工最终监管口径</span>
             </footer>
+            </> : null}
+            {activeTab === "structured" ? <StructuredCaliber
+              businessFinal={businessFinal} businessLocked={businessLocked} onAdoptBusiness={onAdoptBusiness}
+              onAdoptTechnical={onAdoptTechnical} onBusinessFinalChange={onBusinessFinalChange}
+              onSave={onSave} onSelectField={onSelectField} onTechnicalFinalChange={onTechnicalFinalChange}
+              records={records} saveState={saveState} selected={selected} technicalFinal={technicalFinal} technicalLocked={technicalLocked}
+            /> : null}
+            {activeTab === "lineage" ? <LineagePanel record={selected} martFields={martFields} martTables={martTables} sourceMappings={sourceMappings} /> : null}
+            {activeTab === "evidence" ? <EvidencePanel evidenceCountByField={evidenceCountByField} onSelectField={onSelectField} onShowEvidence={onShowEvidence} records={records} selectedFieldId={selectedFieldId} /> : null}
+            {activeTab === "questions" ? <QuestionsPanel questions={selectedQuestions} /> : null}
           </article>
         </div>
       )}
     </section>
   );
+}
+
+function WorkspaceTabs({ activeTab, onChange }: { activeTab: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {
+  return <div aria-label="需求工作台视图" className="mt-5 flex gap-1 overflow-x-auto border-b border-line" role="tablist">
+    {WORKSPACE_TABS.map((tab) => <button aria-selected={tab.id === activeTab} className={`min-h-10 shrink-0 border-b-2 px-3 text-xs font-semibold ${tab.id === activeTab ? "border-pine-600 text-pine-700" : "border-transparent text-slate-500 hover:text-ink"}`} key={tab.id} onClick={() => onChange(tab.id)} role="tab" type="button">{tab.label}</button>)}
+  </div>;
+}
+
+function StructuredCaliber({ records, selected, onSelectField, businessFinal, technicalFinal, onBusinessFinalChange, onTechnicalFinalChange, businessLocked, technicalLocked, saveState, onSave, onAdoptBusiness, onAdoptTechnical }: {
+  records: FieldWorkspaceRecord[]; selected: FieldWorkspaceRecord | null; onSelectField: (id: number) => void;
+  businessFinal: string; technicalFinal: string; onBusinessFinalChange: (value: string) => void; onTechnicalFinalChange: (value: string) => void;
+  businessLocked: boolean; technicalLocked: boolean; saveState: SaveState; onSave: () => void; onAdoptBusiness: () => void; onAdoptTechnical: () => void;
+}) {
+  return <div className="mt-5 space-y-4"><div className="rounded-lg border border-pine-100 bg-pine-50/50 px-4 py-3 text-xs text-pine-900">结构化口径是当前事实视图：监管字段、业务定义、技术溯源、双层 Mapping 和治理状态均来自服务器真实记录；文档预览不会反向修改这些事实。</div>
+    <div className="grid gap-3 md:grid-cols-2">{records.map((record) => <button className={`rounded-lg border p-3 text-left ${record.field.id === selected?.field.id ? "border-pine-400 bg-pine-50" : "border-line bg-white"}`} key={record.field.id} onClick={() => onSelectField(record.field.id)} type="button"><strong className="block text-xs text-ink">{record.field.field_name}</strong><span className="mt-1 block font-mono text-[10px] text-slate-400">{record.field.field_code}</span><span className="mt-2 block text-[11px] text-slate-600">业务：{record.business?.final_content || record.business?.ai_generated_content || "待维护"}</span><span className="mt-1 block text-[11px] text-slate-600">血缘：{record.lineage?.source_system_name || "待确认"} · {record.lineage?.lineage_status || "未关联"}</span></button>)}</div>
+    {selected ? <div className="grid gap-3 lg:grid-cols-2"><MappingEditor aiDraft={selected.business?.ai_generated_content || ""} finalContent={businessFinal} label="业务口径" locked={businessLocked} onAdopt={onAdoptBusiness} onChange={onBusinessFinalChange} status={selected.business?.business_confirm_status || "未维护"} /><MappingEditor aiDraft={selected.lineage?.ai_generated_content || ""} finalContent={technicalFinal} label="技术溯源" locked={technicalLocked} onAdopt={onAdoptTechnical} onChange={onTechnicalFinalChange} status={selected.lineage?.tech_confirm_status || "未维护"} /><div className="flex items-center justify-between rounded-lg border border-line bg-slate-50 px-3 py-2 lg:col-span-2"><SaveStateText state={saveState} /><button className="button-primary" disabled={saveState === "saving" || (businessLocked && technicalLocked)} onClick={onSave} type="button"><Save size={15} />保存人工最终内容</button></div></div> : <p className="text-xs text-slate-500">请选择字段查看完整口径。</p>}
+  </div>;
+}
+
+function LineagePanel({ record, martFields, martTables, sourceMappings }: { record: FieldWorkspaceRecord | null; martFields: MartField[]; martTables: MartTable[]; sourceMappings: SourceMappingIndex }) {
+  return <div className="mt-5">{record ? <><p className="mb-3 text-xs text-slate-500">当前字段的 Source → Mart → YBT 可追溯链路</p><LineageFlow record={record} martFields={martFields} martTables={martTables} sourceMappings={sourceMappings} /></> : <p className="text-xs text-slate-500">请选择字段查看血缘。</p>}</div>;
+}
+
+function EvidencePanel({ records, selectedFieldId, evidenceCountByField, onSelectField, onShowEvidence }: { records: FieldWorkspaceRecord[]; selectedFieldId: number | null; evidenceCountByField: Record<number, number>; onSelectField: (id: number) => void; onShowEvidence: () => void }) {
+  return <div className="mt-5 space-y-2"><p className="text-xs text-slate-500">证据正文按字段懒加载，避免首屏返回大文本。</p>{records.map((record) => <div className="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2" key={record.field.id}><span className="text-xs text-ink">{record.field.field_name}</span><button className="button-secondary h-8 text-xs" onClick={() => { onSelectField(record.field.id); onShowEvidence(); }} type="button">查看 {evidenceCountByField[record.field.id] || 0} 条证据</button></div>)}</div>;
+}
+
+function QuestionsPanel({ questions }: { questions: PendingQuestion[] }) {
+  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{question.priority.toUpperCase()} · {question.question_type}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{question.question_status}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>当前没有未闭环问题</p></div>}</div>;
 }
 
 function DocMeta({ label, value, last = false }: { label: string; value: string; last?: boolean }) {

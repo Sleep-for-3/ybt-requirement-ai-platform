@@ -43,6 +43,7 @@ export function RequirementWorkspace() {
   const [technicalJobId, setTechnicalJobId] = useState<number | null>(null);
   const [businessJobSeed, setBusinessJobSeed] = useState<BackgroundJobSummary | null>(null);
   const [technicalJobSeed, setTechnicalJobSeed] = useState<BackgroundJobSummary | null>(null);
+  const [activeTab, setActiveTab] = useState<"structured" | "lineage" | "evidence" | "questions" | "document">("structured");
   const projectionQuery = useQuery({
     ...workspaceProjectionOptions(projectId || 0, tableId, scenarioId),
     enabled:Boolean(projectId)
@@ -88,6 +89,7 @@ export function RequirementWorkspace() {
 
   useEffect(() => {
     setTableId(null); setFieldId(null); setScenarioId(null); setEvidenceOpen(false); setError(""); setNotice("");
+    setActiveTab("structured");
   }, [projectId]);
   useEffect(() => {
     if (!projectId || !projection) return;
@@ -270,6 +272,7 @@ export function RequirementWorkspace() {
             {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在懒加载当前字段完整口径与双层 Mapping…</div> : null}
             <DocumentPreview
               businessFinal={businessFinal}
+              activeTab={activeTab}
               businessLocked={isMappingLocked(selectedRecord?.business?.business_confirm_status)}
               deliverable={deliverable}
               evidenceCountByField={evidenceCountByField}
@@ -285,6 +288,7 @@ export function RequirementWorkspace() {
               onSelectField={changeField}
               onShowEvidence={() => setEvidenceOpen(true)}
               onTechnicalFinalChange={(value) => { setTechnicalFinal(value); setSaveState("dirty"); }}
+              onTabChange={setActiveTab}
               projectName={selectedProject?.name || "当前项目"}
               questions={tableQuestions}
               records={records}
