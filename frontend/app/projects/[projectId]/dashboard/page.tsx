@@ -70,6 +70,7 @@ export default function Page() {
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
         {error ? <div className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{error}</div> : null}
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs text-slate-500">数据截至 {data?.as_of ? new Date(data.as_of).toLocaleString("zh-CN") : "加载中…"}</p><p className="mt-1 text-xs text-slate-400">所有覆盖率均展示真实分子、分母和项目范围；空项目不展示误导性百分比。</p></div><div className="flex items-center gap-2"><button className="button-secondary h-9 text-xs" onClick={() => setReportMode((current) => !current)} type="button">{reportMode ? "退出汇报模式" : "汇报模式"}</button><div className="flex rounded-lg border border-line bg-white p-1" role="tablist" aria-label="驾驶舱视图">{([["executive","领导驾驶舱"],["business","业务运营"],["technical","技术运营"]] as const).map(([id,label]) => <button className={`rounded px-3 py-1.5 text-xs ${view === id ? "bg-pine text-white" : "text-slate-600"}`} key={id} onClick={() => setView(id)} role="tab" aria-selected={view === id} type="button">{label}</button>)}</div></div></div>
+        {analytics ? <MetricStrip analytics={analytics} /> : null}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Summary
             label="项目准备度"
@@ -104,14 +105,7 @@ export default function Page() {
         {view === "executive" ? <ReportBrief data={data} /> : null}
         {view === "business" ? <section className="panel p-4"><h2 className="text-sm font-semibold text-ink">业务运营</h2><div className="mt-3 grid gap-3 sm:grid-cols-3"><Summary label="待业务审核" value={String(data?.pending_business_review_count ?? "-")} href="/review-tasks" /><Summary label="待确认问题" value={String(data?.open_question_count ?? "-")} href="/questions" /><Summary label="低置信度" value={String(data?.low_confidence_count ?? "-")} href={`/projects/${projectId}/readiness`} /></div></section> : null}
         {view === "technical" ? <section className="panel p-4"><h2 className="text-sm font-semibold text-ink">技术运营</h2><div className="mt-3 grid gap-3 sm:grid-cols-3"><Summary label="目录字段" value={String(data?.catalog_column_count ?? "-")} href="/catalog" /><Summary label="失败任务" value={String(data?.recent_failed_jobs.length ?? "-")} href="/jobs" /><Summary label="未审核影响" value={String(data?.unreviewed_impact_count ?? "-")} href="/lineage/changes" /></div></section> : null}
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Object.entries(LABELS).map(([key, label]) => (
-            <div className="stat-card" key={key}>
-              <div className="stat-label">{label}</div>
-              <div className="stat-value">{typeof data?.[key] === "number" ? String(data[key]) : "-"}</div>
-            </div>
-          ))}
-        </section>
+        {view !== "executive" ? <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(LABELS).map(([key, label]) => <div className="stat-card" key={key}><div className="stat-label">{label}</div><div className="stat-value">{typeof data?.[key] === "number" ? String(data[key]) : "-"}</div></div>)}</section> : null}
       </div>
     </main>
   );
@@ -120,6 +114,21 @@ export default function Page() {
 function AnalyticsRiskSection({ analytics }: { analytics: AnalyticsOverview | null }) {
   const max = Math.max(...(analytics?.risk_distribution.map((item) => item.value) || [0]), 1);
   return <section className="panel p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><div><h2 className="text-sm font-semibold text-ink">风险结构</h2><p className="mt-1 text-xs text-slate-500">来自统一 Analytics Dataset 的当前事实，不含模拟趋势。</p></div><span className="text-xs text-slate-400">{analytics?.reporting_cycle ? `报送期：${analytics.reporting_cycle.cycle_name}` : "当前实时范围"}</span></div><div className="mt-4 space-y-3">{analytics?.risk_distribution.map((item) => <Link className="group block" href={item.drill_target} key={item.code}><div className="mb-1 flex items-center justify-between text-xs"><span className="font-medium text-slate-700">{item.label}</span><span className="tabular-nums text-slate-500">{item.value}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-coral-400 transition-all group-hover:bg-coral-500" style={{ width: `${Math.max(item.value / max * 100, item.value ? 4 : 0)}%` }} /></div></Link>) || <p className="text-xs text-slate-500">分析数据加载中…</p>}</div></section>;
+}
+
+function MetricStrip({ analytics }: { analytics: AnalyticsOverview }) {
+  const readiness = analytics.metrics.readiness_score;
+  const business = analytics.metrics.business_definition_coverage;
+  const technical = analytics.metrics.technical_lineage_coverage;
+  const evidence = analytics.metrics.evidence_coverage;
+  const review = analytics.metrics.review_completion_rate;
+  const risk = analytics.metrics.high_risk_impact_count;
+  const ratio = (metric?: { value: number | null; numerator: number; denominator: number }) => metric?.value == null ? "N/A" : `${Math.round(metric.value * 100)}%`;
+  return <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="统一治理指标"><Metric label="总体准备度" value={readiness?.value == null ? "N/A" : `${Math.round(readiness.value * 100)}%`} detail="实时准备度评分" /><Metric label="业务口径" value={ratio(business)} detail={business ? `${business.numerator}/${business.denominator}` : "暂无可计算对象"} /><Metric label="技术血缘" value={ratio(technical)} detail={technical ? `${technical.numerator}/${technical.denominator}` : "暂无可计算对象"} /><Metric label="证据完备" value={ratio(evidence)} detail={evidence ? `${evidence.numerator}/${evidence.denominator}` : "暂无可计算对象"} /><Metric label="审核完成" value={ratio(review)} detail={review ? `${review.numerator}/${review.denominator}` : "暂无可计算对象"} /><Metric label="高风险影响" value={risk ? String(risk.numerator) : "0"} detail="未闭环高风险影响" /></section>;
+}
+
+function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <div className="border-b border-line px-1 py-2"><div className="stat-label">{label}</div><div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{value}</div><div className="mt-1 truncate text-[10px] text-slate-400">{detail}</div></div>;
 }
 
 function CoverageCard({ label, metric, href }: { label: string; metric?: { numerator: number; denominator: number; scope: string }; href: string }) {
