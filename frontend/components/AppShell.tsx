@@ -60,6 +60,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "工作台",
     items: [
       { href: "/workspace", label: "需求文档工作台", icon: FileSpreadsheet },
+      { href: "/cockpit", label: "监管驾驶舱", icon: ChartNoAxesCombined },
       { href: "/projects", label: "项目", icon: FolderKanban },
       { href: "/work", label: "我的工作", icon: ClipboardCheck }
     ]

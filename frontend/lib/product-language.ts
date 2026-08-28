@@ -34,6 +34,8 @@ const STATUS_LABELS: Record<string, string> = {
   under_review: "审核中",
   awaiting_confirmation: "待确认",
   final: "已定稿",
+  ready: "已就绪",
+  partial: "部分就绪",
   active: "正常",
   inactive: "未启用",
   warning: "需关注",
@@ -117,4 +119,3 @@ export function entityLabel(value?: string | null): string {
   if (!value) return "业务对象";
   return ENTITY_LABELS[value] || value;
 }
-
