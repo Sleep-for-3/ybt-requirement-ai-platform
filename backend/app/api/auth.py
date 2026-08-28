@@ -58,7 +58,8 @@ def me(principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
         ProjectMembership.project_role,
         ProjectMembership.status,
     ).where(ProjectMembership.user_id == user.id)).mappings())
-    effective_by_project = PermissionService(db, principal).effective_permissions_for_visible_projects()
+    permission_service = PermissionService(db, principal)
+    effective_by_project = permission_service.effective_permissions_for_visible_projects()
     effective_permissions = sorted({permission for permissions in effective_by_project.values() for permission in permissions})
     return {
         "id": user.id,
@@ -71,4 +72,5 @@ def me(principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
         "project_memberships": [dict(item) for item in project_memberships],
         "effective_permissions": effective_permissions,
         "effective_project_permissions": {str(project_id): permissions for project_id, permissions in effective_by_project.items()},
+        "capabilities": permission_service.capabilities(),
     }

@@ -60,7 +60,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "工作台",
     items: [
       { href: "/workspace", label: "需求文档工作台", icon: FileSpreadsheet },
-      { href: "/cockpit", label: "监管驾驶舱", icon: ChartNoAxesCombined },
+      { href: "/cockpit", label: "监管驾驶舱", icon: ChartNoAxesCombined, audience: "cockpit" },
       { href: "/projects", label: "项目", icon: FolderKanban },
       { href: "/work", label: "我的工作", icon: ClipboardCheck }
     ]
@@ -110,7 +110,7 @@ const SECONDARY_NAV: NavItem[] = [
   { href: "/notifications", label: "通知", icon: Bell },
   { href: "/jobs", label: "后台任务", icon: History, audience: "technical" },
   { href: "/audit", label: "审计", icon: ScrollText, audience: "admin" },
-  { href: "/admin/institutions", label: "系统管理", icon: Settings2, match: "/admin", audience: "admin" },
+  { href: "/admin", label: "系统管理", icon: Settings2, match: "/admin", audience: "admin" },
   { href: "/legacy", label: "Legacy 综合工作台", icon: LayoutGrid, audience: "admin" }
 ];
 
@@ -215,6 +215,10 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     username: string;
     effective_project_permissions?: Record<string, string[]>;
     institution_memberships?: Array<{ institution_id?: number; role?: string; status?: string }>;
+    capabilities?: {
+      can_view_admin?: boolean;
+      can_view_institution_cockpit?: boolean;
+    };
   } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const jobsQuery = useQuery({

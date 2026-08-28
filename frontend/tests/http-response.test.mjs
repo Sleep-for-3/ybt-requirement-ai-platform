@@ -121,7 +121,7 @@ test("request transport failures become understandable Chinese messages", () => 
   assert.equal(normalizeRequestError(timeout).message, "请求超时，请稍后重试");
   assert.equal(
     normalizeRequestError(new TypeError("Failed to fetch")).message,
-    "无法连接服务器，请检查服务是否已启动"
+    "无法连接服务"
   );
 });
 
@@ -143,4 +143,16 @@ test("http-response normalization preserves status-bearing ApiError instances", 
   const forbidden = new ApiError("没有操作权限", 403);
   assert.equal(normalizeRequestError(forbidden), forbidden);
   assert.equal(normalizeRequestError(forbidden).status, 403);
+});
+
+test("unified error contract preserves error code and trace id", async () => {
+  const response = { ok: false, status: 500, text: async () => JSON.stringify({ detail: "驾驶舱数据计算失败", user_message: "服务器处理失败", error_code: "cockpit_data_unavailable", trace_id: "trace-cockpit-1" }) };
+  await assert.rejects(readApiResponse(response, "/cockpit"), (error) => error instanceof ApiError && error.status === 500 && error.errorCode === "cockpit_data_unavailable" && error.traceId === "trace-cockpit-1");
+});
+
+test("network errors carry a machine-readable classification", () => {
+  const error = normalizeRequestError(new TypeError("Failed to fetch"));
+  assert.equal(error.message, "无法连接服务");
+  assert.equal(error.errorCode, "network_error");
+  assert.equal(error.status, 0);
 });

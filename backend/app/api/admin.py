@@ -47,6 +47,8 @@ def bootstrap(payload: BootstrapRequest, db: Session = Depends(get_db)) -> dict:
 @router.get("/institutions", response_model=list[InstitutionRead])
 def list_institutions(principal: RealPrincipal, db: Session = Depends(get_db)) -> list[Institution]:
     permissions = PermissionService(db, principal)
+    if not permissions.capabilities()["can_view_admin"]:
+        raise HTTPException(status_code=403, detail="Administrator capability required")
     if permissions.is_platform_admin():
         return list(db.scalars(select(Institution).order_by(Institution.institution_name)).all())
     ids = select(InstitutionMembership.institution_id).where(
@@ -147,6 +149,6 @@ def list_users(principal: RealPrincipal, db: Session = Depends(get_db)) -> list[
 
 @router.get("/permissions")
 def permissions(principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
-    if not PermissionService(db, principal).is_platform_admin():
+    if not PermissionService(db, principal).capabilities()["can_view_permission_matrix"]:
         raise HTTPException(status_code=403, detail="Platform administrator required")
     return {"institution_roles": sorted(INSTITUTION_ROLES), "project_roles": {role: sorted(values) for role, values in PROJECT_ROLE_PERMISSIONS.items()}}

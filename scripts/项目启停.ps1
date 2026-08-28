@@ -387,6 +387,14 @@ function Get-LocalSecrets {
                 -NotePropertyValue ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
             $updated = $true
         }
+        if ($secrets.PSObject.Properties.Name -notcontains "appSecretKey") {
+            $secrets | Add-Member -NotePropertyName "appSecretKey" -NotePropertyValue ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+            $updated = $true
+        }
+        if ($secrets.PSObject.Properties.Name -notcontains "jwtSecretKey") {
+            $secrets | Add-Member -NotePropertyName "jwtSecretKey" -NotePropertyValue ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+            $updated = $true
+        }
         if ($updated) {
             $secrets | ConvertTo-Json | Set-Content -LiteralPath $secretsPath -Encoding UTF8
             Protect-LocalSecretFile -Path $secretsPath
@@ -398,6 +406,8 @@ function Get-LocalSecrets {
         databasePassword = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
         milvusMinioUser = "ybt_milvus"
         milvusMinioPassword = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+        appSecretKey = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
+        jwtSecretKey = ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
     }
     $secrets | ConvertTo-Json | Set-Content -LiteralPath $secretsPath -Encoding UTF8
     Protect-LocalSecretFile -Path $secretsPath
@@ -698,7 +708,7 @@ function Assert-LocalPrerequisites {
 }
 
 function Set-ProjectEnvironment {
-    param([int]$Port, [string]$DatabaseUrl)
+    param([int]$Port, [string]$DatabaseUrl, [object]$Secrets)
     $env:DATABASE_URL = $DatabaseUrl
     $env:STORAGE_DIR = "./dev_storage_local"
     # Production must never start in legacy-system mode.  SQLite is the
@@ -706,6 +716,10 @@ function Set-ProjectEnvironment {
     # allowed to retain optional authentication.
     $env:ENVIRONMENT = if ($Mode -eq "production") { "production" } else { "development" }
     $env:AUTH_MODE = if ($Mode -eq "production") { "required" } else { "optional" }
+    if ($Mode -eq "production") {
+        $env:APP_SECRET_KEY = [string]$Secrets.appSecretKey
+        $env:JWT_SECRET_KEY = [string]$Secrets.jwtSecretKey
+    }
     $env:CORS_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
     $env:LOCAL_BACKEND_PORT = [string]$Port
     # Keep the long-running dev server isolated from `next build`'s production `.next` output.
@@ -1006,7 +1020,7 @@ function Start-Project {
         frontendErr = Join-Path $logRoot "frontend-$timestamp.stderr.log"
     }
     $environmentNames = @(
-        "DATABASE_URL", "STORAGE_DIR", "ENVIRONMENT", "AUTH_MODE", "TASK_QUEUE_PROVIDER",
+        "DATABASE_URL", "STORAGE_DIR", "ENVIRONMENT", "AUTH_MODE", "APP_SECRET_KEY", "JWT_SECRET_KEY", "TASK_QUEUE_PROVIDER",
         "REDIS_URL", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND",
         "LLM_PROVIDER", "EMBEDDING_PROVIDER", "VECTOR_STORE_PROVIDER",
         "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION",
@@ -1033,6 +1047,7 @@ function Start-Project {
     $dockerKeepAlive = $null
     $semanticRuntime = $null
     $databaseCreatedNow = $false
+    $secrets = $null
     try {
         if ($Mode -eq "production") {
             $postgresTools = Get-PostgresTools
@@ -1051,7 +1066,7 @@ function Start-Project {
         } else {
             $databaseUrl = "sqlite:///./$DatabaseFile"
         }
-        Set-ProjectEnvironment -Port $resolvedBackendPort -DatabaseUrl $databaseUrl
+        Set-ProjectEnvironment -Port $resolvedBackendPort -DatabaseUrl $databaseUrl -Secrets $secrets
         if ($Mode -eq "production") {
             $semanticRuntime = Set-SemanticEnvironment
             if ($semanticRuntime.usesManagedFastEmbed) {

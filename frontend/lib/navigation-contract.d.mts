@@ -1,11 +1,16 @@
-export type NavigationAudience = "technical" | "admin";
+export type NavigationAudience = "technical" | "admin" | "cockpit";
 
 export type NavigationAccess = {
   isAdmin: boolean;
+  canViewCockpit: boolean;
   isTechnical: boolean;
 };
 
 export type NavigationAuth = {
+  capabilities?: {
+    can_view_admin?: boolean;
+    can_view_institution_cockpit?: boolean;
+  };
   effective_project_permissions?: Record<string, string[]>;
   institution_memberships?: Array<{
     institution_id?: number;

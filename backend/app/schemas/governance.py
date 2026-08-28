@@ -48,6 +48,7 @@ class AuthMe(UserRead):
     project_memberships: list[dict[str, Any]] = Field(default_factory=list)
     effective_permissions: list[str] = Field(default_factory=list)
     effective_project_permissions: dict[str, list[str]] = Field(default_factory=dict)
+    capabilities: dict[str, bool] = Field(default_factory=dict)
 
 
 class AdminInstitutionMembershipRead(BaseModel):

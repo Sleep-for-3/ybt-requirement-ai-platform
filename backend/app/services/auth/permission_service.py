@@ -63,6 +63,31 @@ class PermissionService:
             Institution.status == "active",
         ).limit(1)) is not None
 
+    def capabilities(self) -> dict[str, bool]:
+        platform_admin = self.is_platform_admin()
+        institution_admin = self._has_any_active_institution_role({"institution_admin", "security_admin"})
+        return {
+            "can_view_admin": platform_admin or institution_admin,
+            "can_manage_institutions": platform_admin,
+            "can_manage_users": platform_admin or institution_admin,
+            "can_view_permission_matrix": platform_admin,
+            "can_view_platform_health": platform_admin,
+            "can_view_institution_cockpit": platform_admin or institution_admin or self._has_any_active_institution_role({"auditor"}),
+            "can_view_all_projects": platform_admin,
+        }
+
+    def _has_any_active_institution_role(self, roles: set[str]) -> bool:
+        if self.principal.user_id is None:
+            return False
+        return self.db.scalar(select(InstitutionMembership.id).join(
+            Institution, Institution.id == InstitutionMembership.institution_id,
+        ).where(
+            InstitutionMembership.user_id == self.principal.user_id,
+            InstitutionMembership.status == "active",
+            InstitutionMembership.role.in_(roles),
+            Institution.status == "active",
+        ).limit(1)) is not None
+
     def require_institution_role(self, institution_id: int, roles: Iterable[str]) -> Institution:
         institution = self.db.get(Institution, institution_id)
         if institution is None or institution.status != "active":
@@ -132,10 +157,13 @@ class PermissionService:
             return None
         if self.principal.user_id is None:
             return []
-        managed_institutions = select(InstitutionMembership.institution_id).where(
+        managed_institutions = select(InstitutionMembership.institution_id).join(
+            Institution, Institution.id == InstitutionMembership.institution_id,
+        ).where(
             InstitutionMembership.user_id == self.principal.user_id,
             InstitutionMembership.status == "active",
             InstitutionMembership.role.in_(["institution_admin", "security_admin", "auditor"]),
+            Institution.status == "active",
         )
         return list(self.db.scalars(select(Project.id).where(
             (Project.id.in_(select(ProjectMembership.project_id).where(

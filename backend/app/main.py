@@ -115,12 +115,14 @@ app.add_middleware(
 
 
 def _error_contract(request: Request, status_code: int, detail, *, error_code: str | None = None, technical_message: str | None = None) -> dict:
-    code = error_code or {
+    detail_error_code = detail.get("error_code") if isinstance(detail, dict) else None
+    public_message = detail.get("message", detail) if isinstance(detail, dict) else detail
+    code = error_code or detail_error_code or {
         400: "invalid_request", 401: "authentication_required", 403: "permission_denied",
         404: "resource_not_found", 409: "state_conflict", 422: "validation_failed",
         429: "rate_limited", 503: "dependency_unavailable",
     }.get(status_code, "internal_error")
-    user_message = detail if isinstance(detail, str) and status_code < 500 else {
+    user_message = public_message if isinstance(public_message, str) and status_code < 500 else {
         400: "请求内容不正确", 401: "登录状态已失效", 403: "没有操作权限",
         404: "资源不存在或不可见", 409: "资源状态冲突", 422: "输入数据不完整或格式不正确",
         429: "请求过于频繁，请稍后重试", 503: "依赖服务暂不可用",

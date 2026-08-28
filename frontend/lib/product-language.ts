@@ -36,8 +36,11 @@ const STATUS_LABELS: Record<string, string> = {
   final: "已定稿",
   ready: "已就绪",
   partial: "部分就绪",
-  active: "正常",
-  inactive: "未启用",
+  healthy: "健康",
+  degraded: "降级",
+  unknown: "未知",
+  active: "启用",
+  inactive: "停用",
   warning: "需关注",
   info: "提示"
 };

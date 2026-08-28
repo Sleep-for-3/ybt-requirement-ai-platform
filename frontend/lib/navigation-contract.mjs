@@ -13,8 +13,6 @@ const TECHNICAL_PERMISSIONS = new Set([
   "technical.review"
 ]);
 
-const ADMIN_ROLES = new Set(["institution_admin", "security_admin"]);
-
 const SECTIONS = [
   ["/deliverable-templates", "交付模板"],
   ["/historical-calibers", "历史口径"],
@@ -39,6 +37,7 @@ const SECTIONS = [
 ];
 
 const DETAIL_PARENTS = [
+  [/^\/admin\/(institutions|users|permissions|health|system-health)$/, "/admin"],
   [/^\/datasources\/\d+\/catalog$/, "/datasources"],
   [/^\/deliverable-templates\/\d+$/, "/deliverable-templates"],
   [/^\/deliverables\/\d+$/, "/deliverables"],
@@ -61,19 +60,18 @@ export function navigationAccessForProject(auth, projectId) {
   const permissions = projectId
     ? auth?.effective_project_permissions?.[String(projectId)] || []
     : [];
-  const isAdmin = Boolean(auth?.institution_memberships?.some(
-    (membership) => membership.status === "active" && ADMIN_ROLES.has(membership.role)
-  ));
-
   return {
-    isAdmin,
+    isAdmin: Boolean(auth?.capabilities?.can_view_admin),
+    canViewCockpit: Boolean(auth?.capabilities?.can_view_institution_cockpit),
     isTechnical: permissions.some((permission) => TECHNICAL_PERMISSIONS.has(permission))
   };
 }
 
 export function canViewNavigationAudience(audience, access) {
   if (!audience) return true;
-  return audience === "admin" ? access.isAdmin : access.isTechnical;
+  if (audience === "admin") return access.isAdmin;
+  if (audience === "cockpit") return access.canViewCockpit;
+  return access.isTechnical;
 }
 
 export function navigationTrailForPath(pathname) {

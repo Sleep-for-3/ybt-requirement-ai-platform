@@ -26,10 +26,13 @@ const UNSAFE_ERROR_PATTERN =
   /traceback|sqlalchemy|(?:postgres(?:ql)?|mysql|mssql|mongodb|redis):\/\/|authorization\s*:|cookie\s*:|api[_ -]?key\s*[:=]\s*\S+|\bsk-[a-z0-9_-]+|bearer\s+[a-z0-9._~-]+|(?:[a-z]:\\|\/(?:home|users?|app|var|opt)\/)|(?:完整|system|raw)\s*prompt/i;
 
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, errorCode = null, traceId = null, detail = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.errorCode = errorCode;
+    this.traceId = traceId;
+    this.detail = detail;
   }
 }
 
@@ -60,6 +63,7 @@ function validationIssueText(issue) {
 export function formatApiErrorText(text, status) {
   try {
     const body = JSON.parse(text);
+    if (typeof body?.user_message === "string") return safeMessage(body.user_message, status);
     if (typeof body?.detail === "string") return safeMessage(body.detail, status);
     if (Array.isArray(body?.detail)) {
       return safeMessage(body.detail.map(validationIssueText).join("；"), status);
@@ -74,13 +78,24 @@ export function formatApiErrorText(text, status) {
   return safeMessage(text, status);
 }
 
+export function parseApiError(text, status) {
+  let body = null;
+  try { body = JSON.parse(text); } catch { /* Plain text response. */ }
+  return new ApiError(
+    formatApiErrorText(text, status), status,
+    typeof body?.error_code === "string" ? body.error_code : null,
+    typeof body?.trace_id === "string" ? body.trace_id : null,
+    body?.detail ?? null
+  );
+}
+
 export function normalizeRequestError(error) {
   if (error instanceof ApiError) return error;
   if (error instanceof Error && error.name === "AbortError") {
     return new Error("请求超时，请稍后重试");
   }
   if (error instanceof TypeError) {
-    return new Error("无法连接服务器，请检查服务是否已启动");
+    return new ApiError("无法连接服务", 0, "network_error");
   }
   if (error instanceof Error) {
     return new Error(safeMessage(error.message));
@@ -96,7 +111,7 @@ export async function throwApiError(response, path, environment) {
     // 页面即将整体跳转；保持原请求 pending，避免调用方在跳转完成前产生未处理 rejection。
     return new Promise(() => undefined);
   }
-  throw new ApiError(formatApiErrorText(await response.text(), response.status), response.status);
+  throw parseApiError(await response.text(), response.status);
 }
 
 export async function readApiResponse(response, path, environment) {

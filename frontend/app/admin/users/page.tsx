@@ -4,10 +4,13 @@ import { UserPlus } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { useAdminCapabilities } from "@/components/admin/AdminShell";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { PageState } from "@/components/feedback/PageState";
 import { apiGet, apiPost } from "@/lib/api";
+import { institutionRoleLabel } from "@/lib/permission-language.mjs";
+import { statusLabel } from "@/lib/product-language";
 
 type Institution = { id: number; institution_name: string };
 type AdminUser = {
@@ -20,6 +23,7 @@ type AdminUser = {
 };
 
 export default function Page() {
+  const capabilities = useAdminCapabilities();
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [msg, setMsg] = useState("");
@@ -36,6 +40,7 @@ export default function Page() {
     ]).then(([nextInstitutions, nextUsers]) => {
       setInstitutions(nextInstitutions);
       setUsers(nextUsers);
+      setMsg("");
     }).catch((error) => setMsg(error instanceof Error ? error.message : "用户目录加载失败"));
   }, []);
 
@@ -78,15 +83,15 @@ export default function Page() {
 
   return (
     <main>
-      <WorkspaceHeader title="用户管理" meta={`${users.length} 个权限范围内用户`} actions={<button className="button-primary" disabled={!institutions.length} onClick={openCreate} type="button"><UserPlus size={16} />新建用户</button>} />
+      <WorkspaceHeader title="用户管理" meta={`${users.length} 个权限范围内用户`} actions={capabilities.can_manage_users ? <button className="button-primary" disabled={!institutions.length} onClick={openCreate} type="button"><UserPlus size={16} />新建用户</button> : null} />
       <div className="mx-auto max-w-[1300px] p-4 lg:p-6">
         {msg ? <p className="mb-4 rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{msg}</p> : null}
         {users.length ? (
           <section className="panel overflow-hidden">
             <div className="grid-head grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_100px]"><span>用户</span><span>邮箱</span><span>机构角色</span><span>状态</span></div>
-            {users.map((user) => <div className="grid-row grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_100px] items-center gap-3" key={user.id}><div className="min-w-0"><p className="truncate font-medium text-ink">{user.display_name || user.username}</p><p className="truncate text-xs text-slate-500">{user.username}</p></div><span className="truncate text-sm text-slate-600">{user.email || "未填写"}</span><div className="flex flex-wrap gap-1">{user.institution_memberships.map((membership) => <span className="badge-neutral" key={`${membership.institution_id}-${membership.role}`}>{membership.institution_name} · {membership.role}</span>)}</div><span className={user.status === "active" ? "badge-success" : "badge-neutral"}>{user.status}</span></div>)}
+            {users.map((user) => <div className="grid-row grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_100px] items-center gap-3" key={user.id}><div className="min-w-0"><p className="truncate font-medium text-ink">{user.display_name || user.username}</p><p className="truncate text-xs text-slate-500">{user.username}</p></div><span className="truncate text-sm text-slate-600">{user.email || "未填写"}</span><div className="flex flex-wrap gap-1">{user.institution_memberships.map((membership) => <span className="badge-neutral" key={`${membership.institution_id}-${membership.role}`}>{membership.institution_name} · {institutionRoleLabel(membership.role)}</span>)}</div><span className={user.status === "active" ? "badge-success" : "badge-neutral"}>{statusLabel(user.status)}</span></div>)}
           </section>
-        ) : <PageState kind="empty" title="权限范围内暂无用户" description="创建用户时必须指定机构和机构角色。" action={<button className="button-primary" disabled={!institutions.length} onClick={openCreate} type="button"><UserPlus size={16} />新建用户</button>} />}
+        ) : <PageState kind="empty" title="权限范围内暂无用户" description="创建用户时必须指定机构和机构角色。" action={capabilities.can_manage_users ? <button className="button-primary" disabled={!institutions.length} onClick={openCreate} type="button"><UserPlus size={16} />新建用户</button> : null} />}
       </div>
       <ModalDialog description="初始密码仅用于首次登录，后端只保存 Argon2 哈希。" onClose={requestCloseCreate} open={createOpen} title="新建用户">
         <form className="space-y-4" onChange={() => setDirty(true)} onSubmit={create}>

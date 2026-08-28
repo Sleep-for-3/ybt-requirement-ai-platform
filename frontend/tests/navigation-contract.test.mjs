@@ -26,18 +26,39 @@ test("technical navigation is scoped to the currently selected project", () => {
   assert.equal(canViewNavigationAudience(undefined, businessProject), true);
 });
 
-test("only active institution administrators receive administrator navigation", () => {
+test("administrator and cockpit navigation only use server-computed capabilities", () => {
   const admin = navigationAccessForProject({
+    effective_project_permissions: {},
+    institution_memberships: [{ institution_id: 1, role: "member", status: "active" }],
+    capabilities: { can_view_admin: true, can_view_institution_cockpit: true }
+  }, null);
+  const roleNameOnly = navigationAccessForProject({
     effective_project_permissions: {},
     institution_memberships: [{ institution_id: 1, role: "institution_admin", status: "active" }]
   }, null);
-  const inactiveAdmin = navigationAccessForProject({
-    effective_project_permissions: {},
-    institution_memberships: [{ institution_id: 1, role: "security_admin", status: "inactive" }]
-  }, null);
 
   assert.equal(canViewNavigationAudience("admin", admin), true);
-  assert.equal(canViewNavigationAudience("admin", inactiveAdmin), false);
+  assert.equal(canViewNavigationAudience("cockpit", admin), true);
+  assert.equal(canViewNavigationAudience("admin", roleNameOnly), false);
+  assert.equal(canViewNavigationAudience("cockpit", roleNameOnly), false);
+});
+
+test("named product roles receive menus only from backend capabilities and project permissions", () => {
+  const scenarios = [
+    ["Platform Administrator", { can_view_admin: true, can_view_institution_cockpit: true }, [], true, true],
+    ["Institution Administrator", { can_view_admin: true, can_view_institution_cockpit: true }, [], true, true],
+    ["Security Administrator", { can_view_admin: true, can_view_institution_cockpit: true }, [], true, true],
+    ["Auditor", { can_view_admin: false, can_view_institution_cockpit: true }, ["audit.read"], false, true],
+    ["Project Manager", { can_view_admin: false, can_view_institution_cockpit: false }, ["project.manage"], false, false],
+    ["Business Analyst", { can_view_admin: false, can_view_institution_cockpit: false }, ["business.edit"], false, false],
+    ["Technical Analyst", { can_view_admin: false, can_view_institution_cockpit: false }, ["technical.edit"], false, false],
+    ["Member", { can_view_admin: false, can_view_institution_cockpit: false }, [], false, false]
+  ];
+  for (const [name, capabilities, permissions, expectedAdmin, expectedCockpit] of scenarios) {
+    const access = navigationAccessForProject({ capabilities, effective_project_permissions: { "7": permissions } }, 7);
+    assert.equal(canViewNavigationAudience("admin", access), expectedAdmin, `${name} admin`);
+    assert.equal(canViewNavigationAudience("cockpit", access), expectedCockpit, `${name} cockpit`);
+  }
 });
 
 test("every production detail route has a deterministic business parent", () => {
@@ -68,6 +89,16 @@ test("every production detail route has a deterministic business parent", () => 
   for (const [path, expectedParent] of routes) {
     assert.equal(navigationTrailForPath(path).parentHref, expectedParent, path);
   }
+});
+
+test("admin pages have the canonical system-management hierarchy", () => {
+  for (const path of ["/admin/institutions", "/admin/users", "/admin/permissions", "/admin/health"]) {
+    const trail = navigationTrailForPath(path);
+    assert.equal(trail.sectionHref, "/admin", path);
+    assert.equal(trail.sectionLabel, "系统管理", path);
+    assert.equal(trail.parentHref, "/admin", path);
+  }
+  assert.equal(navigationTrailForPath("/admin").parentHref, null);
 });
 
 test("detail return links restore only a lawful parent list state", () => {

@@ -1,13 +1,14 @@
 "use client";
 
 import { Building2, Plus } from "lucide-react";
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { useAdminCapabilities } from "@/components/admin/AdminShell";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { apiGet, apiPost } from "@/lib/api";
+import { statusLabel } from "@/lib/product-language";
 
 type Institution = {
   id: number;
@@ -18,6 +19,7 @@ type Institution = {
 };
 
 export default function Page() {
+  const capabilities = useAdminCapabilities();
   const [items, setItems] = useState<Institution[]>([]);
   const [msg, setMsg] = useState("");
   const [formError, setFormError] = useState("");
@@ -29,6 +31,7 @@ export default function Page() {
   async function reload() {
     try {
       setItems(await apiGet("/admin/institutions"));
+      setMsg("");
     } catch (error) {
       setMsg(error instanceof Error ? error.message : "加载失败");
     }
@@ -74,16 +77,8 @@ export default function Page() {
 
   return (
     <main>
-      <WorkspaceHeader title="机构管理" meta="银行、咨询公司与平台运营机构" actions={<button className="button-primary" onClick={openCreate} type="button"><Plus size={16} />新建机构</button>} />
+      <WorkspaceHeader title="机构管理" meta="银行、咨询公司与平台运营机构" actions={capabilities.can_manage_institutions ? <button className="button-primary" onClick={openCreate} type="button"><Plus size={16} />新建机构</button> : null} />
       <div className="mx-auto max-w-[1300px] p-4 lg:p-6">
-            <div className="mb-4 flex gap-2">
-              <Link className="button-secondary" href="/admin/users">
-                用户
-              </Link>
-              <Link className="button-secondary" href="/admin/permissions">
-                权限矩阵
-              </Link>
-            </div>
         {msg ? <p className="mb-4 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{msg}</p> : null}
         {items.length ? (
           <section className="panel h-fit overflow-hidden">
@@ -99,15 +94,15 @@ export default function Page() {
                     {item.institution_code} · {item.institution_type}
                   </div>
                 </div>
-                <span className={item.status === "active" ? "badge-success" : "badge-neutral"}>{item.status}</span>
+                <span className={item.status === "active" ? "badge-success" : "badge-neutral"}>{statusLabel(item.status)}</span>
               </div>
             ))}
           </section>
         ) : (
           <div className="empty-state h-fit">
             <Building2 className="text-slate-300" size={28} />
-            <p>还没有机构，从右上角创建银行、咨询公司或平台运营方</p>
-            <button className="button-primary" onClick={openCreate} type="button"><Plus size={16} />新建机构</button>
+            <p>{capabilities.can_manage_institutions ? "还没有机构，可创建银行、咨询公司或平台运营方" : "当前权限范围内暂无机构"}</p>
+            {capabilities.can_manage_institutions ? <button className="button-primary" onClick={openCreate} type="button"><Plus size={16} />新建机构</button> : null}
           </div>
         )}
       </div>
