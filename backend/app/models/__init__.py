@@ -90,6 +90,7 @@ from app.models.uat import (
 )
 from app.models.semantic import SemanticBinding, SemanticConcept, SemanticConceptVersion, SemanticRelation
 from app.models.quality import DataQualityExpectation, DataQualityExpectationBinding
+from app.models.analytics import MetricSnapshot, ReportingCycle
 
 __all__ = [
     "AuditLog",
@@ -190,6 +191,8 @@ __all__ = [
     "SemanticRelation",
     "DataQualityExpectation",
     "DataQualityExpectationBinding",
+    "MetricSnapshot",
+    "ReportingCycle",
     "CaliberComparison",
     "DeliverableEvidenceItem",
     "DeliverableFieldItem",

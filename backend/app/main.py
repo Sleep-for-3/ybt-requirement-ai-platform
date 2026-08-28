@@ -21,6 +21,7 @@ from app.api import (
     audit,
     dashboard,
     analytics,
+    reporting_cycles,
     health,
     review_tasks,
     business_systems,
@@ -188,6 +189,7 @@ app.include_router(storage_files.router, prefix=settings.api_prefix)
 app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
 app.include_router(analytics.router, prefix=settings.api_prefix)
+app.include_router(reporting_cycles.router, prefix=settings.api_prefix)
 app.include_router(health.router)
 app.include_router(health.router, prefix=settings.api_prefix, include_in_schema=False)
 app.include_router(templates.projects_router, prefix=settings.api_prefix, dependencies=secured)
