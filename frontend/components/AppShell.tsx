@@ -61,7 +61,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/workspace", label: "需求文档工作台", icon: FileSpreadsheet },
       { href: "/projects", label: "项目", icon: FolderKanban },
-      { href: "/review-tasks", label: "我的待办", icon: ClipboardCheck }
+      { href: "/work", label: "我的工作", icon: ClipboardCheck }
     ]
   },
   {
