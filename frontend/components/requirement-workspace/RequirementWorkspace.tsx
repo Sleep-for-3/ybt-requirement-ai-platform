@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -36,6 +36,7 @@ export function RequirementWorkspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [inputPanelOpen, setInputPanelOpen] = useState(true);
   const [businessFinal, setBusinessFinal] = useState("");
   const [technicalFinal, setTechnicalFinal] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -234,7 +235,7 @@ export function RequirementWorkspace() {
 
   return (
     <>
-      <main className="min-w-[1180px]">
+      <main className="min-w-0">
         <div className="border-b border-line bg-white px-5 py-4">
           <div className="flex items-end gap-4">
             <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold tracking-tight text-ink">生成监管需求文档</h1><p className="mt-1 text-xs text-slate-500">基于真实监管目标、源系统、监管集市、历史知识与双层 Mapping，形成字段级需求文档草稿并交由人工校核。</p></div>
@@ -246,8 +247,16 @@ export function RequirementWorkspace() {
           {error || queryError ? <div className="mt-3 flex items-start gap-2 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{error || queryError}</div> : null}
           {notice ? <div className="mt-3 rounded-lg border border-pine-100 bg-pine-50 px-3 py-2 text-sm text-pine-800">{notice}</div> : null}
         </div>
-        <div className="grid grid-cols-[390px_minmax(720px,1fr)] items-start gap-4 p-5">
-          <RequirementInputPanel
+        <div className="grid min-w-0 items-start gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+          <div className={inputPanelOpen ? "min-w-0" : "hidden lg:block"}>
+          <div className="mb-2 flex items-center justify-between lg:hidden">
+            <span className="text-xs font-semibold text-slate-600">分析范围与资产</span>
+            <button aria-expanded={inputPanelOpen} className="button-secondary h-8 px-2.5 text-xs" onClick={() => setInputPanelOpen((open) => !open)} type="button">
+              {inputPanelOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+              {inputPanelOpen ? "收起" : "展开"}
+            </button>
+          </div>
+          {inputPanelOpen ? <RequirementInputPanel
             businessJob={businessJob}
             businessSystems={businessSystems}
             datasources={datasources}
@@ -267,7 +276,8 @@ export function RequirementWorkspace() {
             tableId={tableId}
             tables={tables}
             technicalJob={technicalJob}
-          />
+          /> : null}
+          </div>
           <div className="relative min-w-0">
             {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在懒加载当前字段完整口径与双层 Mapping…</div> : null}
             <DocumentPreview
@@ -320,7 +330,7 @@ function StepBar({ hasTable, hasScenario, hasDraft, hasFinal }: { hasTable: bool
 }
 
 function WorkspaceSkeleton() {
-  return <div className="min-w-[1180px] p-5"><div className="h-16 animate-pulse rounded-xl bg-white" /><div className="mt-4 grid grid-cols-[390px_1fr] gap-4"><div className="h-[700px] animate-pulse rounded-xl bg-white" /><div className="h-[760px] animate-pulse rounded-xl bg-white" /></div></div>;
+  return <div className="min-w-0 p-4 sm:p-5"><div className="h-16 animate-pulse rounded-xl bg-white" /><div className="mt-4 grid gap-4 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]"><div className="h-[700px] animate-pulse rounded-xl bg-white" /><div className="h-[760px] animate-pulse rounded-xl bg-white" /></div></div>;
 }
 
 function summaryTargetField(item: RequirementWorkspaceRecordSummary): FieldWorkspaceRecord["field"] {

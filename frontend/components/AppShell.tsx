@@ -190,8 +190,8 @@ function SidebarBrand() {
         <Landmark size={18} />
       </span>
       <span className="min-w-0">
-        <span className="block truncate text-sm font-semibold text-white">一表通口径平台</span>
-        <span className="block text-[11px] text-emerald-100/50">字段级口径 · 智能辅助</span>
+        <span className="block truncate text-sm font-semibold text-white">监管数据智能治理平台</span>
+        <span className="block text-[11px] text-emerald-100/50">监管语义 · 需求口径 · 数据血缘 · 智能治理</span>
       </span>
     </Link>
   );

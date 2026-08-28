@@ -11,6 +11,7 @@ import type {
   TargetTable
 } from "@/lib/api";
 import { buildLineageLabels, combinedFieldStatus, mappingStatusLabel, mappingStatusTone, preferredMappingContent } from "@/lib/workspace-view-model.mjs";
+import { questionTypeLabel, statusLabel } from "@/lib/product-language";
 import type { FieldWorkspaceRecord, SaveState, SourceMappingIndex } from "@/components/requirement-workspace/types";
 
 type WorkspaceTab = "structured" | "lineage" | "evidence" | "questions" | "document";
@@ -198,8 +199,8 @@ export function DocumentPreview({
               <ul className="space-y-2">
                 {selectedQuestions.slice(0, 6).map((question) => (
                   <li className="border-l-2 border-gold-300 bg-gold-50 px-3 py-2 text-[10px] leading-5 text-slate-700" key={question.id}>
-                    <strong className="text-gold-800">{question.priority.toUpperCase()} · {question.question_type}：</strong>{question.question_text}
-                    <span className="ml-2 text-slate-400">{question.question_status}</span>
+                    <strong className="text-gold-800">{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}：</strong>{question.question_text}
+                    <span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span>
                   </li>
                 ))}
               </ul>
@@ -252,7 +253,7 @@ function EvidencePanel({ records, selectedFieldId, evidenceCountByField, onSelec
 }
 
 function QuestionsPanel({ questions }: { questions: PendingQuestion[] }) {
-  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{question.priority.toUpperCase()} · {question.question_type}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{question.question_status}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>当前没有未闭环问题</p></div>}</div>;
+  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>当前没有未闭环问题</p></div>}</div>;
 }
 
 function DocMeta({ label, value, last = false }: { label: string; value: string; last?: boolean }) {

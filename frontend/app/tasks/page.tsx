@@ -8,6 +8,7 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { NaturalLanguageTask, NaturalLanguageTaskCreateResponse, apiGet, apiPost } from "@/lib/api";
+import { statusLabel, workflowStepLabel } from "@/lib/product-language";
 
 function statusBadge(status: string) {
   if (["approved", "success", "completed", "enabled"].includes(status)) return "badge-success";
@@ -76,16 +77,16 @@ export default function Page() {
           {reviewTasks.length ? (
             <div>
               <div className="grid-head grid grid-cols-[1fr_140px_200px_100px] gap-3">
-                <span>步骤</span>
+                <span>审核事项</span>
                 <span>状态</span>
                 <span>到期时间</span>
                 <span className="text-right">操作</span>
               </div>
               {reviewTasks.map((item) => (
                 <div className="grid-row grid grid-cols-[1fr_140px_200px_100px] items-center gap-3" key={item.id}>
-                  <span className="font-medium text-ink">{item.step_key}</span>
+                  <span className="font-medium text-ink">{workflowStepLabel(item.step_key)}</span>
                   <span>
-                    <span className={statusBadge(item.status)}>{item.status}</span>
+                    <span className={statusBadge(item.status)}>{statusLabel(item.status)}</span>
                   </span>
                   <span className="text-slate-500">{item.due_at || "未设置到期时间"}</span>
                   <span className="text-right">
@@ -140,7 +141,7 @@ export default function Page() {
                   <div>
                     <div className="font-medium text-ink">{item.raw_text}</div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <span className={statusBadge(item.status)}>{item.status}</span>
+                      <span className={statusBadge(item.status)}>{statusLabel(item.status)}</span>
                       <span className="text-sm text-slate-500">{item.datasource_name || "数据源待识别"}</span>
                     </div>
                     {item.error_message ? <p className="mt-1.5 text-sm text-slate-500">{item.error_message}</p> : null}

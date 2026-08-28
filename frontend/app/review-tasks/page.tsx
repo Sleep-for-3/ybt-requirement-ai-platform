@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
+import { statusLabel, workflowStepLabel } from "@/lib/product-language";
 
 type Task = {
   id: number;
@@ -54,11 +55,11 @@ export default function Page() {
             {items.map((item) => (
               <div className="grid-row grid grid-cols-[1fr_130px_170px_180px] items-center" key={item.id}>
                 <div>
-                  <b className="text-sm text-ink">{item.step_key}</b>
-                  <div className="mt-0.5 text-xs text-slate-500">项目 #{item.project_id}</div>
+                  <b className="text-sm text-ink">{workflowStepLabel(item.step_key)}</b>
+                  <div className="mt-0.5 text-xs text-slate-500">所属项目 #{item.project_id}</div>
                 </div>
                 <span>
-                  <span className={statusBadge(item.status)}>{item.status}</span>
+                  <span className={statusBadge(item.status)}>{statusLabel(item.status)}</span>
                 </span>
                 <span className="text-xs text-slate-500">{item.due_at || "未设置到期时间"}</span>
                 <div className="flex justify-end gap-2">
