@@ -1,0 +1,16 @@
+{
+  "execution_semantics": "expectations_only_until_a_quality_execution_engine_is available",
+  "expectations": [
+    {"rule_code":"P51_PRODUCT_ID_NOT_NULL","rule_name":"产品ID不能为空","rule_type":"not_null","severity":"error","field_code":"E010001"},
+    {"rule_code":"P51_PRODUCT_ID_UNIQUE","rule_name":"产品ID唯一","rule_type":"unique","severity":"error","field_code":"E010001"},
+    {"rule_code":"P51_INSTITUTION_NOT_NULL","rule_name":"机构ID不能为空","rule_type":"not_null","severity":"error","field_code":"E010002"},
+    {"rule_code":"P51_INSTITUTION_REFERENCE","rule_name":"机构ID必须存在于机构字典","rule_type":"referential","severity":"error","field_code":"E010002","parameters":{"reference":"src_reference.organization.org_id"}},
+    {"rule_code":"P51_CATEGORY_ENUM","rule_name":"产品类别必须属于监管代码表","rule_type":"referential","severity":"error","field_code":"E010007","parameters":{"reference":"src_reference.product_category_dictionary.category_code"}},
+    {"rule_code":"P51_STATUS_ENUM","rule_name":"产品状态仅允许01或02","rule_type":"enum","severity":"error","field_code":"E010015","parameters":{"values":["01","02"]}},
+    {"rule_code":"P51_TERM_CONSISTENCY","rule_name":"产品期限与生命周期一致","rule_type":"consistency","severity":"error","field_code":"E010010","expression":"lifecycle_type='continuous' AND product_term=0 OR lifecycle_type='one_off' AND product_term=julianday(maturity_date)-julianday(establishment_date)"},
+    {"rule_code":"P51_STOP_DATE_CONSISTENCY","rule_name":"停用产品必须具有停用日期","rule_type":"consistency","severity":"warning","field_code":"E010015","expression":"product_status_code!='02' OR stop_date IS NOT NULL"},
+    {"rule_code":"P51_AGENCY_ISSUER_CONSISTENCY","rule_name":"代客产品必须具有所属机构","rule_type":"consistency","severity":"error","field_code":"E010018","expression":"proprietary_flag!='02' OR agency_institution_name IS NOT NULL"},
+    {"rule_code":"P51_MATURITY_CONSISTENCY","rule_name":"一次性产品必须具有到期日期","rule_type":"consistency","severity":"error","field_code":"E010012","expression":"lifecycle_type!='one_off' OR maturity_date IS NOT NULL"}
+  ]
+}
+

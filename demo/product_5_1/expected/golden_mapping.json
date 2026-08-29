@@ -1,0 +1,25 @@
+{
+  "oracle_only": true,
+  "agent_context_forbidden": true,
+  "target_table": "ybt_5_1_product_business_basic",
+  "mappings": [
+    {"field_code":"E010001","target_column":"product_id","mart_field":"mart_product_master.product_id","source_fields":["src_product_center.product_master.product_id_internal","domain product_id_internal"],"transformation":"理财使用登记编码风格，其他产品使用内部产品编号；Demo内保持全局唯一且不超过32位","semantic":"PRODUCT_IDENTIFIER"},
+    {"field_code":"E010002","target_column":"institution_id","mart_field":"mart_product_master.institution_id","source_fields":["src_product_center.product_master.institution_id","src_reference.organization.org_id"],"transformation":"关联实际经办最小机构，跨地区产品使用共同上级机构","semantic":"REPORTING_INSTITUTION"},
+    {"field_code":"E010003","target_column":"product_name","mart_field":"mart_product_master.product_name","source_fields":["src_product_center.product_master.product_name"],"transformation":"产品中心全称优先","semantic":"PRODUCT"},
+    {"field_code":"E010004","target_column":"product_number","mart_field":"mart_product_master.product_number","source_fields":["src_product_center.product_master.product_code","specialized product code"],"transformation":"标准产品使用市场代码，非标准产品使用行内编号","semantic":"PRODUCT_IDENTIFIER"},
+    {"field_code":"E010005","target_column":"accounting_subject_type","mart_field":"mart_product_master.accounting_subject_type","source_fields":["src_product_center.product_master.accounting_subject_code","src_reference.accounting_subject.subject_type"],"transformation":"映射为00/01/02/06等监管科目大类；法人账户透支保留开放问题","semantic":"ACCOUNTING_SUBJECT_TYPE"},
+    {"field_code":"E010007","target_column":"product_category","mart_field":"mart_product_regulatory_classification.product_category","source_fields":["src_product_center.product_master.product_type","specialized category","src_reference.product_category_dictionary.category_code"],"transformation":"按业务实质映射监管产品类别代码，多类别使用半角分号","semantic":"PRODUCT_CATEGORY"},
+    {"field_code":"E010008","target_column":"proprietary_flag","mart_field":"mart_product_master.proprietary_flag","source_fields":["src_product_center.product_master.proprietary_flag","src_wealth_agency.agency_product.proprietary_flag"],"transformation":"01自营、02代客、03混合","semantic":"PROPRIETARY_PRODUCT_FLAG"},
+    {"field_code":"E010009","target_column":"currency","mart_field":"mart_product_master.currency","source_fields":["specialized currency field","src_reference.currency_dictionary.currency_code"],"transformation":"GB/T 12406三位字母；多币种分号，全部币种ALL，仅外币WB","semantic":"CURRENCY"},
+    {"field_code":"E010010","target_column":"product_term","mart_field":"mart_product_master.product_term","source_fields":["src_product_center.product_master.lifecycle_type","launch_date","maturity_date"],"transformation":"持续性产品=0；一次性产品=julianday(到期)-julianday(成立)","semantic":"PRODUCT_TERM"},
+    {"field_code":"E010011","target_column":"establishment_date","mart_field":"mart_product_master.establishment_date","source_fields":["src_product_center.product_master.launch_date"],"transformation":"YYYY-MM-DD；无法追溯且超过10年按监管细化允许9999-12-31","semantic":"PRODUCT_LIFECYCLE"},
+    {"field_code":"E010012","target_column":"maturity_date","mart_field":"mart_product_master.maturity_date","source_fields":["src_product_center.product_master.maturity_date","specialized maturity_date"],"transformation":"持续性产品=9999-12-31；一次性产品取实际约定到期日","semantic":"PRODUCT_LIFECYCLE"},
+    {"field_code":"E010013","target_column":"product_issue","mart_field":"mart_product_master.product_issue","source_fields":["src_product_center.product_master.issue_no","src_wealth_agency.wealth_product.issue_no"],"transformation":"不涉及可空，同一产品取计划发行总期次或最新期次","semantic":"PRODUCT_ISSUE"},
+    {"field_code":"E010014","target_column":"interest_rate_type","mart_field":"mart_product_master.interest_rate_type","source_fields":["deposit_rate_rule.rate_mode","loan_rate_rule.rate_mode"],"transformation":"01固定、02浮动、03固定或浮动；不涉及可空","semantic":"INTEREST_RATE_TYPE"},
+    {"field_code":"E010015","target_column":"product_status_code","mart_field":"mart_product_master.product_status_code","source_fields":["src_product_center.product_master.product_status","specialized status_code"],"transformation":"active→01，inactive→02；v2演示业务系统停用优先规则","semantic":"PRODUCT_STATUS"},
+    {"field_code":"E010018","target_column":"agency_institution_name","mart_field":"mart_product_master.agency_institution_name","source_fields":["src_wealth_agency.agency_product.issuer_id","src_wealth_agency.issuer.issuer_name"],"transformation":"仅proprietary_flag=02代客产品填报","semantic":"AGENCY_INSTITUTION"},
+    {"field_code":"E010016","target_column":"remark","mart_field":"mart_product_master.remark","source_fields":["data quality and cross-system comparison"],"transformation":"多个说明使用英文半角分号连接","semantic":"PRODUCT"},
+    {"field_code":"E010017","target_column":"collection_date","mart_field":"mart_product_master.collection_date","source_fields":["ETL reporting cycle"],"transformation":"本Demo正式周期为2026-08-31","semantic":"PRODUCT_LIFECYCLE"}
+  ]
+}
+
