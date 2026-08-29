@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -64,10 +64,24 @@ class RequirementWorkspaceProjectionService:
             DeliverablePackage.target_table_id == selected_table.id if selected_table else False,
         ).order_by(DeliverablePackage.version_no.desc(), DeliverablePackage.id.desc()).limit(1)) if selected_table else None
 
-        systems = list(self.db.scalars(select(BusinessSystem).where(BusinessSystem.project_id == project_id, BusinessSystem.enabled.is_(True)).order_by(BusinessSystem.id)).all())
-        datasources = list(self.db.scalars(select(DataSource).where(DataSource.project_id == project_id, DataSource.enabled.is_(True)).order_by(DataSource.id)).all())
-        mart_tables = list(self.db.scalars(select(MartTable).where(MartTable.project_id == project_id).order_by(MartTable.id)).all())
-        mart_fields = list(self.db.scalars(select(MartField).where(MartField.project_id == project_id).order_by(MartField.id)).all())
+        business_system_count = int(self.db.scalar(select(func.count(BusinessSystem.id)).where(
+            BusinessSystem.project_id == project_id,
+            BusinessSystem.enabled.is_(True),
+        )) or 0)
+        datasource_count, healthy_datasource_count = self.db.execute(select(
+            func.count(DataSource.id),
+            func.coalesce(func.sum(case((DataSource.last_test_status == "success", 1), else_=0)), 0),
+        ).where(DataSource.project_id == project_id, DataSource.enabled.is_(True))).one()
+        mart_table_count = int(self.db.scalar(select(func.count(MartTable.id)).where(MartTable.project_id == project_id)) or 0)
+        mart_fields = list(self.db.scalars(select(MartField).where(
+            MartField.project_id == project_id,
+            MartField.id.in_(mart_field_ids),
+        ).order_by(MartField.id)).all()) if mart_field_ids else []
+        mart_table_ids = {item.mart_table_id for item in mart_fields}
+        mart_tables = list(self.db.scalars(select(MartTable).where(
+            MartTable.project_id == project_id,
+            MartTable.id.in_(mart_table_ids),
+        ).order_by(MartTable.id)).all()) if mart_table_ids else []
         jobs = list(self.db.scalars(select(BackgroundJob).where(
             BackgroundJob.project_id == project_id,
             BackgroundJob.job_type.in_(("batch_ai_generation_business", "batch_ai_generation_technical")),
@@ -105,8 +119,12 @@ class RequirementWorkspaceProjectionService:
             "selected_scenario_id": selected_scenario.id if selected_scenario else None,
             "tables": [_row(item) for item in tables],
             "scenarios": [_row(item) for item in scenarios],
-            "business_systems": [_row(item) for item in systems],
-            "datasources": [_public_datasource(item) for item in datasources],
+            "asset_summary": {
+                "business_system_count": business_system_count,
+                "datasource_count": int(datasource_count or 0),
+                "healthy_datasource_count": int(healthy_datasource_count or 0),
+                "mart_table_count": mart_table_count,
+            },
             "mart_tables": [_row(item) for item in mart_tables],
             "mart_fields": [_row(item) for item in mart_fields],
             "records": records,
@@ -120,10 +138,12 @@ class RequirementWorkspaceProjectionService:
                 "evidence_count": total_evidence,
             },
             "performance_budget": {
-                "projection_version": "requirement-workspace-v1",
+                "projection_version": "requirement-workspace-v2",
                 "initial_api_request_budget": 1,
                 "bounded_sql_query_budget": 16,
                 "large_content_deferred": True,
+                "project_assets_summarized": True,
+                "mart_entities_reference_scoped": True,
             },
         }
 

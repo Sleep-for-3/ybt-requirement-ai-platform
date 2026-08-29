@@ -138,6 +138,8 @@ class Settings(BaseSettings):
             add("error", "auth_mode_not_required", "Production requires AUTH_MODE=required.")
         if not self.database_url.strip():
             add("error", "database_url_missing", "DATABASE_URL is required.")
+        elif production and not self.database_url.strip().lower().startswith(("postgresql://", "postgresql+")):
+            add("error", "production_database_not_postgresql", "Production requires a PostgreSQL DATABASE_URL.")
         if production and self.app_secret_key.strip().lower() in {"", "default", "change-me", "changeme"}:
             add("error", "app_secret_key_unsafe", "Production APP_SECRET_KEY must be a non-default value.")
         if production and len(self.jwt_secret_key) < 32:
@@ -148,8 +150,12 @@ class Settings(BaseSettings):
             add("error", "s3_configuration_missing", "S3 storage requires S3_BUCKET_NAME.")
         if self.task_queue_provider not in {"inline", "celery"}:
             add("error", "task_queue_provider_invalid", "TASK_QUEUE_PROVIDER must be inline or celery.")
-        if self.task_queue_provider == "celery" and not self.redis_url.strip():
-            add("error", "celery_redis_missing", "Celery mode requires Redis configuration.")
+        elif production and self.task_queue_provider != "celery":
+            add("error", "production_task_queue_not_celery", "Production requires TASK_QUEUE_PROVIDER=celery.")
+        if self.task_queue_provider == "celery" and (
+            not self.redis_url.strip() or not self.celery_broker_url.strip() or not self.celery_result_backend.strip()
+        ):
+            add("error", "celery_redis_missing", "Celery mode requires Redis, broker, and result backend configuration.")
         if self.vector_store_provider not in {"mock", "milvus"}:
             add("error", "vector_store_provider_invalid", "VECTOR_STORE_PROVIDER must be mock or milvus.")
         if self.vector_store_provider == "milvus" and not self.milvus_uri.strip():

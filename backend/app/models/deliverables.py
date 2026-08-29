@@ -134,7 +134,10 @@ class DeliverableEvidenceItem(Base):
 
 class PendingQuestion(Base, TimestampMixin):
     __tablename__ = "pending_questions"
-    __table_args__ = (Index("ix_pending_questions_project_status_priority", "project_id", "question_status", "priority"),)
+    __table_args__ = (
+        Index("ix_pending_questions_project_status_priority", "project_id", "question_status", "priority"),
+        Index("ix_pending_questions_workspace_scope", "project_id", "target_table_id", "scenario_id"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)

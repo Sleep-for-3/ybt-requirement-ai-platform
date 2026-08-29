@@ -14,21 +14,52 @@ export function createJobPollingRegistry(options) {
   const entries = new Map();
   const setTimer = options.setTimer || ((callback, delay) => setTimeout(callback, delay));
   const clearTimer = options.clearTimer || ((token) => clearTimeout(token));
+  const isHidden = options.isHidden || (() => typeof document !== "undefined" && document.hidden);
+  const subscribeVisibility = options.subscribeVisibility || ((listener) => {
+    if (typeof document === "undefined") return () => undefined;
+    document.addEventListener("visibilitychange", listener);
+    return () => document.removeEventListener("visibilitychange", listener);
+  });
   const maxErrors = options.maxErrors ?? 3;
+  let unsubscribeVisibility;
+
+  function releaseVisibilityListener() {
+    if (entries.size !== 0 || !unsubscribeVisibility) return;
+    unsubscribeVisibility();
+    unsubscribeVisibility = undefined;
+  }
+
+  function handleVisibilityChange() {
+    if (isHidden()) {
+      for (const entry of entries.values()) {
+        if (entry.timer) clearTimer(entry.timer);
+        entry.timer = undefined;
+      }
+      return;
+    }
+    for (const [jobId, entry] of entries) {
+      if (!entry.inFlight && !entry.timer && entry.listeners.size > 0) void poll(jobId, entry);
+    }
+  }
+
+  function ensureVisibilityListener() {
+    if (!unsubscribeVisibility) unsubscribeVisibility = subscribeVisibility(handleVisibilityChange);
+  }
 
   function remove(jobId, entry) {
     if (entry.timer) clearTimer(entry.timer);
     entry.timer = undefined;
     if (entries.get(jobId) === entry) entries.delete(jobId);
+    releaseVisibilityListener();
   }
 
   function schedule(jobId, entry, delay) {
-    if (!entries.has(jobId) || entry.listeners.size === 0) return;
+    if (!entries.has(jobId) || entry.listeners.size === 0 || isHidden()) return;
     entry.timer = setTimer(() => poll(jobId, entry), delay);
   }
 
   async function poll(jobId, entry) {
-    if (entries.get(jobId) !== entry || entry.listeners.size === 0 || entry.inFlight) return;
+    if (entries.get(jobId) !== entry || entry.listeners.size === 0 || entry.inFlight || isHidden()) return;
     entry.inFlight = true;
     try {
       const job = await options.fetchJob(jobId);
@@ -69,7 +100,8 @@ export function createJobPollingRegistry(options) {
         entries.set(jobId, entry);
       }
       entry.listeners.add(listener);
-      if (!entry.inFlight && !entry.timer && entry.pollCount === 0) void poll(jobId, entry);
+      ensureVisibilityListener();
+      if (!entry.inFlight && !entry.timer && entry.pollCount === 0 && !isHidden()) void poll(jobId, entry);
       return () => {
         entry.listeners.delete(listener);
         if (entry.listeners.size === 0) remove(jobId, entry);

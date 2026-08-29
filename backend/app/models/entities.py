@@ -62,6 +62,7 @@ class TargetTable(Base):
 
 class TargetField(Base, TimestampMixin):
     __tablename__ = "target_fields"
+    __table_args__ = (Index("ix_target_fields_project_table", "project_id", "target_table_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
@@ -176,7 +177,10 @@ class MartField(Base, TimestampMixin):
 
 class ProductScenario(Base, TimestampMixin):
     __tablename__ = "product_scenarios"
-    __table_args__ = (UniqueConstraint("project_id", "scenario_code", name="uq_product_scenarios_project_code"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "scenario_code", name="uq_product_scenarios_project_code"),
+        Index("ix_product_scenarios_project_enabled_order", "project_id", "enabled", "sort_order"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
@@ -194,6 +198,7 @@ class ScenarioBusinessMapping(Base, TimestampMixin):
     __tablename__ = "scenario_business_mappings"
     __table_args__ = (
         UniqueConstraint("project_id", "target_field_id", "scenario_id", name="uq_scenario_business_field_scenario"),
+        Index("ix_scenario_business_field_scenario", "target_field_id", "scenario_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -220,6 +225,7 @@ class ScenarioTechnicalLineage(Base, TimestampMixin):
     __tablename__ = "scenario_technical_lineages"
     __table_args__ = (
         UniqueConstraint("project_id", "target_field_id", "scenario_id", name="uq_scenario_lineage_field_scenario"),
+        Index("ix_scenario_technical_field_scenario", "target_field_id", "scenario_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -334,6 +340,7 @@ class TraceabilityTemplateParseResult(Base, TimestampMixin):
 
 class SourceToMartMapping(Base, TimestampMixin):
     __tablename__ = "source_to_mart_mappings"
+    __table_args__ = (Index("ix_source_to_mart_project_field", "project_id", "mart_field_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
@@ -396,6 +403,7 @@ class MartToYbtMapping(Base, TimestampMixin):
 
 class MappingEvidenceReference(Base):
     __tablename__ = "mapping_evidence_references"
+    __table_args__ = (Index("ix_mapping_evidence_project_mapping", "project_id", "mapping_type", "mapping_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)

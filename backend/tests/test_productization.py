@@ -159,7 +159,13 @@ def test_windows_secret_acl_commands_remove_explicit_extra_access_and_are_idempo
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env={**os.environ, "YBT_ACL_TEST_PATH": str(secret_path)},
+            # PowerShell 7 prepends its module path in the parent process. Passing
+            # that value into Windows PowerShell 5.1 prevents the Security module
+            # (and therefore Get-Acl) from auto-loading on some hosts.
+            env={
+                **{key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"},
+                "YBT_ACL_TEST_PATH": str(secret_path),
+            },
     )
     acl = json.loads(acl_result.stdout)
     assert acl["Protected"] is True

@@ -8,7 +8,7 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { DocumentPreview } from "@/components/requirement-workspace/DocumentPreview";
 import { EvidenceDrawer } from "@/components/requirement-workspace/EvidenceDrawer";
 import { RequirementInputPanel } from "@/components/requirement-workspace/RequirementInputPanel";
-import type { FieldWorkspaceRecord, SaveState, SourceMappingIndex } from "@/components/requirement-workspace/types";
+import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import {
   BackgroundJobSummary,
@@ -19,11 +19,9 @@ import {
   ScenarioTechnicalLineage,
   SourceToMartMapping,
   apiDownload,
-  apiPost,
-  apiPut
+  apiPost
 } from "@/lib/api";
 import { workspaceEvidenceOptions, workspaceFieldOptions, workspaceProjectionOptions, workspaceQueryKeys } from "@/lib/workspace-queries";
-import { isMappingLocked } from "@/lib/workspace-view-model.mjs";
 
 export function RequirementWorkspace() {
   const { projectId, selectedProject } = useProjectWorkspace();
@@ -37,9 +35,7 @@ export function RequirementWorkspace() {
   const [notice, setNotice] = useState("");
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [inputPanelOpen, setInputPanelOpen] = useState(true);
-  const [businessFinal, setBusinessFinal] = useState("");
-  const [technicalFinal, setTechnicalFinal] = useState("");
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [editorDirty, setEditorDirty] = useState(false);
   const [businessJobId, setBusinessJobId] = useState<number | null>(null);
   const [technicalJobId, setTechnicalJobId] = useState<number | null>(null);
   const [businessJobSeed, setBusinessJobSeed] = useState<BackgroundJobSummary | null>(null);
@@ -61,8 +57,7 @@ export function RequirementWorkspace() {
 
   const tables = projection?.tables || [];
   const scenarios = projection?.scenarios || [];
-  const businessSystems = projection?.business_systems || [];
-  const datasources = projection?.datasources || [];
+  const assetSummary = projection?.asset_summary || { business_system_count: 0, datasource_count: 0, healthy_datasource_count: 0, mart_table_count: 0 };
   const martTables = projection?.mart_tables || [];
   const martFields = projection?.mart_fields || [];
   const questions = projection?.question_summaries || [];
@@ -110,24 +105,9 @@ export function RequirementWorkspace() {
     if (!fields.length) { setFieldId(null); return; }
     setFieldId((current) => current && fields.some((field) => field.id === current) ? current : fields[0].id);
   }, [fields]);
-  useEffect(() => {
-    setBusinessFinal(selectedRecord?.business?.final_content || "");
-    setTechnicalFinal(selectedRecord?.lineage?.final_content || "");
-    setSaveState("idle");
-  }, [fieldId, scenarioId, selectedRecord?.business?.id, selectedRecord?.business?.final_content, selectedRecord?.lineage?.id, selectedRecord?.lineage?.final_content]);
-  useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (saveState !== "dirty") return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", beforeUnload);
-    return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [saveState]);
-
   function guardUnsaved(action: () => void) {
-    if (saveState === "dirty" && !window.confirm("当前字段有未保存修改。放弃修改并切换吗？")) return;
-    setSaveState("idle");
+    if (editorDirty && !window.confirm("当前字段有未保存修改。放弃修改并切换吗？")) return;
+    setEditorDirty(false);
     action();
   }
 
@@ -154,7 +134,7 @@ export function RequirementWorkspace() {
 
   async function generateDrafts() {
     if (!projectId || !selectedField || !scenarioId) return;
-    if (saveState === "dirty") { setError("请先保存当前人工修改，再触发 AI 草稿任务。"); return; }
+    if (editorDirty) { setError("请先保存当前人工修改，再触发 AI 草稿任务。"); return; }
     setGenerating(true); setError(""); setNotice("");
     try {
       let business = selectedRecord?.business || null;
@@ -194,23 +174,6 @@ export function RequirementWorkspace() {
       setNotice(`${kind === "business" ? "业务口径" : "技术溯源"} AI 草稿已显式采用为人工可编辑内容，尚未确认。`);
       await refreshWorkspace();
     } catch (cause) { setError(readError(cause, "采用 AI 草稿失败")); }
-  }
-
-  async function saveFinalContent() {
-    if (!selectedRecord) return;
-    if (!detailQuery.data) { setError("当前字段完整口径仍在加载，请稍后再保存。"); return; }
-    setSaveState("saving"); setError("");
-    try {
-      const actions: Promise<unknown>[] = [];
-      if (selectedRecord.business && !isMappingLocked(selectedRecord.business.business_confirm_status)) actions.push(apiPut(`/scenario-business-mappings/${selectedRecord.business.id}`, { final_content: businessFinal }));
-      if (selectedRecord.lineage && !isMappingLocked(selectedRecord.lineage.tech_confirm_status)) actions.push(apiPut(`/scenario-technical-lineages/${selectedRecord.lineage.id}`, { final_content: technicalFinal }));
-      if (!actions.length) throw new Error("当前内容已进入确认或审核流程，不能在工作台直接修改。请进入字段场景审核任务处理。");
-      await Promise.all(actions);
-      setSaveState("saved"); setNotice("人工最终内容已保存。AI 草稿仍独立保留。" );
-      await refreshWorkspace();
-    } catch (cause) {
-      setSaveState("error"); setError(readError(cause, "保存失败，当前输入仍保留在页面中"));
-    }
   }
 
   async function exportWorkbook() {
@@ -257,13 +220,11 @@ export function RequirementWorkspace() {
             </button>
           </div>
           {inputPanelOpen ? <RequirementInputPanel
+            assetSummary={assetSummary}
             businessJob={businessJob}
-            businessSystems={businessSystems}
-            datasources={datasources}
             fieldId={fieldId}
             fields={fields}
             generating={generating}
-            martTables={martTables}
             onFieldChange={changeField}
             onGenerate={() => void generateDrafts()}
             onScenarioChange={changeScenario}
@@ -281,10 +242,9 @@ export function RequirementWorkspace() {
           <div className="relative min-w-0">
             {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在懒加载当前字段完整口径与双层 Mapping…</div> : null}
             <DocumentPreview
-              businessFinal={businessFinal}
               activeTab={activeTab}
-              businessLocked={isMappingLocked(selectedRecord?.business?.business_confirm_status)}
               deliverable={deliverable}
+              detailReady={Boolean(detailQuery.data)}
               evidenceCountByField={evidenceCountByField}
               evidenceForSelected={fieldId ? evidenceCountByField[fieldId] || 0 : 0}
               exporting={exporting}
@@ -292,23 +252,21 @@ export function RequirementWorkspace() {
               martTables={martTables}
               onAdoptBusiness={() => void adoptDraft("business")}
               onAdoptTechnical={() => void adoptDraft("technical")}
-              onBusinessFinalChange={(value) => { setBusinessFinal(value); setSaveState("dirty"); }}
+              onEditorDirtyChange={setEditorDirty}
+              onEditorError={setError}
+              onEditorNotice={setNotice}
+              onEditorSaved={() => { setEditorDirty(false); setNotice("人工最终内容已保存。AI 草稿仍独立保留。"); void refreshWorkspace(); }}
               onExport={() => void exportWorkbook()}
-              onSave={() => void saveFinalContent()}
               onSelectField={changeField}
               onShowEvidence={() => setEvidenceOpen(true)}
-              onTechnicalFinalChange={(value) => { setTechnicalFinal(value); setSaveState("dirty"); }}
               onTabChange={setActiveTab}
               projectName={selectedProject?.name || "当前项目"}
               questions={tableQuestions}
               records={records}
-              saveState={saveState}
               scenario={selectedScenario}
               selectedFieldId={fieldId}
               sourceMappings={sourceMappings}
               table={selectedTable}
-              technicalFinal={technicalFinal}
-              technicalLocked={isMappingLocked(selectedRecord?.lineage?.tech_confirm_status)}
             />
           </div>
         </div>

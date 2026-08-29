@@ -317,9 +317,17 @@ function Get-DockerStatusSnapshot {
     $probe.StartInfo = $startInfo
     [void]$probe.Start()
     $probe.StandardInput.Close()
+    if (-not $probe.WaitForExit(3000)) {
+        try { $probe.Kill() } catch {
+            # 状态探测超时不应阻塞交互菜单。
+        }
+        try { $probe.WaitForExit() } catch {
+            # 进程已退出时无需额外处理。
+        }
+        return [PSCustomObject]@{ runtime = $null; services = @{} }
+    }
     $output = $probe.StandardOutput.ReadToEnd()
     [void]$probe.StandardError.ReadToEnd()
-    $probe.WaitForExit()
     $rows = @($output -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($probe.ExitCode -ne 0 -or @($rows | Where-Object { $_ -like "ENGINE=*" }).Count -eq 0) {
         return [PSCustomObject]@{ runtime = $null; services = @{} }
@@ -423,6 +431,11 @@ function Write-SemanticComposeEnvFile {
         "POSTGRES_USER=not-used-by-semantic-profile",
         "POSTGRES_PASSWORD=not-used-by-semantic-profile",
         "POSTGRES_DB=not-used-by-semantic-profile",
+        "PRODUCTION_DATABASE_URL=postgresql+psycopg://not-used:unused@postgres/not-used",
+        "APP_SECRET_KEY=$([string]$Secrets.appSecretKey)",
+        "JWT_SECRET_KEY=$([string]$Secrets.jwtSecretKey)",
+        "CORS_ORIGINS=http://127.0.0.1:3000",
+        "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api",
         "S3_ACCESS_KEY=not-used-by-semantic-profile",
         "S3_SECRET_KEY=not-used-by-semantic-profile",
         "MILVUS_MINIO_ROOT_USER=$([string]$Secrets.milvusMinioUser)",
@@ -722,9 +735,8 @@ function Set-ProjectEnvironment {
     }
     $env:CORS_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
     $env:LOCAL_BACKEND_PORT = [string]$Port
-    # Keep the long-running dev server isolated from `next build`'s production `.next` output.
-    # Without this, a build can replace chunks while the dev server is still serving HTML.
-    $env:NEXT_DIST_DIR = ".next-dev"
+    # Development uses an isolated cache; production must use the output created by `next build`.
+    $env:NEXT_DIST_DIR = if ($Mode -eq "production") { ".next" } else { ".next-dev" }
     $env:KNOWLEDGE_INGESTION_BATCH_SIZE = "200"
     if ($Mode -eq "production") {
         $env:TASK_QUEUE_PROVIDER = "celery"
@@ -1016,6 +1028,8 @@ function Start-Project {
         workerErr = Join-Path $logRoot "worker-$timestamp.stderr.log"
         backendOut = Join-Path $logRoot "backend-$timestamp.stdout.log"
         backendErr = Join-Path $logRoot "backend-$timestamp.stderr.log"
+        frontendBuildOut = Join-Path $logRoot "frontend-build-$timestamp.stdout.log"
+        frontendBuildErr = Join-Path $logRoot "frontend-build-$timestamp.stderr.log"
         frontendOut = Join-Path $logRoot "frontend-$timestamp.stdout.log"
         frontendErr = Join-Path $logRoot "frontend-$timestamp.stderr.log"
     }
@@ -1079,6 +1093,18 @@ function Start-Project {
         Invoke-DatabaseMigration
         if ($Mode -eq "production") {
             Invoke-SqliteDataMigration -DatabaseCreatedNow $databaseCreatedNow
+            $frontendBuild = Start-Process `
+                -FilePath (Get-Command npm.cmd).Source `
+                -ArgumentList @("run", "build") `
+                -WorkingDirectory $frontendRoot `
+                -RedirectStandardOutput $logs.frontendBuildOut `
+                -RedirectStandardError $logs.frontendBuildErr `
+                -WindowStyle Hidden `
+                -Wait `
+                -PassThru
+            if ($frontendBuild.ExitCode -ne 0) {
+                throw "前端生产构建失败，请检查日志：$($logs.frontendBuildErr)"
+            }
             $workerStarter = Start-Process `
                 -FilePath $backendPython `
                 -ArgumentList @(
@@ -1105,9 +1131,14 @@ function Start-Project {
             -RedirectStandardError $logs.backendErr `
             -WindowStyle Hidden `
             -PassThru
+        $frontendArguments = if ($Mode -eq "production") {
+            @("run", "start", "--", "-H", "127.0.0.1", "-p", [string]$FrontendPort)
+        } else {
+            @("run", "dev", "--", "-H", "127.0.0.1", "-p", [string]$FrontendPort)
+        }
         $frontendStarter = Start-Process `
             -FilePath (Get-Command npm.cmd).Source `
-            -ArgumentList @("run", "dev", "--", "-p", [string]$FrontendPort) `
+            -ArgumentList $frontendArguments `
             -WorkingDirectory $frontendRoot `
             -RedirectStandardOutput $logs.frontendOut `
             -RedirectStandardError $logs.frontendErr `
@@ -1115,7 +1146,7 @@ function Start-Project {
             -PassThru
 
         $backendReadiness = Wait-BackendReady -Port $resolvedBackendPort -TimeoutSeconds 90
-        if (-not (Wait-Endpoint -Url "http://127.0.0.1:$FrontendPort/")) {
+        if (-not (Wait-Endpoint -Url "http://127.0.0.1:$FrontendPort/login")) {
             throw "前端在 90 秒内未就绪，请检查日志：$($logs.frontendErr)"
         }
 
@@ -1471,13 +1502,17 @@ function Invoke-ProjectAction {
 }
 
 function Start-InteractiveConsole {
+    $redirectedConsole = $false
     try {
         [Console]::Title = "一表通口径平台 - 项目启停"
+        $redirectedConsole = [Console]::IsInputRedirected -or [Console]::IsOutputRedirected
     } catch {
         # 输出被重定向时可能没有可设置标题的控制台。
     }
     while ($true) {
-        Show-ProjectStatus
+        if (-not $redirectedConsole) {
+            Show-ProjectStatus
+        }
         Write-Host ""
         Write-Host "操作菜单：" -ForegroundColor Cyan
         Write-Host "  [1] 启动项目（直接按 Enter）"

@@ -20,10 +20,15 @@ def _production_client(monkeypatch, tmp_path) -> Iterator[TestClient]:
     monkeypatch.setenv("AUTH_MODE", "required")
     monkeypatch.setenv("APP_SECRET_KEY", "release-hardening-app-secret")
     monkeypatch.setenv("JWT_SECRET_KEY", "release-hardening-jwt-secret-with-more-than-32-chars")
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///./release-hardening-test.db")
+    # Production validation must see the real deployment contract. The API's
+    # database dependency remains an isolated in-memory SQLite session below.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://release-test:unused@postgres/release_test")
     monkeypatch.setenv("STORAGE_PROVIDER", "local")
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage"))
-    monkeypatch.setenv("TASK_QUEUE_PROVIDER", "inline")
+    monkeypatch.setenv("TASK_QUEUE_PROVIDER", "celery")
+    monkeypatch.setenv("REDIS_URL", "redis://redis:6379/0")
+    monkeypatch.setenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+    monkeypatch.setenv("CELERY_RESULT_BACKEND", "redis://redis:6379/1")
     monkeypatch.setenv("VECTOR_STORE_PROVIDER", "mock")
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "mock")

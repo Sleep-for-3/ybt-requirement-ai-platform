@@ -1,8 +1,10 @@
 "use client";
 
-import { ArrowDown, Check, Download, FileCheck2, Save, ShieldAlert } from "lucide-react";
+import { ArrowDown, Download, FileCheck2 } from "lucide-react";
 import Link from "next/link";
+import { useMemo } from "react";
 
+import { SelectedFieldEditor } from "@/components/requirement-workspace/SelectedFieldEditor";
 import type {
   MartField,
   MartTable,
@@ -12,7 +14,7 @@ import type {
 } from "@/lib/api";
 import { buildLineageLabels, combinedFieldStatus, mappingStatusLabel, mappingStatusTone, preferredMappingContent } from "@/lib/workspace-view-model.mjs";
 import { questionTypeLabel, statusLabel } from "@/lib/product-language";
-import type { FieldWorkspaceRecord, SaveState, SourceMappingIndex } from "@/components/requirement-workspace/types";
+import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
 
 type WorkspaceTab = "structured" | "lineage" | "evidence" | "questions" | "document";
 
@@ -40,16 +42,13 @@ export function DocumentPreview({
   evidenceForSelected,
   questions,
   deliverable,
-  businessFinal,
-  technicalFinal,
-  onBusinessFinalChange,
-  onTechnicalFinalChange,
-  businessLocked,
-  technicalLocked,
-  saveState,
-  onSave,
+  detailReady,
   onAdoptBusiness,
   onAdoptTechnical,
+  onEditorDirtyChange,
+  onEditorError,
+  onEditorNotice,
+  onEditorSaved,
   onShowEvidence,
   onExport,
   exporting
@@ -69,23 +68,23 @@ export function DocumentPreview({
   evidenceForSelected: number;
   questions: PendingQuestion[];
   deliverable: {id:number;target_table_id:number;status:string;version_no:number} | null;
-  businessFinal: string;
-  technicalFinal: string;
-  onBusinessFinalChange: (value: string) => void;
-  onTechnicalFinalChange: (value: string) => void;
-  businessLocked: boolean;
-  technicalLocked: boolean;
-  saveState: SaveState;
-  onSave: () => void;
+  detailReady: boolean;
   onAdoptBusiness: () => void;
   onAdoptTechnical: () => void;
+  onEditorDirtyChange: (dirty: boolean) => void;
+  onEditorError: (message: string) => void;
+  onEditorNotice: (message: string) => void;
+  onEditorSaved: () => void;
   onShowEvidence: () => void;
   onExport: () => void;
   exporting: boolean;
 }) {
-  const selected = records.find((record) => record.field.id === selectedFieldId) || null;
-  const openQuestions = questions.filter((item) => !["accepted", "rejected", "closed"].includes(item.question_status));
-  const selectedQuestions = openQuestions.filter((item) => !item.target_field_id || item.target_field_id === selectedFieldId);
+  const recordsByFieldId = useMemo(() => new Map(records.map((record) => [record.field.id, record])), [records]);
+  const martFieldsById = useMemo(() => new Map(martFields.map((field) => [field.id, field])), [martFields]);
+  const martTablesById = useMemo(() => new Map(martTables.map((table) => [table.id, table])), [martTables]);
+  const selected = selectedFieldId ? recordsByFieldId.get(selectedFieldId) || null : null;
+  const openQuestions = useMemo(() => questions.filter((item) => !["accepted", "rejected", "closed"].includes(item.question_status)), [questions]);
+  const selectedQuestions = useMemo(() => openQuestions.filter((item) => !item.target_field_id || item.target_field_id === selectedFieldId), [openQuestions, selectedFieldId]);
   const versionLabel = deliverable ? `正式交付 v${deliverable.version_no}` : "工作草稿";
 
   return (
@@ -121,6 +120,17 @@ export function DocumentPreview({
             </div>
 
             <WorkspaceTabs activeTab={activeTab} onChange={onTabChange} />
+            {selected ? <div className={activeTab === "structured" || activeTab === "document" ? "mt-5" : "hidden"}><SelectedFieldEditor
+              detailReady={detailReady}
+              key={`${selected.field.id}:${selected.business?.id || 0}:${selected.lineage?.id || 0}`}
+              onAdoptBusiness={onAdoptBusiness}
+              onAdoptTechnical={onAdoptTechnical}
+              onDirtyChange={onEditorDirtyChange}
+              onError={onEditorError}
+              onNotice={onEditorNotice}
+              onSaved={onEditorSaved}
+              record={selected}
+            /></div> : null}
             {activeTab === "document" ? <>
             <SectionTitle number="1" title="需求背景与范围" />
             <p className="text-xs leading-6 text-slate-600">{table.description || selected?.field.regulatory_refined_definition || selected?.field.regulatory_description || "当前目标表尚未维护整体说明，字段级监管定义与人工口径见下表。"}</p>
@@ -133,8 +143,8 @@ export function DocumentPreview({
                 <tbody>
                   {records.map((record) => {
                     const martMapping = record.martMappings[0] || null;
-                    const martField = martFields.find((item) => item.id === martMapping?.mart_field_id) || null;
-                    const martTable = martTables.find((item) => item.id === martField?.mart_table_id) || null;
+                    const martField = martMapping?.mart_field_id ? martFieldsById.get(martMapping.mart_field_id) || null : null;
+                    const martTable = martField ? martTablesById.get(martField.mart_table_id) || null : null;
                     const sourceMapping = martField ? sourceMappings[martField.id]?.[0] || null : null;
                     const combinedStatus = combinedFieldStatus({
                       businessStatus: record.business?.business_confirm_status,
@@ -164,33 +174,7 @@ export function DocumentPreview({
             {selected ? (
               <>
                 <SectionTitle number="3" title="当前字段双层技术溯源" />
-                <LineageFlow record={selected} martFields={martFields} martTables={martTables} sourceMappings={sourceMappings} />
-
-                <SectionTitle number="4" title="AI 草稿与人工最终口径" />
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <MappingEditor
-                    aiDraft={selected.business?.ai_generated_content || ""}
-                    finalContent={businessFinal}
-                    label="业务口径"
-                    locked={businessLocked}
-                    onAdopt={onAdoptBusiness}
-                    onChange={onBusinessFinalChange}
-                    status={selected.business?.business_confirm_status || "未维护"}
-                  />
-                  <MappingEditor
-                    aiDraft={selected.lineage?.ai_generated_content || ""}
-                    finalContent={technicalFinal}
-                    label="技术溯源"
-                    locked={technicalLocked}
-                    onAdopt={onAdoptTechnical}
-                    onChange={onTechnicalFinalChange}
-                    status={selected.lineage?.tech_confirm_status || "未维护"}
-                  />
-                </div>
-                <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-slate-50 px-3 py-2">
-                  <SaveStateText state={saveState} />
-                  <button className="button-primary" disabled={saveState === "saving" || (businessLocked && technicalLocked) || (!selected.business && !selected.lineage)} onClick={onSave} type="button"><Save size={15} />保存人工最终内容</button>
-                </div>
+                <LineageFlow record={selected} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} />
               </>
             ) : null}
 
@@ -211,13 +195,8 @@ export function DocumentPreview({
               <span>AI 草稿不等于人工最终监管口径</span>
             </footer>
             </> : null}
-            {activeTab === "structured" ? <StructuredCaliber
-              businessFinal={businessFinal} businessLocked={businessLocked} onAdoptBusiness={onAdoptBusiness}
-              onAdoptTechnical={onAdoptTechnical} onBusinessFinalChange={onBusinessFinalChange}
-              onSave={onSave} onSelectField={onSelectField} onTechnicalFinalChange={onTechnicalFinalChange}
-              records={records} saveState={saveState} selected={selected} technicalFinal={technicalFinal} technicalLocked={technicalLocked}
-            /> : null}
-            {activeTab === "lineage" ? <LineagePanel record={selected} martFields={martFields} martTables={martTables} sourceMappings={sourceMappings} /> : null}
+            {activeTab === "structured" ? <StructuredCaliber onSelectField={onSelectField} records={records} selected={selected} /> : null}
+            {activeTab === "lineage" ? <LineagePanel record={selected} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} /> : null}
             {activeTab === "evidence" ? <EvidencePanel evidenceCountByField={evidenceCountByField} onSelectField={onSelectField} onShowEvidence={onShowEvidence} records={records} selectedFieldId={selectedFieldId} /> : null}
             {activeTab === "questions" ? <QuestionsPanel questions={selectedQuestions} /> : null}
           </article>
@@ -233,19 +212,17 @@ function WorkspaceTabs({ activeTab, onChange }: { activeTab: WorkspaceTab; onCha
   </div>;
 }
 
-function StructuredCaliber({ records, selected, onSelectField, businessFinal, technicalFinal, onBusinessFinalChange, onTechnicalFinalChange, businessLocked, technicalLocked, saveState, onSave, onAdoptBusiness, onAdoptTechnical }: {
+function StructuredCaliber({ records, selected, onSelectField }: {
   records: FieldWorkspaceRecord[]; selected: FieldWorkspaceRecord | null; onSelectField: (id: number) => void;
-  businessFinal: string; technicalFinal: string; onBusinessFinalChange: (value: string) => void; onTechnicalFinalChange: (value: string) => void;
-  businessLocked: boolean; technicalLocked: boolean; saveState: SaveState; onSave: () => void; onAdoptBusiness: () => void; onAdoptTechnical: () => void;
 }) {
   return <div className="mt-5 space-y-4"><div className="rounded-lg border border-pine-100 bg-pine-50/50 px-4 py-3 text-xs text-pine-900">结构化口径是当前事实视图：监管字段、业务定义、技术溯源、双层 Mapping 和治理状态均来自服务器真实记录；文档预览不会反向修改这些事实。</div>
     <div className="grid gap-3 md:grid-cols-2">{records.map((record) => <button className={`rounded-lg border p-3 text-left ${record.field.id === selected?.field.id ? "border-pine-400 bg-pine-50" : "border-line bg-white"}`} key={record.field.id} onClick={() => onSelectField(record.field.id)} type="button"><strong className="block text-xs text-ink">{record.field.field_name}</strong><span className="mt-1 block font-mono text-[10px] text-slate-400">{record.field.field_code}</span><span className="mt-2 block text-[11px] text-slate-600">业务：{record.business?.final_content || record.business?.ai_generated_content || "待维护"}</span><span className="mt-1 block text-[11px] text-slate-600">血缘：{record.lineage?.source_system_name || "待确认"} · {record.lineage?.lineage_status || "未关联"}</span></button>)}</div>
-    {selected ? <div className="grid gap-3 lg:grid-cols-2"><MappingEditor aiDraft={selected.business?.ai_generated_content || ""} finalContent={businessFinal} label="业务口径" locked={businessLocked} onAdopt={onAdoptBusiness} onChange={onBusinessFinalChange} status={selected.business?.business_confirm_status || "未维护"} /><MappingEditor aiDraft={selected.lineage?.ai_generated_content || ""} finalContent={technicalFinal} label="技术溯源" locked={technicalLocked} onAdopt={onAdoptTechnical} onChange={onTechnicalFinalChange} status={selected.lineage?.tech_confirm_status || "未维护"} /><div className="flex items-center justify-between rounded-lg border border-line bg-slate-50 px-3 py-2 lg:col-span-2"><SaveStateText state={saveState} /><button className="button-primary" disabled={saveState === "saving" || (businessLocked && technicalLocked)} onClick={onSave} type="button"><Save size={15} />保存人工最终内容</button></div></div> : <p className="text-xs text-slate-500">请选择字段查看完整口径。</p>}
+    {!selected ? <p className="text-xs text-slate-500">请选择字段查看完整口径。</p> : null}
   </div>;
 }
 
-function LineagePanel({ record, martFields, martTables, sourceMappings }: { record: FieldWorkspaceRecord | null; martFields: MartField[]; martTables: MartTable[]; sourceMappings: SourceMappingIndex }) {
-  return <div className="mt-5">{record ? <><p className="mb-3 text-xs text-slate-500">当前字段的 Source → Mart → YBT 可追溯链路</p><LineageFlow record={record} martFields={martFields} martTables={martTables} sourceMappings={sourceMappings} /></> : <p className="text-xs text-slate-500">请选择字段查看血缘。</p>}</div>;
+function LineagePanel({ record, martFieldsById, martTablesById, sourceMappings }: { record: FieldWorkspaceRecord | null; martFieldsById: Map<number, MartField>; martTablesById: Map<number, MartTable>; sourceMappings: SourceMappingIndex }) {
+  return <div className="mt-5">{record ? <><p className="mb-3 text-xs text-slate-500">当前字段的 Source → Mart → YBT 可追溯链路</p><LineageFlow record={record} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} /></> : <p className="text-xs text-slate-500">请选择字段查看血缘。</p>}</div>;
 }
 
 function EvidencePanel({ records, selectedFieldId, evidenceCountByField, onSelectField, onShowEvidence }: { records: FieldWorkspaceRecord[]; selectedFieldId: number | null; evidenceCountByField: Record<number, number>; onSelectField: (id: number) => void; onShowEvidence: () => void }) {
@@ -287,10 +264,10 @@ function StatusBadge({ tone, value }: { tone: string; value: string }) {
   return <span className={`${className} whitespace-normal text-center text-[9px]`}>{value}</span>;
 }
 
-function LineageFlow({ record, martFields, martTables, sourceMappings }: { record: FieldWorkspaceRecord; martFields: MartField[]; martTables: MartTable[]; sourceMappings: SourceMappingIndex }) {
+function LineageFlow({ record, martFieldsById, martTablesById, sourceMappings }: { record: FieldWorkspaceRecord; martFieldsById: Map<number, MartField>; martTablesById: Map<number, MartTable>; sourceMappings: SourceMappingIndex }) {
   const martMapping = record.martMappings[0] || null;
-  const martField = martFields.find((item) => item.id === martMapping?.mart_field_id) || null;
-  const martTable = martTables.find((item) => item.id === martField?.mart_table_id) || null;
+  const martField = martMapping?.mart_field_id ? martFieldsById.get(martMapping.mart_field_id) || null : null;
+  const martTable = martField ? martTablesById.get(martField.mart_table_id) || null : null;
   const sourceMapping = martField ? sourceMappings[martField.id]?.[0] || null : null;
   const labels = buildLineageLabels({ lineage: record.lineage, sourceToMart: sourceMapping, martField, martTable, targetField: record.field });
   return (
@@ -306,23 +283,4 @@ function LineageFlow({ record, martFields, martTables, sourceMappings }: { recor
 
 function LineageNode({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return <div className="rounded-lg border border-line bg-white p-3"><span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</span><strong className="mt-1 block text-xs text-ink">{title}</strong><p className="mt-1 break-all font-mono text-[9px] leading-4 text-slate-500">{detail}</p></div>;
-}
-
-function MappingEditor({ label, status, aiDraft, finalContent, locked, onAdopt, onChange }: { label: string; status: string; aiDraft: string; finalContent: string; locked: boolean; onAdopt: () => void; onChange: (value: string) => void }) {
-  return (
-    <div className="rounded-lg border border-line bg-white p-3">
-      <div className="flex items-center gap-2"><strong className="text-xs text-ink">{label}</strong><StatusBadge tone={mappingStatusTone(status)} value={mappingStatusLabel(status)} />{locked ? <span className="ml-auto flex items-center gap-1 text-[10px] text-gold-700"><ShieldAlert size={13} />治理态保护</span> : null}</div>
-      <label className="mt-3 block text-[10px] font-semibold text-slate-500">AI 建议（只读）</label>
-      <textarea className="control mt-1 min-h-24 resize-y bg-pine-50/40 text-xs leading-5" readOnly value={aiDraft} placeholder="尚未生成 AI 草稿" />
-      <button className="button-secondary mt-2 h-8 text-xs" disabled={!aiDraft || locked} onClick={onAdopt} type="button"><Check size={14} />采用 AI 草稿</button>
-      <label className="mt-3 block text-[10px] font-semibold text-slate-500">人工最终内容</label>
-      <textarea className="control mt-1 min-h-28 resize-y text-xs leading-5" disabled={locked} onChange={(event) => onChange(event.target.value)} value={finalContent} placeholder="输入经人工校核的最终内容" />
-    </div>
-  );
-}
-
-function SaveStateText({ state }: { state: SaveState }) {
-  const copy = state === "saving" ? "保存中…" : state === "dirty" ? "有未保存修改" : state === "saved" ? "已保存" : state === "error" ? "保存失败，人工内容未丢失" : "当前内容与服务器一致";
-  const tone = state === "error" ? "text-coral-700" : state === "dirty" ? "text-gold-700" : state === "saved" ? "text-pine-700" : "text-slate-500";
-  return <span className={`flex items-center gap-1.5 text-xs ${tone}`}>{state === "saved" ? <Check size={14} /> : state === "error" ? <ShieldAlert size={14} /> : <Save size={14} />}{copy}</span>;
 }

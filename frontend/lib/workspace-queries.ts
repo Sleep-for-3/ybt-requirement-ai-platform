@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 
 import { apiGet } from "@/lib/api";
+import { EVIDENCE_STALE_TIME_MS, FIELD_DETAIL_STALE_TIME_MS, WORKSPACE_STALE_TIME_MS } from "@/lib/query-policy.mjs";
 import type { MappingEvidence, RequirementWorkspaceFieldDetail, RequirementWorkspaceProjection } from "@/lib/types";
 
 export const workspaceQueryKeys = {
@@ -17,8 +18,10 @@ export function workspaceProjectionOptions(projectId:number, tableId:number|null
   const suffix = query.size ? `?${query}` : "";
   return queryOptions({
     queryKey: workspaceQueryKeys.projection(projectId, tableId, scenarioId),
-    queryFn: ({signal}) => apiGet<RequirementWorkspaceProjection>(`/projects/${projectId}/requirement-workspace${suffix}`, {signal, cache:"no-cache"}),
-    staleTime: 30_000
+    // React Query owns in-memory freshness; Fetch remains no-store to avoid browser/proxy
+    // caches serving another authenticated session's governed projection.
+    queryFn: ({signal}) => apiGet<RequirementWorkspaceProjection>(`/projects/${projectId}/requirement-workspace${suffix}`, {signal}),
+    staleTime: WORKSPACE_STALE_TIME_MS
   });
 }
 
@@ -26,8 +29,8 @@ export function workspaceFieldOptions(projectId:number, fieldId:number, scenario
   const suffix = scenarioId ? `?scenario_id=${scenarioId}` : "";
   return queryOptions({
     queryKey: workspaceQueryKeys.field(projectId, fieldId, scenarioId),
-    queryFn: ({signal}) => apiGet<RequirementWorkspaceFieldDetail>(`/projects/${projectId}/requirement-workspace/fields/${fieldId}${suffix}`, {signal, cache:"no-cache"}),
-    staleTime: 20_000
+    queryFn: ({signal}) => apiGet<RequirementWorkspaceFieldDetail>(`/projects/${projectId}/requirement-workspace/fields/${fieldId}${suffix}`, {signal}),
+    staleTime: FIELD_DETAIL_STALE_TIME_MS
   });
 }
 
@@ -35,7 +38,7 @@ export function workspaceEvidenceOptions(projectId:number, fieldId:number, scena
   const suffix = scenarioId ? `?scenario_id=${scenarioId}` : "";
   return queryOptions({
     queryKey: workspaceQueryKeys.evidence(projectId, fieldId, scenarioId),
-    queryFn: ({signal}) => apiGet<MappingEvidence[]>(`/projects/${projectId}/requirement-workspace/fields/${fieldId}/evidence${suffix}`, {signal, cache:"no-cache"}),
-    staleTime: 60_000
+    queryFn: ({signal}) => apiGet<MappingEvidence[]>(`/projects/${projectId}/requirement-workspace/fields/${fieldId}/evidence${suffix}`, {signal}),
+    staleTime: EVIDENCE_STALE_TIME_MS
   });
 }

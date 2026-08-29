@@ -8,6 +8,7 @@ from app.models.entities import TimestampMixin
 
 class Institution(Base, TimestampMixin):
     __tablename__ = "institutions"
+    __table_args__ = (Index("ix_institutions_type_status", "institution_type", "status"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     institution_code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
@@ -19,7 +20,10 @@ class Institution(Base, TimestampMixin):
 
 class InstitutionMembership(Base):
     __tablename__ = "institution_memberships"
-    __table_args__ = (UniqueConstraint("institution_id", "user_id", name="uq_institution_membership"),)
+    __table_args__ = (
+        UniqueConstraint("institution_id", "user_id", name="uq_institution_membership"),
+        Index("ix_institution_membership_user", "user_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     institution_id: Mapped[int] = mapped_column(ForeignKey("institutions.id"), index=True)
@@ -32,7 +36,10 @@ class InstitutionMembership(Base):
 
 class ProjectMembership(Base):
     __tablename__ = "project_memberships"
-    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_membership"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_membership"),
+        Index("ix_project_membership_user", "user_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
@@ -45,6 +52,7 @@ class ProjectMembership(Base):
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
+    __table_args__ = (Index("ix_refresh_tokens_user", "user_id", "revoked_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -129,6 +137,7 @@ class ScenarioReviewPackage(Base, TimestampMixin):
     __tablename__ = "scenario_review_packages"
     __table_args__ = (
         UniqueConstraint("project_id", "target_field_id", "scenario_id", name="uq_scenario_review_package_scope"),
+        Index("ix_scenario_review_packages_project", "project_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -144,7 +153,10 @@ class ScenarioReviewPackage(Base, TimestampMixin):
 
 class BackgroundJob(Base, TimestampMixin):
     __tablename__ = "background_jobs"
-    __table_args__ = (Index("ix_background_jobs_project_status", "project_id", "status"),)
+    __table_args__ = (
+        Index("ix_background_jobs_project_status", "project_id", "status"),
+        Index("ix_background_jobs_project_type_id", "project_id", "job_type", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
@@ -218,7 +230,10 @@ class Notification(Base):
 
 class StoredFile(Base, TimestampMixin):
     __tablename__ = "stored_files"
-    __table_args__ = (Index("ix_stored_files_scope", "institution_id", "project_id", "classification"),)
+    __table_args__ = (
+        Index("ix_stored_files_scope", "institution_id", "project_id", "classification"),
+        Index("ix_stored_files_hash", "content_hash"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     institution_id: Mapped[int] = mapped_column(ForeignKey("institutions.id"), index=True)

@@ -1,10 +1,12 @@
 import asyncio
+from time import perf_counter
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.performance import response_payload_bytes
 from app.models import BackgroundJob, BackgroundJobItem, Project, ScenarioBusinessMapping, ScenarioTechnicalLineage, StoredFile, TargetField
 from app.schemas.governance import BatchOperationRequest, BatchReviewJobRequest
 from app.services.auth.dependencies import RealPrincipal
@@ -41,6 +43,31 @@ def list_jobs(principal: RealPrincipal, project_id: int | None = None, db: Sessi
         visible = PermissionService(db, principal).visible_project_ids() or []
         statement = statement.where(BackgroundJob.project_id.in_(visible))
     return [_job_dict(job) for job in db.scalars(statement).all()]
+
+
+@router.get("/projects/{project_id}/jobs/summary")
+def project_jobs_summary(
+    project_id: int,
+    principal: RealPrincipal,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    """Return the header's active-job counters without loading job rows."""
+    PermissionService(db, principal).require_project_permission(project_id, "project.view")
+    started = perf_counter()
+    counts = dict(db.execute(select(
+        BackgroundJob.status,
+        func.count(BackgroundJob.id),
+    ).where(
+        BackgroundJob.project_id == project_id,
+        BackgroundJob.status.in_(("queued", "running")),
+    ).group_by(BackgroundJob.status)).all())
+    queued = int(counts.get("queued", 0))
+    running = int(counts.get("running", 0))
+    result = {"queued_count": queued, "running_count": running, "active_count": queued + running}
+    response.headers["Server-Timing"] = f"jobs_summary;dur={(perf_counter() - started) * 1000:.2f}"
+    response.headers["X-Response-Payload-Bytes"] = str(response_payload_bytes(result))
+    return result
 
 
 @router.get("/jobs/{job_id}")

@@ -12,6 +12,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/
 const ACCESS_TOKEN_KEY = "ybt:access-token";
 const REFRESH_TOKEN_KEY = "ybt:refresh-token";
 const REQUEST_TIMEOUT_MS = 60_000;
+let developmentRequestSequence = 0;
 
 export function saveSession(accessToken: string, refreshToken: string) {
   sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
@@ -39,12 +40,29 @@ function browserAuthEnvironment(): BrowserAuthEnvironment | undefined {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const performanceMark = beginDevelopmentMeasurement(path);
   try {
     const response = await fetchWithTimeout(`${API_BASE}${path}`, init);
     return readApiResponse<T>(response, path, browserAuthEnvironment());
   } catch (error) {
     throw normalizeRequestError(error);
+  } finally {
+    endDevelopmentMeasurement(path, performanceMark);
   }
+}
+
+function beginDevelopmentMeasurement(path: string): string | undefined {
+  if (process.env.NODE_ENV !== "development" || typeof window === "undefined" || !window.performance) return undefined;
+  developmentRequestSequence += 1;
+  const mark = `api-request-${developmentRequestSequence}`;
+  window.performance.mark(mark);
+  return mark;
+}
+
+function endDevelopmentMeasurement(path: string, mark: string | undefined) {
+  if (!mark || typeof window === "undefined" || !window.performance) return;
+  window.performance.measure(`api ${path}`, mark);
+  window.performance.clearMarks(mark);
 }
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {

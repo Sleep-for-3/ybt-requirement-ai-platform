@@ -30,12 +30,22 @@ SQL 解析、数据源安全查询、自然语言任务和数据库探查结果�
 
 ## Docker-first 启动
 
-先从公开模板手工创建私密运行配置，并执行预检：
+默认 `docker-compose.yml` 是正式体验运行方式：Next.js production build、PostgreSQL、Redis、Celery backend/worker。先从公开模板创建不提交的私密配置，替换全部占位密钥后再启动：
 
 ```bash
+cp .env.production.example .env
 cp backend/.env.example backend/.env
 python scripts/check_local_setup.py
+docker compose config
 docker compose up --build
+```
+
+生产配置缺少安全密钥，或把数据库/任务队列误设为 SQLite/inline 时，后端会拒绝启动，不会静默降级。前端容器执行 `next start`，不会运行 development server。
+
+需要热更新和轻量 SQLite/inline 调试时，显式使用开发编排：
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
 ```
 
 可选启动 Milvus（默认验收不需要）：
@@ -345,7 +355,7 @@ AI 输出必须是业务规则描述，不是 SQL。SQL 文件解析结果、自
 
 开发模式仍可使用 SQLite、`InlineTaskQueue`、本地存储和 Mock AI。首次通过 `POST /api/admin/bootstrap` 创建平台运营管理员，完成初始化后设置 `AUTH_MODE=required`。生产启动会校验认证模式、JWT/应用密钥和 CORS 白名单。
 
-Docker Compose 的 `production` profile 提供 PostgreSQL、Redis、Celery Worker 与 S3-compatible 存储入口；所有凭据必须由环境变量注入，仓库不提供生产默认密码。
+默认 Docker Compose 提供 PostgreSQL、Redis、Celery Worker 和真正的 Next.js production runtime；S3-compatible 存储及 Milvus 通过可选 profile 启动。所有凭据必须由环境变量注入，仓库不提供生产默认密码。开发热更新必须显式使用 `docker-compose.dev.yml`。
 
 运行端点：
 

@@ -380,6 +380,12 @@ export type DataSource = {
   last_discovered_schemas_json: string[];
 };
 
+export type ProjectJobsSummary = {
+  queued_count: number;
+  running_count: number;
+  active_count: number;
+};
+
 export type DataSourceConnector = {
   engine_type:string;
   label:string;
@@ -567,6 +573,7 @@ export type RequirementWorkspaceBusinessSummary = { id:number;status:string;conf
 export type RequirementWorkspaceLineageSummary = { id:number;status:string;confidence_level:string;has_ai_draft:boolean;has_final:boolean;content_preview?:string|null;source_system_name?:string|null;source_database_name?:string|null;source_schema_name?:string|null;source_table_name?:string|null;source_field_name?:string|null;lineage_status:string;locked:boolean };
 export type RequirementWorkspaceMappingSummary = { id:number;mart_field_id?:number|null;status:string;confidence_level:string;content_preview?:string|null;lineage_status:string;source_system_summary?:string|null };
 export type RequirementWorkspaceFieldSummary = { id:number;project_id:number;target_table_id:number;field_code:string;field_name:string;field_type?:string|null;required_flag:boolean;definition_preview?:string|null };
+export type RequirementWorkspaceAssetSummary = { business_system_count:number;datasource_count:number;healthy_datasource_count:number;mart_table_count:number };
 export type RequirementWorkspaceRecordSummary = {
   field:RequirementWorkspaceFieldSummary;
   business?:RequirementWorkspaceBusinessSummary|null;
@@ -583,8 +590,7 @@ export type RequirementWorkspaceProjection = {
   selected_scenario_id?:number|null;
   tables:TargetTable[];
   scenarios:ProductScenario[];
-  business_systems:BusinessSystem[];
-  datasources:DataSource[];
+  asset_summary:RequirementWorkspaceAssetSummary;
   mart_tables:MartTable[];
   mart_fields:MartField[];
   records:RequirementWorkspaceRecordSummary[];
@@ -592,7 +598,7 @@ export type RequirementWorkspaceProjection = {
   deliverable_summary?:{id:number;target_table_id:number;status:string;version_no:number}|null;
   recent_jobs:BackgroundJobSummary[];
   readiness_summary:{field_count:number;complete_field_count:number;open_question_count:number;evidence_count:number};
-  performance_budget:{projection_version:string;initial_api_request_budget:number;bounded_sql_query_budget:number;large_content_deferred:boolean};
+  performance_budget:{projection_version:string;initial_api_request_budget:number;bounded_sql_query_budget:number;large_content_deferred:boolean;project_assets_summarized:boolean;mart_entities_reference_scoped:boolean};
 };
 export type RequirementWorkspaceFieldDetail = {
   field:TargetField;

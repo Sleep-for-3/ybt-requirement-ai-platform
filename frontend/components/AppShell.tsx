@@ -36,13 +36,14 @@ import { useEffect, useState } from "react";
 
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
 import { GlobalSearch } from "@/components/GlobalSearch";
-import { BackgroundJobSummary, apiGet, clearSession } from "@/lib/api";
+import { ProjectJobsSummary, apiGet, clearSession } from "@/lib/api";
 import {
   canViewNavigationAudience,
   navigationAccessForProject,
   type NavigationAccess,
   type NavigationAudience
 } from "@/lib/navigation-contract.mjs";
+import { jobsSummaryPollInterval } from "@/lib/query-policy.mjs";
 
 type NavItem = {
   href: string;
@@ -222,16 +223,18 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const jobsQuery = useQuery({
-    queryKey:["project-jobs",projectId],
-    queryFn:({signal})=>apiGet<BackgroundJobSummary[]>(`/jobs?project_id=${projectId}`,{signal,cache:"no-cache"}),
+    queryKey:["project-jobs-summary",projectId],
+    queryFn:({signal})=>apiGet<ProjectJobsSummary>(`/projects/${projectId}/jobs/summary`,{signal}),
     enabled:Boolean(projectId),
     staleTime:5_000,
-    refetchInterval:(query)=>{
-      const jobs=(query.state.data as BackgroundJobSummary[]|undefined)||[];
-      return jobs.some((job)=>["queued","running"].includes(job.status))?5_000:60_000;
-    }
+    refetchInterval:(query)=>jobsSummaryPollInterval(
+      query.state.data as ProjectJobsSummary | undefined,
+      typeof document !== "undefined" && document.hidden
+    ),
+    refetchIntervalInBackground:false,
+    refetchOnWindowFocus:true
   });
-  const runningJobs = (jobsQuery.data || []).filter((job) => ["queued", "running"].includes(job.status)).length;
+  const runningJobs = jobsQuery.data?.active_count || 0;
 
   useEffect(() => {
     apiGet<NonNullable<typeof user>>("/auth/me").then(setUser).catch(() => setUser(null));

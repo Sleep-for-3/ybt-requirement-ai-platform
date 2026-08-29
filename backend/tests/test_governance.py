@@ -630,9 +630,11 @@ def test_task_queues_retry_cancel_and_celery_payload_safety(db_session) -> None:
             return self.Result(f"celery-{len(self.calls)}")
 
     fake = FakeCelery(); celery = CeleryTaskQueue(fake)
-    remote = celery.enqueue(db_session, job_type="metadata_sync", institution_id=1, project_id=1, created_by=1, idempotency_key="celery-safe", payload_summary={"password": "do-not-send", "knowledge_content": "do-not-send"})
+    handler_calls = []
+    remote = celery.enqueue(db_session, job_type="metadata_sync", institution_id=1, project_id=1, created_by=1, idempotency_key="celery-safe", payload_summary={"password": "do-not-send", "knowledge_content": "do-not-send"}, handler=lambda *_: handler_calls.append("executed"))
     duplicate_remote = celery.enqueue(db_session, job_type="metadata_sync", institution_id=1, project_id=1, created_by=1, idempotency_key="celery-safe", payload_summary={"password": "different-secret"})
     assert fake.calls == [("app.workers.execute_background_job", [remote.id])]
+    assert handler_calls == []
     assert duplicate_remote.id == remote.id
     assert duplicate_remote.submission_deduplicated is True
     assert remote.celery_task_id == "celery-1"

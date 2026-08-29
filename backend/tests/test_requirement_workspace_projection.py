@@ -1,6 +1,8 @@
 from sqlalchemy import event
 
 from app.models import (
+    BusinessSystem,
+    DataSource,
     MappingEvidenceReference,
     MartField,
     MartTable,
@@ -24,10 +26,15 @@ def test_workspace_projection_has_bounded_queries_and_defers_large_content(db_se
     table = TargetTable(project_id=project.id, table_code="RPT", table_name="监管表")
     scenario = ProductScenario(project_id=project.id, scenario_code="BASE", scenario_name="基础场景", enabled=True)
     mart_table = MartTable(project_id=project.id, table_code="MART", table_name="监管集市表")
-    db_session.add_all([table, scenario, mart_table])
+    unused_mart_table = MartTable(project_id=project.id, table_code="UNUSED", table_name="未引用集市表")
+    system = BusinessSystem(project_id=project.id, system_code="CORE", system_name="核心", enabled=True)
+    healthy_datasource = DataSource(project_id=project.id, name="healthy", db_type="postgresql", enabled=True, last_test_status="success")
+    unhealthy_datasource = DataSource(project_id=project.id, name="unhealthy", db_type="postgresql", enabled=True, last_test_status="failed")
+    db_session.add_all([table, scenario, mart_table, unused_mart_table, system, healthy_datasource, unhealthy_datasource])
     db_session.flush()
     mart_field = MartField(project_id=project.id, mart_table_id=mart_table.id, field_code="VALUE", field_name="值")
-    db_session.add(mart_field)
+    unused_mart_field = MartField(project_id=project.id, mart_table_id=unused_mart_table.id, field_code="UNUSED", field_name="未引用字段")
+    db_session.add_all([mart_field, unused_mart_field])
     db_session.flush()
 
     large_final = "人工最终内容" * 1000
@@ -54,11 +61,23 @@ def test_workspace_projection_has_bounded_queries_and_defers_large_content(db_se
 
     assert len(statements) <= 16
     assert projection["performance_budget"] == {
-        "projection_version": "requirement-workspace-v1",
+        "projection_version": "requirement-workspace-v2",
         "initial_api_request_budget": 1,
         "bounded_sql_query_budget": 16,
         "large_content_deferred": True,
+        "project_assets_summarized": True,
+        "mart_entities_reference_scoped": True,
     }
+    assert projection["asset_summary"] == {
+        "business_system_count": 1,
+        "datasource_count": 2,
+        "healthy_datasource_count": 1,
+        "mart_table_count": 2,
+    }
+    assert "business_systems" not in projection
+    assert "datasources" not in projection
+    assert [item["id"] for item in projection["mart_fields"]] == [mart_field.id]
+    assert [item["id"] for item in projection["mart_tables"]] == [mart_table.id]
     assert len(projection["records"]) == 30
     assert projection["readiness_summary"]["evidence_count"] == 30
     serialized = str(projection)

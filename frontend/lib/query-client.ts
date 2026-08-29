@@ -1,14 +1,16 @@
 import { QueryClient } from "@tanstack/react-query";
 
+import { GLOBAL_STALE_TIME_MS } from "@/lib/query-policy.mjs";
+
 let browserClient: QueryClient | undefined;
 
 function createQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        staleTime: 30_000,
+        staleTime: GLOBAL_STALE_TIME_MS,
         gcTime: 10 * 60_000,
-        refetchOnWindowFocus: true,
+        refetchOnWindowFocus: false,
         refetchOnReconnect: true,
         retry: (failureCount, error) => {
           const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 0;

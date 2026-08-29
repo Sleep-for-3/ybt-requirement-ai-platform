@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    env_file:
+      - ./backend/.env
+    environment:
+      ENVIRONMENT: development
+      AUTH_MODE: optional
+      DATABASE_URL: sqlite:////app/data/ybt.db
+      TASK_QUEUE_PROVIDER: inline
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend_dev_data:/app/data
+      - backend_dev_storage:/app/storage
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api
+      NEXT_DIST_DIR: .next-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_modules:/app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  backend_dev_data:
+  backend_dev_storage:
+  frontend_dev_modules:

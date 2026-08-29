@@ -110,3 +110,63 @@ test("all supported terminal states stop polling", () => {
   }
   assert.equal(isTerminalJobStatus("running"), false);
 });
+
+test("polling pauses while the document is hidden and resumes when visible", async () => {
+  const timers = fakeTimers();
+  let hidden = false;
+  let visibilityListener = () => undefined;
+  let requests = 0;
+  const registry = createJobPollingRegistry({
+    ...timers,
+    fetchJob: async () => {
+      requests += 1;
+      return { id: 21, status: "running" };
+    },
+    isHidden: () => hidden,
+    subscribeVisibility: (listener) => {
+      visibilityListener = listener;
+      return () => { visibilityListener = () => undefined; };
+    }
+  });
+
+  registry.subscribe(21, () => undefined);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(requests, 1);
+  assert.equal(timers.pending.length, 1);
+
+  hidden = true;
+  visibilityListener();
+  await timers.flush();
+  assert.equal(requests, 1);
+
+  hidden = false;
+  visibilityListener();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(requests, 2);
+});
+
+test("terminal listeners run once even when visibility changes", async () => {
+  const timers = fakeTimers();
+  let visibilityListener = () => undefined;
+  let terminalNotifications = 0;
+  const registry = createJobPollingRegistry({
+    ...timers,
+    fetchJob: async () => ({ id: 22, status: "completed" }),
+    isHidden: () => false,
+    subscribeVisibility: (listener) => {
+      visibilityListener = listener;
+      return () => undefined;
+    }
+  });
+
+  registry.subscribe(22, () => { terminalNotifications += 1; });
+  await Promise.resolve();
+  await Promise.resolve();
+  visibilityListener();
+  await Promise.resolve();
+
+  assert.equal(terminalNotifications, 1);
+  assert.equal(registry.size(), 0);
+});

@@ -6,10 +6,8 @@ import Link from "next/link";
 import { AiStatus } from "@/components/requirement-workspace/AiStatus";
 import type {
   BackgroundJobSummary,
-  BusinessSystem,
-  DataSource,
-  MartTable,
   ProductScenario,
+  RequirementWorkspaceAssetSummary,
   ScenarioBusinessMapping,
   ScenarioTechnicalLineage,
   TargetField,
@@ -26,9 +24,7 @@ export function RequirementInputPanel({
   scenarios,
   scenarioId,
   onScenarioChange,
-  businessSystems,
-  datasources,
-  martTables,
+  assetSummary,
   selectedField,
   selectedBusiness,
   selectedLineage,
@@ -46,9 +42,7 @@ export function RequirementInputPanel({
   scenarios: ProductScenario[];
   scenarioId: number | null;
   onScenarioChange: (id: number | null) => void;
-  businessSystems: BusinessSystem[];
-  datasources: DataSource[];
-  martTables: MartTable[];
+  assetSummary: RequirementWorkspaceAssetSummary;
   selectedField: TargetField | null;
   selectedBusiness: ScenarioBusinessMapping | null;
   selectedLineage: ScenarioTechnicalLineage | null;
@@ -57,8 +51,6 @@ export function RequirementInputPanel({
   generating: boolean;
   onGenerate: () => void;
 }) {
-  const connectedDatasources = datasources.filter((item) => item.enabled && item.last_test_status === "success");
-  const enabledSystems = businessSystems.filter((item) => item.enabled);
   const contextText = selectedBusiness?.business_definition || selectedField?.regulatory_refined_definition || selectedField?.regulatory_description || selectedField?.field_definition || "";
   const canGenerate = Boolean(selectedField && scenarioId);
 
@@ -105,9 +97,9 @@ export function RequirementInputPanel({
       <section className="panel overflow-hidden">
         <PanelHeader title="② 数据分析范围" meta="真实内网资产" />
         <div className="space-y-2 p-4">
-          <AssetRow icon={Building2} label="业务源系统" value={enabledSystems.length ? `${enabledSystems.length} 个已启用` : "尚未维护"} available={enabledSystems.length > 0} href="/business-systems" />
-          <AssetRow icon={Database} label="只读数据源" value={connectedDatasources.length ? `${connectedDatasources.length} 个连接正常` : datasources.length ? "连接状态待检查" : "尚未配置"} available={connectedDatasources.length > 0} href="/datasources" />
-          <AssetRow icon={Layers3} label="监管集市" value={martTables.length ? `${martTables.length} 张真实集市表` : "尚未维护"} available={martTables.length > 0} href="/mart" />
+          <AssetRow icon={Building2} label="业务源系统" value={assetSummary.business_system_count ? `${assetSummary.business_system_count} 个已启用` : "尚未维护"} available={assetSummary.business_system_count > 0} href="/business-systems" />
+          <AssetRow icon={Database} label="只读数据源" value={assetSummary.healthy_datasource_count ? `${assetSummary.healthy_datasource_count} 个连接正常` : assetSummary.datasource_count ? "连接状态待检查" : "尚未配置"} available={assetSummary.healthy_datasource_count > 0} href="/datasources" />
+          <AssetRow icon={Layers3} label="监管集市" value={assetSummary.mart_table_count ? `${assetSummary.mart_table_count} 张真实集市表` : "尚未维护"} available={assetSummary.mart_table_count > 0} href="/mart" />
           <AssetRow icon={FileText} label="历史与知识" value="按当前字段检索真实证据" available href="/knowledge" />
         </div>
       </section>
