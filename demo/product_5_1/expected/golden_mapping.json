@@ -22,4 +22,3 @@
     {"field_code":"E010017","target_column":"collection_date","mart_field":"mart_product_master.collection_date","source_fields":["ETL reporting cycle"],"transformation":"本Demo正式周期为2026-08-31","semantic":"PRODUCT_LIFECYCLE"}
   ]
 }
-

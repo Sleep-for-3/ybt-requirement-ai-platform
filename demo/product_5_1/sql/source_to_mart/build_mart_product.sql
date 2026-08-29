@@ -111,4 +111,3 @@ SELECT '2026-07' AS reporting_cycle, product_id, institution_id, product_name, p
        CASE WHEN product_status_code = '02' AND stop_date > '2026-07-31' THEN '01' ELSE product_status_code END,
        agency_institution_name, remark, '2026-07-31', CASE WHEN stop_date > '2026-07-31' THEN NULL ELSE stop_date END, owner_department_id, description, product_line, product_class, product_group, base_product, customer_segment, channel_code, region_code, partner_name, policy_code, last_evaluation_date, domain_status, source_record
 FROM mart_product_master;
-

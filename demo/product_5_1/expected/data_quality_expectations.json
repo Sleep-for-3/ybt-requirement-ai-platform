@@ -13,4 +13,3 @@
     {"rule_code":"P51_MATURITY_CONSISTENCY","rule_name":"一次性产品必须具有到期日期","rule_type":"consistency","severity":"error","field_code":"E010012","expression":"lifecycle_type!='one_off' OR maturity_date IS NOT NULL"}
   ]
 }
-

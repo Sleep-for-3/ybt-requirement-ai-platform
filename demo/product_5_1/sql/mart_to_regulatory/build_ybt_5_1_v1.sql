@@ -22,4 +22,3 @@ SELECT
 FROM mart_product_master master
 JOIN mart_product_regulatory_classification classification ON classification.product_id = master.product_id;
 CREATE UNIQUE INDEX ux_ybt_5_1_product_id ON ybt_5_1_product_business_basic(product_id);
-
