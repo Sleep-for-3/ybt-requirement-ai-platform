@@ -336,6 +336,35 @@ def test_catalog_resolution_auto_binds_only_a_unique_candidate(db_session: Sessi
     assert len(ambiguous.candidates) == 2
 
 
+def test_target_resolution_uses_imported_physical_column_metadata(db_session: Session) -> None:
+    project = Project(name="target physical resolution")
+    db_session.add(project)
+    db_session.flush()
+    target_table = TargetTable(project=project, table_code="YBT_PRODUCT", table_name="产品")
+    target = TargetField(
+        project=project,
+        target_table=target_table,
+        field_code="E010007",
+        field_name="产品类别",
+        internal_definition="Bank Internal Interpretation: 物理字段 product_category，最终以人工审核内容为准。",
+    )
+    node = LineageNode(
+        project_id=project.id,
+        node_type="column",
+        logical_name="YBT_PRODUCT.product_category",
+        table_name="YBT_PRODUCT",
+        column_name="product_category",
+    )
+    db_session.add_all([target_table, target, node])
+    db_session.flush()
+
+    result = resolve_lineage_node(db_session, node)
+
+    assert result.candidates == ()
+    assert node.target_field_id == target.id
+    assert node.unresolved_flag is False
+
+
 def test_second_script_version_creates_change_set_and_impact(tmp_path: Path, monkeypatch) -> None:
     import app.api.lineage as lineage_api
 

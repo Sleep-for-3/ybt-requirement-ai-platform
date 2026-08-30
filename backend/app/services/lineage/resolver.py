@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -103,11 +104,10 @@ def _candidate_groups(db: Session, node: LineageNode):
             func.lower(func.coalesce(MartTable.physical_table_name, MartTable.table_code)) == table_name,
             func.lower(func.coalesce(MartField.physical_column_name, MartField.field_code)) == column_name,
         )).all(), schema_name, lambda item: item.mart_table.schema_name)
-        target = list(db.scalars(select(TargetField).join(TargetTable, TargetTable.id == TargetField.target_table_id).where(
+        target = [item for item in db.scalars(select(TargetField).join(TargetTable, TargetTable.id == TargetField.target_table_id).where(
             TargetField.project_id == node.project_id,
             func.lower(TargetTable.table_code) == table_name,
-            func.lower(TargetField.field_code) == column_name,
-        )).all())
+        )).all() if _target_column_names(item) and column_name in _target_column_names(item)]
         return [
             ("catalog_column", catalog, "catalog_column_id"),
             ("source_field", source, "source_field_id"),
@@ -150,3 +150,20 @@ def _score(node: LineageNode, value) -> float:
 
 def _match_reason(node: LineageNode) -> str:
     return "schema + table + column" if node.schema_name else "table + column; multiple candidates require manual selection"
+
+
+_PHYSICAL_COLUMN_RE = re.compile(r"物理字段\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+
+def _target_column_names(field: TargetField) -> set[str]:
+    """Return stable target identifiers plus the physical column recorded by imports.
+
+    TargetField predates the demo's physical-column metadata, so the bootstrap stores
+    that value in internal_definition. Keeping the fallback here preserves the model
+    contract while allowing SQL lineage nodes to resolve to target fields.
+    """
+    values = {str(value).strip().lower() for value in (field.field_code, field.field_name, field.report_field_name) if value}
+    match = _PHYSICAL_COLUMN_RE.search(field.internal_definition or "")
+    if match:
+        values.add(match.group(1).lower())
+    return values

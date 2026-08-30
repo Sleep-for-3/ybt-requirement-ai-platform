@@ -164,6 +164,8 @@ def test_full_sync_records_column_drift_and_rename_candidates(db_session,monkeyp
     adapter=Adapter();monkeypatch.setattr(sync_service,"create_metadata_adapter",lambda datasource:adapter)
     first=synchronize_metadata(db_session,datasource)
     assert {(event.entity_type,event.change_type) for event in db_session.query(MetadataDriftEvent).filter_by(sync_task_id=first.id)}=={("table","added"),("column","added")}
+    repeated=synchronize_metadata(db_session,datasource)
+    assert db_session.query(MetadataDriftEvent).filter_by(sync_task_id=repeated.id).count() == 0
     adapter.column_name="customer_full_name"
     second=synchronize_metadata(db_session,datasource)
     events=db_session.query(MetadataDriftEvent).filter_by(sync_task_id=second.id).all()

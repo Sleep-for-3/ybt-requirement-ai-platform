@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { apiGet } from "@/lib/api";
+import { apiGet, hasSession } from "@/lib/api";
 import { statusLabel } from "@/lib/product-language";
 
 type Dashboard = {
@@ -53,22 +53,45 @@ export default function Page() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsOverview | null>(null);
   const [error, setError] = useState("");
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"executive" | "business" | "technical">("executive");
   const [reportMode, setReportMode] = useState(false);
 
   useEffect(() => {
     setError("");
-    Promise.all([
-      apiGet<Dashboard>(`/projects/${projectId}/dashboard`),
-      apiGet<AnalyticsOverview>(`/projects/${projectId}/analytics/overview`)
-    ]).then(([dashboard, overview]) => { setData(dashboard); setAnalytics(overview); }).catch(() => setError("无法加载当前项目驾驶舱，请检查项目权限或后端状态。"));
+    setAnalyticsError("");
+    setLoading(true);
+    if (!hasSession()) {
+      setError("请先登录后查看项目驾驶舱。");
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const withTimeout = <T,>(request: Promise<T>) => Promise.race([
+      request,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error("dashboard_request_timeout")), 10000))
+    ]);
+    Promise.allSettled([
+      withTimeout(apiGet<Dashboard>(`/projects/${projectId}/dashboard`)),
+      withTimeout(apiGet<AnalyticsOverview>(`/projects/${projectId}/analytics/overview`))
+    ]).then(([dashboardResult, analyticsResult]) => {
+      if (cancelled) return;
+      if (dashboardResult.status === "fulfilled") setData(dashboardResult.value);
+      else setError(classifyDashboardError(dashboardResult.reason));
+      if (analyticsResult.status === "fulfilled") setAnalytics(analyticsResult.value);
+      else setAnalyticsError(classifyAnalyticsError(analyticsResult.reason));
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [projectId]);
 
   return (
     <main className={reportMode ? "bg-mist" : ""}>
       <WorkspaceHeader title="项目进度看板" meta="准备度、正式版本、变更影响、UAT 与下一步操作" />
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
+        {loading ? <div className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-500" role="status">正在加载项目驾驶舱…</div> : null}
         {error ? <div className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{error}</div> : null}
+        {analyticsError ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">分析指标暂不可用，项目事实仍可查看：{analyticsError}</div> : null}
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs text-slate-500">数据截至 {data?.as_of ? new Date(data.as_of).toLocaleString("zh-CN") : "加载中…"}</p><p className="mt-1 text-xs text-slate-400">所有覆盖率均展示真实分子、分母和项目范围；空项目不展示误导性百分比。</p></div><div className="flex items-center gap-2"><button className="button-secondary h-9 text-xs" onClick={() => setReportMode((current) => !current)} type="button">{reportMode ? "退出汇报模式" : "汇报模式"}</button><div className="flex rounded-lg border border-line bg-white p-1" role="tablist" aria-label="驾驶舱视图">{([["executive","领导驾驶舱"],["business","业务运营"],["technical","技术运营"]] as const).map(([id,label]) => <button className={`rounded px-3 py-1.5 text-xs ${view === id ? "bg-pine text-white" : "text-slate-600"}`} key={id} onClick={() => setView(id)} role="tab" aria-selected={view === id} type="button">{label}</button>)}</div></div></div>
         {analytics ? <MetricStrip analytics={analytics} /> : null}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -109,6 +132,26 @@ export default function Page() {
       </div>
     </main>
   );
+}
+
+function classifyDashboardError(error: unknown): string {
+  const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status?: number }).status) : 0;
+  if (status === 401) return "登录状态已失效，请重新登录。";
+  if (status === 403) return "当前账号没有查看项目驾驶舱的权限。";
+  if (status === 404) return "当前项目驾驶舱不存在。";
+  if (status >= 500) return "项目驾驶舱数据计算失败，请稍后重试。";
+  if (status === 0 && error instanceof TypeError) return "无法连接服务。";
+  if (error instanceof Error && error.message === "dashboard_request_timeout") return "项目驾驶舱加载超时，请稍后重试。";
+  return "项目驾驶舱暂时不可用，请稍后重试。";
+}
+
+function classifyAnalyticsError(error: unknown): string {
+  const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status?: number }).status) : 0;
+  if (status === 401) return "登录状态已失效。";
+  if (status === 403) return "当前账号没有查看分析指标的权限。";
+  if (status >= 500) return "分析指标计算失败。";
+  if (error instanceof Error && error.message === "dashboard_request_timeout") return "分析指标加载超时。";
+  return "分析指标加载失败。";
 }
 
 function AnalyticsRiskSection({ analytics }: { analytics: AnalyticsOverview | null }) {
