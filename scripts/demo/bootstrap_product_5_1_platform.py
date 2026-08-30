@@ -116,6 +116,32 @@ class Api:
         return self.request("POST", path, **kwargs)
 
 
+def _wait_for_background_job(
+    api: Api,
+    job: dict[str, Any],
+    *,
+    timeout_seconds: float = 180,
+    poll_seconds: float = 1,
+) -> dict[str, Any]:
+    """Wait for a production background job without treating 202 as failure."""
+    job_id = job.get("id") or job.get("job_id")
+    if not job_id:
+        raise RuntimeError("异步任务响应缺少 job id")
+    deadline = time.monotonic() + timeout_seconds
+    current = job
+    while True:
+        status = str(current.get("status") or "").lower()
+        if status in {"completed", "partially_completed"}:
+            return current
+        if status in {"failed", "cancelled"}:
+            message = current.get("error_message") or current.get("message") or "后台任务失败"
+            raise RuntimeError(f"后台任务 {job_id} {status}: {message}")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"后台任务 {job_id} 在 {int(timeout_seconds)} 秒内未完成（当前状态：{status or 'unknown'}）")
+        time.sleep(poll_seconds)
+        current = api.get(f"/jobs/{job_id}")
+
+
 def bootstrap_platform(
     api: Api,
     regulatory_xlsx: Path,
@@ -406,9 +432,10 @@ def _ensure_regulatory_knowledge(api: Api, project_id: int, path: Path) -> dict:
     if found:
         return found
     with path.open("rb") as handle:
-        return api.request(
+        submitted = api.request(
             "POST",
             f"/projects/{project_id}/knowledge/documents/upload",
+            expected=(200, 201, 202),
             files={
                 "file": (
                     path.name,
@@ -423,6 +450,16 @@ def _ensure_regulatory_knowledge(api: Api, project_id: int, path: Path) -> dict:
                 "change_note": "表5.1真实监管原始口径及监管定义细化",
             },
         )
+    if submitted and submitted.get("status") in {"queued", "running"}:
+        _wait_for_background_job(api, submitted)
+        document = next(
+            (item for item in api.get(f"/projects/{project_id}/knowledge/documents") if item["file_name"] == path.name),
+            None,
+        )
+        if document is None:
+            raise RuntimeError(f"知识文档任务已完成，但未找到文档记录：{path.name}")
+        return document
+    return submitted
 
 
 def _ensure_semantics(

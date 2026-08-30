@@ -17,7 +17,7 @@ if str(DEMO_SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_SCRIPT_ROOT))
 
 from build_product_5_1_demo import build_demo  # noqa: E402
-from bootstrap_product_5_1_platform import Api  # noqa: E402
+from bootstrap_product_5_1_platform import Api, _wait_for_background_job  # noqa: E402
 from product_5_1_common import (  # noqa: E402
     DEMO_PROJECT_NAME,
     SOURCE_DATABASES,
@@ -215,6 +215,32 @@ def test_bootstrap_api_retries_rate_limited_requests() -> None:
     finally:
         api.close()
     assert attempts == 2
+
+
+def test_bootstrap_waits_for_production_background_job() -> None:
+    statuses = iter(
+        [
+            {"id": 73, "status": "running", "progress": 50},
+            {"id": 73, "status": "completed", "progress": 100},
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/jobs/73"
+        return httpx.Response(200, json=next(statuses))
+
+    api = Api("http://demo.invalid/api", transport=httpx.MockTransport(handler))
+    try:
+        result = _wait_for_background_job(
+            api,
+            {"id": 73, "status": "queued", "progress": 0},
+            timeout_seconds=1,
+            poll_seconds=0,
+        )
+    finally:
+        api.close()
+
+    assert result == {"id": 73, "status": "completed", "progress": 100}
 
 
 def test_verification_summaries_follow_real_api_contract() -> None:
