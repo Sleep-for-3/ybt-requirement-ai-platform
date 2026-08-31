@@ -3,6 +3,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import dotenv_values
@@ -39,6 +40,7 @@ METADATA_HOSTNAMES = {
     "metadata.google.internal",
 }
 TRANSPARENT_PROXY_FAKE_IP_NETWORKS = (ipaddress.ip_network("198.18.0.0/15"),)
+_BACKEND_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 def normalize_provider_type(provider: str) -> str:
@@ -77,7 +79,7 @@ def resolve_api_key(env_name: str | None, fallback: str = "") -> str:
     if process_value is not None:
         return process_value
     try:
-        dotenv_value = dotenv_values(".env", encoding="utf-8").get(env_name)
+        dotenv_value = dotenv_values(_BACKEND_ENV_FILE, encoding="utf-8").get(env_name)
     except OSError:
         dotenv_value = None
     return str(dotenv_value) if dotenv_value is not None else fallback

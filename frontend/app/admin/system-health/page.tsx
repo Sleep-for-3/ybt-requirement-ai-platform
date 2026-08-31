@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
+import { ApiError } from "@/lib/http-response.mjs";
 import { statusLabel } from "@/lib/product-language";
 
 type Check = { status?: string; message?: string; latency_ms?: number; details?: Record<string, unknown> };
@@ -32,8 +33,13 @@ export default function SystemHealthPage() {
     try {
       setData(await apiGet<Health>("/health/details"));
       setUpdatedAt(new Date().toLocaleString("zh-CN"));
-    } catch {
-      setError("无法读取系统健康详情。该页面仅对平台管理员开放，请检查服务状态与权限。");
+    } catch (cause) {
+      const status = cause instanceof ApiError ? cause.status : 0;
+      if (status === 401) setError("登录状态已失效，请重新登录。");
+      else if (status === 403) setError("当前账号无平台健康查看权限。");
+      else if (status === 500 || status === 503) setError("健康检查服务暂时不可用，请稍后重试。");
+      else if (status === 0) setError("无法连接服务，请检查后端是否正常运行。");
+      else setError(cause instanceof Error ? cause.message : "无法读取系统健康详情，请稍后重试。");
     }
   }
   useEffect(() => { void refresh(); }, []);

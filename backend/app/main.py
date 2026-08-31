@@ -116,17 +116,38 @@ app.add_middleware(
 
 def _error_contract(request: Request, status_code: int, detail, *, error_code: str | None = None, technical_message: str | None = None) -> dict:
     detail_error_code = detail.get("error_code") if isinstance(detail, dict) else None
-    public_message = detail.get("message", detail) if isinstance(detail, dict) else detail
     code = error_code or detail_error_code or {
         400: "invalid_request", 401: "authentication_required", 403: "permission_denied",
         404: "resource_not_found", 409: "state_conflict", 422: "validation_failed",
         429: "rate_limited", 503: "dependency_unavailable",
     }.get(status_code, "internal_error")
-    user_message = public_message if isinstance(public_message, str) and status_code < 500 else {
-        400: "请求内容不正确", 401: "登录状态已失效", 403: "没有操作权限",
-        404: "资源不存在或不可见", 409: "资源状态冲突", 422: "输入数据不完整或格式不正确",
-        429: "请求过于频繁，请稍后重试", 503: "依赖服务暂不可用",
+    # Keep the public contract in product language.  Returning the raw
+    # framework detail here made otherwise identical 401/403 responses leak
+    # English implementation text (for example, ``Authentication required``)
+    # and allowed each client to invent a different interpretation.  Detailed
+    # diagnostics remain in ``detail``/logs for support tooling; business
+    # users always receive the stable status-level message below.
+    user_message = {
+        400: "请求内容不正确",
+        401: "登录状态已失效",
+        403: "当前账号无权执行此操作",
+        404: "资源不存在或不可见",
+        409: "资源状态冲突",
+        422: "输入数据不完整或格式不正确",
+        429: "请求过于频繁，请稍后重试",
+        503: "依赖服务暂不可用",
     }.get(status_code, "服务器处理失败")
+    suggested_actions = {
+        400: ["检查请求内容后重试"],
+        401: ["重新登录"],
+        403: ["联系管理员申请相应权限"],
+        404: ["检查链接或返回上一页"],
+        409: ["刷新页面后重试"],
+        422: ["补充必填信息后重试"],
+        429: ["稍后重试"],
+        500: ["携带追踪编号联系平台管理员"],
+        503: ["稍后重试"],
+    }.get(status_code, ["稍后重试"])
     return {
         "detail": detail,
         "error_code": code,
@@ -134,7 +155,7 @@ def _error_contract(request: Request, status_code: int, detail, *, error_code: s
         "technical_message": technical_message,
         "trace_id": getattr(request.state, "request_id", None),
         "retryable": status_code in {429, 503},
-        "suggested_actions": ["稍后重试"] if status_code in {429, 503} else ["检查输入或联系项目管理员"],
+        "suggested_actions": suggested_actions,
     }
 
 

@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.ai_runtime import ConnectionTestOutput, ModelProfileCreate, sanitize_base_url
+from app.api.ai_runtime import ConnectionTestOutput, ModelProfileCreate, _configuration_issue, sanitize_base_url
 from app.services.llm.base import LLMConfigurationError
 from app.services.llm.providers import ProviderRuntimeConfig
 from app.core.database import Base, get_db
@@ -141,6 +141,19 @@ def test_status_url_sanitizer_removes_query_and_userinfo() -> None:
         sanitize_base_url("https://user:secret@provider.example.com/v1?token=secret#fragment")
         == "https://provider.example.com/v1"
     )
+
+
+def test_runtime_status_reports_an_unreachable_milvus_endpoint() -> None:
+    issue = _configuration_issue(
+        "vector_store",
+        {"configuration_status": "configured", "reachable": False},
+    )
+
+    assert issue == {
+        "component": "vector_store",
+        "code": "endpoint_unreachable",
+        "message": "vector_store endpoint is unreachable",
+    }
 
 
 def test_profile_api_crud_activation_and_secret_safe_status(monkeypatch) -> None:

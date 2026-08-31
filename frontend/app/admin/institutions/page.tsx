@@ -8,7 +8,7 @@ import { useAdminCapabilities } from "@/components/admin/AdminShell";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { apiGet, apiPost } from "@/lib/api";
-import { statusLabel } from "@/lib/product-language";
+import { institutionTypeLabel, statusLabel } from "@/lib/product-language";
 
 type Institution = {
   id: number;
@@ -91,7 +91,7 @@ export default function Page() {
                 <div>
                   <b>{item.institution_name}</b>
                   <div className="text-xs text-slate-500">
-                    {item.institution_code} · {item.institution_type}
+                    {item.institution_code} · {institutionTypeLabel(item.institution_type)}
                   </div>
                 </div>
                 <span className={item.status === "active" ? "badge-success" : "badge-neutral"}>{statusLabel(item.status)}</span>

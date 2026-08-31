@@ -12,6 +12,7 @@ from app.services.llm.base import LLMConfigurationError, LLMResponseError
 from app.services.llm.base import LLMProviderError, ModelCallMetadata
 from app.services.llm.factory import get_llm_service
 from app.services.llm.openai_compatible import OpenAICompatibleLLMService
+from app.services.llm import providers
 from app.services.llm.providers import normalize_provider_type
 from app.services.embeddings.openai_compatible import OpenAICompatibleEmbeddingService
 from app.services.embeddings.observability import (
@@ -42,10 +43,14 @@ def test_provider_aliases_are_normalized_once() -> None:
     assert normalize_provider_type("ollama") == "local_ollama_compatible"
 
 
-def test_named_profile_api_key_loads_from_backend_dotenv(monkeypatch, tmp_path: Path) -> None:
+def test_named_profile_api_key_loads_from_backend_dotenv_regardless_of_cwd(monkeypatch, tmp_path: Path) -> None:
+    """The secret lookup must share Settings' stable backend/.env location."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("PROFILE_DOTENV_KEY", raising=False)
-    (tmp_path / ".env").write_text("PROFILE_DOTENV_KEY=dotenv-test-value\n", encoding="utf-8")
+    env_file = tmp_path / "backend" / ".env"
+    env_file.parent.mkdir()
+    env_file.write_text("PROFILE_DOTENV_KEY=dotenv-test-value\n", encoding="utf-8")
+    monkeypatch.setattr(providers, "_BACKEND_ENV_FILE", env_file, raising=False)
 
     service = get_llm_service(
         provider="openai_compatible",

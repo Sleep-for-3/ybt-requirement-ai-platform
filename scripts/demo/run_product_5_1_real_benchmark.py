@@ -97,7 +97,19 @@ def _call_generation(api: Api, path: str, task: dict[str, Any] | None) -> dict[s
     if task is None:
         return {"status": "missing_task", "path": path}
     if _is_generated(task):
-        return {"status": "reused_existing_success", "path": path, "task_id": task.get("id")}
+        # Reusing an already generated draft must still preserve the draft in
+        # the benchmark artifact.  The previous harness kept only the task id,
+        # which made the post-run Golden evaluator inspect an empty string and
+        # under-report otherwise real outputs.  This is a read-only reuse; no
+        # model call is made and no expected-answer data is introduced.
+        return {
+            "status": "reused_existing_success",
+            "path": path,
+            "task_id": task.get("id"),
+            "result": task,
+            "latency_ms": 0,
+            "token_usage": {"usage_available": False, "reused": True},
+        }
     started = time.perf_counter()
     try:
         result = api.post(path, {})
@@ -207,6 +219,11 @@ def run_agents(
                 "candidate_mart_assets": len(context.get("candidates") or []),
                 "candidate_source_assets": len(context.get("metadata") or []),
                 "open_questions": len(context.get("open_questions") or []),
+                "retrieved_evidence_items": context.get("knowledge_evidence") or [],
+                "semantic_context_items": context.get("semantic") or [],
+                "candidate_mart_assets_items": context.get("candidates") or [],
+                "candidate_source_assets_items": context.get("metadata") or [],
+                "open_question_items": context.get("open_questions") or [],
             },
             "lineage": {
                 "node_count": len(lineage.get("nodes") or []),

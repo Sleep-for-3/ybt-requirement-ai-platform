@@ -46,6 +46,12 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const WORKFLOW_STEP_LABELS: Record<string, string> = {
+  business_draft: "业务口径起草",
+  business_review: "业务口径审核",
+  technical_draft: "技术血缘起草",
+  technical_review: "技术血缘审核",
+  impact_analysis: "变更影响分析",
+  final_review: "最终审核",
   business_mapping_review: "业务口径审核",
   technical_lineage_review: "技术溯源审核",
   business_confirm: "业务口径确认",
@@ -98,6 +104,13 @@ const ENTITY_LABELS: Record<string, string> = {
   reporting_cycle: "报送期"
 };
 
+const INSTITUTION_TYPE_LABELS: Record<string, string> = {
+  bank: "银行",
+  consulting_company: "咨询公司",
+  platform_operator: "平台运营方",
+  other: "其他机构"
+};
+
 const TARGET_TYPE_LABELS: Record<string, string> = {
   target_field: "监管字段",
   target_table: "监管表",
@@ -112,6 +125,17 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
   deliverable: "正式交付",
   script_file: "加工脚本",
   lineage_change_set: "血缘变更集"
+};
+
+const CHANGE_CATEGORY_LABELS: Record<string, string> = {
+  source_column_added: "新增来源字段",
+  source_column_removed: "移除来源字段",
+  source_table_added: "新增来源表",
+  source_table_removed: "移除来源表",
+  transformation_changed: "加工逻辑变化",
+  code_mapping_changed: "代码映射变化",
+  dependency_changed: "依赖关系变化",
+  schema_changed: "结构变化"
 };
 
 export function statusLabel(value?: string | null): string {
@@ -139,9 +163,19 @@ export function entityLabel(value?: string | null): string {
   return ENTITY_LABELS[value] || value;
 }
 
+export function institutionTypeLabel(value?: string | null): string {
+  if (!value) return "未设置";
+  return INSTITUTION_TYPE_LABELS[value] || "未知机构类型";
+}
+
 export function targetTypeLabel(value?: string | null): string {
   if (!value) return "待识别对象";
   return TARGET_TYPE_LABELS[value] || entityLabel(value);
+}
+
+export function changeCategoryLabel(value?: string | null): string {
+  if (!value) return "未标注变更";
+  return CHANGE_CATEGORY_LABELS[value] || "其他变更";
 }
 
 export function formatDateTime(value?: string | null): string {

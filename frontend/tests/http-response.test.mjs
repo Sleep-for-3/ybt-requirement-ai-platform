@@ -87,7 +87,7 @@ test("HTTP conflicts without a safe backend detail use a clear Chinese message",
 test("common HTTP statuses have stable Chinese fallbacks", () => {
   const expectations = new Map([
     [401, "登录状态已失效"],
-    [403, "没有操作权限"],
+    [403, "当前账号无权执行此操作"],
     [409, "相同操作正在执行或资源状态冲突"],
     [422, "输入数据不完整或格式不正确"],
     [429, "请求过于频繁，请稍后重试"],

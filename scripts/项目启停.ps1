@@ -749,6 +749,7 @@ function Set-ProjectEnvironment {
         $env:CELERY_BROKER_URL = ""
         $env:CELERY_RESULT_BACKEND = ""
     }
+
 }
 
 function Get-BackendEnvironmentValue {
@@ -766,12 +767,52 @@ function Get-BackendEnvironmentValue {
     return ""
 }
 
+function Test-ManagedEmbeddingConfiguration {
+    # Treat the bundled FastEmbed endpoint as a managed dependency even when
+    # a previous launcher invocation left LOCAL_VLLM values in the process
+    # environment.  Without this check a second `start` could skip port 11434
+    # and never restart the service, yielding a misleading
+    # `embedding_dimension_missing` readiness failure.
+    $provider = [string](Get-BackendEnvironmentValue -Name "EMBEDDING_PROVIDER")
+    $baseUrl = [string](Get-BackendEnvironmentValue -Name "EMBEDDING_BASE_URL")
+    if ([string]::IsNullOrWhiteSpace($provider) -or $provider -eq "mock") {
+        return $true
+    }
+    if ($provider -eq "local_vllm" -and (
+        [string]::IsNullOrWhiteSpace($baseUrl) -or
+        $baseUrl -match "^https?://(?:127\.0\.0\.1|localhost):11434/v1/?$"
+    )) {
+        return $true
+    }
+    return $false
+}
+
 function Set-SemanticEnvironment {
-    $configuredProvider = Get-BackendEnvironmentValue -Name "EMBEDDING_PROVIDER"
+    param([ValidateSet("production", "sqlite")][string]$RuntimeMode = $Mode)
+
+    if ($RuntimeMode -eq "sqlite") {
+        # SQLite launches are isolated development runs.  Do not inherit the
+        # production `.env` Milvus/local-embedding values, and do not start a
+        # second semantic infrastructure stack for this mode.
+        $developmentProvider = "mock"
+        $env:VECTOR_STORE_PROVIDER = $developmentProvider
+        $env:MILVUS_URI = ""
+        $env:EMBEDDING_PROVIDER = $developmentProvider
+        $env:EMBEDDING_BASE_URL = ""
+        $env:EMBEDDING_MODEL = ""
+        $env:EMBEDDING_DIMENSION = "0"
+        $env:EMBEDDING_API_KEY_ENV_NAME = "EMBEDDING_API_KEY"
+        return [PSCustomObject]@{
+            provider = "mock"
+            model = "mock-embedding"
+            dimension = 0
+            usesManagedFastEmbed = $false
+        }
+    }
 
     $env:VECTOR_STORE_PROVIDER = "milvus"
     $env:MILVUS_URI = "http://127.0.0.1:19530"
-    if ([string]::IsNullOrWhiteSpace($configuredProvider) -or $configuredProvider -eq "mock") {
+    if (Test-ManagedEmbeddingConfiguration) {
         $env:EMBEDDING_PROVIDER = "local_vllm"
         $env:EMBEDDING_BASE_URL = "http://127.0.0.1:11434/v1"
         $env:EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -1001,11 +1042,7 @@ function Start-Project {
     $ports = @($FrontendPort, $resolvedBackendPort)
     if ($Mode -eq "production") {
         $ports += @($PostgresPort, $RedisPort)
-        $configuredEmbeddingProvider = Get-BackendEnvironmentValue -Name "EMBEDDING_PROVIDER"
-        if (
-            [string]::IsNullOrWhiteSpace($configuredEmbeddingProvider) -or
-            $configuredEmbeddingProvider -eq "mock"
-        ) {
+        if (Test-ManagedEmbeddingConfiguration) {
             $ports += 11434
         }
     }
@@ -1036,7 +1073,8 @@ function Start-Project {
     $environmentNames = @(
         "DATABASE_URL", "STORAGE_DIR", "ENVIRONMENT", "AUTH_MODE", "APP_SECRET_KEY", "JWT_SECRET_KEY", "TASK_QUEUE_PROVIDER",
         "REDIS_URL", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND",
-        "LLM_PROVIDER", "EMBEDDING_PROVIDER", "VECTOR_STORE_PROVIDER",
+        "LLM_PROVIDER", "LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY_ENV_NAME",
+        "EMBEDDING_PROVIDER", "VECTOR_STORE_PROVIDER",
         "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION",
         "EMBEDDING_API_KEY_ENV_NAME", "MILVUS_URI",
         "FASTEMBED_CACHE_PATH", "FASTEMBED_THREADS",
@@ -1081,8 +1119,11 @@ function Start-Project {
             $databaseUrl = "sqlite:///./$DatabaseFile"
         }
         Set-ProjectEnvironment -Port $resolvedBackendPort -DatabaseUrl $databaseUrl -Secrets $secrets
+        # Resolve semantic settings for every launcher mode.  Production may
+        # manage a local FastEmbed process; SQLite receives the explicit mock
+        # profile above and never inherits stale Milvus values from `.env`.
+        $semanticRuntime = Set-SemanticEnvironment -RuntimeMode $Mode
         if ($Mode -eq "production") {
-            $semanticRuntime = Set-SemanticEnvironment
             if ($semanticRuntime.usesManagedFastEmbed) {
                 $embeddingStarter = Start-LocalEmbeddingInfrastructure `
                     -OutLog $logs.embeddingOut `

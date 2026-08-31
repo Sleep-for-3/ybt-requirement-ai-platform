@@ -17,7 +17,7 @@ from app.services.auth.password import hash_password, verify_password
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import redact_summary
-from app.services.governance.workflow import _finalize_semantic_target
+from app.services.governance.workflow import _finalize_semantic_target, _normalize_assignments
 from app.services.task_queue.celery import CeleryTaskQueue
 from app.services.task_queue.inline import InlineTaskQueue
 
@@ -61,6 +61,26 @@ def test_password_is_stored_as_a_secure_hash() -> None:
     assert password not in password_hash
     assert verify_password(password, password_hash)
     assert not verify_password(password + "-wrong", password_hash)
+
+
+def test_workflow_assignment_accepts_step_keys_without_losing_role_routing() -> None:
+    steps = [
+        {"step_key": "business_review", "assignee_role": "business_reviewer"},
+        {"step_key": "final_review", "assignee_role": "final_reviewer"},
+    ]
+
+    assert _normalize_assignments(steps, {"business_review": 3, "final_review": 6}) == {
+        "business_reviewer": 3,
+        "final_reviewer": 6,
+    }
+    assert _normalize_assignments(steps, {"business_reviewer": 3, "final_reviewer": 6}) == {
+        "business_reviewer": 3,
+        "final_reviewer": 6,
+    }
+
+    with pytest.raises(HTTPException) as error:
+        _normalize_assignments(steps, {"business_review": 3, "business_reviewer": 4})
+    assert error.value.status_code == 422
 
 
 def test_admin_can_bootstrap_login_refresh_and_revoke_session(monkeypatch) -> None:

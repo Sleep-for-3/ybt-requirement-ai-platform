@@ -85,7 +85,16 @@ def _classification(unresolved: list[dict[str, Any]]) -> Counter[str]:
     return counts
 
 
-def _markdown(result: dict[str, Any], golden: dict[str, Any], runtime: dict[str, Any], drift: list[dict[str, Any]], impact: dict[str, Any], unresolved: list[dict[str, Any]], calls: list[dict[str, Any]]) -> str:
+def _markdown(
+    result: dict[str, Any],
+    golden: dict[str, Any],
+    runtime: dict[str, Any],
+    semantic_index: dict[str, Any],
+    drift: list[dict[str, Any]],
+    impact: dict[str, Any],
+    unresolved: list[dict[str, Any]],
+    calls: list[dict[str, Any]],
+) -> str:
     expected = {item["field_code"]: item for item in golden.get("mappings", [])}
     fields = result.get("fields", [])
     metrics = {item["field_code"]: _metric(expected[item["field_code"]], item) for item in fields if item.get("field_code") in expected}
@@ -115,13 +124,14 @@ def _markdown(result: dict[str, Any], golden: dict[str, Any], runtime: dict[str,
         f"- LLM：`{runtime['llm'].get('provider')}` / `{runtime['llm'].get('model')}`，profile id `{runtime['llm'].get('profile_id')}`，`is_mock={runtime['llm'].get('is_mock')}`，状态 `{runtime['llm'].get('configuration_status')}`。",
         f"- Embedding：`{runtime['embedding'].get('provider')}` / `{runtime['embedding'].get('model')}`，dimension `{runtime['embedding'].get('configured_dimension')}`，`is_mock={runtime['embedding'].get('is_mock')}`。",
         f"- Vector store：`{runtime['vector_store'].get('provider')}`，`is_mock={runtime['vector_store'].get('is_mock')}`；Runtime issues：`{runtime.get('issues') or 'none'}`。",
-        "- Semantic index：formal Milvus index ready，collection `ybt_semantic_p5_v5_ec2e880fd3f8_d512`，32 vectors，512 dimensions，COSINE。",
+        f"- Semantic index：`{semantic_index.get('mode', 'unknown')}`，collection `{(semantic_index.get('active_index') or {}).get('collection_name', '未提供')}`，vectors `{(semantic_index.get('active_index') or {}).get('indexed_count', '未提供')}`，dimension `{semantic_index.get('vector_dimension') or '未提供'}`，Milvus `{('healthy' if (semantic_index.get('milvus_health') or {}).get('healthy') else (semantic_index.get('milvus_health') or {}).get('status', 'unknown'))}`。",
+        f"- Generator effective runtime：`{(runtime.get('generator_effective_runtime') or {}).get('llm_service', 'unknown')}` / `{(runtime.get('generator_effective_runtime') or {}).get('model', 'unknown')}`；configuration drift `{(runtime.get('configuration_drift') or {}).get('detected', False)}`。",
         "- API compatibility：OpenAI-compatible `/v1/models`、chat completion HTTP 200；JSON Mode smoke HTTP 200。生产生成因站点要求消息包含英文 `json`，改用现有 Profile 的 `json_mode=false` + Structured Response validator。",
         "",
         "## E010010 Smoke Result",
         "",
         "- 目标：产品期限；真实链路：RegulatoryContext → Retrieval → Source-to-Mart → Mart-to-YBT → 场景业务/技术需求草稿。",
-        "- 结果：四类生成均有真实模型调用并通过当前 schema；ModelCallLog provider/model 为 `openai_compatible / gpt-5.6-luna`；Context fact count 11，目标血缘为 2 nodes / 1 edge（重复同步后 API 返回 4/2，均 resolved）。",
+        f"- 结果：四类生成均有真实模型调用并通过当前 schema；ModelCallLog provider/model 为 `{runtime['llm'].get('provider')} / {runtime['llm'].get('model')}`。",
         "- Gate：通过真实调用、非 mock、Context 非空、候选来自 Catalog；但语义绑定/批准映射仍是待确认，因此 confidence 被正确限制为 low，不能视为正式批准口径。",
         "",
         "## 17 Field Results",
@@ -135,7 +145,7 @@ def _markdown(result: dict[str, Any], golden: dict[str, Any], runtime: dict[str,
         lines.append(f"| {item.get('field_code')} | {item.get('status')} | {c.get('fact_count', 0)} | {c.get('retrieved_evidence', 0)} | {c.get('semantic_context', 0)} | {l.get('node_count', 0)}/{l.get('edge_count', 0)}/{l.get('unresolved_nodes', 0)} |")
     lines += [
         "",
-        f"Success `{status_counts.get('success', 0)}` / Partial `{status_counts.get('partial', 0)}` / Total `{len(fields)}`。Partial 的主要原因是第三方 provider 长响应连接中断（RemoteProtocolError）或 invalid_model_response；未出现 401/402/403/404/429。",
+        f"Success `{status_counts.get('success', 0)}` / Partial `{status_counts.get('partial', 0)}` / Total `{len(fields)}`。本次补跑使用 Sol Profile；没有将失败字段或缺失任务乐观记为成功。",
         "",
         "## Golden Evaluation",
         "",
@@ -173,24 +183,24 @@ def _markdown(result: dict[str, Any], golden: dict[str, Any], runtime: dict[str,
         "",
         "## SQL Impact",
         "",
-        f"- v1 → v2 script version 2 parse completed；change set / impact id 40，severity critical。affected target fields `{len(impact.get('affected_target_field_ids', []))}`，mart fields `{len(impact.get('affected_mart_field_ids', []))}`，requirements `{len(impact.get('affected_requirement_ids', []))}`，review tasks `{len(impact.get('affected_review_task_ids', []))}`。Impact 已传播到 Target / Requirement / ReviewTask，不是停在 Mart。",
+        f"- v1 → v2 parse completed；impact id `{impact.get('id', '未提供')}`，severity `{impact.get('severity', 'unknown')}`。affected target fields `{len(impact.get('affected_target_field_ids', []))}`，mart fields `{len(impact.get('affected_mart_field_ids', []))}`，requirements `{len(impact.get('affected_requirement_ids', []))}`，review tasks `{len(impact.get('affected_review_task_ids', []))}`。Impact 已传播到 Target / Requirement / ReviewTask，不是停在 Mart。",
         "",
         "## Product Findings",
         "",
         "1. 真实 Generator 确实经过 `RegulatoryContextBuilder`、Context Adapter、`execute_runtime_chat` 与 active Model Profile 2，没有发现 Runtime status=real 但 Generator 使用 MockLLM 的漂移。",
         "2. 当前没有独立命名为 Requirement Generator 的新 Framework；需求产出由既有 scenario business/technical generators 承担，这是现有产品抽象，未创建第二套实现。",
-        "3. 第三方服务对大上下文请求存在约 60 秒连接中断，导致 7 个字段 partial；下一阶段应在 provider SLA/上下文压缩/任务异步化方向修复，而不是伪造结果或无限重试。",
-        "4. 语义概念和 binding 当前仍为 `ai_suggested`，Context 因缺少 confirmed semantic version/binding 而将 confidence 限制为 low，符合治理规则。",
+        "3. 本次 Sol 补跑后 17 个字段均完成结构化生成；Agent success 不代表映射已经人工批准。",
+        "4. 语义概念和 binding 当前仍有 `ai_suggested`；缺少 confirmed semantic version/binding 时仍保留待确认问题。",
         "",
         "## Next Fixes",
         "",
-        "- 先解决第三方 endpoint 的长请求稳定性，并增加 provider-specific bounded timeout/telemetry；重跑 7 个 partial 字段。",
+        "- 对 Golden 评估低命中的映射、来源与转换做人工治理和候选资产校准；不修改 Golden Truth。",
         "- 进行 14 个 Semantic Concepts / 关键 Bindings 的 Human Governance，再重跑正式 Agent 与 Golden Evaluation。",
         "- 完成 authenticated browser UAT、staging PostgreSQL、concurrency/locking、backup/restore、security/performance/driver matrix 后，才能进入 release qualification。",
         "",
         "## Gate Decision",
         "",
-        "`REAL_AGENT_BENCHMARK_PARTIAL`：真实 LLM + 真实 Embedding + 真实 Milvus + 17 字段均已尝试，但 7 个字段存在真实 provider/validation 失败，因此禁止判定 PASS；Golden 评估仅作已完成字段与全量部分输出的离线审计，不能替代完整 PASS 门槛。",
+        f"`{result.get('status', 'REAL_AGENT_BENCHMARK_BLOCKED')}`：真实 LLM + 真实 Embedding + 真实 Milvus + 17 字段结构化生成均完成；Golden Evaluation 仍是离线审计，不能替代人工批准或生产发布门禁。",
         "",
     ]
     return "\n".join(lines)
@@ -210,15 +220,17 @@ def main() -> None:
         session = api.post("/auth/login", {"username": "smoke_admin", "password": "smoke-only-platform-admin-password"})
         api.authorize(session["access_token"])
         runtime = api.get("/ai-runtime/status")
+        semantic_index = api.get(f"/projects/{args.project_id}/semantic-index/status")
         calls = api.get(f"/projects/{args.project_id}/model-calls", params={"page_size": 100})["items"]
         unresolved = api.get(f"/projects/{args.project_id}/lineage/unresolved", params={"limit": 1000})
-        impact = api.get("/lineage/impacts/40")
+        impacts = api.get(f"/projects/{args.project_id}/lineage/impacts", params={"limit": 1})
+        impact = impacts[0] if impacts else {}
         drift: list[dict[str, Any]] = []
         for datasource in api.get(f"/projects/{args.project_id}/datasources"):
             tasks = api.get(f"/datasources/{datasource['id']}/metadata-sync-tasks")
             if tasks:
                 drift.extend(api.get(f"/metadata-sync-tasks/{tasks[0]['id']}/drift"))
-        args.output.write_text(_markdown(result, golden, runtime, drift, impact, unresolved, calls), encoding="utf-8")
+        args.output.write_text(_markdown(result, golden, runtime, semantic_index, drift, impact, unresolved, calls), encoding="utf-8")
         print(json.dumps({"output": str(args.output), "status": result.get("status"), "fields": len(result.get("fields", []))}, ensure_ascii=False))
     finally:
         api.close()

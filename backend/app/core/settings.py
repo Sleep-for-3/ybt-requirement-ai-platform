@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,7 +12,18 @@ from app.services.llm.providers import (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # Resolve the project environment file from the backend package instead
+    # of the caller's current working directory.  A direct `uvicorn` launch
+    # from the repository root previously skipped backend/.env and silently
+    # fell back to mock providers, while the lifecycle script (which starts
+    # from backend/) used a different configuration.  Process environment
+    # variables still take precedence, as required for deployment overrides.
+    _project_env_file = Path(__file__).resolve().parents[2] / ".env"
+    model_config = SettingsConfigDict(
+        env_file=str(_project_env_file),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = "YBT Requirement AI Platform"
     api_prefix: str = "/api"

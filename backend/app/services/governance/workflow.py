@@ -138,7 +138,7 @@ def start_workflow(
         if package.status == "withdrawn":
             package.current_version_no += 1
         package.status = "in_review"
-    assignments = assignments or {}
+    assignments = _normalize_assignments(steps, assignments)
     for step in steps:
         role = step["assignee_role"]
         assignee = assignments.get(role)
@@ -170,6 +170,38 @@ def start_workflow(
     db.commit()
     db.refresh(instance)
     return instance
+
+
+def _normalize_assignments(
+    steps: list[dict[str, str]],
+    assignments: dict[str, int] | None,
+) -> dict[str, int]:
+    """Normalize workflow assignment keys to the canonical assignee roles.
+
+    The public workflow contract historically documented both role keys
+    (``business_reviewer``) and step keys (``business_review``).  The latter
+    is natural for UI clients, but the persistence layer stores the role.  A
+    missing normalization silently created unassigned tasks and made a valid
+    submission look like a routing failure.  Accept both forms while
+    rejecting contradictory values so assignment intent is never ambiguous.
+    """
+
+    raw = assignments or {}
+    normalized: dict[str, int] = {}
+    for step in steps:
+        role = step["assignee_role"]
+        step_key = step["step_key"]
+        role_value = raw.get(role)
+        step_value = raw.get(step_key)
+        if role_value is not None and step_value is not None and role_value != step_value:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Conflicting assignees supplied for {step_key} and {role}",
+            )
+        value = role_value if role_value is not None else step_value
+        if value is not None:
+            normalized[role] = int(value)
+    return normalized
 
 
 def claim_task(db: Session, task: ReviewTask, principal: Principal) -> ReviewTask:

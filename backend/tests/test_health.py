@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.core.observability import build_log_event
 from app.core.settings import Settings, get_settings
-from app.main import app
+from app.main import _error_contract, app
 from app.services.storage import get_storage_service
 from app.services.health_checks import _check_task_queue
 from app.services.health_checks import readiness_summary
@@ -45,6 +45,12 @@ def test_health_endpoints_are_bounded_sanitized_and_revision_aware(monkeypatch, 
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "health-storage"))
     monkeypatch.setenv("HEALTH_DETAILS_PUBLIC", "true")
     monkeypatch.setenv("AUTH_MODE", "required")
+    # Health endpoint tests must be independent from a developer's ignored
+    # backend/.env (which may intentionally enable Milvus for local runtime
+    # bring-up).  This case exercises the isolated SQLite/mock profile.
+    monkeypatch.setenv("VECTOR_STORE_PROVIDER", "mock")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "mock")
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "0")
     get_settings.cache_clear()
     get_storage_service.cache_clear()
     try:
@@ -82,11 +88,19 @@ def test_not_found_response_uses_compatible_error_contract() -> None:
     payload = response.json()
     assert payload["detail"] == "Not Found"
     assert payload["error_code"] == "resource_not_found"
-    assert payload["user_message"] == "Not Found"
+    assert payload["user_message"] == "资源不存在或不可见"
     assert payload["technical_message"] is None
     assert payload["trace_id"] == "test-error-contract"
     assert payload["retryable"] is False
-    assert payload["suggested_actions"] == ["检查输入或联系项目管理员"]
+    assert payload["suggested_actions"] == ["检查链接或返回上一页"]
+
+
+def test_error_contract_localizes_auth_and_server_statuses() -> None:
+    request = SimpleNamespace(state=SimpleNamespace(request_id="contract-test"))
+
+    assert _error_contract(request, 401, "Authentication required")["user_message"] == "登录状态已失效"
+    assert _error_contract(request, 403, "Forbidden")["user_message"] == "当前账号无权执行此操作"
+    assert _error_contract(request, 500, "internal traceback")["user_message"] == "服务器处理失败"
 
 
 def test_structured_log_event_has_required_fields_and_redacts_sensitive_input() -> None:

@@ -119,8 +119,29 @@ export type LineageNode = { id:number;node_type:string;logical_name:string;datab
 export type LineageEdge = { id:number;source_node_id:number;target_node_id:number;edge_type:string;transformation_type?:string|null;transformation_expression?:string|null;join_condition?:string|null;filter_condition?:string|null;aggregation_rule?:string|null;code_mapping_rule?:string|null;source_line_start?:number|null;source_line_end?:number|null;confidence_level:string;evidence:Record<string,unknown> };
 export type LineageGraph = { nodes:LineageNode[];edges:LineageEdge[];direction:string;depth:number;truncated:boolean };
 export type ScriptChange = { id:number;script_file_id:number;from_version_id?:number|null;to_version_id?:number|null;change_type:string;status:string;summary:Record<string,unknown>;severity:string;impact_id?:number|null;created_at:string };
+export type ChangeSetDetail = {
+  id:number;
+  project_id:number;
+  script_file_id:number;
+  from_version_id?:number|null;
+  to_version_id?:number|null;
+  from_version_no?:number|null;
+  to_version_no?:number|null;
+  change_type:string;
+  status:string;
+  summary:Record<string,unknown>;
+  items:Array<{
+    id:number;
+    change_category:string;
+    entity_type:string;
+    old_value:Record<string,unknown>;
+    new_value:Record<string,unknown>;
+    severity:string;
+  }>;
+  impact?:{id:number;project_id:number;severity:string;status:string}|null;
+};
 export type ImpactAnalysis = {
-  id:number;project_id:number;change_set_id:number;status:string;severity:string;
+  id:number;project_id:number;change_set_id:number;status:string;severity:string;created_at?:string|null;completed_at?:string|null;
   affected_source_field_ids:number[];affected_target_field_ids:number[];affected_mart_field_ids:number[];
   affected_mapping_ids:string[];affected_scenario_mapping_ids:number[];affected_lineage_edge_ids:number[];
   affected_semantic_binding_ids:number[];affected_semantic_concept_ids:number[];affected_semantic_version_ids:number[];

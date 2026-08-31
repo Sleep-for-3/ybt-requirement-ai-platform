@@ -1,4 +1,5 @@
 from datetime import datetime
+import socket
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.settings import get_settings
-from app.models import ModelCallLog, ModelProfile
+from app.models import EmbeddingIndexVersion, ModelCallLog, ModelProfile
 from app.services.auth.dependencies import CurrentPrincipal, Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.embeddings.factory import get_embedding_service
@@ -117,7 +118,8 @@ def runtime_status(principal: CurrentPrincipal, db: Session = Depends(get_db)) -
     profile = _active_profile(db)
     llm = _llm_status(profile)
     embedding = _embedding_status()
-    vector = _vector_status()
+    vector = _vector_status(db)
+    semantic_index = _semantic_index_status(db, vector)
     issues = [
         issue
         for issue in (
@@ -131,6 +133,9 @@ def runtime_status(principal: CurrentPrincipal, db: Session = Depends(get_db)) -
         "llm": llm,
         "embedding": embedding,
         "vector_store": vector,
+        "semantic_index": semantic_index,
+        "generator_effective_runtime": _generator_effective_runtime(llm),
+        "configuration_drift": _configuration_drift(profile, llm),
         "issues": issues if is_admin else [],
         "observability": _call_metrics(db) if is_admin else _basic_observability(),
     }
@@ -416,21 +421,95 @@ def _embedding_status() -> dict[str, Any]:
     }
 
 
-def _vector_status() -> dict[str, Any]:
+def _vector_status(db: Session) -> dict[str, Any]:
     settings = get_settings()
     configured = settings.vector_store_provider == "mock" or bool(settings.milvus_uri)
+    reachable: bool | None = None
+    reachability_error: str | None = None
+    if settings.vector_store_provider == "milvus":
+        parsed = urlsplit(settings.milvus_uri)
+        if parsed.hostname:
+            try:
+                with socket.create_connection(
+                    (parsed.hostname, parsed.port or 19530),
+                    timeout=settings.health_check_timeout_seconds,
+                ):
+                    reachable = True
+            except OSError:
+                reachable = False
+                reachability_error = "endpoint_unreachable"
+        else:
+            reachable = False
+            reachability_error = "invalid_endpoint"
     return {
         "provider": settings.vector_store_provider,
         "is_mock": settings.vector_store_provider == "mock",
         "configuration_status": "configured" if configured else "misconfigured",
         "collection_prefix": settings.milvus_collection_prefix if settings.vector_store_provider == "milvus" else None,
+        "reachable": reachable,
+        "reachability_error": reachability_error,
+    }
+
+
+def _semantic_index_status(db: Session, vector: dict[str, Any]) -> dict[str, Any]:
+    if vector["is_mock"]:
+        return {"state": "disabled", "active_index_count": 0}
+    active_count = int(
+        db.scalar(
+            select(func.count(EmbeddingIndexVersion.id)).where(
+                EmbeddingIndexVersion.status == "active"
+            )
+        )
+        or 0
+    )
+    return {
+        "state": "ready" if active_count > 0 and vector.get("reachable") else "unavailable",
+        "active_index_count": active_count,
+    }
+
+
+def _generator_effective_runtime(llm: dict[str, Any]) -> dict[str, Any]:
+    provider = llm["provider"]
+    service = "MockLLMService" if provider == "mock" else "OpenAICompatibleLLMService"
+    return {
+        "provider": provider,
+        "model": llm["model"],
+        "profile_id": llm.get("profile_id"),
+        "llm_service": service,
+        "source": "enabled_model_profile" if llm.get("profile_id") is not None else "settings",
+    }
+
+
+def _configuration_drift(profile: ModelProfile | None, llm: dict[str, Any]) -> dict[str, Any]:
+    """Expose safe, actionable drift metadata without returning credentials."""
+    if profile is None:
+        return {"detected": False, "source": "settings", "fields": []}
+    settings = get_settings()
+    fields: list[str] = []
+    if normalize_provider_type(profile.provider_type) != normalize_provider_type(settings.llm_provider):
+        fields.append("provider")
+    if (profile.base_url or "").rstrip("/") != (settings.llm_base_url or "").rstrip("/"):
+        fields.append("base_url")
+    if (profile.model_name or "") != (settings.llm_model or ""):
+        fields.append("model")
+    if (profile.api_key_env_name or "") != (settings.llm_api_key_env_name or ""):
+        fields.append("api_key_env_name")
+    return {
+        "detected": bool(fields),
+        "source": "enabled_model_profile",
+        "profile_id": profile.id,
+        "fields": fields,
+        "effective_provider": llm["provider"],
+        "effective_model": llm["model"],
     }
 
 
 def _configuration_issue(component: str, status: dict[str, Any]) -> dict[str, str] | None:
-    if status["configuration_status"] == "configured":
-        return None
-    return {"component": component, "code": "configuration_incomplete", "message": f"{component} configuration is incomplete"}
+    if status.get("configuration_status") != "configured":
+        return {"component": component, "code": "configuration_incomplete", "message": f"{component} configuration is incomplete"}
+    if status.get("reachable") is False:
+        return {"component": component, "code": status.get("reachability_error") or "endpoint_unreachable", "message": f"{component} endpoint is unreachable"}
+    return None
 
 
 def _call_metrics(db: Session) -> dict[str, Any]:
