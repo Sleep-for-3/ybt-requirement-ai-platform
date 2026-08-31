@@ -98,9 +98,25 @@ const ENTITY_LABELS: Record<string, string> = {
   reporting_cycle: "报送期"
 };
 
+const TARGET_TYPE_LABELS: Record<string, string> = {
+  target_field: "监管字段",
+  target_table: "监管表",
+  source_to_mart_mapping: "来源到集市映射",
+  mart_to_ybt_mapping: "集市到监管字段映射",
+  scenario_review_package: "场景口径审核包",
+  impact_analysis: "变更影响分析",
+  semantic_concept: "业务概念",
+  semantic_concept_version: "业务概念版本",
+  semantic_binding: "数据绑定",
+  quality_expectation: "质量规则",
+  deliverable: "正式交付",
+  script_file: "加工脚本",
+  lineage_change_set: "血缘变更集"
+};
+
 export function statusLabel(value?: string | null): string {
   if (!value) return "未设置";
-  return STATUS_LABELS[value] || value;
+  return STATUS_LABELS[value] || "未知状态";
 }
 
 export function workflowStepLabel(value?: string | null): string {
@@ -121,4 +137,29 @@ export function severityLabel(value?: string | null): string {
 export function entityLabel(value?: string | null): string {
   if (!value) return "业务对象";
   return ENTITY_LABELS[value] || value;
+}
+
+export function targetTypeLabel(value?: string | null): string {
+  if (!value) return "待识别对象";
+  return TARGET_TYPE_LABELS[value] || entityLabel(value);
+}
+
+export function formatDateTime(value?: string | null): string {
+  if (!value) return "未设置";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间待确认";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit"
+  }).format(date);
+}
+
+export function dueState(value?: string | null, now = new Date()): "overdue" | "soon" | "normal" | "unset" {
+  if (!value) return "unset";
+  const due = new Date(value);
+  if (Number.isNaN(due.getTime())) return "unset";
+  const delta = due.getTime() - now.getTime();
+  if (delta < 0) return "overdue";
+  if (delta <= 48 * 60 * 60 * 1000) return "soon";
+  return "normal";
 }

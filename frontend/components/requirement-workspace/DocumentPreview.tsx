@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 
 import { SelectedFieldEditor } from "@/components/requirement-workspace/SelectedFieldEditor";
+import { AiExplanationPanel } from "@/components/requirement-workspace/AiExplanationPanel";
 import type {
   MartField,
   MartTable,
@@ -196,6 +197,7 @@ export function DocumentPreview({
             </footer>
             </> : null}
             {activeTab === "structured" ? <StructuredCaliber onSelectField={onSelectField} records={records} selected={selected} /> : null}
+            {activeTab === "structured" && selected ? <AiExplanationPanel evidenceCount={evidenceForSelected} martFieldsById={martFieldsById} martTablesById={martTablesById} record={selected} sourceMappings={sourceMappings} /> : null}
             {activeTab === "lineage" ? <LineagePanel record={selected} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} /> : null}
             {activeTab === "evidence" ? <EvidencePanel evidenceCountByField={evidenceCountByField} onSelectField={onSelectField} onShowEvidence={onShowEvidence} records={records} selectedFieldId={selectedFieldId} /> : null}
             {activeTab === "questions" ? <QuestionsPanel questions={selectedQuestions} /> : null}

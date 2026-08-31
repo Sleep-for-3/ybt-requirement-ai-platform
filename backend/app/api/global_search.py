@@ -79,12 +79,18 @@ def global_search(
     for row in target_tables:
         add("监管目标", "target_table", row.id, row.table_name, row.table_code, f"/fields?targetTableId={row.id}")
 
-    target_fields = db.scalars(select(TargetField).where(
+    target_fields = db.execute(select(TargetField, TargetTable).join(
+        TargetTable, TargetTable.id == TargetField.target_table_id,
+    ).where(
         TargetField.project_id == project_id,
         _matches(pattern, TargetField.field_code, TargetField.field_name, TargetField.field_definition, TargetField.regulatory_description),
     ).order_by(TargetField.field_code).limit(per_type)).all()
-    for row in target_fields:
-        add("监管目标", "target_field", row.id, row.field_name, row.field_code, f"/fields/{row.id}/scenarios")
+    for row, table in target_fields:
+        add(
+            "监管目标", "target_field", row.id, row.field_name,
+            f"{row.field_code} · {table.table_name} · 监管字段",
+            f"/fields/{row.id}/scenarios",
+        )
 
     semantic_concepts = db.scalars(select(SemanticConcept).where(
         SemanticConcept.project_id == project_id,

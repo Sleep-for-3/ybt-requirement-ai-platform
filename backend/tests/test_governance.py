@@ -229,6 +229,10 @@ def test_global_search_returns_project_scoped_production_destinations(monkeypatc
         items = response.json()["items"]
         assert {item["entity_type"] for item in items} >= {"target_table", "target_field", "semantic_concept"}
         assert any(item["href"] == f"/fields/{field_a['id']}/scenarios" for item in items)
+        target_field_result = next(item for item in items if item["entity_type"] == "target_field")
+        assert "SEARCH_CUSTOMER_ID_A" in (target_field_result.get("subtitle") or "")
+        assert "甲行客户表" in (target_field_result.get("subtitle") or "")
+        assert "监管字段" in (target_field_result.get("subtitle") or "")
         assert all("乙行" not in f"{item['title']} {item.get('subtitle') or ''}" for item in items)
 
         encoded = client.get(

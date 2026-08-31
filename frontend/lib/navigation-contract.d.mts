@@ -29,7 +29,7 @@ export function canViewNavigationAudience(
   access: NavigationAccess
 ): boolean;
 
-export function navigationTrailForPath(pathname: string): {
+export function navigationTrailForPath(pathname: string, queryString?: string): {
   parentHref: string | null;
   sectionHref: string | null;
   sectionLabel: string | null;

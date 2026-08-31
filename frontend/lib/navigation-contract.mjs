@@ -17,7 +17,8 @@ const SECTIONS = [
   ["/deliverable-templates", "交付模板"],
   ["/historical-calibers", "历史口径"],
   ["/knowledge", "知识与证据"],
-  ["/review-tasks", "我的待办"],
+  ["/work", "我的工作"],
+  ["/review-tasks", "我的工作"],
   ["/datasources", "数据源"],
   ["/deliverables", "交付成果"],
   ["/evaluations", "RAG 评测"],
@@ -74,13 +75,25 @@ export function canViewNavigationAudience(audience, access) {
   return access.isTechnical;
 }
 
-export function navigationTrailForPath(pathname) {
+export function navigationTrailForPath(pathname, queryString = "") {
   const section = SECTIONS.find(([route]) => pathname === route || pathname.startsWith(`${route}/`));
-  const parent = DETAIL_PARENTS.find(([pattern]) => pattern.test(pathname));
+  let parent = DETAIL_PARENTS.find(([pattern]) => pattern.test(pathname));
+  let resolvedSection = section;
+
+  // /tasks/:id is shared by the technical task explorer and the canonical
+  // work queue. Preserve the user's journey when they opened a review task
+  // from /work instead of presenting the unrelated "安全查询" context.
+  if (/^\/tasks\/\d+$/.test(pathname)) {
+    const params = new URLSearchParams(queryString);
+    if (params.get("from") === "work" || params.get("returnTo")?.startsWith("/work")) {
+      parent = [/^\/tasks\/\d+$/, "/work"];
+      resolvedSection = ["/work", "我的工作"];
+    }
+  }
   return {
     parentHref: parent?.[1] || null,
-    sectionHref: section?.[0] || null,
-    sectionLabel: section?.[1] || null
+    sectionHref: resolvedSection?.[0] || null,
+    sectionLabel: resolvedSection?.[1] || null
   };
 }
 

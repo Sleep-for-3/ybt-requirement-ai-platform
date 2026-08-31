@@ -101,6 +101,20 @@ test("admin pages have the canonical system-management hierarchy", () => {
   assert.equal(navigationTrailForPath("/admin").parentHref, null);
 });
 
+test("work center is canonical and review task details preserve its journey", () => {
+  assert.deepEqual(navigationTrailForPath("/work"), {
+    parentHref: null,
+    sectionHref: "/work",
+    sectionLabel: "我的工作"
+  });
+  assert.equal(navigationTrailForPath("/review-tasks").sectionHref, "/review-tasks");
+  assert.equal(navigationTrailForPath("/review-tasks").sectionLabel, "我的工作");
+  const trail = navigationTrailForPath("/tasks/16", "from=work&returnTo=%2Fwork%3Fstatus%3Dreturned");
+  assert.equal(trail.parentHref, "/work");
+  assert.equal(trail.sectionHref, "/work");
+  assert.equal(parentReturnHref(trail.parentHref, "from=work&returnTo=%2Fwork%3Fstatus%3Dreturned"), "/work?status=returned");
+});
+
 test("detail return links restore only a lawful parent list state", () => {
   assert.equal(
     parentReturnHref("/semantics", "returnTo=%2Fsemantics%3Fq%3Dloan%26page%3D3"),

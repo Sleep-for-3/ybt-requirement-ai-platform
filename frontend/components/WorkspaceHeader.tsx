@@ -10,7 +10,7 @@ export function WorkspaceHeader({ title, meta, actions }: { title: string; meta?
   const pathname = usePathname();
   const [retainedQuery, setRetainedQuery] = useState("");
   useEffect(() => { setRetainedQuery(window.location.search.slice(1)); }, [pathname]);
-  const trail = navigationTrailForPath(pathname);
+  const trail = navigationTrailForPath(pathname, retainedQuery);
   const parentHref = parentReturnHref(trail.parentHref, retainedQuery);
   return (
     <div className="border-b border-line bg-white">
