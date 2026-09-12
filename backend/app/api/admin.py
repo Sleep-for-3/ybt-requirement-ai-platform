@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -64,15 +65,24 @@ def create_institution(payload: InstitutionCreate, principal: RealPrincipal, db:
         raise HTTPException(status_code=403, detail="Platform administrator required")
     if payload.institution_type not in {"bank", "consulting_company", "platform_operator"}:
         raise HTTPException(status_code=400, detail="Invalid institution type")
+    institution_code = payload.institution_code.strip().upper()
+    # 重复创建必须是可以被调用方处理的 409，而不是数据库唯一约束冒出来的 500。
+    # 端到端验收脚本正是依赖这个语义来决定「复用既有机构」还是「新建」。
+    if db.scalar(select(Institution.id).where(Institution.institution_code == institution_code)) is not None:
+        raise HTTPException(status_code=409, detail="Institution code already exists")
     institution = Institution(
-        institution_code=payload.institution_code.strip().upper(),
+        institution_code=institution_code,
         institution_name=payload.institution_name.strip(),
         institution_type=payload.institution_type,
         status="active",
         data_classification_policy_json=payload.data_classification_policy_json,
     )
     db.add(institution)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:  # 并发下仍可能同时通过上面的预检查
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Institution code already exists") from exc
     db.refresh(institution)
     return institution
 
@@ -82,23 +92,33 @@ def create_user(payload: AdminUserCreate, principal: RealPrincipal, db: Session 
     PermissionService(db, principal).require_institution_role(payload.institution_id, {"institution_admin", "security_admin"})
     if payload.institution_role not in INSTITUTION_ROLES:
         raise HTTPException(status_code=400, detail="Invalid institution role")
+    username = payload.username.strip().lower()
+    email = payload.email.strip().lower()
+    if db.scalar(select(User.id).where(User.username == username)) is not None:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    if db.scalar(select(User.id).where(func.lower(User.email) == email)) is not None:
+        raise HTTPException(status_code=409, detail="Email already exists")
     user = User(
-        username=payload.username.strip().lower(),
+        username=username,
         display_name=payload.display_name.strip(),
-        email=payload.email.strip().lower(),
+        email=email,
         password_hash=hash_password(payload.password),
         status="active",
     )
-    db.add(user)
-    db.flush()
-    db.add(InstitutionMembership(
-        institution_id=payload.institution_id,
-        user_id=user.id,
-        role=payload.institution_role,
-        status="active",
-        created_by=principal.user_id,
-    ))
-    db.commit()
+    try:
+        db.add(user)
+        db.flush()
+        db.add(InstitutionMembership(
+            institution_id=payload.institution_id,
+            user_id=user.id,
+            role=payload.institution_role,
+            status="active",
+            created_by=principal.user_id,
+        ))
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username or email already exists") from exc
     db.refresh(user)
     return user
 

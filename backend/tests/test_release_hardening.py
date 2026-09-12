@@ -128,3 +128,72 @@ def test_production_requires_auth_and_preserves_login_and_project_isolation(monk
 def test_production_metrics_requires_authenticated_platform_admin(monkeypatch, tmp_path) -> None:
     with _production_client(monkeypatch, tmp_path) as client:
         assert client.get("/api/metrics").status_code == 401
+
+
+def test_duplicate_admin_resources_report_conflict_instead_of_server_error(monkeypatch, tmp_path) -> None:
+    """重复创建机构/用户必须返回 409，而不是数据库唯一约束冒出来的 500。
+
+    端到端验收脚本靠这个状态码判断“复用既有资源”还是“新建资源”；返回 500 会让
+    生产环境上的重复演练在第一步就中断，也掩盖了真正的冲突原因。
+    """
+
+    with _production_client(monkeypatch, tmp_path) as client:
+        admin_password = "Test-only-admin-password-2026"
+        bootstrap = client.post("/api/admin/bootstrap", json={
+            "institution_code": "RC_DUP_PLATFORM",
+            "institution_name": "RC 冲突平台运营方",
+            "institution_type": "platform_operator",
+            "username": "rc_dup_admin",
+            "display_name": "RC 冲突管理员",
+            "email": "rc-dup-admin@example.invalid",
+            "password": admin_password,
+        })
+        assert bootstrap.status_code == 201, bootstrap.text
+        admin_headers = _bearer(client.post(
+            "/api/auth/login", json={"username": "rc_dup_admin", "password": admin_password},
+        ).json()["access_token"])
+
+        duplicate_institution = client.post("/api/admin/institutions", headers=admin_headers, json={
+            "institution_code": "rc_dup_platform",
+            "institution_name": "重复机构",
+            "institution_type": "bank",
+        })
+        assert duplicate_institution.status_code == 409, duplicate_institution.text
+
+        second_institution = client.post("/api/admin/institutions", headers=admin_headers, json={
+            "institution_code": "RC_DUP_BANK2",
+            "institution_name": "RC 第二机构",
+            "institution_type": "bank",
+        })
+        assert second_institution.status_code == 201, second_institution.text
+        second_id = second_institution.json()["id"]
+
+        first_user = client.post("/api/admin/users", headers=admin_headers, json={
+            "username": "rc_dup_user",
+            "display_name": "RC 重复用户",
+            "email": "rc-dup-user@example.invalid",
+            "password": "Test-only-user-password-2026",
+            "institution_id": second_id,
+            "institution_role": "member",
+        })
+        assert first_user.status_code == 201, first_user.text
+
+        duplicate_username = client.post("/api/admin/users", headers=admin_headers, json={
+            "username": "RC_DUP_USER",
+            "display_name": "RC 重复用户名",
+            "email": "rc-dup-user-2@example.invalid",
+            "password": "Test-only-user-password-2026",
+            "institution_id": second_id,
+            "institution_role": "member",
+        })
+        assert duplicate_username.status_code == 409, duplicate_username.text
+
+        duplicate_email = client.post("/api/admin/users", headers=admin_headers, json={
+            "username": "rc_dup_user_2",
+            "display_name": "RC 重复邮箱",
+            "email": "RC-DUP-USER@example.invalid",
+            "password": "Test-only-user-password-2026",
+            "institution_id": second_id,
+            "institution_role": "member",
+        })
+        assert duplicate_email.status_code == 409, duplicate_email.text
