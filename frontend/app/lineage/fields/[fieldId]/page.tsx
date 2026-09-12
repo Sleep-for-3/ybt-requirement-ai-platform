@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { LineageGraph } from "@/components/LineageGraph";
@@ -36,6 +37,17 @@ export default function Page() {
               value={depth}
               onChange={(e) => setDepth(Number(e.target.value))}
             />
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-body flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-600">按层级查看该字段的端到端数据星云（源系统 → 数仓 → 监管集市 → 监管输出）。</p>
+            <Link
+              className="button-secondary h-9 px-3 text-sm"
+              href={`/lineage/nebula?rootType=target_field&rootId=${fieldId}&direction=upstream&depth=${depth}`}
+            >
+              打开数据星云
+            </Link>
           </div>
         </section>
         <LineageGraph graph={graph} />

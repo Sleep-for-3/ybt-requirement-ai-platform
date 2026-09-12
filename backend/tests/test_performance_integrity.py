@@ -42,7 +42,7 @@ def test_production_docker_contract_uses_next_start_celery_and_postgresql() -> N
     assert "NODE_ENV=production" in dockerfile
     assert 'CMD ["npm", "run", "dev"' in development_dockerfile
     assert "TASK_QUEUE_PROVIDER: celery" in compose
-    assert "ENVIRONMENT: production" in compose
+    assert "ENVIRONMENT: ${ENVIRONMENT:-production}" in compose
     assert "postgresql+psycopg://" in compose
     assert "TASK_QUEUE_PROVIDER: inline" in development_compose
     assert "sqlite:" in development_compose

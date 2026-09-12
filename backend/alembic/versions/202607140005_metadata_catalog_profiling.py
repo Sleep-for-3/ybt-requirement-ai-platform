@@ -2,48 +2,107 @@
 
 Revision ID: 202607140005
 Revises: 202607100004
+
+Table definitions are frozen from git history instead of being imported from the
+current ORM (see ``app/schema_freeze``).
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-from app.models import (
-    CatalogColumn, CatalogImportBinding, CatalogSchema, CatalogTable,
-    ColumnProfileSnapshot, ColumnProfileTask, MetadataImportDocument, MetadataSyncTask,
-)
+from app.schema_freeze import create_frozen_tables, drop_frozen_tables
+
 
 revision = "202607140005"
 down_revision = "202607100004"
 branch_labels = None
 depends_on = None
 
+FROZEN_REVISION = revision
 
-def upgrade() -> None:
-    bind = op.get_bind()
-    for table in [
-        MetadataSyncTask.__table__, CatalogSchema.__table__, CatalogTable.__table__, CatalogColumn.__table__,
-        MetadataImportDocument.__table__, ColumnProfileTask.__table__, ColumnProfileSnapshot.__table__,
-        CatalogImportBinding.__table__,
-    ]:
-        table.create(bind=bind, checkfirst=True)
-    existing_recommendation = {item["name"] for item in sa.inspect(bind).get_columns("candidate_source_recommendations")}
-    for name, column in {
-        "catalog_column_id": sa.Column("catalog_column_id", sa.Integer(), sa.ForeignKey("catalog_columns.id"), nullable=True),
-        "datasource_id": sa.Column("datasource_id", sa.Integer(), sa.ForeignKey("data_sources.id"), nullable=True),
+RECOMMENDATION_COLUMN_NAMES = (
+    "catalog_column_id",
+    "datasource_id",
+    "data_type",
+    "nullable",
+    "profile_status",
+)
+
+
+def _recommendation_columns() -> dict[str, sa.Column]:
+    return {
+        "catalog_column_id": sa.Column("catalog_column_id", sa.Integer(), nullable=True),
+        "datasource_id": sa.Column("datasource_id", sa.Integer(), nullable=True),
         "data_type": sa.Column("data_type", sa.String(255), nullable=True),
         "nullable": sa.Column("nullable", sa.Boolean(), nullable=True),
         "profile_status": sa.Column("profile_status", sa.String(50), nullable=True),
-    }.items():
-        if name not in existing_recommendation:
-            op.add_column("candidate_source_recommendations", column)
+    }
+
+
+def upgrade() -> None:
+    bind = op.get_bind()
+    create_frozen_tables(FROZEN_REVISION, bind=bind)
+
+    # SQLite cannot ALTER to add a constraint, so every column that carries a
+    # foreign key goes through batch mode (the pre-existing code only worked
+    # because the removed ``create_all`` had already created these columns).
+    existing_recommendation = {
+        item["name"] for item in sa.inspect(bind).get_columns("candidate_source_recommendations")
+    }
+    missing_recommendation = [
+        name for name in RECOMMENDATION_COLUMN_NAMES if name not in existing_recommendation
+    ]
+    if missing_recommendation:
+        with op.batch_alter_table("candidate_source_recommendations") as batch:
+            for name in missing_recommendation:
+                batch.add_column(_recommendation_columns()[name])
+        with op.batch_alter_table("candidate_source_recommendations") as batch:
+            batch.create_foreign_key(
+                "fk_candidate_source_recommendations_catalog_column_id",
+                "catalog_columns",
+                ["catalog_column_id"],
+                ["id"],
+            )
+            batch.create_foreign_key(
+                "fk_candidate_source_recommendations_datasource_id",
+                "data_sources",
+                ["datasource_id"],
+                ["id"],
+            )
+
     existing_logs = {item["name"] for item in sa.inspect(bind).get_columns("sql_execution_logs")}
     if "profile_task_id" not in existing_logs:
-        op.add_column("sql_execution_logs", sa.Column("profile_task_id", sa.Integer(), sa.ForeignKey("column_profile_tasks.id"), nullable=True))
+        with op.batch_alter_table("sql_execution_logs") as batch:
+            batch.add_column(sa.Column("profile_task_id", sa.Integer(), nullable=True))
+            batch.create_foreign_key(
+                "fk_sql_execution_logs_profile_task_id",
+                "column_profile_tasks",
+                ["profile_task_id"],
+                ["id"],
+            )
 
 
 def downgrade() -> None:
-    op.drop_column("sql_execution_logs", "profile_task_id")
-    for name in ["profile_status", "nullable", "data_type", "datasource_id", "catalog_column_id"]:
-        op.drop_column("candidate_source_recommendations", name)
-    for name in ["catalog_import_bindings", "column_profile_snapshots", "column_profile_tasks", "metadata_import_documents", "catalog_columns", "catalog_tables", "catalog_schemas", "metadata_sync_tasks"]:
-        op.drop_table(name)
+    bind = op.get_bind()
+    existing_logs = {item["name"] for item in sa.inspect(bind).get_columns("sql_execution_logs")}
+    if "profile_task_id" in existing_logs:
+        with op.batch_alter_table("sql_execution_logs") as batch:
+            batch.drop_column("profile_task_id")
+
+    existing_recommendation = {
+        item["name"] for item in sa.inspect(bind).get_columns("candidate_source_recommendations")
+    }
+    with op.batch_alter_table("candidate_source_recommendations") as batch:
+        for constraint in (
+            "fk_candidate_source_recommendations_datasource_id",
+            "fk_candidate_source_recommendations_catalog_column_id",
+        ):
+            if constraint in {
+                item["name"] for item in sa.inspect(bind).get_foreign_keys("candidate_source_recommendations")
+            }:
+                batch.drop_constraint(constraint, type_="foreignkey")
+        for name in reversed(RECOMMENDATION_COLUMN_NAMES):
+            if name in existing_recommendation:
+                batch.drop_column(name)
+
+    drop_frozen_tables(FROZEN_REVISION, bind=bind)

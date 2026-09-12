@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.excel import excel_value
 from app.core.settings import get_settings
 from app.models import DeliverablePackageVersion, StoredFile, UatCase, UatCaseResult, UatFinding, UatRun, UatSignoff, UatSuite
 from app.services.deployment import database_revisions
@@ -89,6 +90,7 @@ def _append_rows(sheet, headers: list[str], rows: list[list]) -> None:
 
 
 def _safe_excel_value(value):
+    value = excel_value(value)
     if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
         return f"'{value}"
     return value

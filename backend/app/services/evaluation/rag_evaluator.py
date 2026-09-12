@@ -61,6 +61,7 @@ async def run_evaluation(db, run):
                 db,
                 run.project_id,
                 case.query_text,
+                interactive=False,
                 target_field_id=case.target_field_id,
                 scenario_id=case.scenario_id,
                 top_k=top_k,

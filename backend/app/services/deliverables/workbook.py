@@ -8,6 +8,8 @@ from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import column_index_from_string, get_column_letter
 
+from app.core.excel import excel_value
+
 
 def inspect_workbook(content: bytes) -> dict[str, Any]:
     workbook = load_workbook(BytesIO(content), data_only=False)
@@ -112,6 +114,7 @@ def render_workbook(content: bytes, sheet_mappings: list[Any], column_mappings: 
 
 
 def _safe_excel_value(value: Any) -> Any:
+    value = excel_value(value)
     if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
         return "'" + value
     return value

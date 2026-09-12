@@ -3,13 +3,26 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from app.models import (BusinessSystem, CatalogColumn, CatalogImportBinding, CatalogTable, DataSource, MartField, MartTable, SourceField, SourceTable, TargetField)
 
+
+def like_pattern(value: str) -> str:
+    """Build a case-insensitive substring pattern shared by every catalog query.
+
+    PostgreSQL ``LIKE`` is case sensitive while SQLite's is not, so a raw
+    ``contains`` silently stops matching real catalog names in production
+    (``cert_type`` vs ``CERT_TYPE``).  Callers must use ``ilike`` with this
+    pattern so both dialects behave identically.
+    """
+    escaped = str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 def search_catalog(db: Session, project_id: int, request):
     statement = select(CatalogColumn, CatalogTable, DataSource).join(CatalogTable, CatalogTable.id == CatalogColumn.catalog_table_id).join(DataSource, DataSource.id == CatalogColumn.datasource_id).where(CatalogColumn.project_id == project_id, CatalogColumn.enabled.is_(True), CatalogTable.enabled.is_(True))
     if request.datasource_ids: statement = statement.where(CatalogColumn.datasource_id.in_(request.datasource_ids))
     if request.schema_names: statement = statement.where(CatalogColumn.schema_name.in_(request.schema_names))
     tokens=[token for token in request.query.replace("_"," ").split() if len(token)>=2]
     if tokens:
-        statement=statement.where(or_(*[condition for token in tokens[:10] for condition in [CatalogColumn.column_name.contains(token),CatalogColumn.column_comment.contains(token),CatalogTable.table_name.contains(token),CatalogTable.table_comment.contains(token)]]))
+        statement=statement.where(or_(*[condition for token in tokens[:10] for condition in [CatalogColumn.column_name.ilike(like_pattern(token),escape="\\"),CatalogColumn.column_comment.ilike(like_pattern(token),escape="\\"),CatalogTable.table_name.ilike(like_pattern(token),escape="\\"),CatalogTable.table_comment.ilike(like_pattern(token),escape="\\")]]))
     target = db.get(TargetField, request.target_field_id) if request.target_field_id else None
     query = " ".join(filter(None, [request.query, target.field_code if target else None, target.field_name if target else None, target.field_definition if target else None]))
     results=[]

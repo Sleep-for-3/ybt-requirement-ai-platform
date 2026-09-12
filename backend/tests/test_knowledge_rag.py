@@ -20,7 +20,7 @@ from app.services.embeddings.factory import get_embedding_service
 from app.services.embeddings.observability import embed_with_observability
 from app.services.embeddings.openai_compatible import LocalEmbeddingService,OpenAICompatibleEmbeddingService
 from app.services.rag.citation_validator import validate_citations
-from app.services.llm.base import ModelCallMetadata
+from app.services.llm.base import LLMProviderError, ModelCallMetadata
 from app.services.llm.prompt_runtime import get_prompt_runtime,prepare_model_input,record_model_call
 from app.services.knowledge_ingestion import ingest_knowledge_document
 from app.services.security import ensure_external_allowed, redact_content
@@ -290,6 +290,31 @@ def test_knowledge_versions_hybrid_search_grounded_answer_and_evaluation(tmp_pat
         assert client.get(f"/api/knowledge/units/{unit['id']}?project_id={other['id']}").status_code==404
         assert client.delete(f"/api/knowledge/documents/{document['id']}?project_id={other['id']}").status_code==404
 
+def test_grounded_answer_degrades_instead_of_failing_when_the_provider_is_down(tmp_path:Path,monkeypatch):
+    monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()
+
+    class FailingService:
+        last_call=ModelCallMetadata(provider="openai_compatible",model="slow-model",latency_ms=900)
+
+        async def chat_structured(self,*_args,**_kwargs):
+            raise LLMProviderError("Model provider call exceeded 90s",error_type="timeout",detail="ReadTimeout: read timed out")
+
+    monkeypatch.setattr("app.services.llm.prompt_runtime.get_runtime_llm_service",lambda *_args,**_kwargs:FailingService())
+
+    with _client() as client:
+        project=_post(client,"/api/projects",{"name":"降级问答","bank_name":"甲银行"})
+        document=_upload(client,project["id"],"监管答疑.xlsx",_qa_excel("监管答疑：客户证件类型应来自 ECIF_CUSTOMER.CERT_TYPE"),"regulatory_qa","institution","甲银行")
+        unit=_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}")[0]
+        answer=_post(client,f"/api/projects/{project['id']}/knowledge/ask",{"query":"客户证件类型取哪个字段","top_k":5})
+
+    # A provider outage must hand the operator the retrieved evidence with an
+    # explicit degraded status instead of an HTTP 500 without citations.
+    assert answer["answer_status"]=="degraded"
+    assert answer["degraded_reason"]=="timeout"
+    assert "待确认" in answer["answer"]
+    assert [item["knowledge_unit_id"] for item in answer["citations"]]==[unit["id"]]
+    assert answer["open_questions"]
+
 def test_docx_pdf_text_markdown_and_sql_ingestion_preserve_locations(tmp_path:Path,monkeypatch):
     monkeypatch.setenv("STORAGE_DIR",str(tmp_path));get_vector_store.cache_clear();get_embedding_service.cache_clear()
     with _client() as client:
@@ -549,6 +574,12 @@ def test_prompt_version_external_policy_and_model_call_audit(db_session):
     db_session.commit();log=db_session.query(ModelCallLog).one()
     assert log.prompt_version==7 and log.retrieval_log_id==retrieval.id
     assert "13800138000" not in (log.output_summary or "")
+    record_model_call(db_session,project.id,runtime,model_input,"failed",status="failed",error_type="provider_error",http_status=400,error_detail="HTTP 400: unsupported parameter 13800138000 "+("x"*600))
+    db_session.commit();failed=db_session.query(ModelCallLog).filter(ModelCallLog.status=="failed").one()
+    assert failed.http_status==400
+    assert failed.error_detail and failed.error_detail.startswith("HTTP 400: ")
+    assert len(failed.error_detail)==500
+    assert "13800138000" not in failed.error_detail
 
 def _qa_excel(answer):
     workbook=Workbook();sheet=workbook.active;sheet.title="答疑";sheet.append(["问题","监管回复","表代码","字段代码","字段名称","备注"]);sheet.append(["客户证件类型如何取值",answer,"YBT_CUSTOMER","CERT_TYPE","客户证件类型","脱敏模拟"]);stream=BytesIO();workbook.save(stream);return stream.getvalue()

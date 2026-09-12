@@ -39,7 +39,16 @@ METADATA_HOSTNAMES = {
     "metadata.azure.internal",
     "metadata.google.internal",
 }
-TRANSPARENT_PROXY_FAKE_IP_NETWORKS = (ipaddress.ip_network("198.18.0.0/15"),)
+# Local proxy software (Clash/mihomo style "fake-ip" DNS) answers external
+# hostnames with benchmark addresses instead of the real public ones.  Without
+# these ranges an external provider looks like an internal service and the SSRF
+# guard refuses to reach it, which breaks every real-model smoke test on a
+# developer machine.  Literal IPs in these ranges are still rejected before this
+# allowlist is consulted; only DNS answers are tolerated here.
+TRANSPARENT_PROXY_FAKE_IP_NETWORKS = (
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("fdfe:dcba:9876::/48"),
+)
 _BACKEND_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
@@ -77,12 +86,28 @@ def resolve_api_key(env_name: str | None, fallback: str = "") -> str:
     validate_env_name(env_name)
     process_value = os.getenv(env_name)
     if process_value is not None:
-        return process_value
+        return _clean_secret(process_value)
     try:
         dotenv_value = dotenv_values(_BACKEND_ENV_FILE, encoding="utf-8").get(env_name)
     except OSError:
         dotenv_value = None
-    return str(dotenv_value) if dotenv_value is not None else fallback
+    return _clean_secret(dotenv_value) if dotenv_value is not None else fallback
+
+
+def _clean_secret(value: object) -> str:
+    """Normalise the whitespace and quoting that shells and env files add.
+
+    ``export KEY=$(cat key.txt)`` or a CRLF ``.env`` leaves a trailing newline
+    on the value.  That newline then lands inside the ``Authorization`` header,
+    where the HTTP client rejects it as an illegal header value and the caller
+    only sees an opaque 500.  Trimming here keeps the failure mode meaningful
+    instead of hiding it behind an unrelated server error.
+    """
+
+    cleaned = str(value).strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in "\"'":
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
 
 
 def sanitize_base_url(value: str | None) -> str | None:

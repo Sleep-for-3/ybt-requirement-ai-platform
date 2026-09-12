@@ -114,6 +114,17 @@ export async function throwApiError(response, path, environment) {
   throw parseApiError(await response.text(), response.status);
 }
 
+/**
+ * 访问令牌只有 ``ACCESS_TOKEN_MINUTES``（默认 15 分钟），而一次真实模型生成可能耗时数分钟，
+ * 所以受保护的 401 应该先尝试用刷新令牌静默续期并重放一次原请求。登录/刷新端点自身的
+ * 401 必须原样冒泡，否则会变成刷新死循环或掩盖密码错误。
+ */
+export function shouldRefreshSession(path, response, hasRefreshToken) {
+  if (!response || response.status !== 401) return false;
+  if (!hasRefreshToken) return false;
+  return path !== "/auth/login" && path !== "/auth/refresh";
+}
+
 export async function readApiResponse(response, path, environment) {
   if (!response.ok) {
     return throwApiError(response, path, environment);

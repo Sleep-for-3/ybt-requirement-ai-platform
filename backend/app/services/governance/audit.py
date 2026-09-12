@@ -1,3 +1,4 @@
+from datetime import date, datetime, time
 from typing import Any
 import re
 
@@ -31,6 +32,8 @@ def redact_summary(value: Any) -> Any:
         return [redact_summary(item) for item in value[:100]]
     if isinstance(value, str):
         return redact_content(value[:2000])
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
     return value
 
 

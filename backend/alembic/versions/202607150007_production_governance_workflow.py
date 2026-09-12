@@ -7,6 +7,8 @@ Revises: 202607140006
 import sqlalchemy as sa
 from alembic import op
 
+from app.schema_freeze import create_frozen_table
+
 
 revision = "202607150007"
 down_revision = "202607140006"
@@ -15,6 +17,12 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # ``knowledge_keyword_indexes`` belongs to this revision, but the historical
+    # body relied on the removed ``Base.metadata.create_all`` to create it, so a
+    # fresh database never got the table.  The definition is frozen from the
+    # commit that introduced this revision.
+    create_frozen_table("knowledge_keyword_indexes", bind=op.get_bind())
+
     _create_table(
         "institutions",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -266,6 +274,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     for table in [
+        "knowledge_keyword_indexes",
         "stored_files", "notifications", "audit_logs", "background_job_items", "background_jobs",
         "review_decisions", "review_tasks", "workflow_instances", "workflow_definitions",
         "login_attempts", "refresh_tokens", "project_memberships", "institution_memberships",
@@ -326,6 +335,14 @@ def _columns(table: str) -> set[str]:
 
 
 def _drop_indexes_for_columns(table: str, columns: set[str]) -> None:
-    for index in sa.inspect(op.get_bind()).get_indexes(table):
+    inspector = sa.inspect(op.get_bind())
+    # PostgreSQL reports unique constraints through ``get_indexes`` as well;
+    # dropping those with DROP INDEX fails ("cannot drop index ... because
+    # constraint ... requires it") and the constraint is removed together with
+    # its column below.
+    constraint_names = {item["name"] for item in inspector.get_unique_constraints(table)}
+    for index in inspector.get_indexes(table):
+        if index["name"] in constraint_names:
+            continue
         if columns.intersection(index.get("column_names") or []):
             op.drop_index(index["name"], table_name=table)

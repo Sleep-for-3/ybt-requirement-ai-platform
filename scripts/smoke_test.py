@@ -1,7 +1,9 @@
+import base64
 import json
 import os
 import sqlite3
 import tempfile
+import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -14,27 +16,231 @@ from openpyxl.styles import Font
 from generate_demo_uat_pack import FIXED_ZIP_TIME, generate_demo_pack
 
 
+# The inline queue finishes a job inside the request, while the real Celery
+# queue answers with a submission handle.  Every verification step that depends
+# on a background effect must therefore be able to await the same job in both
+# topologies instead of assuming synchronous completion.
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "partially_completed", "cancelled"}
+_TERMINAL_RUN_STATUSES = {"passed", "failed", "blocked", "cancelled"}
+
+
+# 访问令牌默认只有 ACCESS_TOKEN_MINUTES（15）分钟，而一次真实模型生成可能耗时数分钟。
+# 演练必须像浏览器客户端一样在令牌失效前续期，否则验收会在中途以 401 失败，
+# 而 401 只会掩盖真正要验证的业务步骤。
+_RUNTIME: dict[str, object] = {}
+_SESSIONS: list[dict] = []
+
+
+# 已经初始化过的数据库（例如生产环境重复演练）会在 /admin/bootstrap 上返回 409，
+# 重复创建机构/用户同样返回 409。显式开启复用模式后，演练复用既有机构与用户，
+# 只新建本次运行专属的项目，从而可以在不清理生产数据的前提下做真实端到端验证。
+_REUSE_EXISTING = os.getenv("SMOKE_REUSE_EXISTING", "").strip().lower() in {"1", "true", "yes"}
+_REUSE_CONFLICT_STATUSES = {409}
+
+
+def _post_json_reuse(client: httpx.Client, url: str, payload: dict) -> dict | None:
+    """创建类接口：复用模式下把 409 视为“已存在”，其余情况保持原有严格语义。"""
+    response = _send_with_session_renewal(client, "post", url, json=payload)
+    if _REUSE_EXISTING and response.status_code in _REUSE_CONFLICT_STATUSES:
+        return None
+    response.raise_for_status()
+    return response.json()
+
+
+def _find_institution(client: httpx.Client, base: str, institution_code: str) -> dict:
+    for item in _get_json(client, f"{base}/admin/institutions"):
+        if str(item["institution_code"]).upper() == institution_code.upper():
+            return item
+    raise AssertionError(f"复用模式下未找到机构: {institution_code}")
+
+
+def _find_user(client: httpx.Client, base: str, username: str) -> dict:
+    for item in _get_json(client, f"{base}/admin/users"):
+        if str(item["username"]).lower() == username.lower():
+            return item
+    raise AssertionError(f"复用模式下未找到用户: {username}")
+
+
+def _ensure_institution(client: httpx.Client, base: str, payload: dict) -> dict:
+    created = _post_json_reuse(client, f"{base}/admin/institutions", payload)
+    if created is not None:
+        return created
+    return _find_institution(client, base, str(payload["institution_code"]))
+
+
+def _ensure_user(client: httpx.Client, base: str, payload: dict) -> dict:
+    created = _post_json_reuse(client, f"{base}/admin/users", payload)
+    if created is not None:
+        return created
+    return _find_user(client, base, str(payload["username"]))
+
+
+def _scoped_project_name() -> str:
+    """复用模式下的项目名带时间戳，避免与历史演练数据重名。"""
+    if not _REUSE_EXISTING:
+        return "增强验收测试项目"
+    return f"增强验收测试项目 {time.strftime('%Y%m%d-%H%M%S')}"
+
+
+def _access_token_expires_at(token: str) -> float | None:
+    """读取 JWT 的 exp 声明，用于在令牌失效前续期（不做签名校验）。"""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return float(json.loads(base64.urlsafe_b64decode(payload))["exp"])
+    except Exception:
+        return None
+
+
+def register_session(session: dict) -> dict:
+    """登记登录会话，使长耗时演练可以原地续期而不是重新登录。"""
+    _SESSIONS.append(session)
+    return session
+
+
+def _renew_session(session: dict, *, skew_seconds: float = 120.0, force: bool = False) -> None:
+    if not session.get("refresh_token"):
+        return
+    expires_at = _access_token_expires_at(str(session.get("access_token", "")))
+    if not force and expires_at is not None and expires_at - time.time() > skew_seconds:
+        return
+    client, base = _RUNTIME.get("client"), _RUNTIME.get("base")
+    if client is None or base is None:
+        return
+    response = client.post(f"{base}/auth/refresh", json={"refresh_token": session["refresh_token"]})
+    if response.status_code != 200:
+        raise AssertionError(f"会话续期失败: {response.status_code} {response.text[:200]}")
+    # 刷新令牌会轮换，必须回写；否则第二次续期会被当作已吊销令牌拒绝。
+    session.update(response.json())
+
+
+def bearer(session: dict) -> str:
+    """返回可用的 Authorization 头，必要时先静默续期。"""
+    _renew_session(session)
+    return f"Bearer {session['access_token']}"
+
+
+def admin_authorization() -> str:
+    """始终取当前管理员会话的有效令牌，避免保存字符串后因续期而失效。"""
+    return bearer(_RUNTIME["admin_session"])
+
+
+def _verify_session_refresh_contract(client: httpx.Client, base: str, session: dict) -> None:
+    """演练真实续期契约：轮换后的旧刷新令牌必须立即失效。"""
+    previous_refresh = session["refresh_token"]
+    session.update(_post_json(client, f"{base}/auth/refresh", {"refresh_token": previous_refresh}))
+    if not session.get("access_token") or not session.get("refresh_token"):
+        raise AssertionError("会话续期未返回新的访问令牌与刷新令牌")
+    rejected = client.post(f"{base}/auth/refresh", json={"refresh_token": previous_refresh})
+    if rejected.status_code != 401:
+        raise AssertionError(f"轮换后的旧刷新令牌仍被接受: {rejected.status_code}")
+    authenticated = client.get(f"{base}/auth/me", headers={"Authorization": f"Bearer {session['access_token']}"})
+    if authenticated.status_code in {401, 403}:
+        raise AssertionError(f"续期后的访问令牌不可用: {authenticated.status_code}")
+
+
+def _await_job(client: httpx.Client, base: str, job_id: int, *, timeout: float = 900.0) -> dict:
+    deadline = time.monotonic() + timeout
+    payload: dict = {}
+    while time.monotonic() < deadline:
+        payload = _get_json(client, f"{base}/jobs/{job_id}")
+        if payload.get("status") in _TERMINAL_JOB_STATUSES:
+            return payload
+        time.sleep(0.5)
+    raise AssertionError(f"后台任务在 {timeout}s 内未结束: job={job_id} status={payload.get('status')}")
+
+
+def _settle_job(client: httpx.Client, base: str, job: dict, *, timeout: float = 900.0) -> dict:
+    if job.get("status") in _TERMINAL_JOB_STATUSES:
+        return job
+    return _await_job(client, base, int(job["id"]), timeout=timeout)
+
+
+def _await_submission(client: httpx.Client, base: str, payload: dict, *, timeout: float = 900.0) -> dict:
+    """Resolve a submission handle (202) into the finished job payload."""
+    if isinstance(payload, dict) and "job_id" in payload:
+        return _settle_job(client, base, payload, timeout=timeout)
+    return payload
+
+
+def _await_uat_run(client: httpx.Client, base: str, run_id: int, *, timeout: float = 3600.0) -> dict:
+    deadline = time.monotonic() + timeout
+    payload: dict = {}
+    while time.monotonic() < deadline:
+        payload = _get_json(client, f"{base}/uat-runs/{run_id}")
+        if payload.get("status") in _TERMINAL_RUN_STATUSES:
+            return payload
+        time.sleep(1.0)
+    raise AssertionError(f"UAT 轮次在 {timeout}s 内未结束: run={run_id} status={payload.get('status')}")
+
+
+def _await_evaluation_run(client: httpx.Client, base: str, run: dict, *, timeout: float = 1800.0) -> dict:
+    """Return the RAG evaluation run once its queued metrics exist."""
+    if run.get("status") in {"completed", "failed"} and "recall_at_5" in (run.get("summary_metrics_json") or {}):
+        return run
+    deadline = time.monotonic() + timeout
+    payload = run
+    while time.monotonic() < deadline:
+        payload = _get_json(client, f"{base}/evaluation-runs/{run['id']}")
+        if payload.get("status") in {"completed", "failed"}:
+            return payload
+        time.sleep(0.5)
+    raise AssertionError(f"RAG 评测在 {timeout}s 内未结束: run={run['id']} status={payload.get('status')}")
+
+
+def _await_metadata_sync(client: httpx.Client, base: str, response: dict, datasource_id: int, *, timeout: float = 1800.0) -> dict:
+    """Return the finished metadata sync task for both queue topologies."""
+    if "job_id" not in response:
+        return response
+    job = _await_job(client, base, int(response["job_id"]), timeout=timeout)
+    if job.get("status") != "completed":
+        raise AssertionError(f"元数据同步任务未完成: {job.get('status')} {job.get('error_message')}")
+    tasks = _get_json(client, f"{base}/datasources/{datasource_id}/metadata-sync-tasks")
+    if not tasks:
+        raise AssertionError("元数据同步任务未写入同步记录")
+    return tasks[0]
+
+
+def _await_column_profile(client: httpx.Client, base: str, response: dict, *, timeout: float = 1800.0) -> dict:
+    """Return the finished column profile task for both queue topologies."""
+    if "job_id" not in response:
+        return response
+    job = _await_job(client, base, int(response["job_id"]), timeout=timeout)
+    task_id = (job.get("result_summary_json") or {}).get("profile_task_id")
+    if not task_id:
+        raise AssertionError(f"列画像任务未返回任务号: {job.get('status')} {job.get('error_message')}")
+    return _get_json(client, f"{base}/profile-tasks/{task_id}")
+
+
 def main() -> None:
     base = os.getenv("SMOKE_BASE_URL", "http://127.0.0.1:8000/api")
-    client = httpx.Client(timeout=90, trust_env=False)
+    # Real providers (and the inline queue, which runs jobs inside the request)
+    # can legitimately need minutes for one business step.  Keep the historic
+    # 90 s default and let a rehearsal raise it explicitly.
+    request_timeout = float(os.getenv("SMOKE_REQUEST_TIMEOUT_SECONDS", "90"))
+    client = httpx.Client(timeout=request_timeout, trust_env=False)
     artifact_dir = Path(os.environ["SMOKE_ARTIFACT_DIR"]).resolve() if os.getenv("SMOKE_ARTIFACT_DIR") else None
     if artifact_dir:
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
     admin_password = "smoke-only-" + "platform-admin-password"
-    bootstrap = _post_json(client, f"{base}/admin/bootstrap", {
+    _post_json_reuse(client, f"{base}/admin/bootstrap", {
         "institution_code": "PLATFORM", "institution_name": "脱敏平台运营方", "institution_type": "platform_operator",
         "username": "smoke_admin", "display_name": "Smoke 管理员", "email": "smoke-admin@example.invalid", "password": admin_password,
     })
-    admin_session = _post_json(client, f"{base}/auth/login", {"username": "smoke_admin", "password": admin_password})
-    client.headers["Authorization"] = f"Bearer {admin_session['access_token']}"
-    bank = _post_json(client, f"{base}/admin/institutions", {"institution_code": "DEMO_BANK", "institution_name": "示例银行", "institution_type": "bank"})
+    admin_session = register_session(_post_json(client, f"{base}/auth/login", {"username": "smoke_admin", "password": admin_password}))
+    _RUNTIME["client"] = client
+    _RUNTIME["base"] = base
+    _RUNTIME["admin_session"] = admin_session
+    _verify_session_refresh_contract(client, base, admin_session)
+    client.headers["Authorization"] = admin_authorization()
+    bank = _ensure_institution(client, base, {"institution_code": "DEMO_BANK", "institution_name": "示例银行", "institution_type": "bank"})
 
     project = _post_json(
         client,
         f"{base}/projects",
         {
-            "name": "增强验收测试项目",
+            "name": _scoped_project_name(),
             "institution_id": bank["id"],
             "bank_name": "示例银行",
             "description": "验证模板、数据源、自然语言任务和口径生成",
@@ -98,11 +304,11 @@ def main() -> None:
         field = next(item for item in fields.json() if item["field_code"] == "CERT_TYPE")
 
         knowledge_documents = [
-            _upload_knowledge(client, base, project_id, qa_path, "regulatory_qa", "institution", "示例银行"),
-            _upload_knowledge(client, base, project_id, historical_path, "historical_mapping"),
-            _upload_knowledge(client, base, project_id, policy_path, "regulatory_policy"),
-            _upload_knowledge(client, base, project_id, pdf_path, "regulatory_policy"),
-            _upload_knowledge(client, base, project_id, sql_path, "sql_evidence"),
+            _await_submission(client, base, _upload_knowledge(client, base, project_id, qa_path, "regulatory_qa", "institution", "示例银行")),
+            _await_submission(client, base, _upload_knowledge(client, base, project_id, historical_path, "historical_mapping")),
+            _await_submission(client, base, _upload_knowledge(client, base, project_id, policy_path, "regulatory_policy")),
+            _await_submission(client, base, _upload_knowledge(client, base, project_id, pdf_path, "regulatory_policy")),
+            _await_submission(client, base, _upload_knowledge(client, base, project_id, sql_path, "sql_evidence")),
         ]
         knowledge_units = _get_json(client, f"{base}/projects/{project_id}/knowledge/units")
         qa_unit = next(item for item in knowledge_units if item["knowledge_type"] == "regulatory_qa")
@@ -134,6 +340,7 @@ def main() -> None:
             "expected_answer_keywords_json": ["CERT_TYPE"],
         })
         evaluation_run = _post_json(client, f"{base}/projects/{project_id}/evaluations/runs", {"run_name": "Smoke RAG 回归"})
+        evaluation_run = _await_evaluation_run(client, base, evaluation_run)
         if evaluation_run["summary_metrics_json"].get("recall_at_5", 0) <= 0 or evaluation_run["summary_metrics_json"].get("mrr", 0) <= 0:
             raise AssertionError("RAG 评测 Recall@5 或 MRR 未命中")
 
@@ -151,6 +358,7 @@ def main() -> None:
         )
         datasource_test = _post_json(client, f"{base}/datasources/{datasource['id']}/test", {})
         metadata_sync = _post_json(client, f"{base}/datasources/{datasource['id']}/metadata-sync", {"sync_mode": "full", "schema_names": [], "include_views": True})
+        metadata_sync = _await_metadata_sync(client, base, metadata_sync, datasource["id"])
         catalog_tables = _get_json(client, f"{base}/projects/{project_id}/catalog/tables?datasource_id={datasource['id']}")
         catalog_search = _post_json(client, f"{base}/projects/{project_id}/catalog/search", {"datasource_ids": [datasource["id"]], "query": "cert_type", "top_k": 20})
         catalog_cert_type = next(item for item in catalog_search["items"] if item["column_name"] == "cert_type")
@@ -219,6 +427,7 @@ def main() -> None:
             "target_field_id": field["id"], "scenario_id": debit_scenario["id"], "source_recommendation_id": catalog_recommendation["id"],
             "metrics": ["null_rate", "distinct_count", "top_values", "min_max", "length_distribution"],
         })
+        column_profile = _await_column_profile(client, base, column_profile)
         if column_profile["profile_result_json"].get("distinct_count") != 2:
             raise AssertionError("目录字段 distinct 探查结果不正确")
         selected_recommendation = _post_json(client, f"{base}/source-recommendations/{catalog_recommendation['id']}/adopt", {})
@@ -229,6 +438,7 @@ def main() -> None:
         sensitive_catalog = next(item for item in sensitive_recommendations["recommendations"] if item.get("catalog_column_id") and item.get("recommended_field_name") == "customer_name")
         _post_json(client, f"{base}/source-recommendations/{sensitive_catalog['id']}/select", {})
         sensitive_profile = _post_json(client, f"{base}/catalog/columns/{sensitive_catalog['catalog_column_id']}/profile", {"target_field_id": sensitive_field["id"], "scenario_id": debit_scenario["id"], "source_recommendation_id": sensitive_catalog["id"], "metrics": ["distinct_count", "top_values", "min_max"]})
+        sensitive_profile = _await_column_profile(client, base, sensitive_profile)
         if sensitive_profile["profile_result_json"].get("top_values"):
             raise AssertionError("敏感字段不应返回 top values")
 
@@ -413,24 +623,44 @@ def main() -> None:
                 f"导出 Excel 未写入已采用目录来源: {exported_source_table}.{exported_source_field}"
             )
 
-        legacy_mapping = _post_json(
-            client,
+        # 单层字段口径生成已退休（410）。Smoke 不再调用它取草稿，而是直接断言退休契约，
+        # 并从双层 Mapping 的受支持接口取证据事实，避免继续依赖已下线的响应结构。
+        legacy_field_mapping = client.post(
             f"{base}/fields/{field['id']}/generate-mapping",
-            {
+            json={
                 "include_template": True,
                 "include_documents": True,
                 "include_sql_parse_results": True,
                 "include_nl_task_results": True,
             },
         )
-        draft = legacy_mapping["draft"]
-        evidence_types = sorted({item["evidence_type"] for item in draft["evidences"]})
+        if legacy_field_mapping.status_code != 410:
+            raise AssertionError(
+                f"旧字段口径生成接口必须返回 410，实际为 {legacy_field_mapping.status_code}"
+            )
+        legacy_field_mapping_detail = legacy_field_mapping.json().get("detail") or {}
+        if legacy_field_mapping_detail.get("code") != "legacy-mapping-generator-retired":
+            raise AssertionError(f"旧字段口径生成接口未返回退休说明: {legacy_field_mapping_detail}")
+        legacy_replacement_routes = legacy_field_mapping_detail.get("replacement_routes") or []
+        if not legacy_replacement_routes:
+            raise AssertionError("旧字段口径生成接口未声明替代路由")
+        latest_field_draft = client.get(f"{base}/fields/{field['id']}/drafts/latest")
+        latest_field_draft.raise_for_status()
+        if latest_field_draft.json() is not None:
+            raise AssertionError("已退休的旧接口仍然产生了字段口径草稿")
+        double_layer_evidence_types = sorted({
+            item["evidence_type"]
+            for mapping_type, mapping_id in (("source_to_mart", source_to_mart["id"]), ("mart_to_ybt", mart_to_ybt["id"]))
+            for item in _get_json(client, f"{base}/mappings/{mapping_type}/{mapping_id}/evidence")
+        })
+        if not double_layer_evidence_types:
+            raise AssertionError("双层 Mapping 证据接口未返回任何证据类型")
 
         governance_roles = ["business_analyst", "business_reviewer", "technical_analyst", "technical_reviewer", "final_reviewer"]
         governance_users = {}
         for role in governance_roles:
             password = f"smoke-only-{role}-password"
-            user = _post_json(client, f"{base}/admin/users", {
+            user = _ensure_user(client, base, {
                 "username": f"smoke_{role}", "display_name": role, "email": f"smoke-{role}@example.invalid", "password": password,
                 "institution_id": bank["id"], "institution_role": "member",
             })
@@ -443,13 +673,12 @@ def main() -> None:
         workflow_id = workflow_created["workflow_instance_ids"][0]
         workflow_tasks = _get_json(client, f"{base}/projects/{project_id}/tasks")
         task_by_step = {item["step_key"]: item for item in workflow_tasks if item["workflow_instance_id"] == workflow_id}
-        admin_authorization = client.headers["Authorization"]
         for step, role in [("business_draft", "business_analyst"), ("business_review", "business_reviewer"), ("technical_draft", "technical_analyst"), ("technical_review", "technical_reviewer"), ("final_review", "final_reviewer")]:
             role_session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": governance_users[role]["password"]})
             client.headers["Authorization"] = f"Bearer {role_session['access_token']}"
             _post_json(client, f"{base}/review-tasks/{task_by_step[step]['id']}/approve", {"comment": f"{step} smoke approved"})
         final_notifications = _get_json(client, f"{base}/me/notifications")
-        client.headers["Authorization"] = admin_authorization
+        client.headers["Authorization"] = admin_authorization()
         workflow_result = _get_json(client, f"{base}/workflows/{workflow_id}")
         confirmed_business = _get_json(client, f"{base}/scenario-business-mappings/{scenario_business['id']}")
         confirmed_lineage = _get_json(client, f"{base}/scenario-technical-lineages/{scenario_lineage['id']}")
@@ -473,7 +702,7 @@ def main() -> None:
                 role_session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": governance_users[role]["password"]})
                 client.headers["Authorization"] = f"Bearer {role_session['access_token']}"
                 _post_json(client, f"{base}/review-tasks/{double_tasks[step]['id']}/approve", {"comment": f"{step} double layer approved"})
-            client.headers["Authorization"] = admin_authorization
+            client.headers["Authorization"] = admin_authorization()
         source_approved = _get_json(client, f"{base}/source-to-mart-mappings/{source_final['id']}")
         ybt_approved = _get_json(client, f"{base}/mart-to-ybt-mappings/{ybt_final['id']}")
         if source_approved["mapping_status"] != "approved" or ybt_approved["mapping_status"] != "approved":
@@ -515,7 +744,7 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             role_session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": governance_users[role]["password"]})
             client.headers["Authorization"] = f"Bearer {role_session['access_token']}"
             _post_json(client, f"{base}/review-tasks/{impact_tasks[step]['id']}/approve", {"comment": f"lineage {step} smoke approved"})
-        client.headers["Authorization"] = admin_authorization
+        client.headers["Authorization"] = admin_authorization()
         lineage_impact_reviewed = _get_json(client, f"{base}/lineage/impacts/{lineage_upload_v2['impact_id']}")
         source_after_lineage_review = _get_json(client, f"{base}/source-to-mart-mappings/{source_final['id']}")
         ybt_after_lineage_review = _get_json(client, f"{base}/mart-to-ybt-mappings/{ybt_final['id']}")
@@ -523,27 +752,26 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             raise AssertionError("血缘最终审核后未恢复 verified")
         batch_job_response = client.post(f"{base}/projects/{project_id}/batch/generate-business-drafts", headers={"Idempotency-Key": "smoke-business-batch"}, json={"field_ids": []})
         batch_job_response.raise_for_status()
-        batch_job = _get_json(client, f"{base}/jobs/{batch_job_response.json()['id']}")
+        batch_job = _settle_job(client, base, batch_job_response.json())
         audit_rows = _get_json(client, f"{base}/audit?project_id={project_id}")
-        other_bank = _post_json(client, f"{base}/admin/institutions", {"institution_code": "OTHER_BANK", "institution_name": "其他示例银行", "institution_type": "bank"})
+        other_bank = _ensure_institution(client, base, {"institution_code": "OTHER_BANK", "institution_name": "其他示例银行", "institution_type": "bank"})
         outsider_password = "smoke-only-outsider-password"
-        _post_json(client, f"{base}/admin/users", {"username": "smoke_outsider", "display_name": "跨行用户", "email": "smoke-outsider@example.invalid", "password": outsider_password, "institution_id": other_bank["id"], "institution_role": "member"})
-        outsider_session = _post_json(client, f"{base}/auth/login", {"username": "smoke_outsider", "password": outsider_password})
-        cross_bank_response = client.get(f"{base}/projects/{project_id}", headers={"Authorization": f"Bearer {outsider_session['access_token']}"})
+        _ensure_user(client, base, {"username": "smoke_outsider", "display_name": "跨行用户", "email": "smoke-outsider@example.invalid", "password": outsider_password, "institution_id": other_bank["id"], "institution_role": "member"})
+        outsider_session = register_session(_post_json(client, f"{base}/auth/login", {"username": "smoke_outsider", "password": outsider_password}))
+        cross_bank_response = client.get(f"{base}/projects/{project_id}", headers={"Authorization": bearer(outsider_session)})
         if cross_bank_response.status_code != 404:
             raise AssertionError(f"Cross-bank project read must be hidden, got {cross_bank_response.status_code}")
-        cross_bank_lineage = client.get(f"{base}/scripts/{lineage_upload_v1['script_file_id']}", headers={"Authorization": f"Bearer {outsider_session['access_token']}"})
+        cross_bank_lineage = client.get(f"{base}/scripts/{lineage_upload_v1['script_file_id']}", headers={"Authorization": bearer(outsider_session)})
         if cross_bank_lineage.status_code != 404:
             raise AssertionError(f"Cross-bank lineage read must be hidden, got {cross_bank_lineage.status_code}")
-        client.headers["Authorization"] = admin_authorization
+        client.headers["Authorization"] = admin_authorization()
 
         delivery_smoke = _run_delivery_smoke(
             client, base, project_id, debit_scenario, mart_field,
-            governance_users, outsider_session["access_token"], admin_authorization, artifact_dir,
+            governance_users, outsider_session, artifact_dir,
         )
         uat_smoke = _run_uat_smoke(
-            client, base, project_id, bank["id"], outsider_session["access_token"],
-            admin_authorization, temp_path, artifact_dir,
+            client, base, project_id, bank["id"], outsider_session, temp_path, artifact_dir,
         )
         model_calls = _get_json(client, f"{base}/projects/{project_id}/model-calls?page_size=100")
         if expected_provider != "mock":
@@ -608,11 +836,10 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
             "ybt_draft_confidence": ybt_draft["confidence_level"],
             "mapping_evidence_ids": [source_evidence["id"], ybt_evidence["id"], source_profile_binding["id"], ybt_profile_binding["id"]],
             "export_markdown_chars": len(markdown),
-            "draft_id": draft["id"],
-            "evidence_types": evidence_types,
-            "template_reference_summary": draft.get("template_reference_summary"),
-            "db_query_summary": draft.get("db_query_summary"),
-            "evidence_completeness": draft.get("evidence_completeness"),
+            "legacy_field_mapping_status": legacy_field_mapping.status_code,
+            "legacy_field_mapping_code": legacy_field_mapping_detail.get("code"),
+            "legacy_field_mapping_replacement_routes": legacy_replacement_routes,
+            "double_layer_evidence_types": double_layer_evidence_types,
             "governance_institution_id": bank["id"],
             "workflow_status": workflow_result["status"],
             "workflow_decision_count": len(workflow_result["decisions"]),
@@ -634,7 +861,7 @@ insert into YBT_CUSTOMER (CERT_TYPE) select cert_type from mart_customer;
         print(json.dumps(output, ensure_ascii=False, indent=2))
 
 
-def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, outsider_token, admin_authorization, artifact_dir=None):
+def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, outsider_session, artifact_dir=None):
     table = _post_json(client, f"{base}/target-tables", {"project_id": project_id, "table_code": "YBT_DELIVERY", "table_name": "正式交付验收表"})
     field = _post_json(client, f"{base}/fields", {"project_id": project_id, "target_table_id": table["id"], "field_code": "DELIVERY_CERT_TYPE", "field_name": "交付证件类型", "field_type": "VARCHAR(20)", "regulatory_description": "正式交付验收使用的脱敏监管定义"})
     business = _post_json(client, f"{base}/target-fields/{field['id']}/scenarios/{scenario['id']}/business-mapping", {"business_definition": "借记卡有效客户证件类型", "final_content": "仅包含当前有效借记卡客户，排除注销客户。"})
@@ -648,7 +875,7 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
         session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": users[role]["password"]})
         client.headers["Authorization"] = f"Bearer {session['access_token']}"
         _post_json(client, f"{base}/review-tasks/{tasks[step]['id']}/approve", {"comment": f"deliverable {step} approved"})
-    client.headers["Authorization"] = admin_authorization
+    client.headers["Authorization"] = admin_authorization()
     mart_mapping = _post_json(client, f"{base}/target-fields/{field['id']}/mart-to-ybt-mappings", {"mart_field_id": mart_field["id"], "mapping_name": "正式交付集市映射", "final_content": "mart_customer.cert_type 映射至 DELIVERY_CERT_TYPE"})
     _post_json(client, f"{base}/mappings/mart_to_ybt/{mart_mapping['id']}/evidence", {"evidence_type": "manual_note", "source_name": "脱敏集市映射确认", "evidence_summary": "集市到一表通映射已由科技人员核验"})
     double = _post_json(client, f"{base}/projects/{project_id}/tasks/batch-create", {"workflow_key": "double_layer_mapping_review", "targets": [{"target_type": "mart_to_ybt", "target_id": mart_mapping["id"]}], "assignments": {"technical_reviewer": users["technical_reviewer"]["id"], "final_reviewer": users["final_reviewer"]["id"]}})
@@ -658,7 +885,7 @@ def _run_delivery_smoke(client, base, project_id, scenario, mart_field, users, o
         session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": users[role]["password"]})
         client.headers["Authorization"] = f"Bearer {session['access_token']}"
         _post_json(client, f"{base}/review-tasks/{double_tasks[step]['id']}/approve", {"comment": f"deliverable {step} approved"})
-    client.headers["Authorization"] = admin_authorization
+    client.headers["Authorization"] = admin_authorization()
 
     delivery_sql_v1 = b"""-- sanitized delivery lineage v1
 insert into YBT_DELIVERY (DELIVERY_CERT_TYPE)
@@ -678,7 +905,7 @@ select case when cert_type='01' then 'A' else cert_type end from mart_customer w
         session = _post_json(client, f"{base}/auth/login", {"username": f"smoke_{role}", "password": users[role]["password"]})
         client.headers["Authorization"] = f"Bearer {session['access_token']}"
         _post_json(client, f"{base}/review-tasks/{delivery_impact_tasks[step]['id']}/approve", {"comment": f"delivery impact {step} approved"})
-    client.headers["Authorization"] = admin_authorization
+    client.headers["Authorization"] = admin_authorization()
 
     template_content = _delivery_template_bytes()
     template = _post_file(client, f"{base}/projects/{project_id}/deliverable-templates/upload", {"template_name": "银行正式交付模板", "template_type": "full_delivery_package"}, {"file": ("银行正式交付模板.xlsx", BytesIO(template_content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
@@ -710,13 +937,19 @@ select case when cert_type='01' then 'A' else cert_type end from mart_customer w
 
     question = _post_json(client, f"{base}/projects/{project_id}/questions", {"target_table_id": table["id"], "target_field_id": field["id"], "scenario_id": scenario["id"], "question_type": "code_mapping", "question_text": "确认码值映射版本", "priority": "high", "assigned_role": "technical_analyst"})
     package = _post_json(client, f"{base}/projects/{project_id}/deliverables", {"package_name": "正式交付验收包", "target_table_id": table["id"], "template_version_id": version_id})
-    _post_json(client, f"{base}/deliverables/{package['id']}/generate", {})
+    generation = _post_json(client, f"{base}/deliverables/{package['id']}/generate", {})
+    generation_job = _settle_job(client, base, generation["job"], timeout=1800.0)
+    if generation_job.get("status") != "completed":
+        raise AssertionError(f"正式交付包生成任务未完成: {generation_job.get('status')} {generation_job.get('error_message')}")
     blocked = _post_json(client, f"{base}/deliverables/{package['id']}/validate", {})
     if not any(item["code"] == "high_priority_question" for item in blocked["issues"]): raise AssertionError("高优问题未阻止正式批准")
     _post_json(client, f"{base}/questions/{question['id']}/answer", {"resolution_text": "采用当前监管代码集"}); _post_json(client, f"{base}/questions/{question['id']}/accept", {})
     validation = _post_json(client, f"{base}/deliverables/{package['id']}/validate", {})
     if validation["error_count"]: raise AssertionError(f"正式交付校验仍有错误: {validation['issues']}")
     rendered = _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    rendered["job"] = _settle_job(client, base, rendered["job"], timeout=1800.0)
+    if rendered["job"].get("status") != "completed":
+        raise AssertionError(f"正式交付 Excel 渲染任务未完成: {rendered['job'].get('status')}")
     downloaded = client.get(f"{base}/deliverables/{package['id']}/download"); downloaded.raise_for_status()
     if artifact_dir:
         (artifact_dir / "formal-deliverable.xlsx").write_bytes(downloaded.content)
@@ -727,7 +960,7 @@ select case when cert_type='01' then 'A' else cert_type end from mart_customer w
     if lineage_rows < 1 or impact_rows < 1: raise AssertionError("正式 Excel 缺少真实字段血缘或脚本影响记录")
     workbook_text = " ".join(str(cell.value or "") for workbook_sheet in workbook.worksheets for row in workbook_sheet.iter_rows() for cell in row)
     if "SMOKE_RAW_SQL_MARKER" in workbook_text or "insert into YBT_DELIVERY" in workbook_text: raise AssertionError("正式 Excel 泄漏了原始 SQL")
-    _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
+    _approve_delivery_workflow(client, base, project_id, package["id"], users)
     approved1 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     repeated_approval = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     if repeated_approval["version"]["id"] != approved1["version"]["id"] or not repeated_approval.get("idempotent"):
@@ -735,21 +968,22 @@ select case when cert_type='01' then 'A' else cert_type end from mart_customer w
     version_note = _post_json(client, f"{base}/projects/{project_id}/questions", {"target_table_id": table["id"], "target_field_id": field["id"], "scenario_id": scenario["id"], "question_type": "version_note", "question_text": "确认第二版交付说明", "priority": "medium", "assigned_role": "project_manager"})
     _post_json(client, f"{base}/questions/{version_note['id']}/answer", {"resolution_text": "第二版纳入最新已审核脚本影响说明"})
     _post_json(client, f"{base}/questions/{version_note['id']}/accept", {})
-    _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    second_render = _post_json(client, f"{base}/deliverables/{package['id']}/render", {})
+    _settle_job(client, base, second_render["job"], timeout=1800.0)
     stale_approval = client.post(f"{base}/deliverables/{package['id']}/approve", json={})
     if stale_approval.status_code != 409: raise AssertionError("重新渲染后的交付包复用了旧审核结果")
-    _approve_delivery_workflow(client, base, project_id, package["id"], users, admin_authorization)
+    _approve_delivery_workflow(client, base, project_id, package["id"], users)
     approved2 = _post_json(client, f"{base}/deliverables/{package['id']}/approve", {})
     comparison = _post_json(client, f"{base}/projects/{project_id}/caliber-comparisons", {"left_package_version_id": approved1["version"]["id"], "right_package_version_id": approved2["version"]["id"], "left": {"source_field": "cert_type"}, "right": {"source_field": "cert_type_v2"}})
-    cross = client.get(f"{base}/deliverables/{package['id']}", headers={"Authorization": f"Bearer {outsider_token}"})
+    cross = client.get(f"{base}/deliverables/{package['id']}", headers={"Authorization": bearer(outsider_session)})
     if cross.status_code != 404: raise AssertionError("跨银行用户可读取正式交付包")
-    client.headers["Authorization"] = admin_authorization
+    client.headers["Authorization"] = admin_authorization()
     version1_download = client.get(f"{base}/deliverable-package-versions/{approved1['version']['id']}/download"); version1_download.raise_for_status()
     version2_download = client.get(f"{base}/deliverable-package-versions/{approved2['version']['id']}/download"); version2_download.raise_for_status()
-    return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "generation_job_status": "completed", "render_job_status": rendered["job"]["status"], "rendered_file_id": rendered["file_id"], "rendered_file_bytes": len(downloaded.content), "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "repeat_approval_idempotent": repeated_approval["idempotent"], "lineage_sheet_rows": lineage_rows, "change_impact_sheet_rows": impact_rows, "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames), "version_file_bytes": [len(version1_download.content), len(version2_download.content)]}
+    return {"template_version_id": version_id, "historical_item_id": historical_item["id"], "package_id": package["id"], "generation_job_status": generation_job["status"], "render_job_status": rendered["job"]["status"], "rendered_file_id": rendered["file_id"], "rendered_file_bytes": len(downloaded.content), "validation_errors": validation["error_count"], "approved_versions": [approved1["version"]["version_no"], approved2["version"]["version_no"]], "repeat_approval_idempotent": repeated_approval["idempotent"], "lineage_sheet_rows": lineage_rows, "change_impact_sheet_rows": impact_rows, "comparison_id": comparison["id"], "cross_bank_status": cross.status_code, "sheet_count": len(workbook.sheetnames), "version_file_bytes": [len(version1_download.content), len(version2_download.content)]}
 
 
-def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_authorization, temp_path, artifact_dir=None):
+def _run_uat_smoke(client, base, project_id, bank_id, outsider_session, temp_path, artifact_dir=None):
     demo_dir = temp_path / "demo-uat-pack"
     demo_manifest = generate_demo_pack(demo_dir)
     archive = BytesIO()
@@ -769,7 +1003,7 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
     if not validation["valid"]:
         raise AssertionError(f"公开模拟 UAT 材料校验失败: {validation}")
 
-    _post_json(client, f"{base}/admin/users", {
+    _ensure_user(client, base, {
         "username": "smoke_unassigned",
         "display_name": "同机构未授权项目用户",
         "email": "smoke-unassigned@example.invalid",
@@ -793,6 +1027,7 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
             "git_commit_sha": os.getenv("GITHUB_SHA", "e" * 40),
         })
         builtin_execution = _post_json(client, f"{base}/uat-runs/{builtin_run['id']}/execute", {})
+        builtin_execution["run"] = _await_uat_run(client, base, builtin_run["id"])
         automatic_results = [item for item in builtin_execution["run"]["results"] if item["case"]["execution_mode"] == "automatic"]
         builtin_automatic_count += len(automatic_results)
         if any(item["status"] != "passed" for item in automatic_results):
@@ -823,6 +1058,7 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
         "git_commit_sha": os.getenv("GITHUB_SHA", "f" * 40),
     })
     first = _post_json(client, f"{base}/uat-runs/{run['id']}/execute", {})
+    first["run"] = _await_uat_run(client, base, run["id"])
     if first["run"]["status"] != "failed" or first["run"]["results"][0]["status"] != "failed":
         raise AssertionError("受控 UAT 首次执行没有按预期失败")
     result_id = first["run"]["results"][0]["id"]
@@ -843,6 +1079,7 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
         raise AssertionError(f"失败轮次未阻止签署: {blocked_signoff.status_code}")
 
     retried = _post_json(client, f"{base}/uat-runs/{run['id']}/retry-failed", {})
+    retried["run"] = _await_uat_run(client, base, run["id"])
     retried_result = retried["run"]["results"][0]
     if retried["run"]["status"] != "passed" or retried_result["status"] != "passed":
         raise AssertionError(f"修复重跑未通过: {retried['run']['status']}/{retried_result['status']}")
@@ -894,11 +1131,11 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
     details = client.get(f"{root}/health/details")
     details.raise_for_status()
 
-    cross_bank = client.get(f"{base}/uat-suites/{suite['id']}", headers={"Authorization": f"Bearer {outsider_token}"})
+    cross_bank = client.get(f"{base}/uat-suites/{suite['id']}", headers={"Authorization": bearer(outsider_session)})
     if cross_bank.status_code != 404:
         raise AssertionError(f"跨机构 UAT 资源未隐藏: {cross_bank.status_code}")
     viewer_password = "smoke-only-viewer-password"
-    viewer = _post_json(client, f"{base}/admin/users", {
+    viewer = _ensure_user(client, base, {
         "username": "smoke_viewer",
         "display_name": "只读验收用户",
         "email": "smoke-viewer@example.invalid",
@@ -907,15 +1144,15 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
         "institution_role": "member",
     })
     _post_json(client, f"{base}/projects/{project_id}/members", {"user_id": viewer["id"], "project_role": "viewer"})
-    viewer_session = _post_json(client, f"{base}/auth/login", {"username": "smoke_viewer", "password": viewer_password})
+    viewer_session = register_session(_post_json(client, f"{base}/auth/login", {"username": "smoke_viewer", "password": viewer_password}))
     viewer_execute = client.post(
         f"{base}/uat-runs/{run['id']}/execute",
         json={},
-        headers={"Authorization": f"Bearer {viewer_session['access_token']}"},
+        headers={"Authorization": bearer(viewer_session)},
     )
     if viewer_execute.status_code != 403:
         raise AssertionError(f"只读用户可以执行 UAT: {viewer_execute.status_code}")
-    client.headers["Authorization"] = admin_authorization
+    client.headers["Authorization"] = admin_authorization()
 
     audit_rows = _get_json(client, f"{base}/audit?project_id={project_id}&limit=500")
     uat_audit_actions = sorted({row["action"] for row in audit_rows if "uat" in row["action"]})
@@ -957,14 +1194,14 @@ def _run_uat_smoke(client, base, project_id, bank_id, outsider_token, admin_auth
     }
 
 
-def _approve_delivery_workflow(client, base, project_id, package_id, users, admin_authorization):
+def _approve_delivery_workflow(client, base, project_id, package_id, users):
     submitted = _post_json(client, f"{base}/deliverables/{package_id}/submit-review", {})
     workflow_id = submitted["workflow_instance"]["id"]
     task = next(item for item in _get_json(client, f"{base}/projects/{project_id}/tasks") if item["workflow_instance_id"] == workflow_id and item["step_key"] == "final_review")
     session = _post_json(client, f"{base}/auth/login", {"username": "smoke_final_reviewer", "password": users["final_reviewer"]["password"]})
     client.headers["Authorization"] = f"Bearer {session['access_token']}"
     _post_json(client, f"{base}/review-tasks/{task['id']}/approve", {"comment": "正式交付包最终审核通过"})
-    client.headers["Authorization"] = admin_authorization
+    client.headers["Authorization"] = admin_authorization()
 
 
 def _delivery_template_bytes():
@@ -1131,26 +1368,41 @@ def _write_sqlite_source(path: Path) -> None:
         connection.close()
 
 
+def _send_with_session_renewal(client: httpx.Client, method: str, url: str, **kwargs):
+    """单次 401 兜底：续期令牌所属会话后重放该请求，其余状态码原样返回。"""
+    request = getattr(client, method)
+    response = request(url, **kwargs)
+    if response.status_code != 401:
+        return response
+    token = client.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    session = next((item for item in _SESSIONS if item.get("access_token") == token), None)
+    if session is None:
+        return response
+    _renew_session(session, force=True)
+    client.headers["Authorization"] = f"Bearer {session['access_token']}"
+    return request(url, **kwargs)
+
+
 def _post_json(client: httpx.Client, url: str, payload: dict) -> dict:
-    response = client.post(url, json=payload)
+    response = _send_with_session_renewal(client, "post", url, json=payload)
     response.raise_for_status()
     return response.json()
 
 
 def _get_json(client: httpx.Client, url: str) -> dict | list[dict]:
-    response = client.get(url)
+    response = _send_with_session_renewal(client, "get", url)
     response.raise_for_status()
     return response.json()
 
 
 def _post_file(client: httpx.Client, url: str, data: dict, files: dict) -> dict:
-    response = client.post(url, data=data, files=files)
+    response = _send_with_session_renewal(client, "post", url, data=data, files=files)
     response.raise_for_status()
     return response.json()
 
 
 def _put_json(client: httpx.Client, url: str, payload: dict) -> dict:
-    response = client.put(url, json=payload)
+    response = _send_with_session_renewal(client, "put", url, json=payload)
     response.raise_for_status()
     return response.json()
 

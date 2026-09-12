@@ -2,7 +2,7 @@ import hashlib
 
 from app.models import ModelCallLog
 from app.services.governance.audit import record_audit
-from app.services.llm.base import LLMRuntimeError
+from app.services.llm.base import LLMRuntimeError, sanitize_provider_error_detail
 from app.services.security import ensure_external_allowed, redact_content
 
 
@@ -36,6 +36,8 @@ def record_embedding_call(
         token_usage_json=metadata.token_usage,
         confidentiality_level=confidentiality_level,
         error_type=None,
+        http_status=metadata.http_status,
+        error_detail=None,
     ))
 
 
@@ -90,6 +92,12 @@ def embed_with_observability(
             token_usage_json=metadata.token_usage,
             confidentiality_level=confidentiality,
             error_type=error_type,
+            http_status=(
+                exc.http_status
+                if isinstance(exc, LLMRuntimeError) and exc.http_status is not None
+                else metadata.http_status
+            ),
+            error_detail=exc.detail if isinstance(exc, LLMRuntimeError) else f"{type(exc).__name__}: {exc}",
         ))
         db.flush()
         raise

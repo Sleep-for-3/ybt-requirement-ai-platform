@@ -3,57 +3,27 @@
 Revision ID: 202607070003
 Revises: 202607070002
 Create Date: 2026-07-07
+
+Table definitions are frozen from git history instead of being imported from the
+current ORM (see ``app/schema_freeze``).
 """
 
 from alembic import op
 
-from app.models import (
-    BusinessSystem,
-    MappingEvidenceReference,
-    MappingVersion,
-    MartField,
-    MartTable,
-    MartToYbtMapping,
-    SourceField,
-    SourceTable,
-    SourceToMartMapping,
-)
+from app.schema_freeze import create_frozen_tables, drop_frozen_tables
+
 
 revision = "202607070003"
 down_revision = "202607070002"
 branch_labels = None
 depends_on = None
 
+FROZEN_REVISION = revision
+
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    for table in [
-        BusinessSystem.__table__,
-        SourceTable.__table__,
-        SourceField.__table__,
-        MartTable.__table__,
-        MartField.__table__,
-        SourceToMartMapping.__table__,
-        MartToYbtMapping.__table__,
-        MappingEvidenceReference.__table__,
-        MappingVersion.__table__,
-    ]:
-        table.create(bind=bind, checkfirst=True)
+    create_frozen_tables(FROZEN_REVISION, bind=op.get_bind())
 
 
 def downgrade() -> None:
-    for table_name in [
-        "mapping_versions",
-        "mapping_evidence_references",
-        "mart_to_ybt_mappings",
-        "source_to_mart_mappings",
-        "mart_fields",
-        "mart_tables",
-        "source_fields",
-        "source_tables",
-        "business_systems",
-    ]:
-        try:
-            op.drop_table(table_name)
-        except Exception:
-            pass
+    drop_frozen_tables(FROZEN_REVISION, bind=op.get_bind())

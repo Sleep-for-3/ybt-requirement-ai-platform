@@ -706,6 +706,31 @@ def _deliverable_render_handler(db: Session, job: BackgroundJob) -> dict:
         raise ValueError("Deliverable render fingerprint is stale")
     if job.status == "cancelled":
         package.status = "cancelled"; db.commit(); return {"success_count": 0, "failed_count": 0, "cancelled_count": 1}
+    try:
+        return _render_package_workbook(db, job, package)
+    except Exception as exc:
+        # A crashed renderer must never leave the package stuck in
+        # "generating": surface it as a retryable failure with the real reason
+        # so the delivery cannot be submitted for review by accident.
+        db.rollback()
+        package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
+        if package is not None:
+            reason = f"{type(exc).__name__}: {exc}"[:500]
+            package.status = "render_failed"
+            package.generated_file_id = None
+            package.content_hash = None
+            package.warnings_json = [{"severity": "error", "code": "render_crashed", "message": reason}]
+            record_audit(
+                db, action="render_deliverable_failed", resource_type="deliverable_package",
+                resource_id=package.id, actor_user_id=job.created_by, institution_id=package.institution_id,
+                project_id=package.project_id, after={"error": reason},
+            )
+            notify_user(db, job.created_by, "deliverable_render_failed", "正式交付 Excel 渲染失败", reason, project_id=package.project_id, resource_type="deliverable_package", resource_id=package.id)
+            db.commit()
+        raise
+
+
+def _render_package_workbook(db: Session, job: BackgroundJob, package: DeliverablePackage) -> dict:
     job.current_step = "validate_template"; job.progress = 10
     template_validation = validate_template_version(db, package.template_version_id)
     if not template_validation["valid"]:

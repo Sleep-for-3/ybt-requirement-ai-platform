@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, ImpactAnalysis, LineageGraph, ScriptFile } from "@/lib/api";
+import { describeTraversal } from "@/lib/lineage-graph.mjs";
 
 export default function Page() {
   const { projectId } = useProjectWorkspace();
@@ -26,6 +27,8 @@ export default function Page() {
       setGraph(c);
     });
   }, [projectId]);
+
+  const traversalInfo = describeTraversal(graph);
 
   return (
     <main>
@@ -52,14 +55,31 @@ export default function Page() {
           <div className="panel-header">
             <h2 className="text-[15px] font-semibold text-ink">安全边界</h2>
           </div>
-          <div className="panel-body">
+          <div className="panel-body space-y-3">
             <p className="text-sm leading-relaxed text-slate-600">
               平台只读取和静态解析脚本，不执行 SQL、Shell、Git hooks 或仓库程序。高风险变化必须通过 impact_analysis → technical_review → final_review 才能重新标记 verified。
             </p>
+            {graph ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="lineage-traversal">
+                <span className={traversalInfo.tone === "warning" ? "badge-warning" : "badge-neutral"}>
+                  {traversalInfo.label}
+                </span>
+                <span className="text-slate-500">{traversalInfo.detail}</span>
+                {traversalInfo.truncationReason ? (
+                  <span className="badge-warning">{traversalInfo.truncationReason}</span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </section>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Link className="panel block p-5 transition hover:border-pine-300 hover:shadow-pop" href="/lineage/nebula">
+            <strong className="text-ink">数据星云</strong>
+            <p className="mt-2 text-sm text-slate-500">
+              源系统 → 数仓 → 监管集市 → 一表通/EAST/1104 的分层血缘，按版本查看。
+            </p>
+          </Link>
           <Link className="panel block p-5 transition hover:border-pine-300 hover:shadow-pop" href="/lineage/scripts">
             <strong className="text-ink">脚本仓库</strong>
             <p className="mt-2 text-sm text-slate-500">上传 SQL / Shell / ZIP，配置受控 Git 同步。</p>

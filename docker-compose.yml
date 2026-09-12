@@ -1,13 +1,25 @@
+# Production topology is Linux Docker Compose.
+#
+# Invariants this file must keep (locked by tests/test_deployment_contract.py):
+#   * schema changes are applied exactly once by the one-shot ``migrate``
+#     service, and API/Worker/Beat wait for it to complete successfully;
+#   * every long-running service has a healthcheck;
+#   * PostgreSQL, Redis and Milvus are never published on host ports;
+#   * API/Worker/Beat run the same image and the same configuration contract.
+#
+# Local development that needs host access to the dependency ports should use
+# the extra override file instead of editing this one:
+#   docker compose -f docker-compose.yml -f docker-compose.dev-ports.yml up
+
 services:
   postgres:
     image: postgres:16
     container_name: ybt-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the root .env file}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env file}
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the root .env file}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,6 +31,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ybt-redis
+    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -28,14 +41,16 @@ services:
       timeout: 3s
       retries: 10
 
-  backend:
+  migrate:
     build:
       context: ./backend
-    container_name: ybt-backend
+    container_name: ybt-migrate
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
     env_file:
-      - ./backend/.env
-    environment:
-      ENVIRONMENT: production
+      - ./.env
+    environment: &backend_environment
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       AUTH_MODE: required
       APP_SECRET_KEY: ${APP_SECRET_KEY:?Set APP_SECRET_KEY in the root .env file}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in the root .env file}
@@ -45,11 +60,43 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-    ports:
-      - "8000:8000"
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      STORAGE_DIR: /app/storage
+      VECTOR_STORE_PROVIDER: ${VECTOR_STORE_PROVIDER:-mock}
+      MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      TASK_QUEUE_INLINE_MAX_JOBS: ${TASK_QUEUE_INLINE_MAX_JOBS:-0}
     volumes:
       - backend_storage:/app/storage
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ybt-backend
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - ./.env
+    environment: *backend_environment
+    ports:
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_HOST_PORT:-8000}:8000"
+    volumes:
+      - backend_storage:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.container_probe", "api"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -59,24 +106,45 @@ services:
     build:
       context: ./backend
     container_name: ybt-worker
+    restart: unless-stopped
     command: ["python", "-m", "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO"]
     env_file:
-      - ./backend/.env
-    environment:
-      ENVIRONMENT: production
-      AUTH_MODE: required
-      APP_SECRET_KEY: ${APP_SECRET_KEY:?Set APP_SECRET_KEY in the root .env file}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in the root .env file}
-      DATABASE_URL: ${PRODUCTION_DATABASE_URL:?Set PRODUCTION_DATABASE_URL to a postgresql+psycopg:// URL}
-      TASK_QUEUE_PROVIDER: celery
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      - ./.env
+    environment: *backend_environment
     volumes:
       - backend_storage:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.container_probe", "worker"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: ./backend
+    container_name: ybt-beat
+    restart: unless-stopped
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app", "beat", "--loglevel=INFO"]
+    env_file:
+      - ./.env
+    environment: *backend_environment
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.container_probe", "beat"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -86,12 +154,20 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api}
     container_name: ybt-frontend
+    restart: unless-stopped
     environment:
       NODE_ENV: production
     ports:
-      - "3000:3000"
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   object-storage:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
@@ -129,7 +205,6 @@ services:
       MINIO_ADDRESS: milvus-minio:9000
       MINIO_ACCESS_KEY_ID: ${MILVUS_MINIO_ROOT_USER}
       MINIO_SECRET_ACCESS_KEY: ${MILVUS_MINIO_ROOT_PASSWORD}
-    ports: ["19530:19530"]
     depends_on: ["etcd", "milvus-minio"]
     volumes: ["milvus_data:/var/lib/milvus"]
     healthcheck:

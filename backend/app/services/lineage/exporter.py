@@ -8,6 +8,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.excel import excel_value
 from app.models import (
     ImpactAnalysis, LineageEdge, LineageNode, MartToYbtMapping, ReviewDecision, ReviewTask,
     ScenarioTechnicalLineage, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile,
@@ -115,7 +116,7 @@ def _write(sheet, headers: list[str], rows: list[list]) -> None:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1D4ED8")
         cell.alignment = Alignment(horizontal="center", vertical="center")
-    for row in rows: sheet.append(row)
+    for row in rows: sheet.append([excel_value(value) for value in row])
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(sheet.max_row, 1)}"
     for row in sheet.iter_rows(min_row=2):

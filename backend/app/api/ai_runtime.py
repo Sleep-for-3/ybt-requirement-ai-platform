@@ -1,4 +1,6 @@
 from datetime import datetime
+import json
+import logging
 import socket
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -9,13 +11,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.observability import build_log_event, current_request_id
 from app.core.settings import get_settings
 from app.models import EmbeddingIndexVersion, ModelCallLog, ModelProfile
 from app.services.auth.dependencies import CurrentPrincipal, Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.embeddings.factory import get_embedding_service
 from app.services.llm.base import LLMRuntimeError
-from app.services.llm.factory import get_llm_service
+from app.services.llm.factory import get_interactive_llm_service
 from app.services.llm.providers import (
     is_local_provider,
     normalize_provider_type,
@@ -27,6 +30,9 @@ from app.services.llm.providers import (
     validate_provider_url,
 )
 from app.services.task_queue.inflight import InFlightOperationGuard
+
+
+logger = logging.getLogger("app.llm")
 
 
 router = APIRouter(tags=["AI runtime"])
@@ -152,6 +158,7 @@ async def test_chat(
     profile = db.get(ModelProfile, payload.profile_id) if payload.profile_id else _active_profile(db)
     if payload.profile_id and profile is None:
         raise HTTPException(404, "Model profile not found")
+    service = None
     try:
         service = _profile_service(profile)
         result = await service.chat_structured(
@@ -161,7 +168,38 @@ async def test_chat(
         )
     except LLMRuntimeError as exc:
         _store_test_result(db, profile, "failed", str(exc))
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # This endpoint is how the operator answers "is the model gateway
+        # healthy", so the provider's own answer (status plus sanitized body)
+        # travels back instead of a bare 503 with no next step.
+        logger.warning(
+            json.dumps(
+                build_log_event(
+                    "model_connection_test_failed",
+                    level="WARNING",
+                    logger_name="app.llm",
+                    request_id=current_request_id(),
+                    provider=getattr(service, "provider", None),
+                    model=getattr(service, "model", None),
+                    error_type=exc.error_type,
+                    http_status=exc.http_status,
+                    error_detail=exc.detail,
+                ),
+                ensure_ascii=False,
+            )
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": str(exc),
+                "error_code": exc.error_type,
+                "provider": getattr(service, "provider", None),
+                "model": getattr(service, "model", None),
+                "http_status": exc.http_status,
+                "provider_detail": exc.detail,
+                "retryable": True,
+                "suggested_action": "稍后重试；若持续失败请检查模型网关配额、模型名与网络可达性。",
+            },
+        ) from exc
     _store_test_result(db, profile, "success", None)
     metadata = service.last_call
     return {
@@ -345,10 +383,16 @@ def _active_profile(db: Session) -> ModelProfile | None:
 
 
 def _profile_service(profile: ModelProfile | None):
-    settings = get_settings()
+    """Build the service for a synchronous, operator-facing call.
+
+    ``/ai-runtime/test-chat`` runs inside the request, so it takes the
+    interactive budget (and a single retry) rather than the long background
+    budget used by generation jobs.
+    """
+
     if profile is None:
-        return get_llm_service()
-    return get_llm_service(
+        return get_interactive_llm_service()
+    return get_interactive_llm_service(
         profile.provider_type,
         base_url=profile.base_url,
         model=profile.model_name,
@@ -656,6 +700,8 @@ def _model_call_response(item: ModelCallLog) -> dict[str, Any]:
         "token_usage": item.token_usage_json,
         "confidentiality_level": item.confidentiality_level,
         "error_type": item.error_type,
+        "http_status": item.http_status,
+        "error_detail": item.error_detail,
         "created_at": item.created_at,
         "input_summary": item.input_summary,
         "output_summary": item.output_summary,

@@ -5,12 +5,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from openpyxl import Workbook
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import CatalogColumn, DataSource, MetadataDriftEvent, Project
+from app.models import CatalogColumn, CatalogTable, DataSource, MetadataDriftEvent, Project
+from app.schemas import CatalogSearchRequest
+from app.services.metadata.catalog_service import like_pattern, search_catalog
 from app.services.metadata.base import ColumnMetadata, SchemaMetadata, TableMetadata
 from app.services.metadata.sync_service import synchronize_metadata
 import app.services.metadata.sync_service as sync_service
@@ -119,6 +121,30 @@ def test_metadata_excel_preview_and_repeated_apply_are_idempotent()->None:
         assert len({item["source_table_id"] for item in source_imports})==2
         assert len({item["mart_table_id"] for item in mart_imports})==2
 
+def test_catalog_search_matches_uppercase_queries_like_postgresql(tmp_path: Path) -> None:
+    source_db=tmp_path/"case_catalog.db"
+    with sqlite3.connect(source_db) as connection:
+        connection.execute("create table ecif_customer (cert_type text, customer_name text)")
+    with _client(case_sensitive_like=True) as client:
+        project=_post(client,"/api/projects",{"name":"大小写目录项目"})
+        datasource=_post(client,f"/api/projects/{project['id']}/datasources",{"name":"case_catalog","db_type":"sqlite","database_name":str(source_db),"readonly_flag":True})
+        task=_post(client,f"/api/datasources/{datasource['id']}/metadata-sync",{"sync_mode":"full","schema_names":[],"include_views":True})
+        assert task["status"]=="completed" and task["column_count"]==2
+        search=_post(client,f"/api/projects/{project['id']}/catalog/search",{"query":"CERT_TYPE","top_k":10})
+        matched=[item for item in search["items"] if item["column_name"]=="cert_type"]
+        assert matched, "PostgreSQL 区分大小写的 LIKE 会让大写查询搜不到真实目录字段"
+        assert matched[0]["catalog_column_id"]
+        tables=_get(client,f"/api/projects/{project['id']}/catalog/tables?query=ECIF_CUSTOMER")
+        assert tables["total"]==1
+        table=tables["items"][0]
+        columns=_get(client,f"/api/catalog/tables/{table['id']}/columns?query=CERT_TYPE")
+        assert columns["total"]==1 and columns["items"][0]["column_name"]=="cert_type"
+        # Wildcards pasted by a user must be treated as literal text.
+        literal=_post(client,f"/api/projects/{project['id']}/catalog/search",{"query":"cert_type%","top_k":10})
+        assert all("%" not in item["column_name"] for item in literal["items"])
+        assert like_pattern("a%b")=="%a\\%b%"
+
+
 def test_postgresql_and_mysql_adapters_exclude_system_schemas(monkeypatch)->None:
     class Inspector:
         def get_schema_names(self):return ["public","information_schema","pg_catalog","mysql","sys"]
@@ -176,8 +202,15 @@ def test_full_sync_records_column_drift_and_rename_candidates(db_session,monkeyp
     assert "character_max_length" in added.changed_attributes_json
 
 @contextmanager
-def _client()->Iterator[TestClient]:
-    engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool);Base.metadata.create_all(engine);factory=sessionmaker(bind=engine,autoflush=False)
+def _client(*,case_sensitive_like:bool=False)->Iterator[TestClient]:
+    engine=create_engine("sqlite://",connect_args={"check_same_thread":False},poolclass=StaticPool)
+    if case_sensitive_like:
+        # PostgreSQL LIKE is case sensitive while SQLite's default is not.
+        # Emulating the production behaviour here keeps catalog search honest.
+        @event.listens_for(engine,"connect")
+        def _case_sensitive(connection,_record):
+            cursor=connection.cursor();cursor.execute("PRAGMA case_sensitive_like=ON");cursor.close()
+    Base.metadata.create_all(engine);factory=sessionmaker(bind=engine,autoflush=False)
     def override()->Iterator[Session]:
         session=factory()
         try:yield session

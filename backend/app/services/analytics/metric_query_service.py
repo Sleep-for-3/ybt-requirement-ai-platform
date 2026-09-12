@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     ImpactAnalysis,
+    LineageNode,
     MappingEvidenceReference,
     MetadataDriftEvent,
     ProductScenario,
@@ -47,6 +48,19 @@ def build_project_overview(db: Session, project_id: int, cycle_id: int | None = 
     technical_evidence = _distinct_mapping_count(db, "scenario_technical", eligible_technical_ids)
     mapping_total = business_count + technical_count
     evidence_with_mapping = business_evidence + technical_evidence
+    open_question_objects = (
+        _count(db, ScenarioBusinessMapping, ScenarioBusinessMapping.project_id == project_id, ScenarioBusinessMapping.target_field_id.in_(field_ids), ScenarioBusinessMapping.scenario_id.in_(enabled_scenarios), _has_text(ScenarioBusinessMapping.open_questions))
+        + _count(db, ScenarioTechnicalLineage, ScenarioTechnicalLineage.project_id == project_id, ScenarioTechnicalLineage.target_field_id.in_(field_ids), ScenarioTechnicalLineage.scenario_id.in_(enabled_scenarios), _has_text(ScenarioTechnicalLineage.open_questions))
+    )
+    lineage_node_count = _count(db, LineageNode, LineageNode.project_id == project_id)
+    lineage_unresolved_nodes = _count(db, LineageNode, LineageNode.project_id == project_id, LineageNode.unresolved_flag.is_(True))
+    fields_with_resolved_lineage = int(db.scalar(
+        select(func.count(func.distinct(LineageNode.target_field_id))).where(
+            LineageNode.project_id == project_id,
+            LineageNode.target_field_id.is_not(None),
+            LineageNode.unresolved_flag.is_(False),
+        )
+    ) or 0)
     pending_tasks = _count(db, ReviewTask, ReviewTask.project_id == project_id, ReviewTask.status.in_(("pending", "claimed", "returned")))
     completed_tasks = _count(db, ReviewTask, ReviewTask.project_id == project_id, ReviewTask.status.in_(("completed", "approved")))
     overdue_tasks = _count(db, ReviewTask, ReviewTask.project_id == project_id, ReviewTask.status.in_(("pending", "claimed", "returned")), ReviewTask.due_at < as_of)
@@ -55,9 +69,12 @@ def build_project_overview(db: Session, project_id: int, cycle_id: int | None = 
     readiness = build_project_readiness(db, project_id)
     metrics = {
         "readiness_score": _score_metric("readiness_score", readiness["score"], "当前项目准备度维度", as_of),
-        "business_definition_coverage": _ratio_metric("business_definition_coverage", business_count, eligible, as_of),
-        "technical_lineage_coverage": _ratio_metric("technical_lineage_coverage", technical_count, eligible, as_of),
+        "business_definition_coverage": _ratio_metric("business_definition_coverage", business_confirmed, eligible, as_of),
+        "technical_lineage_coverage": _ratio_metric("technical_lineage_coverage", technical_confirmed, eligible, as_of),
         "evidence_coverage": _ratio_metric("evidence_coverage", evidence_with_mapping, mapping_total, as_of),
+        "open_question_rate": _ratio_metric("open_question_rate", open_question_objects, mapping_total, as_of),
+        "target_field_lineage_coverage": _ratio_metric("target_field_lineage_coverage", fields_with_resolved_lineage, field_count, as_of),
+        "lineage_unresolved_rate": _ratio_metric("lineage_unresolved_rate", lineage_unresolved_nodes, lineage_node_count, as_of),
         "review_completion_rate": _ratio_metric("review_completion_rate", completed_tasks, pending_tasks + completed_tasks, as_of),
         "review_sla_compliance": _ratio_metric("review_sla_compliance", max(completed_tasks - overdue_tasks, 0), completed_tasks, as_of),
         "high_risk_impact_count": _count_metric("high_risk_impact_count", high_risk_impacts, as_of),
@@ -79,6 +96,22 @@ def build_project_overview(db: Session, project_id: int, cycle_id: int | None = 
         },
         "filters": {"project_id": project_id, "reporting_cycle_id": cycle_id},
         "metrics": metrics,
+        "coverage_context": {
+            "eligible_field_scenario_pairs": eligible,
+            "numerator_statuses": ["confirmed", "approved"],
+            "excluded_numerator_statuses": ["draft", "pending", "rejected", "ai_suggested"],
+            "business_mapping_recorded": business_count,
+            "business_mapping_counted": business_confirmed,
+            "technical_lineage_recorded": technical_count,
+            "technical_lineage_counted": technical_confirmed,
+            "mapping_objects": mapping_total,
+            "mapping_objects_with_evidence": evidence_with_mapping,
+            "target_fields": field_count,
+            "target_fields_with_resolved_lineage": fields_with_resolved_lineage,
+            "lineage_nodes": lineage_node_count,
+            "lineage_unresolved_nodes": lineage_unresolved_nodes,
+            "open_question_objects": open_question_objects,
+        },
         "risk_distribution": [
             {"code": "missing_business_definition", "label": "缺少业务口径", "value": max(eligible - business_count, 0), "drill_target": "/fields"},
             {"code": "missing_technical_lineage", "label": "缺少技术血缘", "value": max(eligible - technical_count, 0), "drill_target": "/lineage"},
@@ -94,11 +127,19 @@ def _count(db: Session, model, *conditions) -> int:
     return int(db.scalar(select(func.count(model.id)).where(*conditions)) or 0)
 
 
+def _has_text(column):
+    """SQL predicate: the nullable text column holds a non-blank value."""
+
+    return func.length(func.trim(func.coalesce(column, ""))) > 0
+
+
 def _distinct_mapping_count(db: Session, mapping_type: str, mapping_ids) -> int:
     return int(db.scalar(select(func.count(func.distinct(MappingEvidenceReference.mapping_id))).where(MappingEvidenceReference.mapping_type == mapping_type, MappingEvidenceReference.mapping_id.in_(mapping_ids))) or 0)
 
 
-def _metric_payload(metric_code: str, numerator: int | float, denominator: int | float, as_of: datetime, *, scope: str | None = None) -> dict:
+def build_metric_payload(metric_code: str, numerator: int | float, denominator: int | float, as_of: datetime, *, scope: str | None = None) -> dict:
+    """Single governed payload builder shared by every dashboard/analytics surface."""
+
     definition = get_metric_definition(metric_code)
     value = None if denominator == 0 else numerator / denominator
     return {
@@ -125,12 +166,16 @@ def _metric_payload(metric_code: str, numerator: int | float, denominator: int |
 
 
 def _ratio_metric(metric_code: str, numerator: int, denominator: int, as_of: datetime) -> dict:
-    return _metric_payload(metric_code, numerator, denominator, as_of)
+    return build_metric_payload(metric_code, numerator, denominator, as_of)
 
 
 def _score_metric(metric_code: str, value: float, scope: str, as_of: datetime) -> dict:
-    return _metric_payload(metric_code, value, 1, as_of, scope=scope)
+    return build_metric_payload(metric_code, value, 1, as_of, scope=scope)
 
 
 def _count_metric(metric_code: str, value: int, as_of: datetime) -> dict:
-    return _metric_payload(metric_code, value, 1, as_of)
+    return build_metric_payload(metric_code, value, 1, as_of)
+
+
+# Backwards-compatible private alias: existing tests and callers import ``_metric_payload``.
+_metric_payload = build_metric_payload

@@ -8,6 +8,25 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, hasSession } from "@/lib/api";
 import { statusLabel } from "@/lib/product-language";
 
+type CoverageMetric = {
+  numerator: number;
+  denominator: number;
+  value?: number | null;
+  scope: string;
+  as_of?: string;
+  metric_code?: string;
+  definition?: {
+    description?: string;
+    numerator_definition?: string;
+    denominator_definition?: string;
+    excluded_population?: string;
+    eligible_population?: string;
+    version?: string;
+    owner?: string;
+    certification_status?: string;
+  };
+};
+
 type Dashboard = {
   [key: string]: unknown;
   readiness: { status: string; score: number; critical_blocker_count: number };
@@ -19,7 +38,8 @@ type Dashboard = {
   next_action?: { text: string; href: string } | null;
   as_of?: string;
   critical_blockers?: Array<{ code: string; message: string; severity?: string }>;
-  metric_definitions?: Record<string, { numerator: number; denominator: number; scope: string; as_of: string }>;
+  metric_definitions?: Record<string, CoverageMetric>;
+  coverage_context?: Record<string, number | string[]>;
 };
 
 type AnalyticsOverview = {
@@ -164,19 +184,34 @@ function MetricStrip({ analytics }: { analytics: AnalyticsOverview }) {
   const business = analytics.metrics.business_definition_coverage;
   const technical = analytics.metrics.technical_lineage_coverage;
   const evidence = analytics.metrics.evidence_coverage;
+  const lineage = analytics.metrics.target_field_lineage_coverage;
+  const unresolved = analytics.metrics.lineage_unresolved_rate;
+  const questions = analytics.metrics.open_question_rate;
   const review = analytics.metrics.review_completion_rate;
   const risk = analytics.metrics.high_risk_impact_count;
   const ratio = (metric?: { value: number | null; numerator: number; denominator: number }) => metric?.value == null ? "N/A" : `${Math.round(metric.value * 100)}%`;
-  return <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="统一治理指标"><Metric label="总体准备度" value={readiness?.value == null ? "N/A" : `${Math.round(readiness.value * 100)}%`} detail="实时准备度评分" /><Metric label="业务口径" value={ratio(business)} detail={business ? `${business.numerator}/${business.denominator}` : "暂无可计算对象"} /><Metric label="技术血缘" value={ratio(technical)} detail={technical ? `${technical.numerator}/${technical.denominator}` : "暂无可计算对象"} /><Metric label="证据完备" value={ratio(evidence)} detail={evidence ? `${evidence.numerator}/${evidence.denominator}` : "暂无可计算对象"} /><Metric label="审核完成" value={ratio(review)} detail={review ? `${review.numerator}/${review.denominator}` : "暂无可计算对象"} /><Metric label="高风险影响" value={risk ? String(risk.numerator) : "0"} detail="未闭环高风险影响" /></section>;
+  const detail = (metric?: { numerator: number; denominator: number }) => !metric ? "暂无可计算对象" : metric.denominator === 0 ? "暂无可计算对象" : `${metric.numerator}/${metric.denominator}`;
+  return <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-label="统一治理指标"><Metric label="总体准备度" value={readiness?.value == null ? "N/A" : `${Math.round(readiness.value * 100)}%`} detail="实时准备度评分" /><Metric label="业务口径" value={ratio(business)} detail={detail(business)} /><Metric label="技术血缘" value={ratio(technical)} detail={detail(technical)} /><Metric label="血缘覆盖" value={ratio(lineage)} detail={detail(lineage)} /><Metric label="未解析血缘" value={ratio(unresolved)} detail={detail(unresolved)} /><Metric label="证据完备" value={ratio(evidence)} detail={detail(evidence)} /><Metric label="审核完成" value={ratio(review)} detail={detail(review)} /><Metric label="待确认问题" value={ratio(questions)} detail={detail(questions)} /><Metric label="高风险影响" value={risk ? String(risk.numerator) : "0"} detail="未闭环高风险影响" /></section>;
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return <div className="border-b border-line px-1 py-2"><div className="stat-label">{label}</div><div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-ink">{value}</div><div className="mt-1 truncate text-[10px] text-slate-400">{detail}</div></div>;
 }
 
-function CoverageCard({ label, metric, href }: { label: string; metric?: { numerator: number; denominator: number; scope: string }; href: string }) {
-  const value = metric && metric.denominator > 0 ? `${Math.round((metric.numerator / metric.denominator) * 100)}%` : "暂无数据";
-  return <Link className="stat-card block transition hover:border-pine" href={href}><div className="stat-label">{label}</div><div className="stat-value text-lg">{value}</div><p className="mt-2 text-[11px] text-slate-500">{metric ? `分子 ${metric.numerator} / 分母 ${metric.denominator}` : "等待服务端指标"}</p><p className="mt-1 text-[10px] text-slate-400">{metric?.scope || "当前项目范围"}</p></Link>;
+function CoverageCard({ label, metric, href }: { label: string; metric?: CoverageMetric; href: string }) {
+  const value = !metric ? "等待服务端指标" : metric.denominator === 0 ? "暂无可计算对象" : metric.value == null ? "暂不可用" : `${Math.round(metric.value * 100)}%`;
+  const traceability = metric?.definition
+    ? `分子：${metric.definition.numerator_definition || "服务端口径"}；分母：${metric.definition.denominator_definition || "服务端口径"}；排除：${metric.definition.excluded_population || "无"}`
+    : undefined;
+  return (
+    <Link className="stat-card block transition hover:border-pine" href={href} title={traceability}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value text-lg">{value}</div>
+      <p className="mt-2 text-[11px] text-slate-500">{metric ? `分子 ${metric.numerator} / 分母 ${metric.denominator}` : "等待服务端指标"}</p>
+      <p className="mt-1 text-[10px] text-slate-400">{metric?.scope || "当前项目范围"}</p>
+      {metric?.definition?.version ? <p className="mt-1 text-[10px] text-slate-400">口径版本 {metric.definition.version} · {metric.definition.owner || "治理团队"}</p> : null}
+    </Link>
+  );
 }
 
 function ReportBrief({ data }: { data: Dashboard | null }) {

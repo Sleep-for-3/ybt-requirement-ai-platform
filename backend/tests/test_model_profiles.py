@@ -9,11 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.ai_runtime import ConnectionTestOutput, ModelProfileCreate, _configuration_issue, sanitize_base_url
-from app.services.llm.base import LLMConfigurationError
+from app.services.llm.base import LLMConfigurationError, LLMProviderError
 from app.services.llm.providers import ProviderRuntimeConfig
 from app.core.database import Base, get_db
 from app.core.settings import get_settings
 from app.main import app
+from app.models import ModelCallLog, Project
 from app.services.auth.dependencies import Principal, get_current_principal
 from app.services.task_queue.inflight import InFlightOperationGuard
 
@@ -119,6 +120,44 @@ def test_runtime_allows_transparent_proxy_fake_ip_benchmark_range(monkeypatch) -
     )
 
     runtime.validate()
+
+
+def test_runtime_allows_transparent_proxy_fake_ipv6_range(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.llm.providers.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (10, 1, 6, "", ("fdfe:dcba:9876::27", 443, 0, 0)),
+            (2, 1, 6, "", ("198.18.0.45", 443)),
+        ],
+    )
+    runtime = ProviderRuntimeConfig(
+        provider="openai_compatible",
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        api_key_env_name="DEEPSEEK_API_KEY",
+        api_key="test-only",
+        local_only=False,
+    )
+
+    runtime.validate()
+
+
+def test_runtime_rejects_real_private_ipv6_address(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.llm.providers.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(10, 1, 6, "", ("fd00::10", 443, 0, 0))],
+    )
+    runtime = ProviderRuntimeConfig(
+        provider="openai_compatible",
+        base_url="https://internal.vendor.example.net/v1",
+        model="example-model",
+        api_key_env_name="OPENAI_API_KEY",
+        api_key="test-only",
+        local_only=False,
+    )
+
+    with pytest.raises(LLMConfigurationError, match="non-public"):
+        runtime.validate()
 
 
 def test_connection_test_schema_only_accepts_ok_status() -> None:
@@ -276,6 +315,12 @@ def test_non_admin_only_sees_basic_active_profile_fields() -> None:
 
 @contextmanager
 def _client() -> Iterator[TestClient]:
+    with _client_with_session() as (client, _):
+        yield client
+
+
+@contextmanager
+def _client_with_session() -> Iterator[tuple[TestClient, sessionmaker]]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -295,9 +340,82 @@ def _client() -> Iterator[TestClient]:
     get_settings.cache_clear()
     try:
         with TestClient(app) as client:
-            yield client
+            yield client, session_factory
     finally:
         app.dependency_overrides.pop(get_db, None)
         get_settings.cache_clear()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_model_call_api_exposes_provider_failure_diagnostics() -> None:
+    with _client_with_session() as (client, session_factory):
+        session = session_factory()
+        try:
+            project = Project(name="Model diagnostics project")
+            session.add(project)
+            session.flush()
+            session.add(
+                ModelCallLog(
+                    project_id=project.id,
+                    prompt_key="scenario_business_mapping",
+                    prompt_version=1,
+                    provider="openai_compatible",
+                    model_name="example-model",
+                    request_hash="a" * 64,
+                    status="failed",
+                    latency_ms=42,
+                    token_usage_json={"usage_available": False},
+                    confidentiality_level="internal",
+                    error_type="provider_error",
+                    http_status=400,
+                    error_detail="HTTP 400: unsupported parameter max_completion_tokens",
+                )
+            )
+            session.commit()
+            project_id = project.id
+        finally:
+            session.close()
+
+        response = client.get(f"/api/projects/{project_id}/model-calls")
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["total"] == 1
+        item = payload["items"][0]
+        assert item["error_type"] == "provider_error"
+        assert item["http_status"] == 400
+        assert item["error_detail"] == "HTTP 400: unsupported parameter max_completion_tokens"
+
+
+def test_connection_test_endpoint_returns_provider_diagnostics(monkeypatch) -> None:
+    class FailingService:
+        provider = "openai_compatible"
+        model = "primary-model"
+        last_call = None
+
+        async def chat_structured(self, *_args, **_kwargs):
+            raise LLMProviderError(
+                "Model provider request failed",
+                error_type="provider_error",
+                http_status=403,
+                detail="HTTP 403: insufficient_quota for 13800138000",
+            )
+
+    monkeypatch.setattr(
+        "app.api.ai_runtime.get_interactive_llm_service",
+        lambda *_args, **_kwargs: FailingService(),
+    )
+    with _client_with_session() as (client, _):
+        response = client.post("/api/ai-runtime/test-chat", json={})
+
+    # The operator-facing connection test must state why the gateway refused
+    # the call, without leaking the account number inside the provider body.
+    assert response.status_code == 503, response.text
+    payload = response.json()
+    assert payload["error_code"] == "provider_error"
+    assert payload["retryable"] is True
+    detail = payload["detail"]
+    assert detail["http_status"] == 403
+    assert detail["model"] == "primary-model"
+    assert "insufficient_quota" in detail["provider_detail"]
+    assert "13800138000" not in detail["provider_detail"]

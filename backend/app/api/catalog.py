@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import CatalogColumn, CatalogImportBinding, CatalogSchema, CatalogTable, MartTable
 from app.schemas import (CatalogColumnRead,CatalogImportRequest,CatalogImportResult,CatalogSchemaRead,CatalogSearchRequest,CatalogSearchResponse,CatalogTableRead,PaginatedCatalogColumns,PaginatedCatalogTables)
-from app.services.metadata.catalog_service import import_mart_column, import_source_column, import_source_table, search_catalog
+from app.services.metadata.catalog_service import import_mart_column, import_source_column, import_source_table, like_pattern, search_catalog
 
 router=APIRouter(tags=["catalog"])
 
@@ -18,7 +18,9 @@ def tables(project_id:int,datasource_id:int|None=None,schema_name:str|None=None,
     q=select(CatalogTable).where(CatalogTable.project_id==project_id,CatalogTable.enabled.is_(True))
     if datasource_id:q=q.where(CatalogTable.datasource_id==datasource_id)
     if schema_name:q=q.where(CatalogTable.schema_name==schema_name)
-    if query:q=q.where((CatalogTable.table_name.contains(query))|(CatalogTable.table_comment.contains(query)))
+    if query:
+        pattern=like_pattern(query)
+        q=q.where((CatalogTable.table_name.ilike(pattern,escape="\\"))|(CatalogTable.table_comment.ilike(pattern,escape="\\")))
     total=db.scalar(select(func.count()).select_from(q.subquery())) or 0; items=list(db.scalars(q.order_by(CatalogTable.schema_name,CatalogTable.table_name).offset((page-1)*page_size).limit(page_size)).all())
     return PaginatedCatalogTables(items=items,total=total,page=page,page_size=page_size)
 
@@ -32,7 +34,9 @@ def table(table_id:int,db:Session=Depends(get_db)):
 def columns(table_id:int,page:int=Query(1,ge=1),page_size:int=Query(100,ge=1,le=200),query:str|None=None,include_disabled:bool=False,db:Session=Depends(get_db)):
     q=select(CatalogColumn).where(CatalogColumn.catalog_table_id==table_id)
     if not include_disabled:q=q.where(CatalogColumn.enabled.is_(True))
-    if query:q=q.where((CatalogColumn.column_name.contains(query))|(CatalogColumn.column_comment.contains(query)))
+    if query:
+        pattern=like_pattern(query)
+        q=q.where((CatalogColumn.column_name.ilike(pattern,escape="\\"))|(CatalogColumn.column_comment.ilike(pattern,escape="\\")))
     total=db.scalar(select(func.count()).select_from(q.subquery())) or 0; items=list(db.scalars(q.order_by(CatalogColumn.ordinal_position).offset((page-1)*page_size).limit(page_size)).all())
     return PaginatedCatalogColumns(items=items,total=total,page=page,page_size=page_size)
 

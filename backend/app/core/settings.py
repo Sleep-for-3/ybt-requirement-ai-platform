@@ -91,6 +91,22 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = 60
     embedding_retry_count: int = 2
     llm_api_key_env_name: str = "OPENAI_API_KEY"
+    # Ordered fallback models replayed when the primary endpoint answers with a
+    # model-level outage (HTTP 404, or 400 ``model_not_found``).  The optional
+    # base URL / key environment variable let the fallback point at a second
+    # provider (for example a domestic model) instead of the same relay.
+    llm_fallback_models: str = ""
+    llm_fallback_base_url: str = ""
+    llm_fallback_api_key_env_name: str = ""
+    # Provider round-trip budget.  Domestic relays and long reasoning models
+    # routinely need more than the historic 60 s default, so the value is
+    # configurable and bounded instead of hard-coded in the call sites.
+    llm_timeout_seconds: int = 60
+    # Synchronous, user-facing calls (knowledge Q&A, connection test, draft
+    # regeneration) get their own budget: background generation may wait for a
+    # slow provider, while an interactive request must answer or hand the user
+    # back the evidence it already retrieved instead of hanging.
+    llm_interactive_timeout_seconds: int = 90
 
     @property
     def resolved_llm_api_key(self) -> str:
@@ -178,6 +194,14 @@ class Settings(BaseSettings):
             add("error", "embedding_batch_size_invalid", "EMBEDDING_BATCH_SIZE must be between 1 and 256.")
         if not 0 <= self.embedding_retry_count <= 2:
             add("error", "embedding_retry_count_invalid", "EMBEDDING_RETRY_COUNT must be between 0 and 2.")
+        if not 1 <= self.llm_timeout_seconds <= 180:
+            add("error", "llm_timeout_invalid", "LLM_TIMEOUT_SECONDS must be between 1 and 180.")
+        if not 1 <= self.llm_interactive_timeout_seconds <= 180:
+            add(
+                "error",
+                "llm_interactive_timeout_invalid",
+                "LLM_INTERACTIVE_TIMEOUT_SECONDS must be between 1 and 180.",
+            )
         if self.hybrid_keyword_weight < 0 or self.hybrid_vector_weight < 0 or (
             self.hybrid_keyword_weight + self.hybrid_vector_weight <= 0
         ):

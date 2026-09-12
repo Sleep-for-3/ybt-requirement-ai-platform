@@ -49,6 +49,7 @@ const DETAIL_PARENTS = [
   [/^\/knowledge\/documents\/\d+$/, "/knowledge/documents"],
   [/^\/lineage\/changes\/\d+$/, "/lineage/changes"],
   [/^\/lineage\/fields\/\d+$/, "/lineage"],
+  [/^\/lineage\/nebula$/, "/lineage"],
   [/^\/lineage\/impacts\/\d+$/, "/lineage/changes"],
   [/^\/lineage\/scripts\/\d+$/, "/lineage/scripts"],
   [/^\/projects\/\d+\/(dashboard|members|onboarding|readiness)$/, "/projects"],

@@ -4,6 +4,7 @@ import argparse
 from hashlib import sha256
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -11,7 +12,7 @@ from time import perf_counter
 import tracemalloc
 
 from openpyxl import Workbook
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, inspect, make_url, select
 from sqlalchemy.orm import Session
 
 
@@ -32,12 +33,18 @@ from app.models import (  # noqa: E402
     MartToYbtMapping,
     ProductScenario,
     Project,
+    ScriptFile,
+    ScriptChangeSet,
+    ScriptFileVersion,
     ScenarioBusinessMapping,
     ScenarioTechnicalLineage,
     SourceToMartMapping,
+    StoredFile,
     TargetField,
     TargetTable,
+    User,
 )
+from app.models.governance import Institution  # noqa: E402
 from app.services.project_readiness import build_project_readiness  # noqa: E402
 from app.services.task_queue import InlineTaskQueue  # noqa: E402
 
@@ -71,9 +78,20 @@ def main() -> None:
     parser.add_argument("--small", action="store_true", help="Use the CI-sized dataset while exercising the same code paths")
     parser.add_argument("--output", type=Path, help="Write JSON metrics to this path")
     parser.add_argument("--excel-output", type=Path, help="Keep the generated formal Excel package")
+    parser.add_argument(
+        "--database-url",
+        help=(
+            "演练目标数据库；缺省为临时 SQLite。非 SQLite 目标会被要求是空库"
+            "（性能结构由本脚本自建，禁止指向任何真实业务库）。也可用 PERFORMANCE_DATABASE_URL 指定。"
+        ),
+    )
     args = parser.parse_args()
     scale = SMALL_SCALE if args.small else FULL_SCALE
-    metrics, workbook_bytes = run_baseline(scale, profile="small" if args.small else "full")
+    metrics, workbook_bytes = run_baseline(
+        scale,
+        profile="small" if args.small else "full",
+        database_url=args.database_url or os.getenv("PERFORMANCE_DATABASE_URL"),
+    )
     rendered = json.dumps(metrics, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -84,11 +102,31 @@ def main() -> None:
     print(rendered)
 
 
-def run_baseline(scale: dict[str, int], *, profile: str) -> tuple[dict, bytes]:
+def _guard_target_database(engine) -> None:
+    """非 SQLite 目标必须是空库：本脚本会自建整套结构，指向真实库等于污染数据。"""
+    if engine.dialect.name == "sqlite":
+        return
+    existing = inspect(engine).get_table_names()
+    if existing:
+        raise SystemExit(
+            f"拒绝在非空 {engine.dialect.name} 数据库上运行性能基线（已存在 {len(existing)} 张表）；"
+            "请改用专用空库。"
+        )
+
+
+def run_baseline(scale: dict[str, int], *, profile: str, database_url: str | None = None) -> tuple[dict, bytes]:
     tracemalloc.start()
     with tempfile.TemporaryDirectory(prefix="ybt-performance-") as temporary:
-        database_path = Path(temporary) / "baseline.db"
-        engine = create_engine(f"sqlite:///{database_path}")
+        if database_url:
+            # 只打印脱敏后的目标（hide_password），避免把口令写进日志。
+            target = make_url(database_url)
+            print(f"[performance-baseline] target={target.render_as_string(hide_password=True)}")
+            engine = create_engine(database_url)
+            _guard_target_database(engine)
+        else:
+            database_path = Path(temporary) / "baseline.db"
+            engine = create_engine(f"sqlite:///{database_path}")
+        dialect = engine.dialect.name
         Base.metadata.create_all(engine)
         try:
             with Session(engine) as db:
@@ -136,7 +174,7 @@ def run_baseline(scale: dict[str, int], *, profile: str) -> tuple[dict, bytes]:
                     job_type="performance_formal_excel_render",
                     institution_id=None,
                     project_id=ids["project_id"],
-                    created_by=0,
+                    created_by=1,
                     idempotency_key=f"performance-baseline-{profile}",
                     payload_summary={"sanitized_fixture": True, "row_count": len(delivery_rows)},
                     handler=render_handler,
@@ -156,6 +194,7 @@ def run_baseline(scale: dict[str, int], *, profile: str) -> tuple[dict, bytes]:
     tracemalloc.stop()
     return {
         "profile": profile,
+        "database_dialect": dialect,
         "sanitized_fixture": True,
         "requested_scale": scale,
         "actual_counts": actual_counts,
@@ -331,6 +370,49 @@ def _create_dataset(db: Session, scale: dict[str, int]) -> dict[str, int]:
     } for index in range(scale["knowledge_units"])])
 
     node_count = max(2, min(scale["lineage_edges"] + 1, field_count * 2))
+    # lineage_edges.script_file_version_id 是 NOT NULL 外键：SQLite 默认不校验外键，
+    # PostgreSQL 会直接拒绝插入，因此 fixture 必须补齐"机构 → 用户 → 存储文件 → 脚本 → 版本"链路。
+    institution = Institution(id=1, institution_code="PERF_SANITIZED", institution_name="脱敏性能基线机构")
+    owner = User(id=1, username="performance-fixture-owner", display_name="性能基线夹具账号")
+    stored_file = StoredFile(
+        id=1,
+        institution_id=1,
+        project_id=project_id,
+        storage_key="performance-fixture://sanitized.sql",
+        original_file_name="sanitized_performance.sql",
+        content_type="text/plain",
+        byte_size=128,
+        content_hash="b" * 64,
+        created_by=1,
+    )
+    script_file = ScriptFile(
+        id=1,
+        project_id=project_id,
+        relative_path="sanitized_performance.sql",
+        file_name="sanitized_performance.sql",
+        file_type="sql",
+        current_version_no=1,
+    )
+    # 每次变更影响都绑定一个独立版本：script_change_sets 上唯一约束
+    # (script_file_id, from_version_id, to_version_id) 要求版本对唯一。
+    change_count = max(1, scale["impacts"])
+    script_versions = [
+        ScriptFileVersion(
+            id=index + 1,
+            project_id=project_id,
+            script_file_id=1,
+            version_no=index + 1,
+            file_hash=f"{index + 1:064d}",
+            normalized_hash=f"{index + 1001:064d}",
+            raw_content_storage_file_id=1,
+            parse_status="completed",
+            dialect="ansi",
+            created_by=1,
+        )
+        for index in range(change_count)
+    ]
+    db.add_all([institution, owner, stored_file, script_file, *script_versions])
+    db.flush()
     db.bulk_insert_mappings(LineageNode, [{
         "id": index + 1,
         "project_id": project_id,
@@ -356,6 +438,17 @@ def _create_dataset(db: Session, scale: dict[str, int]) -> dict[str, int]:
         "evidence_json": {"fixture": True},
         "enabled": True,
     } for index in range(scale["lineage_edges"])])
+    db.bulk_insert_mappings(ScriptChangeSet, [{
+        "id": index + 1,
+        "project_id": project_id,
+        "script_file_id": 1,
+        "from_version_id": None,
+        "to_version_id": index + 1,
+        "change_type": "modify",
+        "status": "completed",
+        "summary_json": {"fixture": True},
+        "created_by": 1,
+    } for index in range(change_count)])
     db.bulk_insert_mappings(ImpactAnalysis, [{
         "id": index + 1,
         "project_id": project_id,

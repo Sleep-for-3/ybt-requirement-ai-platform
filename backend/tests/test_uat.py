@@ -20,6 +20,36 @@ from app.models import RetrievalLog
 from app.services.uat.builtin_checks import _knowledge_evidence
 
 
+def _migration_head_from_files() -> str:
+    """Head revision read straight from ``alembic/versions``.
+
+    The evidence package reports the repository migration head; reading the
+    migration files independently keeps that assertion meaningful without
+    hard-coding a value that breaks on every new revision.
+    """
+
+    versions = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    for path in versions.glob("*.py"):
+        if path.name.startswith("_"):
+            continue
+        revision = parent = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("revision = "):
+                revision = line.split("=", 1)[1].strip().strip('"')
+            elif line.startswith("down_revision = "):
+                value = line.split("=", 1)[1].strip()
+                parent = value.strip('"') if value != "None" else None
+        if revision:
+            revisions.add(revision)
+            if parent:
+                parents.add(parent)
+    heads = revisions - parents
+    assert len(heads) == 1, f"expected exactly one migration head, found {sorted(heads)}"
+    return heads.pop()
+
+
 def test_builtin_uat_suites_are_initialized_idempotently_in_display_order() -> None:
     with _client() as client:
         project = _post(client, "/api/projects", {"name": "示例 UAT 项目"})
@@ -242,7 +272,11 @@ def test_uat_pack_rejects_path_traversal_and_exports_sanitized_evidence(monkeypa
             assert not any(".env" in name or "token" in name.lower() or "database" in name.lower() for name in names)
             assert all(not name.startswith("/") and ".." not in name for name in names)
             version = json.loads(archive.read("version.json"))
-            assert version["alembic_head_revision"] == "202608290021"
+            # The evidence package records the repository's current migration
+            # head, so compare it with an independent reading of
+            # ``alembic/versions`` instead of a value that breaks on every new
+            # revision.
+            assert version["alembic_head_revision"] == _migration_head_from_files()
             assert version["alembic_revision"] is None
 
 

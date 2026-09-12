@@ -21,6 +21,11 @@ export class ApiError extends Error {
 export function formatApiErrorText(text: string, status?: number): string;
 export function parseApiError(text: string, status: number): ApiError;
 export function normalizeRequestError(error: unknown): Error | ApiError;
+export function shouldRefreshSession(
+  path: string,
+  response: ApiResponse,
+  hasRefreshToken: boolean
+): boolean;
 export function throwApiError<T = never>(
   response: ApiResponse,
   path: string,

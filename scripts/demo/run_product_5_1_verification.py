@@ -65,7 +65,9 @@ def run_verification(api: Api, runtime_root: Path, *, username: str, password: s
 
     change_set = api.get(f"/lineage/changes/{v2_upload['change_set_id']}")
     impact = api.get(f"/lineage/impacts/{v2_upload['impact_id']}")
-    graph = api.get(f"/projects/{project_id}/lineage/graph", params={"depth": 5, "limit": 2000})
+    # Project-wide graph reads the full revision snapshot; direction/depth
+    # require an explicit root and are covered by the field-level calls below.
+    graph = api.get(f"/projects/{project_id}/lineage/graph", params={"limit": 2000})
     unresolved = api.get(f"/projects/{project_id}/lineage/unresolved", params={"limit": 500})
     workspace = api.get(
         f"/projects/{project_id}/requirement-workspace",

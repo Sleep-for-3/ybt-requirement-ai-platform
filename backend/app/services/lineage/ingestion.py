@@ -18,6 +18,7 @@ from app.services.lineage.shell_parser import parse_shell_dependencies
 from app.services.lineage.resolver import resolve_lineage_node
 from app.services.lineage.impact_analyzer import persist_change_impact
 from app.services.lineage.version_diff import ChangeItemSpec, VersionDiffResult, compare_shell_versions, compare_sql_versions
+from app.services.lineage.revisions import LineageRevisionService
 from app.services.storage.base import StorageService
 from app.services.governance.audit import record_audit
 
@@ -36,6 +37,7 @@ class IngestionResult:
     change_set: ScriptChangeSet | None = None
     impact: ImpactAnalysis | None = None
     change_categories: tuple[str, ...] = ()
+    lineage_revision_id: int | None = None
 
 
 class ScriptIngestionService:
@@ -57,7 +59,15 @@ class ScriptIngestionService:
         code_repository_id: int | None = None,
         git_commit_sha: str | None = None,
         change_note: str | None = None,
+        build_revision: bool = True,
     ) -> IngestionResult:
+        """Store one script version and project its parser facts.
+
+        ``build_revision`` exists for batch callers: a repository sync or a ZIP
+        upload must publish a single atomic project revision for the whole
+        batch instead of one intermediate revision per file. Individual
+        uploads keep the default single-file behaviour.
+        """
         safe_path = validate_script_path(relative_path or file_name)
         suffix = Path(file_name).suffix.lower()
         if suffix not in ALLOWED_SCRIPT_EXTENSIONS:
@@ -225,9 +235,23 @@ class ScriptIngestionService:
             actor_user_id=actor_id, institution_id=project.institution_id, project_id=project.id,
             after={"script_file_id": script_file.id, "version_no": version.version_no, "file_hash": version.file_hash, "parse_status": version.parse_status, "change_set_id": change_set.id if change_set else None},
         )
+        # Build a project-level immutable view after the parser facts and
+        # impact analysis are present.  Low-risk, fully parsed snapshots can
+        # become current automatically; semantic/high-risk or partial parses
+        # remain reviewable and never replace the previous published graph.
+        revision_id: int | None = None
+        if build_revision:
+            revision_result = LineageRevisionService(self.db).build(
+                project.id,
+                created_by=actor_id,
+                trigger_type="script_ingest",
+                source_commit_sha=git_commit_sha,
+                publish=version.parse_status == "parsed" and (impact is None or impact.severity == "low"),
+            )
+            revision_id = revision_result.revision.id
         self.db.commit()
         self.db.refresh(version)
-        return IngestionResult(script_file, version, stored_file, False, self._node_count(version.id), self._edge_count(version.id), change_set, impact, categories)
+        return IngestionResult(script_file, version, stored_file, False, self._node_count(version.id), self._edge_count(version.id), change_set, impact, categories, revision_id)
 
     def _persist_shell(self, project: Project, script_file: ScriptFile, version: ScriptFileVersion, content: str) -> None:
         result = parse_shell_dependencies(content)

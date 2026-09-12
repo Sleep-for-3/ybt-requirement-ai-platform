@@ -10,7 +10,7 @@ from app.models import (
     MartField, MartTable, MartToYbtMapping, MetadataImportDocument, MetadataSyncTask, NaturalLanguageTask,
     ProductScenario, RagEvaluationCase, RagEvaluationRun, ScenarioBusinessMapping, ScenarioTechnicalLineage,
     SourceField, SourceTable, SourceToMartMapping, TargetField, TargetTable, TemplateDocument,
-    TraceabilityTemplateDocument, CodeRepository, LineageNode, ScriptFile, ScriptChangeSet, ImpactAnalysis,
+    TraceabilityTemplateDocument, CodeRepository, LineageNode, LineageRevision, ScriptFile, ScriptChangeSet, ImpactAnalysis,
     DataQualityExpectation,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
@@ -57,6 +57,14 @@ async def guard_project_resource(
 def _permission(method: str, path: str) -> str:
     if "export" in path:
         return "export"
+    if "/requirement-workspace/snapshots" in path:
+        return "deliverable.view" if method == "GET" else "deliverable.generate"
+    if "/lineage/revisions" in path:
+        if path.endswith("/publish"):
+            return "lineage.manage"
+        if path.endswith("/rebuild"):
+            return "lineage.manage"
+        return "lineage.view"
     if "/semantic" in path:
         # Semantic endpoints enforce their fine-grained business/review/knowledge
         # permissions themselves.  The shared resource guard only establishes
@@ -95,7 +103,7 @@ def _path_resource(db: Session, path: str, params: dict):
         ("lineage_id", ScenarioTechnicalLineage), ("scenario_id", ProductScenario), ("system_id", BusinessSystem),
         ("run_id", RagEvaluationRun), ("case_id", RagEvaluationCase), ("unit_id", KnowledgeUnit),
         ("node_id", LineageNode), ("script_file_id", ScriptFile), ("change_set_id", ScriptChangeSet),
-        ("impact_id", ImpactAnalysis),
+        ("impact_id", ImpactAnalysis), ("revision_id", LineageRevision),
         ("expectation_id", DataQualityExpectation),
         ("repository_id", CodeRepository),
     ]

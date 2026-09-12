@@ -5,7 +5,8 @@ import {
   ApiError,
   formatApiErrorText,
   normalizeRequestError,
-  readApiResponse
+  readApiResponse,
+  shouldRefreshSession
 } from "../lib/http-response.mjs";
 
 const ACCESS_TOKEN_KEY = "ybt:access-token";
@@ -155,4 +156,20 @@ test("network errors carry a machine-readable classification", () => {
   assert.equal(error.message, "无法连接服务");
   assert.equal(error.errorCode, "network_error");
   assert.equal(error.status, 0);
+});
+
+test("expired access tokens are renewed silently instead of bouncing to the login page", () => {
+  assert.equal(shouldRefreshSession("/projects/1/dashboard", { status: 401 }, true), true);
+  assert.equal(shouldRefreshSession("/scenario-technical-lineages/1/adopt-ai-draft", { status: 401 }, true), true);
+});
+
+test("session renewal is skipped without a refresh token or for non-401 answers", () => {
+  assert.equal(shouldRefreshSession("/projects/1/dashboard", { status: 401 }, false), false);
+  assert.equal(shouldRefreshSession("/projects/1/dashboard", { status: 403 }, true), false);
+  assert.equal(shouldRefreshSession("/projects/1/dashboard", { status: 200 }, true), false);
+});
+
+test("login and refresh endpoints keep their own 401 semantics", () => {
+  assert.equal(shouldRefreshSession("/auth/login", { status: 401 }, true), false);
+  assert.equal(shouldRefreshSession("/auth/refresh", { status: 401 }, true), false);
 });

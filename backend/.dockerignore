@@ -3,9 +3,19 @@
 !.env.example
 __pycache__/
 .pytest_cache/
+# pytest writes its basetemp directories with an execute-only mode when the
+# suite runs as root inside a container; BuildKit then fails the whole build
+# while walking the context, so these artifacts must never be shipped.
+.pytest-basetemp*/
+.smoke-run/
 .venv/
 venv/
 *.db
+# Anchor the runtime storage directory to the context root: an unanchored
+# ``storage/`` pattern also matches ``app/services/storage/`` and would strip a
+# real source package from the production image.
+/storage/
 dev_storage*/
 smoke_storage_*/
+smoke_storage/
 uat_local_packs/

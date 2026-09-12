@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-basetemp/
+.pytest-basetemp*/
 .mypy_cache/
 .ruff_cache/
 .venv/
@@ -21,10 +23,14 @@ npm-debug.log*
 /storage/
 /backend/storage/
 /backend/dev_storage*/
+/backend/.smoke-run/
 /uat_local_packs/
 /.local-run/
 /.demo_runtime/
 *.db
+
+# Migration-history reconstruction probe (scripts/migration/frozen_schema_gen.py)
+/.tmp-migration-probe/
 
 # Docker and OS
 *.pid

@@ -12,6 +12,7 @@ from app.models import (
 )
 from app.services.auth.dependencies import RealPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.services.analytics.metric_query_service import build_metric_payload
 from app.services.project_readiness import build_project_readiness
 
 
@@ -24,6 +25,8 @@ def project_dashboard(project_id: int, principal: RealPrincipal, target_table_id
     field_filter = [TargetField.project_id == project_id]
     if target_table_id is not None: field_filter.append(TargetField.target_table_id == target_table_id)
     field_ids = select(TargetField.id).where(*field_filter)
+    enabled_scenarios = select(ProductScenario.id).where(ProductScenario.project_id == project_id, ProductScenario.enabled.is_(True))
+    enabled_scenario_count = db.scalar(select(func.count()).select_from(enabled_scenarios.subquery())) or 0
     business_filter = [ScenarioBusinessMapping.project_id == project_id, ScenarioBusinessMapping.target_field_id.in_(field_ids)]
     technical_filter = [ScenarioTechnicalLineage.project_id == project_id, ScenarioTechnicalLineage.target_field_id.in_(field_ids)]
     if scenario_id is not None:
@@ -69,17 +72,40 @@ def project_dashboard(project_id: int, principal: RealPrincipal, target_table_id
     readiness = build_project_readiness(db, project_id)
     next_dimension = next((item for item in readiness["dimensions"].values() if item["status"] != "ready"), None)
     if evidence_completeness == "complete": counts["without_evidence_count"] = 0
-    eligible = counts["field_count"] * max(counts["scenario_count"], 1)
-    mapping_objects = counts["business_mapping_count"] + counts["technical_lineage_count"] + counts["source_mart_mapping_count"] + counts["mart_ybt_mapping_count"]
+    # Honest coverage: the eligible population is target fields x ENABLED scenarios, the
+    # numerator is the in-scope mapping/linkage objects with a formal confirmation, and an
+    # empty denominator stays ``value: null`` instead of being clamped to 0%.
+    eligible = counts["field_count"] * enabled_scenario_count
+    confirmed_business_in_scope = _count(
+        db, ScenarioBusinessMapping, *business_filter,
+        ScenarioBusinessMapping.scenario_id.in_(enabled_scenarios),
+        ScenarioBusinessMapping.business_confirm_status.in_(("confirmed", "approved")),
+    )
+    confirmed_technical_in_scope = _count(
+        db, ScenarioTechnicalLineage, *technical_filter,
+        ScenarioTechnicalLineage.scenario_id.in_(enabled_scenarios),
+        ScenarioTechnicalLineage.tech_confirm_status.in_(("confirmed", "approved")),
+    )
+    mapping_objects = counts["business_mapping_count"] + counts["technical_lineage_count"]
+    evidence_objects = _distinct_evidence_objects(db, "scenario_business", business_ids) + _distinct_evidence_objects(db, "scenario_technical", technical_ids)
     return {
         **counts,
         "readiness": {"status": readiness["overall_status"], "score": readiness["score"], "critical_blocker_count": len(readiness["critical_blockers"])},
         "as_of": now.isoformat(),
         "critical_blockers": readiness["critical_blockers"][:10],
         "metric_definitions": {
-            "regulatory_coverage": {"numerator": min(counts["business_confirmed_count"], eligible), "denominator": eligible, "scope": "当前项目启用场景 × 目标字段", "as_of": now.isoformat()},
-            "technical_lineage_coverage": {"numerator": min(counts["technical_confirmed_count"], eligible), "denominator": eligible, "scope": "当前项目启用场景 × 目标字段", "as_of": now.isoformat()},
-            "evidence_coverage": {"numerator": min(counts["evidence_reference_count"], mapping_objects), "denominator": mapping_objects, "scope": "当前项目全部业务/技术/双层映射对象", "as_of": now.isoformat()},
+            "regulatory_coverage": build_metric_payload("business_definition_coverage", confirmed_business_in_scope, eligible, now),
+            "technical_lineage_coverage": build_metric_payload("technical_lineage_coverage", confirmed_technical_in_scope, eligible, now),
+            "evidence_coverage": build_metric_payload("evidence_coverage", evidence_objects, mapping_objects, now),
+        },
+        "coverage_context": {
+            "eligible_field_scenario_pairs": eligible,
+            "enabled_scenario_count": enabled_scenario_count,
+            "numerator_statuses": ["confirmed", "approved"],
+            "business_mapping_counted": confirmed_business_in_scope,
+            "technical_lineage_counted": confirmed_technical_in_scope,
+            "mapping_objects": mapping_objects,
+            "mapping_objects_with_evidence": evidence_objects,
         },
         "recent_failed_jobs": [{"id": job.id, "job_type": job.job_type, "status": job.status, "error_message": job.error_message, "finished_at": job.finished_at} for job in failed],
         "latest_formal_version": None if latest_version is None else {"id": latest_version.id, "package_id": latest_version.deliverable_package_id, "version_no": latest_version.version_no, "approved_at": latest_version.approved_at},
@@ -106,3 +132,9 @@ def _without_evidence(db, business_ids, technical_ids):
     business_evidence = db.scalar(select(func.count(func.distinct(MappingEvidenceReference.mapping_id))).where(MappingEvidenceReference.mapping_type == "scenario_business", MappingEvidenceReference.mapping_id.in_(business_ids))) or 0
     technical_evidence = db.scalar(select(func.count(func.distinct(MappingEvidenceReference.mapping_id))).where(MappingEvidenceReference.mapping_type == "scenario_technical", MappingEvidenceReference.mapping_id.in_(technical_ids))) or 0
     return max(business_total - business_evidence, 0) + max(technical_total - technical_evidence, 0)
+
+
+def _distinct_evidence_objects(db, mapping_type: str, mapping_ids) -> int:
+    """Count in-scope mapping objects that carry at least one evidence reference."""
+
+    return int(db.scalar(select(func.count(func.distinct(MappingEvidenceReference.mapping_id))).where(MappingEvidenceReference.mapping_type == mapping_type, MappingEvidenceReference.mapping_id.in_(mapping_ids))) or 0)

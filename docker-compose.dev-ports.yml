@@ -1,0 +1,21 @@
+# Local development override.
+#
+# Production must NOT publish datastore ports.  Workstations that need to
+# reach PostgreSQL/Redis/Milvus directly can layer this file on top:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev-ports.yml up -d
+#
+# It only publishes the dependency ports on the loopback interface.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  milvus:
+    ports:
+      - "127.0.0.1:19530:19530"

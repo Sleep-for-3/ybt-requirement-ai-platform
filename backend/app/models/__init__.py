@@ -76,6 +76,7 @@ from app.models.governance import (
 )
 from app.models.lineage import (
     CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate,
+    LineageRevision, LineageRevisionEdge, LineageRevisionNode,
     ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion,
     SqlStatement, TemplateVariable,
 )
@@ -91,6 +92,7 @@ from app.models.uat import (
 from app.models.semantic import SemanticBinding, SemanticConcept, SemanticConceptVersion, SemanticRelation
 from app.models.quality import DataQualityExpectation, DataQualityExpectationBinding
 from app.models.analytics import MetricSnapshot, ReportingCycle
+from app.models.requirement_snapshot import StructuredRequirementSnapshot
 
 __all__ = [
     "AuditLog",
@@ -178,6 +180,9 @@ __all__ = [
     "LineageEdge",
     "LineageNode",
     "LineageResolutionCandidate",
+    "LineageRevision",
+    "LineageRevisionNode",
+    "LineageRevisionEdge",
     "ScriptChangeItem",
     "ScriptChangeSet",
     "ScriptDependency",
@@ -193,6 +198,7 @@ __all__ = [
     "DataQualityExpectationBinding",
     "MetricSnapshot",
     "ReportingCycle",
+    "StructuredRequirementSnapshot",
     "CaliberComparison",
     "DeliverableEvidenceItem",
     "DeliverableFieldItem",

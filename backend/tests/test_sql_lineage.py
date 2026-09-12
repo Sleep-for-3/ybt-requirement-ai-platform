@@ -4,10 +4,12 @@ import base64
 from datetime import date
 from pathlib import Path
 from io import BytesIO
+import shutil
 from types import SimpleNamespace
 from zipfile import ZipFile
 from openpyxl import load_workbook
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -159,8 +161,11 @@ def test_manual_sql_upload_is_version_idempotent_and_queryable(tmp_path: Path, m
         assert second.json()["version_id"] == first.json()["version_id"]
         assert second.json()["deduplicated"] is True
 
-        graph = client.get(f"/api/projects/{project['id']}/lineage/graph?direction=both&depth=3")
+        # A project-wide graph is a full revision snapshot: direction/depth
+        # are only accepted together with an explicit root_type/root_id.
+        graph = client.get(f"/api/projects/{project['id']}/lineage/graph")
         assert graph.status_code == 200, graph.text
+        assert graph.json()["traversal"]["direction_applied"] is False
         assert {node["logical_name"] for node in graph.json()["nodes"]} >= {
             "ODS.CUSTOMER.CERT_TYPE",
             "MART.TARGET.CERT_TYPE",
@@ -439,6 +444,8 @@ def test_zip_upload_runs_as_idempotent_retryable_background_job(tmp_path: Path, 
 
 
 def test_git_reader_does_not_execute_checkout_hooks(tmp_path: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git executable is required to exercise the repository reader")
     repository = tmp_path / "repo"
     repository.mkdir()
     subprocess.run(["git", "init", "-b", "main"], cwd=repository, check=True, capture_output=True)

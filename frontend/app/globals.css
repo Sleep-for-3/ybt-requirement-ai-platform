@@ -127,3 +127,87 @@ textarea {
     @apply mt-1.5 text-2xl font-semibold tabular-nums tracking-tight text-ink;
   }
 }
+
+/* 数据星云：深色画布 + 发光节点 + 只表达“结构连接关系”的流动连线。
+   动效在 prefers-reduced-motion 下必须关闭；连线不表示脚本正在运行。 */
+.nebula-canvas {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 16%, rgba(56, 189, 248, 0.18), transparent 42%),
+    radial-gradient(circle at 78% 10%, rgba(52, 211, 153, 0.15), transparent 46%),
+    radial-gradient(circle at 52% 88%, rgba(167, 139, 250, 0.16), transparent 54%),
+    #050b18;
+}
+
+.nebula-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.nebula-column-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.nebula-node {
+  position: absolute;
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.92));
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.6),
+    0 14px 30px -20px rgba(56, 189, 248, 0.8);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease, border-color 0.16s ease;
+}
+
+.nebula-node:hover {
+  box-shadow:
+    0 0 0 1px rgba(148, 163, 184, 0.45),
+    0 20px 38px -20px rgba(56, 189, 248, 0.9);
+  transform: translateY(-1px);
+}
+
+.nebula-node:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.nebula-node[data-dimmed="true"] {
+  opacity: 0.28;
+}
+
+@keyframes nebula-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+.nebula-edge-flow {
+  animation: nebula-flow 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nebula-edge-flow {
+    animation: none;
+  }
+
+  .nebula-node {
+    transition: none;
+  }
+
+  .nebula-node:hover {
+    transform: none;
+  }
+}

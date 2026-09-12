@@ -6,13 +6,20 @@ from app.services.llm.prompt_runtime import (
     execute_runtime_chat,
     prepare_model_input,
 )
+from app.services.llm.base import LLMRuntimeError
 from app.services.llm.structured_outputs import RegulatoryFieldExplanationOutput
 from app.services.retrieval import HybridRetriever
 
 from .citation_validator import validate_citations
 
 
-async def grounded_answer(db, project_id, query, **filters):
+# A slow or unavailable provider must not turn a grounded Q&A into an HTTP 500:
+# the citations are already known, so the answer degrades to "evidence only,
+# conclusion unconfirmed" and the failure stays visible through the audit trail.
+DEGRADED_ANSWER_TEXT = "模型生成暂时不可用，以下为检索到的证据，结论待确认。"
+
+
+async def grounded_answer(db, project_id, query, *, interactive: bool = True, **filters):
     retrieval_log, items = HybridRetriever(db).search(
         project_id,
         query,
@@ -31,6 +38,7 @@ async def grounded_answer(db, project_id, query, **filters):
             "unsupported_claims": [],
             "open_questions": ["请补充监管答疑、历史口径或人工确认记录。"],
             "retrieval_log_id": retrieval_log.id,
+            "answer_status": "needs_confirmation",
         }
 
     citations = [
@@ -62,15 +70,19 @@ async def grounded_answer(db, project_id, query, **filters):
         db=db,
         project_id=project_id,
     )
-    output = await execute_runtime_chat(
-        db,
-        project_id,
-        runtime,
-        model_input,
-        RegulatoryFieldExplanationOutput,
-        confidentiality=_highest_confidentiality(items),
-        retrieval_log_id=retrieval_log.id,
-    )
+    try:
+        output = await execute_runtime_chat(
+            db,
+            project_id,
+            runtime,
+            model_input,
+            RegulatoryFieldExplanationOutput,
+            confidentiality=_highest_confidentiality(items),
+            retrieval_log_id=retrieval_log.id,
+            interactive=interactive,
+        )
+    except LLMRuntimeError as exc:
+        return _degraded_answer(citations, retrieval_log.id, exc)
     answer = str(output.get("answer") or "").strip()
     supported_claims = _string_list(output.get("supported_claims"))
     unsupported_claims = _string_list(output.get("unsupported_claims"))
@@ -101,6 +113,23 @@ async def grounded_answer(db, project_id, query, **filters):
         "open_questions": open_questions
         or ["来源字段和适用场景仍需业务与科技人员确认。"],
         "retrieval_log_id": retrieval_log.id,
+        "answer_status": "grounded",
+    }
+
+
+def _degraded_answer(citations, retrieval_log_id, exc: LLMRuntimeError) -> dict:
+    return {
+        "answer": DEGRADED_ANSWER_TEXT,
+        "confidence_level": "low",
+        "citations": citations,
+        "supported_claims": [],
+        "unsupported_claims": [],
+        "open_questions": [
+            f"模型生成服务暂时不可用（{exc.error_type}），请稍后重试或人工确认引用内容。"
+        ],
+        "retrieval_log_id": retrieval_log_id,
+        "answer_status": "degraded",
+        "degraded_reason": exc.error_type,
     }
 
 

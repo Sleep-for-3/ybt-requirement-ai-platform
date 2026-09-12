@@ -33,6 +33,11 @@ METRIC_REGISTRY: dict[str, MetricDefinition] = {
         "存在技术血缘记录的 eligible 字段-场景对", "项目目标字段 × 启用业务场景", "启用场景与目标字段的笛卡尔积", "停用场景、无效项目字段",
         ("institution", "project", "reporting_cycle", "target_table", "scenario", "as_of"), "技术治理团队",
     ),
+    "target_field_lineage_coverage": MetricDefinition(
+        "target_field_lineage_coverage", "目标字段血缘覆盖率", "目标字段中至少存在一个已解析血缘节点的比例。", "ratio",
+        "至少存在一个 unresolved_flag=false 的 LineageNode 的项目目标字段", "项目内全部目标字段", "当前项目目标字段", "仅有未解析节点或完全没有血缘节点的字段；端到端完整性由 Phase D 路径接口按需计算",
+        ("institution", "project", "reporting_cycle", "target_table", "as_of"), "技术治理团队",
+    ),
     "evidence_coverage": MetricDefinition(
         "evidence_coverage", "证据完备率", "至少绑定一条合格证据的口径映射对象比例。", "ratio",
         "至少拥有一条 Evidence Reference 的业务/技术 Mapping 对象", "项目内业务/技术 Mapping 对象总数", "当前项目业务与技术 Mapping", "空 Mapping、停用项目范围外对象",
@@ -86,4 +91,3 @@ def get_metric_definition(metric_code: str) -> MetricDefinition:
         return METRIC_REGISTRY[metric_code]
     except KeyError as exc:
         raise KeyError(f"Unknown governed metric: {metric_code}") from exc
-

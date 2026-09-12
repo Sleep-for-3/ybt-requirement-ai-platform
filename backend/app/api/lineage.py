@@ -1,28 +1,52 @@
 import re
+from collections import defaultdict
+from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.settings import get_settings
-from app.models import BackgroundJob, BackgroundJobItem, CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate, Project, RegulatoryKnowledgeItem, ReviewTask, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, SemanticConcept, SemanticConceptVersion, StoredFile, TargetField, WorkflowInstance
+from app.models import BackgroundJob, BackgroundJobItem, CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate, LineageRevision, Project, RegulatoryKnowledgeItem, ReviewTask, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, SemanticConcept, SemanticConceptVersion, StoredFile, TargetField, WorkflowInstance
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.services.asset_display import AssetDisplayResolver
 from app.services.lineage.archive_ingestion import read_safe_script_archive
 from app.services.lineage.ingestion import ScriptIngestionService, ensure_actor_user_id
+from app.services.lineage.impact_view import ImpactDetailBuilder
 from app.services.lineage.exporter import export_lineage_workbook
 from app.services.lineage.git_repository import validate_repository_location
-from app.services.lineage.jobs import lineage_export_handler, script_archive_ingestion_handler, script_repository_sync_handler
+from app.services.lineage.jobs import lineage_export_handler, script_archive_ingestion_handler
+from app.services.lineage.monitoring import (
+    configure_repository_monitor,
+    enqueue_repository_sync_job,
+    repository_monitor_status,
+    run_due_repository_monitors,
+)
 from app.services.lineage.resolver import select_resolution_candidate, unbind_lineage_node
+from app.services.lineage.path_resolver import LineagePathNotFound, LineagePathResolver
+from app.services.lineage.revisions import LineageRevisionService
+from app.services.lineage.view_projection import project_nodes, validate_view
+from app.services.governance.audit import record_audit
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
 from app.services.task_queue.idempotency import semantic_idempotency_key
 from app.services.task_queue.presentation import job_submission_response
+from app.schemas.lineage import LineageDirection, LineagePathResponse, LineageRootType, LineageView, RepositoryMonitorUpdateRequest
 
 
 router = APIRouter(tags=["lineage"])
+
+GRAPH_DEFAULT_DIRECTION = "both"
+GRAPH_DEFAULT_DEPTH = 3
+REVISION_ROOT_FIELDS = {
+    "target_field": "target_field_id",
+    "mart_field": "mart_field_id",
+    "source_field": "source_field_id",
+    "catalog_column": "catalog_column_id",
+}
 
 
 @router.post("/projects/{project_id}/code-repositories")
@@ -47,32 +71,107 @@ def create_code_repository(project_id: int, payload: dict, principal: CurrentPri
     if not row.repository_name or not row.repository_url:
         raise HTTPException(status_code=400, detail="repository_name and repository_url are required")
     db.add(row); db.commit(); db.refresh(row)
-    return _repository_dict(row)
+    return _repository_dict(row, db)
 
 
 @router.get("/projects/{project_id}/code-repositories")
 def list_code_repositories(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> list[dict]:
     PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
-    return [_repository_dict(item) for item in db.scalars(select(CodeRepository).where(CodeRepository.project_id == project_id).order_by(CodeRepository.id.desc())).all()]
+    return [_repository_dict(item, db) for item in db.scalars(select(CodeRepository).where(CodeRepository.project_id == project_id).order_by(CodeRepository.id.desc())).all()]
+
+
+@router.patch("/code-repositories/{repository_id}/monitor")
+def update_repository_monitor(
+    repository_id: int,
+    payload: RepositoryMonitorUpdateRequest,
+    principal: CurrentPrincipal,
+    db: Session = Depends(get_db),
+) -> dict:
+    repository = PermissionService(db, principal).load_project_resource_or_404(
+        CodeRepository, repository_id, "script.sync"
+    )
+    before = repository_monitor_status(db, repository)
+    try:
+        configure_repository_monitor(
+            repository,
+            enabled=payload.enabled,
+            poll_interval_minutes=payload.poll_interval_minutes,
+            run_immediately=payload.run_immediately,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    actor_id = ensure_actor_user_id(db, principal.user_id)
+    record_audit(
+        db,
+        action="lineage_monitor_configure",
+        resource_type="code_repository",
+        resource_id=repository.id,
+        actor_user_id=actor_id,
+        institution_id=repository.institution_id,
+        project_id=repository.project_id,
+        before=before,
+        after={
+            "enabled": repository.monitor_enabled,
+            "poll_interval_minutes": repository.poll_interval_minutes,
+            "next_poll_at": repository.next_poll_at,
+        },
+    )
+    db.commit()
+    db.refresh(repository)
+    job = None
+    if payload.enabled and payload.run_immediately:
+        try:
+            job = enqueue_repository_sync_job(
+                db,
+                repository,
+                actor_user_id=actor_id,
+                trigger_type="monitor_manual",
+                scheduled_for=repository.next_poll_at,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        repository.next_poll_at = repository.last_monitor_checked_at + timedelta(
+            minutes=repository.poll_interval_minutes
+        )
+        db.commit()
+        db.refresh(repository)
+    return {
+        **_repository_dict(repository, db),
+        "submitted_job": _job_dict(job, db) if job is not None else None,
+    }
 
 
 @router.post("/code-repositories/{repository_id}/sync")
 def sync_code_repository(repository_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     repository = PermissionService(db, principal).load_project_resource_or_404(CodeRepository, repository_id, "script.sync")
     actor_id = ensure_actor_user_id(db, principal.user_id)
-    job = get_task_queue().enqueue(
-        db, job_type="script_repository_sync", institution_id=repository.institution_id,
-        project_id=repository.project_id, created_by=actor_id,
-        idempotency_key=semantic_idempotency_key(
-            job_type="script_repository_sync",
-            target_resource_type="code_repository",
-            target_resource_id=repository.id,
-            payload={"repository_id": repository.id, "branch": repository.default_branch, "last_sync_commit": repository.last_sync_commit},
-        ),
-        payload_summary={"repository_id": repository.id, "branch": repository.default_branch, "last_sync_commit": repository.last_sync_commit},
-        handler=script_repository_sync_handler,
-    )
+    try:
+        job = enqueue_repository_sync_job(
+            db,
+            repository,
+            actor_user_id=actor_id,
+            trigger_type="manual",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _job_dict(job, db)
+
+
+@router.post("/projects/{project_id}/lineage/monitors/run-due")
+def run_due_lineage_monitors(
+    project_id: int,
+    principal: CurrentPrincipal,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> dict:
+    PermissionService(db, principal).require_project_permission(project_id, "script.sync")
+    result = run_due_repository_monitors(
+        db,
+        project_id=project_id,
+        actor_user_id=ensure_actor_user_id(db, principal.user_id),
+        limit=limit,
+    )
+    return result.as_dict()
 
 
 @router.post("/projects/{project_id}/scripts/upload")
@@ -113,6 +212,7 @@ async def upload_script(
         "edge_count": result.edge_count,
         "change_set_id": result.change_set.id if result.change_set else None,
         "impact_id": result.impact.id if result.impact else None,
+        "lineage_revision_id": result.lineage_revision_id,
         "change_categories": list(result.change_categories),
         "impact_severity": result.impact.severity if result.impact else None,
     }
@@ -185,15 +285,99 @@ def get_script(script_file_id: int, principal: CurrentPrincipal, db: Session = D
 def project_lineage_graph(
     project_id: int,
     principal: CurrentPrincipal,
-    direction: str = "both",
-    depth: int = 3,
+    root_type: LineageRootType | None = None,
+    root_id: int | None = Query(default=None, gt=0),
+    direction: LineageDirection | None = None,
+    depth: int | None = Query(default=None, ge=1, le=10),
+    view: LineageView = "business",
     limit: int = 1000,
+    revision_id: int | None = None,
+    layer: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
     PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
-    if direction not in {"upstream", "downstream", "both"} or not 1 <= depth <= 10:
-        raise HTTPException(status_code=400, detail="Invalid graph direction or depth")
+    try:
+        view = validate_view(view)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if (root_type is None) != (root_id is None):
+        raise HTTPException(status_code=400, detail="root_type and root_id must be provided together")
+    if root_type is None and (direction is not None or depth is not None):
+        # A full revision snapshot has no single root, so direction/depth
+        # cannot be honoured.  Refuse the request instead of echoing
+        # parameters that did not affect the result.
+        raise HTTPException(
+            status_code=400,
+            detail="direction and depth require root_type and root_id; omit them to read the full revision snapshot",
+        )
+    resolved_direction: str = direction or GRAPH_DEFAULT_DIRECTION
+    resolved_depth = int(depth if depth is not None else GRAPH_DEFAULT_DEPTH)
+    traversal_applied = root_type is not None
     capped = min(max(limit, 1), 2000)
+    revision_service = LineageRevisionService(db)
+    revision = revision_service.get(revision_id, project_id=project_id) if revision_id is not None else db.scalar(select(LineageRevision).where(
+        LineageRevision.project_id == project_id,
+        LineageRevision.status == "published",
+    ).order_by(LineageRevision.revision_no.desc()).limit(1))
+    if revision_id is not None and revision is None:
+        raise HTTPException(status_code=404, detail="Lineage revision not found")
+    if revision is not None:
+        try:
+            nodes, edges, traversal = _revision_graph_payload(
+                db,
+                revision,
+                capped,
+                layer=layer,
+                project_id=project_id,
+                root_type=root_type,
+                root_id=root_id,
+                direction=resolved_direction,
+                depth=resolved_depth,
+                view=view,
+            )
+        except LineagePathNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "project_id": project_id,
+            "revision_id": revision.id,
+            "as_of": revision.published_at or revision.created_at,
+            "nodes": nodes,
+            "edges": edges,
+            "direction": resolved_direction,
+            "depth": resolved_depth,
+            "view": view,
+            "traversal": traversal,
+            "truncated": bool(traversal["truncated"]),
+            "warnings": list(revision.warnings_json or []) + ([] if revision_id is not None else ["未指定版本，已使用最近发布的正式血缘版本"]),
+            "confidence": "low" if revision.warnings_json else "high",
+            "evidence_refs": _revision_evidence_refs(revision),
+        }
+    if root_type is not None and root_id is not None:
+        seeds = _live_root_node_ids(db, project_id, root_type, root_id)
+        if not seeds:
+            raise HTTPException(status_code=404, detail="Lineage root is not present in the project facts")
+        compat = _walk_graph(db, project_id, seeds, resolved_direction, resolved_depth, capped)
+        project_nodes(compat["nodes"], view)
+        compat["view"] = view
+        return {
+            "project_id": project_id,
+            "revision_id": None,
+            "as_of": None,
+            "nodes": compat["nodes"],
+            "edges": compat["edges"],
+            "direction": resolved_direction,
+            "depth": resolved_depth,
+            "view": view,
+            "traversal": {
+                **compat["traversal"],
+                "view": view,
+                "root": {"root_type": root_type, "root_id": int(root_id), "node_ids": [int(item) for item in seeds]},
+            },
+            "truncated": bool(compat["truncated"]),
+            "warnings": ["未指定正式血缘版本，当前结果为兼容性事实视图"],
+            "confidence": "medium",
+            "evidence_refs": [],
+        }
     nodes = list(db.scalars(select(LineageNode).where(LineageNode.project_id == project_id).limit(capped)).all())
     node_ids = {item.id for item in nodes}
     edges = list(db.scalars(select(LineageEdge).where(
@@ -202,13 +386,188 @@ def project_lineage_graph(
         LineageEdge.source_node_id.in_(node_ids),
         LineageEdge.target_node_id.in_(node_ids),
     ).limit(capped * 2)).all()) if node_ids else []
+    resolver = AssetDisplayResolver(db)
+    payload_nodes = project_nodes([_node_dict(item, db, resolver) for item in nodes], view)
     return {
-        "nodes": [_node_dict(item) for item in nodes],
+        "project_id": project_id,
+        "revision_id": None,
+        "as_of": None,
+        "nodes": payload_nodes,
         "edges": [_edge_dict(item) for item in edges],
-        "direction": direction,
-        "depth": depth,
+        "direction": resolved_direction,
+        "depth": resolved_depth,
+        "view": view,
+        "traversal": revision_snapshot_traversal(
+            node_count=len(payload_nodes), edge_count=len(edges), node_budget=capped, edge_budget=capped * 2,
+            direction=resolved_direction, depth=resolved_depth, view=view,
+            truncated=len(nodes) == capped or len(edges) == capped * 2,
+        ),
         "truncated": len(nodes) == capped or len(edges) == capped * 2,
+        "warnings": ["未指定正式血缘版本，当前结果为兼容性事实视图"],
+        "confidence": "medium",
+        "evidence_refs": [],
     }
+
+
+@router.get("/projects/{project_id}/lineage/path", response_model=LineagePathResponse)
+def project_lineage_path(
+    project_id: int,
+    principal: CurrentPrincipal,
+    root_type: LineageRootType,
+    root_id: int = Query(gt=0),
+    direction: LineageDirection = "upstream",
+    depth: int = Query(default=10, ge=1, le=10),
+    revision_id: int | None = Query(default=None, gt=0),
+    include_unresolved: bool = True,
+    view: LineageView = "business",
+    max_paths: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> dict:
+    PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
+    try:
+        return LineagePathResolver(db).resolve(
+            project_id,
+            root_entity_type=root_type,
+            root_entity_id=root_id,
+            direction=direction,
+            depth=depth,
+            lineage_revision_id=revision_id,
+            include_unresolved=include_unresolved,
+            view=view,
+            max_paths=max_paths,
+        )
+    except LineagePathNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/lineage/revisions")
+def list_lineage_revisions(
+    project_id: int,
+    principal: CurrentPrincipal,
+    status: str | None = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
+    return [_revision_dict(item) for item in LineageRevisionService(db).list(project_id, status=status, limit=limit)]
+
+
+@router.get("/lineage/revisions/{revision_id}")
+def get_lineage_revision(revision_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    revision = PermissionService(db, principal).load_project_resource_or_404(LineageRevision, revision_id, "lineage.view")
+    service = LineageRevisionService(db)
+    nodes, edges = service.members(revision)
+    return {
+        **_revision_dict(revision),
+        "nodes": nodes,
+        "edges": edges,
+        "publication_readiness": service.publication_readiness(revision),
+        "warnings": list(revision.warnings_json or []),
+        "confidence": "low" if revision.warnings_json else "high",
+        "evidence_refs": _revision_evidence_refs(revision),
+    }
+
+
+@router.get("/lineage/revisions/{revision_id}/diff")
+def diff_lineage_revision(
+    revision_id: int,
+    principal: CurrentPrincipal,
+    compare_to: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    revision = PermissionService(db, principal).load_project_resource_or_404(LineageRevision, revision_id, "lineage.view")
+    baseline = LineageRevisionService(db).get(compare_to, project_id=revision.project_id)
+    if baseline is None:
+        raise HTTPException(status_code=404, detail="Comparison lineage revision not found")
+    result = LineageRevisionService(db).diff(revision, baseline)
+    result.update({"warnings": list(revision.warnings_json or []), "confidence": "low" if revision.warnings_json else "high", "evidence_refs": _revision_evidence_refs(revision)})
+    return result
+
+
+@router.post("/projects/{project_id}/lineage/rebuild")
+def rebuild_lineage_revision(project_id: int, principal: CurrentPrincipal, payload: dict | None = None, db: Session = Depends(get_db)) -> dict:
+    project = PermissionService(db, principal).require_project_permission(project_id, "script.upload")
+    body = payload or {}
+    raw_ids = body.get("script_version_ids")
+    if raw_ids is not None and (not isinstance(raw_ids, list) or any(not isinstance(item, int) for item in raw_ids)):
+        raise HTTPException(status_code=400, detail="script_version_ids must be a list of integers")
+    actor_id = ensure_actor_user_id(db, principal.user_id)
+    try:
+        service = LineageRevisionService(db)
+        result = service.build(
+            project.id,
+            created_by=actor_id,
+            trigger_type=str(body.get("trigger_type") or "manual"),
+            source_commit_sha=str(body.get("source_commit_sha") or "") or None,
+            script_version_ids=raw_ids,
+            status=str(body.get("status") or "") or None,
+            publish=bool(body.get("publish", False)),
+        )
+        record_audit(
+            db,
+            action="lineage_revision_rebuild",
+            resource_type="lineage_revision",
+            resource_id=result.revision.id,
+            actor_user_id=actor_id,
+            institution_id=project.institution_id,
+            project_id=project.id,
+            after={
+                "revision_no": result.revision.revision_no,
+                "status": result.revision.status,
+                "graph_hash": result.revision.graph_hash,
+                "idempotent": result.idempotent,
+                "trigger_type": result.revision.trigger_type,
+            },
+        )
+        db.commit()
+        db.refresh(result.revision)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **_revision_dict(result.revision),
+        "idempotent": result.idempotent,
+        "publication_readiness": service.publication_readiness(result.revision),
+    }
+
+
+@router.post("/projects/{project_id}/lineage/revisions/{revision_id}/publish")
+def publish_lineage_revision(project_id: int, revision_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    PermissionService(db, principal).require_project_permission(project_id, "lineage.manage")
+    revision = LineageRevisionService(db).get(revision_id, project_id=project_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Lineage revision not found")
+    service = LineageRevisionService(db)
+    before = {"status": revision.status, "published_at": revision.published_at}
+    publication_readiness = service.publication_readiness(revision)
+    actor_id = ensure_actor_user_id(db, principal.user_id)
+    try:
+        service.publish(revision, commit=False)
+        record_audit(
+            db,
+            action="lineage_revision_publish",
+            resource_type="lineage_revision",
+            resource_id=revision.id,
+            actor_user_id=actor_id,
+            institution_id=revision.institution_id,
+            project_id=revision.project_id,
+            before=before,
+            after={
+                "status": revision.status,
+                "published_at": revision.published_at,
+                # Preserve the gate evidence evaluated before the previous
+                # published revision is superseded.
+                "publication_readiness": publication_readiness,
+            },
+        )
+        db.commit()
+        db.refresh(revision)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**_revision_dict(revision), "publication_readiness": service.publication_readiness(revision)}
 
 
 @router.get("/target-fields/{field_id}/lineage")
@@ -253,7 +612,7 @@ def select_candidate(node_id: int, candidate_id: int, principal: CurrentPrincipa
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.commit(); db.refresh(node)
-    return _node_dict(node)
+    return _node_dict(node, db, AssetDisplayResolver(db))
 
 
 @router.post("/lineage/nodes/{node_id}/unbind")
@@ -261,7 +620,7 @@ def unbind_node(node_id: int, principal: CurrentPrincipal, db: Session = Depends
     node = PermissionService(db, principal).load_project_resource_or_404(LineageNode, node_id, "lineage.manage")
     unbind_lineage_node(db, node)
     db.commit(); db.refresh(node)
-    return _node_dict(node)
+    return _node_dict(node, db, AssetDisplayResolver(db))
 
 
 @router.get("/lineage/changes/{change_set_id}")
@@ -298,13 +657,27 @@ def list_impacts(project_id: int, principal: CurrentPrincipal, limit: int = 100,
 
 
 @router.get("/lineage/impacts/{impact_id}")
-def get_impact(impact_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+def get_impact(
+    impact_id: int,
+    principal: CurrentPrincipal,
+    include_paths: bool = True,
+    max_paths: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> dict:
     row = PermissionService(db, principal).load_project_resource_or_404(ImpactAnalysis, impact_id, "impact.view")
     instance = db.scalar(select(WorkflowInstance).where(WorkflowInstance.workflow_key == "lineage_change_review", WorkflowInstance.target_type == "impact_analysis", WorkflowInstance.target_id == row.id).order_by(WorkflowInstance.id.desc()).limit(1))
     tasks = list(db.scalars(select(ReviewTask).where(ReviewTask.workflow_instance_id == instance.id).order_by(ReviewTask.id)).all()) if instance else []
+    detail = ImpactDetailBuilder(db).build(
+        row,
+        include_paths=include_paths,
+        max_paths=max_paths,
+    )
+    if instance is not None and instance.status not in {"completed", "approved", "closed"}:
+        detail["pending_confirmation"] = True
     return {
         **_impact_dict(row),
         "impact_scope": _impact_scope_dict(db, row),
+        "impact_detail": detail,
         "workflow": None if instance is None else {"id": instance.id, "status": instance.status, "current_step": instance.current_step, "tasks": [{"id": item.id, "step_key": item.step_key, "status": item.status, "assignee_user_id": item.assignee_user_id, "assignee_role": item.assignee_role} for item in tasks]},
     }
 
@@ -316,7 +689,7 @@ def list_unresolved_nodes(project_id: int, principal: CurrentPrincipal, limit: i
     result = []
     for row in rows:
         candidates = db.scalars(select(LineageResolutionCandidate).where(LineageResolutionCandidate.lineage_node_id == row.id).order_by(LineageResolutionCandidate.score.desc())).all()
-        result.append({**_node_dict(row), "candidates": [{"id": item.id, "candidate_type": item.candidate_type, "candidate_id": item.candidate_id, "score": item.score, "match_reason": item.match_reason, "selected_flag": item.selected_flag} for item in candidates]})
+        result.append({**_node_dict(row, db, AssetDisplayResolver(db)), "candidates": [{"id": item.id, "candidate_type": item.candidate_type, "candidate_id": item.candidate_id, "score": item.score, "match_reason": item.match_reason, "selected_flag": item.selected_flag} for item in candidates]})
     return result
 
 
@@ -373,8 +746,233 @@ def _script_dict(row: ScriptFile) -> dict:
     return {"id": row.id, "project_id": row.project_id, "relative_path": row.relative_path, "file_name": row.file_name, "file_type": row.file_type, "logical_target_name": row.logical_target_name, "enabled": row.enabled, "current_version_no": row.current_version_no}
 
 
-def _node_dict(row: LineageNode) -> dict:
-    return {"id": row.id, "node_type": row.node_type, "logical_name": row.logical_name, "database_name": row.database_name, "schema_name": row.schema_name, "table_name": row.table_name, "column_name": row.column_name, "catalog_table_id": row.catalog_table_id, "catalog_column_id": row.catalog_column_id, "source_field_id": row.source_field_id, "mart_field_id": row.mart_field_id, "target_field_id": row.target_field_id, "unresolved_flag": row.unresolved_flag, "metadata": row.metadata_json}
+def _revision_dict(row: LineageRevision) -> dict:
+    return {
+        "id": row.id,
+        "project_id": row.project_id,
+        "revision_no": row.revision_no,
+        "parent_revision_id": row.parent_revision_id,
+        "trigger_type": row.trigger_type,
+        "source_commit_sha": row.source_commit_sha,
+        "parser_version": row.parser_version,
+        "graph_hash": row.graph_hash,
+        "status": row.status,
+        "warnings": row.warnings_json or [],
+        "source_manifest": row.source_manifest_json or [],
+        "node_count": row.node_count,
+        "edge_count": row.edge_count,
+        "created_by": row.created_by,
+        "created_at": row.created_at,
+        "published_at": row.published_at,
+    }
+
+
+def _revision_graph_payload(
+    db: Session,
+    revision: LineageRevision,
+    limit: int,
+    *,
+    layer: str | None = None,
+    project_id: int | None = None,
+    root_type: str | None = None,
+    root_id: int | None = None,
+    direction: str = GRAPH_DEFAULT_DIRECTION,
+    depth: int = GRAPH_DEFAULT_DEPTH,
+    view: str = "business",
+) -> tuple[list[dict], list[dict], dict]:
+    """Return the bounded, view-projected members of one published revision.
+
+    A revision is an immutable set of nodes and edges.  ``direction`` and
+    ``depth`` are only meaningful relative to one root, so a caller that wants
+    a bounded traversal must supply ``root_type`` and ``root_id``.  Without a
+    root the response is the whole revision snapshot and the traversal block
+    records that direction/depth were not applied.
+    """
+
+    all_nodes, all_edges = LineageRevisionService(db).members(revision)
+    node_by_id = {int(item["id"]): item for item in all_nodes if item.get("id") is not None}
+    usable_edges: list[dict] = []
+    dangling_edges = 0
+    for edge in all_edges:
+        source = edge.get("source_node_id")
+        target = edge.get("target_node_id")
+        if source is None or target is None or int(source) not in node_by_id or int(target) not in node_by_id:
+            # A revision edge must never dangle outside its own node set.
+            dangling_edges += 1
+            continue
+        usable_edges.append(edge)
+
+    edge_budget = limit * 2
+    truncation_reason: str | None = None
+    root_payload: dict | None = None
+    depth_reached = 0
+    if root_type is not None and root_id is not None:
+        root_node_id = _revision_root_node_id(node_by_id, root_type, int(root_id))
+        visited, selected_edges, depth_reached, truncation_reason = _bounded_revision_traversal(
+            node_by_id,
+            usable_edges,
+            root_node_id,
+            direction=direction,
+            depth=depth,
+            node_budget=limit,
+            edge_budget=edge_budget,
+        )
+        selected_nodes = [node_by_id[item] for item in sorted(visited)]
+        mode = "bounded_traversal"
+        root_payload = {"root_type": root_type, "root_id": int(root_id), "node_id": int(root_node_id)}
+    else:
+        selected_nodes = [node_by_id[item] for item in sorted(node_by_id)]
+        selected_edges = list(usable_edges)
+        mode = "revision_snapshot"
+        if len(selected_nodes) > limit:
+            selected_nodes = selected_nodes[:limit]
+            truncation_reason = "node_budget"
+        if len(selected_edges) > edge_budget:
+            selected_edges = selected_edges[:edge_budget]
+            truncation_reason = truncation_reason or "edge_budget"
+
+    layer_filtered = 0
+    if layer:
+        normalized_layer = layer.strip().upper()
+        allowed_ids = {
+            int(item["id"])
+            for item in selected_nodes
+            if str((item.get("display") or {}).get("layer_code") or "").upper() == normalized_layer
+        }
+        layer_filtered = len(selected_nodes) - len(allowed_ids)
+        selected_nodes = [item for item in selected_nodes if int(item.get("id", -1)) in allowed_ids]
+        selected_edges = [
+            item for item in selected_edges
+            if int(item.get("source_node_id", -1)) in allowed_ids
+            and int(item.get("target_node_id", -1)) in allowed_ids
+        ]
+
+    returned_ids = {int(item["id"]) for item in selected_nodes}
+    selected_edges = [
+        item for item in selected_edges
+        if int(item.get("source_node_id", -1)) in returned_ids
+        and int(item.get("target_node_id", -1)) in returned_ids
+    ][:edge_budget]
+    project_nodes(selected_nodes, view)
+    traversal = {
+        "mode": mode,
+        "root": root_payload,
+        "direction": direction,
+        "depth": int(depth),
+        "depth_reached": int(depth_reached),
+        "view": view,
+        "direction_applied": mode == "bounded_traversal",
+        "depth_applied": mode == "bounded_traversal",
+        "returned_node_count": len(selected_nodes),
+        "returned_edge_count": len(selected_edges),
+        "node_budget": limit,
+        "edge_budget": edge_budget,
+        "truncated": truncation_reason is not None,
+        "truncation_reason": truncation_reason,
+        "layer_filtered_node_count": layer_filtered,
+        "dangling_edge_count": dangling_edges,
+    }
+    return selected_nodes, selected_edges, traversal
+
+
+def _revision_root_node_id(node_by_id: dict[int, dict], root_type: str, root_id: int) -> int:
+    if root_type == "lineage_node":
+        for node_id, item in node_by_id.items():
+            if node_id == root_id or int(item.get("lineage_node_id") or -1) == root_id:
+                return node_id
+        raise LineagePathNotFound("Lineage root is not present in the selected revision")
+    field = REVISION_ROOT_FIELDS.get(root_type)
+    if field is None:
+        raise LineagePathNotFound("Unsupported lineage root type")
+    matches = [node_id for node_id, item in node_by_id.items() if int(item.get(field) or -1) == root_id]
+    if not matches:
+        raise LineagePathNotFound("Lineage root is not present in the selected revision")
+    # Prefer the column-level node and then the lowest id so one root always
+    # resolves to one deterministic starting point.
+    matches.sort(key=lambda node_id: (str(node_by_id[node_id].get("node_type") or "") != "column", node_id))
+    return matches[0]
+
+
+def _bounded_revision_traversal(
+    node_by_id: dict[int, dict],
+    edges: list[dict],
+    root_node_id: int,
+    *,
+    direction: str,
+    depth: int,
+    node_budget: int,
+    edge_budget: int,
+) -> tuple[set[int], list[dict], int, str | None]:
+    outgoing: dict[int, list[dict]] = defaultdict(list)
+    incoming: dict[int, list[dict]] = defaultdict(list)
+    for edge in edges:
+        outgoing[int(edge["source_node_id"])].append(edge)
+        incoming[int(edge["target_node_id"])].append(edge)
+    for bucket in (*outgoing.values(), *incoming.values()):
+        bucket.sort(key=lambda item: int(item["id"]))
+
+    visited = {int(root_node_id)}
+    frontier = {int(root_node_id)}
+    selected: dict[int, dict] = {}
+    depth_reached = 0
+    truncation_reason: str | None = None
+    for _ in range(int(depth)):
+        if not frontier or truncation_reason in {"node_budget", "edge_budget"}:
+            break
+        next_frontier: set[int] = set()
+        for node_id in sorted(frontier):
+            candidates: list[tuple[dict, int]] = []
+            if direction in {"downstream", "both"}:
+                candidates.extend((edge, int(edge["target_node_id"])) for edge in outgoing.get(node_id, []))
+            if direction in {"upstream", "both"}:
+                candidates.extend((edge, int(edge["source_node_id"])) for edge in incoming.get(node_id, []))
+            candidates.sort(key=lambda item: (int(item[0]["id"]), item[1]))
+            for edge, other in candidates:
+                edge_id = int(edge["id"])
+                if edge_id in selected:
+                    continue
+                if other not in visited:
+                    if len(visited) >= node_budget:
+                        truncation_reason = truncation_reason or "node_budget"
+                        continue
+                    visited.add(other)
+                    next_frontier.add(other)
+                if len(selected) >= edge_budget:
+                    truncation_reason = truncation_reason or "edge_budget"
+                    break
+                selected[edge_id] = edge
+        depth_reached += 1
+        frontier = next_frontier
+    if truncation_reason is None and frontier:
+        for node_id in frontier:
+            if direction in {"downstream", "both"} and outgoing.get(node_id):
+                truncation_reason = "depth_limit"
+                break
+            if direction in {"upstream", "both"} and incoming.get(node_id):
+                truncation_reason = "depth_limit"
+                break
+    return visited, list(selected.values()), depth_reached, truncation_reason
+
+
+def _revision_evidence_refs(row: LineageRevision) -> list[dict]:
+    return [
+        {
+            "type": "script_file_version",
+            "script_file_id": item.get("script_file_id"),
+            "version_id": item.get("version_id"),
+            "relative_path": item.get("relative_path"),
+            "version_no": item.get("version_no"),
+            "git_commit_sha": item.get("git_commit_sha"),
+        }
+        for item in (row.source_manifest_json or [])
+    ]
+
+
+def _node_dict(row: LineageNode, db: Session | None = None, resolver: AssetDisplayResolver | None = None) -> dict:
+    payload = {"id": row.id, "node_type": row.node_type, "logical_name": row.logical_name, "database_name": row.database_name, "schema_name": row.schema_name, "table_name": row.table_name, "column_name": row.column_name, "catalog_table_id": row.catalog_table_id, "catalog_column_id": row.catalog_column_id, "source_field_id": row.source_field_id, "mart_field_id": row.mart_field_id, "target_field_id": row.target_field_id, "unresolved_flag": row.unresolved_flag, "metadata": row.metadata_json}
+    if db is not None:
+        payload["display"] = (resolver or AssetDisplayResolver(db)).describe_lineage_node(row)
+    return payload
 
 
 def _edge_dict(row: LineageEdge) -> dict:
@@ -388,8 +986,28 @@ def _job_dict(job: BackgroundJob, db: Session) -> dict:
     return result
 
 
-def _repository_dict(row: CodeRepository) -> dict:
-    return {"id": row.id, "project_id": row.project_id, "repository_name": row.repository_name, "repository_type": row.repository_type, "repository_url": row.repository_url, "default_branch": row.default_branch, "credential_env_name": row.credential_env_name, "enabled": row.enabled, "last_sync_commit": row.last_sync_commit, "last_synced_at": row.last_synced_at}
+def _repository_dict(row: CodeRepository, db: Session | None = None) -> dict:
+    return {
+        "id": row.id,
+        "project_id": row.project_id,
+        "repository_name": row.repository_name,
+        "repository_type": row.repository_type,
+        "repository_url": row.repository_url,
+        "default_branch": row.default_branch,
+        "credential_env_name": row.credential_env_name,
+        "enabled": row.enabled,
+        "last_sync_commit": row.last_sync_commit,
+        "last_synced_at": row.last_synced_at,
+        "monitor": repository_monitor_status(db, row) if db is not None else {
+            "enabled": bool(row.monitor_enabled),
+            "poll_interval_minutes": int(row.poll_interval_minutes or 60),
+            "next_poll_at": row.next_poll_at,
+            "last_checked_at": row.last_monitor_checked_at,
+            "last_job_id": row.last_monitor_job_id,
+            "last_job_status": None,
+            "last_error": row.last_monitor_error,
+        },
+    }
 
 
 def _impact_dict(row: ImpactAnalysis) -> dict:
@@ -476,20 +1094,143 @@ def _walk_graph(db: Session, project_id: int, seed_ids: list[int], direction: st
     if direction not in {"upstream", "downstream", "both"} or not 1 <= depth <= 10:
         raise HTTPException(status_code=400, detail="Invalid graph direction or depth")
     capped = min(max(limit, 1), 2000)
-    visited = set(seed_ids[:capped]); frontier = set(visited); edge_map: dict[int, LineageEdge] = {}
-    for _ in range(depth):
-        if not frontier or len(visited) >= capped: break
+    edge_budget = capped * 2
+    visited = set(int(item) for item in seed_ids[:capped])
+    frontier = set(visited)
+    edge_map: dict[int, LineageEdge] = {}
+    depth_reached = 0
+    truncation_reason: str | None = None
+    for _ in range(int(depth)):
+        if not frontier or truncation_reason in {"node_budget", "edge_budget"}:
+            break
         conditions = []
-        if direction in {"upstream", "both"}: conditions.append(LineageEdge.target_node_id.in_(frontier))
-        if direction in {"downstream", "both"}: conditions.append(LineageEdge.source_node_id.in_(frontier))
+        if direction in {"upstream", "both"}:
+            conditions.append(LineageEdge.target_node_id.in_(frontier))
+        if direction in {"downstream", "both"}:
+            conditions.append(LineageEdge.source_node_id.in_(frontier))
         condition = conditions[0] if len(conditions) == 1 else conditions[0] | conditions[1]
-        rows = list(db.scalars(select(LineageEdge).where(LineageEdge.project_id == project_id, LineageEdge.enabled.is_(True), condition).limit(capped * 2)).all())
+        rows = list(db.scalars(select(LineageEdge).where(
+            LineageEdge.project_id == project_id,
+            LineageEdge.enabled.is_(True),
+            condition,
+        ).order_by(LineageEdge.id).limit(edge_budget + 1)).all())
         next_frontier: set[int] = set()
         for edge in rows:
+            if edge.id in edge_map:
+                continue
+            if len(edge_map) >= edge_budget:
+                truncation_reason = truncation_reason or "edge_budget"
+                break
+            neighbours = [int(edge.source_node_id), int(edge.target_node_id)]
+            added = False
+            for node_id in neighbours:
+                if node_id in visited:
+                    continue
+                if len(visited) >= capped:
+                    truncation_reason = truncation_reason or "node_budget"
+                    continue
+                visited.add(node_id)
+                next_frontier.add(node_id)
+                added = True
+            if not added and not any(node_id in visited for node_id in neighbours):
+                continue
             edge_map[edge.id] = edge
-            for node_id in (edge.source_node_id, edge.target_node_id):
-                if node_id not in visited and len(visited) < capped:
-                    visited.add(node_id); next_frontier.add(node_id)
+        depth_reached += 1
         frontier = next_frontier
-    nodes = list(db.scalars(select(LineageNode).where(LineageNode.project_id == project_id, LineageNode.id.in_(visited))).all()) if visited else []
-    return {"nodes": [_node_dict(item) for item in nodes], "edges": [_edge_dict(item) for item in edge_map.values()], "direction": direction, "depth": depth, "truncated": len(visited) >= capped}
+    if truncation_reason is None and frontier:
+        boundary_conditions = []
+        if direction in {"upstream", "both"}:
+            boundary_conditions.append(LineageEdge.target_node_id.in_(frontier))
+        if direction in {"downstream", "both"}:
+            boundary_conditions.append(LineageEdge.source_node_id.in_(frontier))
+        boundary = boundary_conditions[0]
+        for condition in boundary_conditions[1:]:
+            boundary = boundary | condition
+        if db.scalar(select(func.count(LineageEdge.id)).where(
+            LineageEdge.project_id == project_id,
+            LineageEdge.enabled.is_(True),
+            boundary,
+        )):
+            truncation_reason = "depth_limit"
+    nodes = list(db.scalars(select(LineageNode).where(
+        LineageNode.project_id == project_id,
+        LineageNode.id.in_(visited),
+    ).order_by(LineageNode.id)).all()) if visited else []
+    returned_ids = {int(item.id) for item in nodes}
+    resolver = AssetDisplayResolver(db)
+    edges = [edge for edge in edge_map.values() if int(edge.source_node_id) in returned_ids and int(edge.target_node_id) in returned_ids]
+    edges.sort(key=lambda item: int(item.id))
+    return {
+        "nodes": [_node_dict(item, db, resolver) for item in nodes],
+        "edges": [_edge_dict(item) for item in edges],
+        "direction": direction,
+        "depth": int(depth),
+        "truncated": truncation_reason is not None,
+        "traversal": revision_snapshot_traversal(
+            node_count=len(nodes),
+            edge_count=len(edges),
+            node_budget=capped,
+            edge_budget=edge_budget,
+            direction=direction,
+            depth=int(depth),
+            view="business",
+            truncated=truncation_reason is not None,
+            mode="compatibility_facts",
+            depth_reached=depth_reached,
+            truncation_reason=truncation_reason,
+        ),
+    }
+
+
+def _live_root_node_ids(db: Session, project_id: int, root_type: str, root_id: int) -> list[int]:
+    if root_type == "lineage_node":
+        row = db.get(LineageNode, int(root_id))
+        return [int(row.id)] if row is not None and int(row.project_id) == int(project_id) else []
+    field = REVISION_ROOT_FIELDS.get(root_type)
+    if field is None:
+        return []
+    column = getattr(LineageNode, field)
+    return [
+        int(item)
+        for item in db.scalars(select(LineageNode.id).where(
+            LineageNode.project_id == project_id,
+            column == int(root_id),
+        ).order_by(LineageNode.id)).all()
+    ]
+
+
+def revision_snapshot_traversal(
+    *,
+    node_count: int,
+    edge_count: int,
+    node_budget: int,
+    edge_budget: int,
+    direction: str,
+    depth: int,
+    view: str,
+    truncated: bool,
+    mode: str = "revision_snapshot",
+    depth_reached: int = 0,
+    truncation_reason: str | None = None,
+    layer_filtered_node_count: int = 0,
+    dangling_edge_count: int = 0,
+    root: dict | None = None,
+) -> dict:
+    return {
+        "mode": mode,
+        "root": root,
+        "direction": direction,
+        "depth": int(depth),
+        "depth_reached": int(depth_reached),
+        "view": view,
+        "direction_applied": mode == "bounded_traversal",
+        "depth_applied": mode == "bounded_traversal",
+        "returned_node_count": int(node_count),
+        "returned_edge_count": int(edge_count),
+        "node_budget": int(node_budget),
+        "edge_budget": int(edge_budget),
+        "truncated": bool(truncated),
+        "truncation_reason": truncation_reason,
+        "layer_filtered_node_count": int(layer_filtered_node_count),
+        "dangling_edge_count": int(dangling_edge_count),
+    }

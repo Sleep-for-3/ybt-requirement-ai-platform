@@ -8,7 +8,10 @@ from app.models.entities import TimestampMixin
 
 class CodeRepository(Base, TimestampMixin):
     __tablename__ = "code_repositories"
-    __table_args__ = (UniqueConstraint("project_id", "repository_name", name="uq_code_repository_project_name"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "repository_name", name="uq_code_repository_project_name"),
+        Index("ix_code_repositories_monitor_due", "monitor_enabled", "next_poll_at"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
@@ -20,6 +23,15 @@ class CodeRepository(Base, TimestampMixin):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_sync_commit: Mapped[str | None] = mapped_column(String(64))
     last_synced_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    monitor_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    poll_interval_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    next_poll_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    last_monitor_checked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    # Deliberately kept as a soft reference.  This avoids introducing a
+    # circular migration dependency between repositories and background jobs,
+    # while project scoping is still enforced whenever the job is loaded.
+    last_monitor_job_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    last_monitor_error: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
 
 
@@ -163,6 +175,75 @@ class LineageEdge(Base, TimestampMixin):
     confidence_level: Mapped[str] = mapped_column(String(50), default="medium", index=True)
     evidence_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class LineageRevision(Base, TimestampMixin):
+    """Immutable project-level membership of a published lineage graph.
+
+    Script versions remain the parser facts.  A revision is only the
+    project-wide, auditable view of which facts were in force at a point in
+    time; creating a new revision never mutates an older one.
+    """
+
+    __tablename__ = "lineage_revisions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "revision_no", name="uq_lineage_revision_project_no"),
+        UniqueConstraint("project_id", "graph_hash", name="uq_lineage_revision_project_hash"),
+        Index("ix_lineage_revisions_project_status", "project_id", "status", "revision_no"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_revision_id: Mapped[int | None] = mapped_column(ForeignKey("lineage_revisions.id"), index=True)
+    trigger_type: Mapped[str] = mapped_column(String(50), default="manual", index=True)
+    source_commit_sha: Mapped[str | None] = mapped_column(String(64), index=True)
+    parser_version: Mapped[str] = mapped_column(String(100), default="lineage-revision-v1")
+    graph_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
+    warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    source_manifest_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    node_count: Mapped[int] = mapped_column(Integer, default=0)
+    edge_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
+class LineageRevisionNode(Base):
+    """Snapshot member for a node in a specific lineage revision."""
+
+    __tablename__ = "lineage_revision_nodes"
+    __table_args__ = (
+        UniqueConstraint("revision_id", "lineage_node_id", name="uq_lineage_revision_node_member"),
+        UniqueConstraint("revision_id", "node_key", name="uq_lineage_revision_node_key"),
+        Index("ix_lineage_revision_nodes_revision", "revision_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    revision_id: Mapped[int] = mapped_column(ForeignKey("lineage_revisions.id", ondelete="CASCADE"), index=True)
+    lineage_node_id: Mapped[int] = mapped_column(ForeignKey("lineage_nodes.id"), index=True)
+    node_key: Mapped[str] = mapped_column(String(1500), nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    snapshot_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+
+
+class LineageRevisionEdge(Base):
+    """Snapshot member for an edge in a specific lineage revision."""
+
+    __tablename__ = "lineage_revision_edges"
+    __table_args__ = (
+        UniqueConstraint("revision_id", "lineage_edge_id", name="uq_lineage_revision_edge_member"),
+        UniqueConstraint("revision_id", "edge_key", name="uq_lineage_revision_edge_key"),
+        Index("ix_lineage_revision_edges_revision", "revision_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    revision_id: Mapped[int] = mapped_column(ForeignKey("lineage_revisions.id", ondelete="CASCADE"), index=True)
+    lineage_edge_id: Mapped[int] = mapped_column(ForeignKey("lineage_edges.id"), index=True)
+    edge_key: Mapped[str] = mapped_column(String(2000), nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    snapshot_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
 
 
 class LineageResolutionCandidate(Base):
