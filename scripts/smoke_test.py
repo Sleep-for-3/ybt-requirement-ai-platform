@@ -317,6 +317,27 @@ def main() -> None:
         pdf_unit = next(item for item in knowledge_units if item["source_file_name"] == "监管说明.pdf")
         if pdf_unit.get("source_page_no") != 1:
             raise AssertionError("PDF 知识未保留页码")
+        # 生产使用 Milvus 正式索引：检索前必须先完成正式语义索引重建，
+        # 否则 hybrid-search 只能报“请先重建索引”，端到端链路并未真正走通。
+        index_status = _get_json(client, f"{base}/projects/{project_id}/semantic-index/status")
+        if index_status.get("vector_store") == "milvus":
+            if index_status.get("active_index") is None or not index_status.get("active_index_current"):
+                reindex = _post_json(
+                    client,
+                    f"{base}/projects/{project_id}/semantic-index/reindex",
+                    {"force": False},
+                )
+                if not reindex.get("already_active"):
+                    reindex_job = _await_submission(client, base, reindex, timeout=1800.0)
+                    if reindex_job.get("status") != "completed":
+                        raise AssertionError(
+                            f"正式语义索引重建失败：{reindex_job.get('status')} {reindex_job.get('error_message')}"
+                        )
+                index_status = _get_json(client, f"{base}/projects/{project_id}/semantic-index/status")
+            if index_status.get("active_index") is None or not index_status.get("active_index_current"):
+                raise AssertionError(f"正式语义索引未激活：{index_status.get('mode')} {index_status.get('latest_index')}")
+            if not (index_status.get("milvus_health") or {}).get("healthy"):
+                raise AssertionError(f"Milvus 健康检查未通过：{index_status.get('milvus_health')}")
         knowledge_search = _post_json(client, f"{base}/projects/{project_id}/knowledge/hybrid-search", {
             "query": "借记卡客户证件类型 CERT_TYPE", "target_field_id": field["id"], "top_k": 10,
         })

@@ -174,7 +174,11 @@ def unit(unit_id:int,project_id:int,db:Session=Depends(get_db)):
     return _unit(item)
 @router.post("/projects/{project_id}/knowledge/hybrid-search")
 def hybrid_search(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
-    log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k,retrieval_mode=payload.retrieval_mode);project=db.get(Project,project_id);record_audit(db,action="knowledge_search",resource_type="retrieval_log",resource_id=log.id,actor_user_id=principal.user_id,institution_id=project.institution_id if project else None,project_id=project_id,after={"result_count":len(items),"retrieval_mode":payload.retrieval_mode});db.commit();return {"retrieval_log_id":log.id,"retrieval_mode":payload.retrieval_mode,"items":items}
+    try:
+        log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k,retrieval_mode=payload.retrieval_mode)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    project=db.get(Project,project_id);record_audit(db,action="knowledge_search",resource_type="retrieval_log",resource_id=log.id,actor_user_id=principal.user_id,institution_id=project.institution_id if project else None,project_id=project_id,after={"result_count":len(items),"retrieval_mode":payload.retrieval_mode});db.commit();return {"retrieval_log_id":log.id,"retrieval_mode":payload.retrieval_mode,"items":items}
 @router.post("/projects/{project_id}/knowledge/ask")
 async def ask(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     try:

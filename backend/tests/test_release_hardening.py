@@ -197,3 +197,48 @@ def test_duplicate_admin_resources_report_conflict_instead_of_server_error(monke
             "institution_role": "member",
         })
         assert duplicate_email.status_code == 409, duplicate_email.text
+
+
+def test_hybrid_search_reports_missing_formal_index_as_client_error(monkeypatch, tmp_path) -> None:
+    """Milvus 模式下缺少正式语义索引时必须返回 4xx 而不是 500。
+
+    生产环境用 Milvus 正式索引，知识检索前必须先重建索引；过去这种“状态前提
+    未满足”会冒成 500，端到端脚本只能看到“服务器处理失败”，运维无从判断该
+    先重建索引。这里锁定为可读的客户端错误。
+    """
+
+    class _MissingIndexRetriever:
+        def __init__(self, db) -> None:
+            self.db = db
+
+        def search(self, *_args, **_kwargs):
+            raise ValueError("No active formal semantic index exists for this project; run reindex first")
+
+    with _production_client(monkeypatch, tmp_path) as client:
+        admin_password = "Test-only-admin-password-2026"
+        bootstrap = client.post("/api/admin/bootstrap", json={
+            "institution_code": "RC_INDEX_PLATFORM",
+            "institution_name": "RC 索引平台运营方",
+            "institution_type": "platform_operator",
+            "username": "rc_index_admin",
+            "display_name": "RC 索引管理员",
+            "email": "rc-index-admin@example.invalid",
+            "password": admin_password,
+        })
+        assert bootstrap.status_code == 201, bootstrap.text
+        admin_headers = _bearer(client.post(
+            "/api/auth/login", json={"username": "rc_index_admin", "password": admin_password},
+        ).json()["access_token"])
+        project = client.post("/api/projects", headers=admin_headers, json={
+            "name": "RC 索引项目", "institution_id": bootstrap.json()["institution_id"],
+        })
+        assert project.status_code == 200, project.text
+
+        monkeypatch.setattr("app.api.knowledge_rag.HybridRetriever", _MissingIndexRetriever)
+        search = client.post(
+            f"/api/projects/{project.json()['id']}/knowledge/hybrid-search",
+            headers=admin_headers,
+            json={"query": "缺少正式索引时的检索行为"},
+        )
+        assert search.status_code == 400, search.text
+        assert "semantic index" in search.json()["detail"]
