@@ -1384,6 +1384,8 @@ def _write_values(sheet, row: int, start_column: int, values: list[str]) -> None
 def _write_sqlite_source(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:
+        # 共享夹具目录会跨轮次复用，这里必须幂等重建，避免 "table already exists"。
+        connection.execute("drop table if exists ecif_customer")
         connection.execute("create table ecif_customer (cert_type text, customer_name text)")
         connection.executemany(
             "insert into ecif_customer (cert_type, customer_name) values (?, ?)",
