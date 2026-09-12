@@ -1,0 +1,7 @@
+# 服务器是 Linux：shell 脚本与容器构建入口必须是 LF。
+# Windows 检出与 `git archive` 导出会把文本文件转成 CRLF，导致 bash 报
+# `$'\r': command not found`（2026-09-13 的 ede8472 发布曾因此失败）。
+*.sh text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.dockerfile text eol=lf
