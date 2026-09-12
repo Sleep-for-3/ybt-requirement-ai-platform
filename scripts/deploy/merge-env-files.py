@@ -68,7 +68,17 @@ def main() -> int:
     effective.update(override_values)
     effective.update(forced)
 
-    output: list[str] = list(override_lines)
+    # --set 必须覆盖 --override 里已有的同名键，否则「改成新的 COMPOSE_FILE」
+    # 这类关键改动会被旧值静默吞掉。
+    output: list[str] = []
+    for line in override_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in forced:
+                output.append(f"{key}={forced[key]}")
+                continue
+        output.append(line)
     if output and output[-1].strip():
         output.append("")
 
