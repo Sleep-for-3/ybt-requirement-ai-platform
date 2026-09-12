@@ -21,10 +21,22 @@ cd "$SOURCE_DIR"
 
 [[ -f .env ]] || { echo "缺少 .env（生产密钥不在 Git 里，需要服务器本地维护）" >&2; exit 1; }
 
-set -a
-# shellcheck disable=SC1091
-. ./.env
-set +a
+# 不能直接 `source .env`：生产 .env 里存在带空格的值（例如 APP_NAME），
+# shell 会把空格后面的部分当成命令执行。这里按 KEY=VALUE 逐行安全加载。
+load_env_file() {
+  local file="$1" line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    export "$key=$value"
+  done < "$file"
+}
+
+load_env_file ./.env
 
 export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml:docker-compose.server.yml}"
 # 用命令行参数覆盖 .env 里的标签，保证“构建的镜像”与“启动的镜像”是同一个。
