@@ -270,7 +270,12 @@ def main() -> None:
         policy_path = temp_path / "监管制度.docx"
         pdf_path = temp_path / "监管说明.pdf"
         sql_path = temp_path / "历史取数逻辑.sql"
-        sqlite_path = temp_path / "ecif_query.db"
+        # 数据源夹具必须放在后端/Worker 容器也能读到的地方：容器化验收时用
+        # SMOKE_FIXTURE_DIR 指向与 backend/worker 共享的目录（例如
+        # /app/storage/_acceptance），否则元数据同步只会“部分完成”且查不到任何列。
+        fixture_dir = os.getenv("SMOKE_FIXTURE_DIR", "").strip()
+        sqlite_path = Path(fixture_dir).resolve() / "ecif_query.db" if fixture_dir else temp_path / "ecif_query.db"
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         _write_template(excel_path)
         _write_traceability_template(traceability_path)
         _write_qa(qa_path)
