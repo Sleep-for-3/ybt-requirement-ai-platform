@@ -1,0 +1,106 @@
+# Production E2E Product Review (2026-09-19)
+
+## Status
+
+- Deployed production baseline before this review: `8412e91`.
+- New frontend fix committed and pushed to `origin/main`: `01020be`.
+- `01020be` is not yet deployed to production. The temporary SSH verification session was closed by the remote host before the rebuild could be run.
+- No password was reset or changed. `smoke_admin` was not modified.
+- No production project was physically deleted. All lifecycle changes use suspend/restore.
+- No production database, credential, token, `.env` file, build output, or uploaded customer file is part of this report.
+
+## Database Conclusion
+
+The original project-creation failure was not caused by SQLite, WSL PostgreSQL, or server PostgreSQL. It was a browser-side React event-timing defect:
+
+1. The project POST completed successfully.
+2. The handler awaited the response.
+3. It then read `event.currentTarget`, which React had already cleared, and called `reset()` on null.
+4. The UI reported failure even though the project existed, so retrying created another row.
+
+The same frontend behavior occurs against every database backend. WSL verification was nevertheless completed against PostgreSQL `16.15`; the production compose contract also uses PostgreSQL 16. The migration chain reached `202609180039`, and repeating the same project request key returned the same project row.
+
+The fix now snapshots `formElement` before the `await`, and project creation uses a stable client request id. A unique database index provides the final concurrency guard.
+
+## Project Lifecycle Decision
+
+Projects are not hard-deleted. A project is the isolation boundary for permissions, assets, lineage, scripts, requirements, reviews, UAT, deliveries, background jobs, and audit history. Hard deletion would break historical references and auditability.
+
+The implemented lifecycle is:
+
+- active: visible to normal project selection and work entry points;
+- suspended: hidden from normal selection, but all history and explicit references remain;
+- restored: returns to active status without recreating or rewriting history.
+
+Suspension and restoration require institution admin/security admin (or legacy platform-admin) permission and write an audit record.
+
+## Duplicate Production Projects
+
+Read-only production statistics found 13 likely duplicate rows left by the old frontend defect:
+
+| Project name | Institution id | Copies |
+|---|---:|---:|
+| 天津农商银行 | 1 | 8 |
+| 天津农商银行智能监管平台 | 1 | 3 |
+| 天津农商银行智能监管平台 | 2 | 2 |
+
+They were not automatically deleted or modified. An administrator should keep the row that owns real work and suspend only the confirmed empty duplicates after checking assets, requirements, reviews, deliveries, and audit references.
+
+Two dedicated acceptance projects remain as suspended history:
+
+- project `25`: API/browser idempotency acceptance;
+- project `26`: browser creation and architecture configuration acceptance.
+
+## Browser Findings
+
+A real production browser session was established through a backend-signed, short-lived session without exposing or storing the token. Password login was not used because the documented legacy password does not match the real account and changing it was forbidden.
+
+Passed in production browser:
+
+- `/projects` loads with 25 cards and no application error;
+- project `25` restore and suspend round-trip through the real UI;
+- suspended project disappears from normal project selection;
+- project creation completes without the old reset exception;
+- created project `26` is suspended after acceptance;
+- `/resources/architecture?projectId=26` loads and saves the two-layer example (`HTTP 200`).
+
+The browser review then found a second deployment-only defect:
+
+- `/resources/import?projectId=26` showed `Application error: a client-side exception has occurred`;
+- console error: `TypeError: crypto.randomUUID is not a function`;
+- cause: `crypto.randomUUID()` is available only in secure browser contexts, while production is reached through plain HTTP by IP.
+
+The fix in `01020be` centralizes client id generation and falls back to `crypto.getRandomValues`, then to `Date.now()` plus `Math.random()` when Web Crypto is absent. The same helper is now used by project creation, batch import, architecture layer creation, reverse requirement creation, and requirement generation submission.
+
+## Verification
+
+Deterministic/local verification completed:
+
+- targeted client-id, project-contract, and declaration tests: `8 passed`;
+- frontend full suite: `148 passed`;
+- TypeScript: passed;
+- isolated production Next build: 52 pages generated successfully;
+- real Next production browser with `crypto.randomUUID` removed: batch-import page rendered, default layers loaded, no page or console errors.
+
+Earlier isolated deterministic and Mock verification remains valid for batch import, reverse requirements, policy comparison, review, delivery, Word/Excel, and recheck flows. Those results are not represented here as a real external-model acceptance test.
+
+Evidence paths:
+
+- production project page: `.local-run/production-e2e-20260919/projects-production-smoke.png`;
+- production project lifecycle: `.local-run/production-e2e-20260919/project-lifecycle-production.json`;
+- production project creation: `.local-run/production-e2e-20260919/project-created-production.png`;
+- production architecture save: `.local-run/production-e2e-20260919/architecture-project26.png`;
+- HTTP fallback browser result: `.local-run/production-e2e-20260919/batch-import-http-fallback-local.json`.
+
+## Remaining Deployment Work
+
+Production still runs the old frontend image. Deployment of `01020be` requires a new safe SSH/operations channel with the user's existing credential mechanism. After access is available:
+
+1. back up the production database and current images;
+2. place commit `01020be` in `/opt/ybt/source`;
+3. run the existing server release script for tag `01020be`;
+4. verify backend health, frontend HTTP, and the batch-import page over plain HTTP;
+5. repeat project/architecture browser smoke checks against the new image;
+6. retain suspended acceptance projects until an administrator reviews them.
+
+No real-model test, production restore drill, or production reverse-requirement end-to-end generation was claimed in this review.
