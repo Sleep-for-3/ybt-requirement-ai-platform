@@ -12,7 +12,7 @@ test("project creation keeps a stable form element instead of reading currentTar
   assert.match(source, /formElement\.reset\(\);/);
   assert.doesNotMatch(source, /event\.currentTarget\.reset\(\)/);
   assert.match(source, /client_request_id: requestId/);
-  assert.match(source, /newProjectRequestId/);
+  assert.match(source, /createClientId/);
 });
 
 

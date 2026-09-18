@@ -9,6 +9,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { Project, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { createClientId } from "@/lib/client-id.mjs";
 
 export default function ProjectsPage() {
   const { projects, projectId, refreshProjects, selectProject } = useProjectWorkspace();
@@ -39,7 +40,7 @@ export default function ProjectsPage() {
     if (creating) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const requestId = creationRequestId.current || newProjectRequestId();
+    const requestId = creationRequestId.current || createClientId();
     creationRequestId.current = requestId;
     setFormError("");
     setCreating(true);
@@ -77,7 +78,7 @@ export default function ProjectsPage() {
 
   function openCreate() {
     setFormError("");
-    creationRequestId.current = newProjectRequestId();
+    creationRequestId.current = createClientId();
     setCreateOpen(true);
   }
 
@@ -187,15 +188,4 @@ export default function ProjectsPage() {
       />
     </main>
   );
-}
-
-function newProjectRequestId() {
-  const cryptoApi = globalThis.crypto as Crypto | undefined;
-  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
-  const bytes = new Uint8Array(16);
-  if (typeof cryptoApi?.getRandomValues === "function") {
-    cryptoApi.getRandomValues(bytes);
-    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2).padEnd(12, "0")}`;
 }

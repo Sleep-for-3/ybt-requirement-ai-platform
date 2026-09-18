@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { apiGet, apiPost } from "@/lib/api";
+import { createClientId } from "@/lib/client-id.mjs";
 
 type Section = "business" | "lineage";
 type RunItem = {id:number;field_id:number;section:Section;status:string;reason_code?:string|null;decision:string;adopted_content_version?:number|null};
@@ -61,7 +62,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   async function generate(){
     if(busy||dirty||!contentVersion||!fieldIds.length||!sections.length)return;
     setBusy(true);setError("");setNotice("");
-    submitKey.current ||= (globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`).replaceAll("-","");
+    submitKey.current ||= createClientId();
     try{
       await apiPost(`${base}/generation-runs`,{expected_content_version:contentVersion,field_ids:fieldIds,
         sections,idempotency_key:submitKey.current});

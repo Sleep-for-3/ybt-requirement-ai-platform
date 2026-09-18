@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost, apiPut } from "@/lib/api";
+import { createClientId } from "@/lib/client-id.mjs";
 import { useProjectPermissions } from "@/lib/project-permissions";
 
 type Layer = {key:string;name:string;active:boolean};
@@ -47,7 +48,7 @@ export default function Page(){
         <button disabled={index===0||busy} onClick={()=>move(index,-1)}>上移</button><button disabled={index===draft.layers.length-1||busy} onClick={()=>move(index,1)}>下移</button>
         <label><input type="checkbox" checked={layer.active} onChange={event=>setDraft({...draft,layers:draft.layers.map(x=>x.key===layer.key?{...x,active:event.target.checked}:x)})}/>启用</label>
       </div>)}
-      <button className="button-secondary" disabled={busy} onClick={()=>setDraft({...draft,layers:[...draft.layers,{key:`layer_${crypto.randomUUID()}`,name:"新层级",active:true}]})}>添加层级</button>
+      <button className="button-secondary" disabled={busy} onClick={()=>setDraft({...draft,layers:[...draft.layers,{key:`layer_${createClientId()}`,name:"新层级",active:true}]})}>添加层级</button>
       <h3 className="font-semibold">允许的层间关系</h3>
       {draft.relations.map((relation,index)=><div className="flex gap-2" key={index}>{(["from","to"] as const).map(side=><select aria-label={`${side==="from"?"来源":"目标"}层 ${index+1}`} className="control w-auto max-w-full" key={side} value={relation[side]} onChange={event=>setDraft({...draft,relations:draft.relations.map((x,i)=>i===index?{...x,[side]:event.target.value}:x)})}>{draft.layers.map(layer=><option key={layer.key} value={layer.key}>{layer.name}</option>)}</select>)}<button onClick={()=>setDraft({...draft,relations:draft.relations.filter((_,i)=>i!==index)})}>移除关系</button></div>)}
       <div className="flex gap-3"><button className="button-secondary" disabled={busy||draft.layers.length<2} onClick={()=>setDraft({...draft,relations:[...draft.relations,{from:draft.layers[0].key,to:draft.layers[1].key}]})}>添加关系</button>

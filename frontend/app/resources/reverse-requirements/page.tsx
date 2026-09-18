@@ -8,6 +8,7 @@ import { FilePlus2, Search } from "lucide-react";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
+import { createClientId } from "@/lib/client-id.mjs";
 import type { ScriptBasis } from "@/components/requirement-workspace/RequirementScriptPanel";
 
 type RegulatoryOption = { target_table_id:number; table_code:string; table_name:string;
@@ -82,7 +83,7 @@ function ReverseRequirements() {
           template_version_id:option.template_version_id,target_key:key,field_bindings:choice.bindings};
       })};
     const encoded=JSON.stringify(body);
-    if(request.current?.body!==encoded)request.current={body:encoded,key:crypto.randomUUID()};
+    if(request.current?.body!==encoded)request.current={body:encoded,key:createClientId()};
     const result=await apiPost<Created>(`${base}/from-scripts`,{...body,idempotency_key:request.current.key});
     if(owner.current===project)setCreated(result);
   }
