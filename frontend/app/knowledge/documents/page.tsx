@@ -3,11 +3,12 @@
 import { Database, FileText, RefreshCw, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { knowledgeLabel } from "@/lib/knowledge-contract.mjs";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
@@ -57,12 +58,14 @@ const STATUS_BADGE: Record<string, string> = {
   archived: "badge-neutral"
 };
 
-const GRID_COLS = "grid-cols-[minmax(0,1fr)_150px_90px_70px_110px]";
+const GRID_COLS = "grid-cols-[minmax(150px,1fr)_110px_70px_55px_85px] min-w-[520px]";
 
 export default function Page() {
   const { projectId } = useProjectWorkspace();
   const router = useRouter();
   const [items, setItems] = useState<KnowledgeRagDocument[]>([]);
+  const generation = useRef(0);
+  const [loadError, setLoadError] = useState("");
   const [semanticStatus, setSemanticStatus] = useState<SemanticStatus | null>(null);
   const [indexVersions, setIndexVersions] = useState<IndexVersion[]>([]);
   const [confirmReindex, setConfirmReindex] = useState(false);
@@ -78,20 +81,29 @@ export default function Page() {
   });
 
   const load = useCallback(async () => {
+    const request = ++generation.current;
     if (projectId) {
+      setLoadError("");
+      try {
       const [documents, status, versions] = await Promise.all([
         apiGet<KnowledgeRagDocument[]>(`/projects/${projectId}/knowledge/documents`),
         apiGet<SemanticStatus>(`/projects/${projectId}/semantic-index/status`),
         apiGet<IndexVersion[]>(`/projects/${projectId}/semantic-index/versions`)
       ]);
+      if (request !== generation.current) return;
       setItems(documents);
       setSemanticStatus(status);
       setIndexVersions(versions);
+      } catch {
+        if (request === generation.current) setLoadError("文档列表暂不可用，请确认项目权限或稍后重试。");
+      }
     }
   }, [projectId]);
 
   useEffect(() => {
+    setItems([]); setSemanticStatus(null); setIndexVersions([]); setActiveJob(null);
     void load();
+    return () => { generation.current += 1; };
   }, [load]);
 
   const polledJob = useJobPolling(activeJob?.id, {
@@ -109,6 +121,7 @@ export default function Page() {
     if (!projectId) return;
     const formElement = event.currentTarget;
     const formData = new FormData(formElement);
+    formData.forEach((value,key)=>{if(typeof value==="string"&&!value.trim())formData.delete(key);});
     setActiveJob(null);
     const result = await uploadAction.run(() =>
       uploadForm<KnowledgeRagDocument | BackgroundJobSummary>(
@@ -146,6 +159,8 @@ export default function Page() {
     <main>
       <WorkspaceHeader title="知识文档" meta="版本、去重、解析状态与出处" />
       <div className="mx-auto max-w-6xl space-y-4 p-4 lg:p-6">
+        {loadError ? <p role="alert" className="text-red-700">{loadError}</p> : null}
+        <details><summary className="cursor-pointer text-sm text-slate-500">高级工具：索引状态</summary>
         <section className="panel">
           <div className="panel-header flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -209,13 +224,16 @@ export default function Page() {
           </section>
         ) : null}
 
+        </details>
         <form className="panel" onSubmit={upload}>
           <div className="panel-header">
             <h2 className="text-[15px] font-semibold text-ink">上传知识文档</h2>
           </div>
-          <div className="panel-body grid gap-3 md:grid-cols-3">
-            <input className="control" name="file" required type="file" />
-            <select className="control" name="knowledge_type">
+          <div className="panel-body grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <label className="text-sm">上传方式<select className="control mt-1" name="document_id"><option value="">新文档</option>{items.map(item=><option key={item.id} value={item.id}>为“{item.file_name}”上传新版本</option>)}</select></label>
+            <label className="text-sm">选择文件<input className="control mt-1" name="file" required type="file" /></label>
+            <label className="text-sm">来源类别<select className="control mt-1" name="source_category" required><option value="regulatory_formal">监管正式文件</option><option value="regulatory_qa">监管正式答疑</option><option value="internal_policy">行内制度</option><option value="internal_interpretation">行内解释</option><option value="business_material">业务沉淀</option><option value="technical_evidence">技术证据</option></select></label>
+            <label className="text-sm">知识用途<select className="control mt-1" name="knowledge_type">
               <option value="regulatory_qa">监管答疑</option>
               <option value="regulatory_policy">监管制度</option>
               <option value="field_explanation">字段解释</option>
@@ -228,22 +246,34 @@ export default function Page() {
               <option value="code_mapping">码值映射</option>
               <option value="manual_note">人工备注</option>
               <option value="sql_evidence">SQL 证据</option>
-            </select>
-            <select className="control" name="knowledge_scope">
+            </select></label>
+            <label className="text-sm">可见范围<select className="control mt-1" name="knowledge_scope">
               <option value="project">项目</option>
               <option value="institution">银行</option>
               <option value="global">全局</option>
-            </select>
-            <select className="control" name="confidentiality_level">
+            </select></label>
+            <label className="text-sm">保密级别<select className="control mt-1" name="confidentiality_level">
               <option value="internal">内部</option>
               <option value="public">公开</option>
               <option value="confidential">机密</option>
               <option value="restricted">受限</option>
-            </select>
-            <input className="control" name="institution_name" placeholder="银行名称（银行作用域）" />
+            </select></label>
+            <label className="text-sm">逻辑文档代码<input className="control mt-1" name="logical_code" placeholder="新文档可填写稳定业务标识" /></label>
+            <label className="text-sm">监管文号<input className="control mt-1" name="regulatory_document_no" /></label>
+            <label className="text-sm">监管版本<input className="control mt-1" name="regulatory_version" /></label>
+            <label className="text-sm">内部修订版本<input className="control mt-1" name="internal_revision" placeholder="例如 R2" /></label>
+            <label className="text-sm">发布机构<input className="control mt-1" name="publisher" /></label>
+            <label className="text-sm">发布日期<input className="control mt-1" name="published_at" type="datetime-local" /></label>
+            <label className="text-sm">生效日期<input className="control mt-1" name="effective_at" type="datetime-local" /></label>
+            <label className="text-sm">失效日期<input className="control mt-1" name="expires_at" type="datetime-local" /></label>
+            <label className="text-sm">适用机构<input className="control mt-1" name="applicable_institutions" placeholder="用逗号分隔机构名称" /></label>
+            <label className="text-sm">适用字段<input className="control mt-1" name="applicable_fields" placeholder="用逗号分隔字段代码" /></label>
+            <label className="text-sm">适用场景<input className="control mt-1" name="applicable_scenarios" placeholder="用逗号分隔已选场景编号" /></label>
+            <label className="text-sm">银行名称<input className="control mt-1" name="institution_name" placeholder="仅银行作用域需要" /></label>
+            <label className="text-sm md:col-span-2">变更说明<textarea className="control mt-1 min-h-20" name="change_note" placeholder="说明本次修订内容和依据" /></label>
             <AsyncActionButton actionStatus={uploadButtonStatus} className="button-primary" loadingText="正在上传…" type="submit">
               <Upload size={16} />
-              上传并索引
+              上传草稿并解析
             </AsyncActionButton>
           </div>
         </form>
@@ -251,7 +281,7 @@ export default function Page() {
         {polledJob ? <JobProgressPanel job={polledJob} resultHref="/knowledge/documents" /> : null}
 
         {items.length ? (
-          <section className="panel overflow-hidden">
+          <section className="panel overflow-x-auto">
             <div className={`grid-head grid ${GRID_COLS}`}>
               <span>文件名</span>
               <span>类型</span>
@@ -266,11 +296,11 @@ export default function Page() {
                 key={item.id}
               >
                 <strong className="truncate font-semibold text-ink">{item.file_name}</strong>
-                <span className="text-slate-500">{item.knowledge_type}</span>
-                <span className="text-slate-500">{item.knowledge_scope}</span>
-                <span className="text-slate-500">v{item.current_version_no}</span>
+                <span className="text-slate-500">{knowledgeLabel(item.knowledge_type)}</span>
+                <span className="text-slate-500">{knowledgeLabel(item.knowledge_scope)}</span>
+                <span className="text-slate-500">{item.current_version_id?`内部版本 ${item.current_version_no}`:"无生效版本"}</span>
                 <span>
-                  <span className={STATUS_BADGE[item.document_status] || "badge-neutral"}>{item.document_status}</span>
+                  <span className={STATUS_BADGE[item.document_status] || "badge-neutral"}>{knowledgeLabel(item.document_status)}</span>
                 </span>
               </StatefulLink>
             ))}

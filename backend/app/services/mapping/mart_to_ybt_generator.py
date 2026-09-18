@@ -140,6 +140,7 @@ async def generate_mart_to_ybt_draft(
         reauthorized = PermissionService(db, actor).require_project_permission(
             snapshot.project.id,
             "technical.edit",
+            allow_suspended=True,
         )
         locked_project = db.scalar(
             select(Project)

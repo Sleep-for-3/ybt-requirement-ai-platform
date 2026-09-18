@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowDown, Download, FileCheck2 } from "lucide-react";
+import { Download, FileCheck2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 
 import { SelectedFieldEditor } from "@/components/requirement-workspace/SelectedFieldEditor";
 import { AiExplanationPanel } from "@/components/requirement-workspace/AiExplanationPanel";
+import { RequirementLineagePanel } from "@/components/requirement-workspace/RequirementLineagePanel";
 import type {
   MartField,
   MartTable,
@@ -13,9 +14,14 @@ import type {
   ProductScenario,
   TargetTable
 } from "@/lib/api";
-import { buildLineageLabels, combinedFieldStatus, mappingStatusLabel, mappingStatusTone, preferredMappingContent } from "@/lib/workspace-view-model.mjs";
+import { combinedFieldStatus, mappingStatusLabel, mappingStatusTone, preferredMappingContent } from "@/lib/workspace-view-model.mjs";
 import { questionTypeLabel, statusLabel } from "@/lib/product-language";
 import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
+import type { RequirementScope } from "./RequirementScopePanel";
+import { RequirementContentEditor } from "./RequirementContentEditor";
+
+export type RequirementGap = {id:string; field_id:number|null; origin:string; message:string; status:string};
+export type RequirementResourceSummary = {kind:string; name:string; code:string; status:string};
 
 type WorkspaceTab = "structured" | "lineage" | "evidence" | "questions" | "document";
 
@@ -28,6 +34,13 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string }> = [
 ];
 
 export function DocumentPreview({
+  requirementId,
+  requirementBackground,
+  requirementScope,
+  requirementGaps,
+  requirementResources,
+  contentVersion,
+  contentStatus,
   projectName,
   activeTab,
   table,
@@ -42,7 +55,6 @@ export function DocumentPreview({
   evidenceCountByField,
   evidenceForSelected,
   questions,
-  deliverable,
   detailReady,
   onAdoptBusiness,
   onAdoptTechnical,
@@ -54,6 +66,13 @@ export function DocumentPreview({
   onExport,
   exporting
 }: {
+  requirementId?: number;
+  requirementBackground?: string;
+  requirementScope?: RequirementScope;
+  requirementGaps?: RequirementGap[];
+  requirementResources?: RequirementResourceSummary[];
+  contentVersion?: number;
+  contentStatus?: string;
   projectName: string;
   activeTab: WorkspaceTab;
   table: TargetTable | null;
@@ -68,7 +87,6 @@ export function DocumentPreview({
   evidenceCountByField: Record<number, number>;
   evidenceForSelected: number;
   questions: PendingQuestion[];
-  deliverable: {id:number;target_table_id:number;status:string;version_no:number} | null;
   detailReady: boolean;
   onAdoptBusiness: () => void;
   onAdoptTechnical: () => void;
@@ -84,22 +102,24 @@ export function DocumentPreview({
   const martFieldsById = useMemo(() => new Map(martFields.map((field) => [field.id, field])), [martFields]);
   const martTablesById = useMemo(() => new Map(martTables.map((table) => [table.id, table])), [martTables]);
   const selected = selectedFieldId ? recordsByFieldId.get(selectedFieldId) || null : null;
-  const openQuestions = useMemo(() => questions.filter((item) => !["accepted", "rejected", "closed"].includes(item.question_status)), [questions]);
+  const openQuestions = useMemo(() => questions.filter((item) => (!["resolved", "rejected", "closed"].includes(item.question_status) || !item.resolution_text?.trim())), [questions]);
   const selectedQuestions = useMemo(() => openQuestions.filter((item) => !item.target_field_id || item.target_field_id === selectedFieldId), [openQuestions, selectedFieldId]);
-  const versionLabel = deliverable ? `正式交付 v${deliverable.version_no}` : "工作草稿";
+  const versionLabel = requirementScope
+    ? `需求 v${requirementScope.version}${contentVersion ? ` · 内容 v${contentVersion}` : ""} · ${statusLabel(contentStatus || "draft")}`
+    : "工作草稿";
+  const confirmed = contentStatus === "confirmed";
 
   return (
     <section className="panel min-w-0 overflow-hidden">
       <div className="flex min-h-14 flex-wrap items-center gap-2 border-b border-line bg-slate-50/70 px-4 py-2.5">
         <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold text-ink">需求文档草稿预览</h2>
-          <p className="text-[10px] text-slate-500">AI 草稿必须经人工采用、编辑和现有治理流程确认</p>
+          <h2 className="text-[13px] font-semibold text-ink">{confirmed ? "已确认需求文档" : "需求文档草稿预览"}</h2>
+          <p className="text-[10px] text-slate-500">{confirmed ? "当前内容已通过三阶段审核，修订将建立新版本" : "AI 草稿必须经人工采用、编辑和现有治理流程确认"}</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button className="badge-info cursor-pointer" onClick={onShowEvidence} type="button">证据 {evidenceForSelected} 条</button>
-          <Link className="badge-warning" href="/questions">待确认 {openQuestions.length} 项</Link>
-          <span className={deliverable?.status === "approved" ? "badge-success" : "badge-neutral"}>{versionLabel}</span>
-          <Link className="button-secondary" href="/deliverables"><FileCheck2 size={15} />正式交付</Link>
+          {requirementId ? <button className="badge-warning" onClick={()=>onTabChange("questions")}>{requirementGaps ? `待确认 ${requirementGaps.length} 项` : "完整性待评估"}</button> : <Link className="badge-warning" href="/questions">人工问题 {openQuestions.length} 项 · 完整性待评估</Link>}
+          <span className="badge-neutral">{versionLabel}</span>
           <button className="button-primary" disabled={!table || exporting} onClick={onExport} type="button"><Download size={15} />{exporting ? "导出中…" : "导出需求文档"}</button>
         </div>
       </div>
@@ -110,18 +130,20 @@ export function DocumentPreview({
         <div className="bg-[#eef2f5] p-5 2xl:p-7">
           <article className="mx-auto min-h-[760px] max-w-[1180px] border border-slate-200 bg-white px-7 py-7 shadow-[0_8px_24px_rgba(33,47,61,0.08)] 2xl:px-9">
             <div className="mb-4 h-1 w-12 rounded-full bg-pine" />
-            <h1 className="text-xl font-semibold tracking-tight text-ink">{table.table_code} {table.table_name} — 业务口径及技术溯源需求</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-ink">{requirementScope?.name || `${table.table_code} ${table.table_name} — 业务口径及技术溯源需求`}</h1>
             <p className="mt-1 text-xs text-slate-500">{projectName} · {scenario?.scenario_name || "未选择业务场景"} · AI 辅助需求工作稿</p>
 
             <div className="mt-5 grid grid-cols-4 overflow-hidden rounded-lg border border-line bg-slate-50/70 text-[10px] text-slate-500">
               <DocMeta label="项目" value={projectName} />
               <DocMeta label="目标表" value={`${table.table_code} ${table.table_name}`} />
-              <DocMeta label="字段范围" value={`${records.length} 个真实字段`} />
-              <DocMeta label="状态" value={deliverable ? mappingStatusLabel(deliverable.status) : "工作草稿"} last />
+              <DocMeta label="字段范围" value={`${records.length} 个字段`} />
+              <DocMeta label="状态" value="草稿（待审核交付）" last />
             </div>
 
             <WorkspaceTabs activeTab={activeTab} onChange={onTabChange} />
-            {selected ? <div className={activeTab === "structured" || activeTab === "document" ? "mt-5" : "hidden"}><SelectedFieldEditor
+            {selected ? <div className={activeTab === "structured" || activeTab === "document" ? "mt-5" : "hidden"}>{requirementId && requirementScope ? <RequirementContentEditor
+              key={`${requirementId}:${selected.field.id}`} requirementId={requirementId} scopeVersion={requirementScope.version}
+              contentVersion={contentVersion||0} record={selected} onSaved={onEditorSaved} onDirty={onEditorDirtyChange}/>:<SelectedFieldEditor
               detailReady={detailReady}
               key={`${selected.field.id}:${selected.business?.id || 0}:${selected.lineage?.id || 0}`}
               onAdoptBusiness={onAdoptBusiness}
@@ -131,27 +153,40 @@ export function DocumentPreview({
               onNotice={onEditorNotice}
               onSaved={onEditorSaved}
               record={selected}
-            /></div> : null}
+            />}</div> : null}
             {activeTab === "document" ? <>
             <SectionTitle number="1" title="需求背景与范围" />
-            <p className="text-xs leading-6 text-slate-600">{table.description || selected?.field.regulatory_refined_definition || selected?.field.regulatory_description || "当前目标表尚未维护整体说明，字段级监管定义与人工口径见下表。"}</p>
+            <p className="whitespace-pre-wrap text-xs leading-6 text-slate-600">{requirementId ? requirementBackground || "业务背景待补充" : table.description || "整体背景待补充；字段定义不替代需求背景。"}</p>
+            {requirementScope ? <dl className="mt-3 space-y-2 text-xs">{([
+              ["业务目标",requirementScope.objective], ["口径生效日期",requirementScope.effective_date],
+              ["纳入范围",requirementScope.inclusion], ["排除条件",requirementScope.exclusion]
+            ] as const).map(([label,value])=><div key={label}><dt className="font-semibold">{label}</dt><dd className="whitespace-pre-wrap text-slate-600">{value||"待确认"}</dd></div>)}
+              <div><dt className="font-semibold">资料与数据范围</dt><dd>{requirementResources?.length ? requirementResources.map((item,index)=><p key={index}>{item.kind}：{item.name} {item.code!==item.name?item.code:""} · {item.status==="selected"?"已选，待核验":"不可用，待重新选择"}</p>) : "未指定，不代表允许使用全部资料"}</dd></div>
+            </dl> : null}
 
             <SectionTitle number="2" title="字段级业务口径与技术溯源" />
             <div className="overflow-x-auto border border-line">
               <table className="w-full min-w-[900px] table-fixed border-collapse text-[10px]">
                 <colgroup><col className="w-[12%]" /><col className="w-[20%]" /><col className="w-[11%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[19%]" /><col className="w-[9%]" /></colgroup>
-                <thead><tr className="bg-slate-50 text-left text-slate-600"><Th>目标字段</Th><Th>业务口径</Th><Th>源系统</Th><Th>源表 / 字段</Th><Th>集市字段</Th><Th>双层加工与取数规则</Th><Th>状态</Th></tr></thead>
+                <thead><tr className="bg-slate-50 text-left text-slate-600"><Th>目标字段</Th><Th>业务口径</Th><Th>源系统</Th><Th>源表 / 字段</Th><Th>加工路径 / 集市字段</Th><Th>加工与取数规则</Th><Th>状态</Th></tr></thead>
                 <tbody>
                   {records.map((record) => {
                     const martMapping = record.martMappings[0] || null;
                     const martField = martMapping?.mart_field_id ? martFieldsById.get(martMapping.mart_field_id) || null : null;
                     const martTable = martField ? martTablesById.get(martField.mart_table_id) || null : null;
                     const sourceMapping = martField ? sourceMappings[martField.id]?.[0] || null : null;
-                    const combinedStatus = combinedFieldStatus({
+                    const mappingStatus = combinedFieldStatus({
                       businessStatus: record.business?.business_confirm_status,
                       technicalStatus: record.lineage?.tech_confirm_status,
+                      pathConfirmed: record.pathConfirmed,
                       martStatuses: record.martMappings.map((mapping) => mapping.mapping_status)
                     });
+                    const sourcesApproved = record.pathConfirmed || (record.martMappings.length > 0 && record.martMappings.every(mapping=>{
+                      const sources=mapping.mart_field_id?sourceMappings[mapping.mart_field_id]||[]:[];
+                      return sources.length>0 && sources.every(source=>["approved","confirmed"].includes(source.mapping_status));
+                    }));
+                    const hasScopeGap=Boolean(requirementId && (!requirementGaps || requirementGaps.some(gap=>gap.field_id===null||gap.field_id===record.field.id)));
+                    const combinedStatus=mappingStatus==="approved"&&(!sourcesApproved||hasScopeGap)?"draft":mappingStatus;
                     const tone = mappingStatusTone(combinedStatus);
                     const status = mappingStatusLabel(combinedStatus);
                     const selectedRow = record.field.id === selectedFieldId;
@@ -161,7 +196,7 @@ export function DocumentPreview({
                         <Td>{preferredMappingContent(record.business, record.field.regulatory_refined_definition || record.field.regulatory_description || "待维护")}</Td>
                         <Td>{record.lineage?.source_system_name || sourceMapping?.source_system_summary || "待确认"}</Td>
                         <Td>{sourcePath(record)}</Td>
-                        <Td>{martField ? `${martTable?.table_code || martTable?.table_name || "MART"}.${martField.field_code}` : martMapping?.mart_field_summary || "待确认"}</Td>
+                        <Td>{record.confirmedPath ? <><p>{record.pathConfirmed?"已确认路径":"路径待重新确认"}</p><p className="break-all">{record.confirmedPath.nodes.map(node=>[node.table_name,node.column_name].filter(Boolean).join(".")).join("；")}</p></> : martField ? `${martTable?.table_code || martTable?.table_name || "MART"}.${martField.field_code}` : martMapping?.mart_field_summary || "待确认"}</Td>
                         <Td><RuleLayers source={sourceMapping?.final_content || sourceMapping?.business_rule} target={martMapping?.final_content || martMapping?.business_rule || record.lineage?.processing_logic} /><button className="mt-1 text-[9px] font-medium text-sky-700 hover:underline" onClick={(event) => { event.stopPropagation(); onSelectField(record.field.id); onShowEvidence(); }} type="button">查看 {evidenceCountByField[record.field.id] || 0} 条证据</button></Td>
                         <Td><StatusBadge tone={tone} value={status} /></Td>
                       </tr>
@@ -174,22 +209,23 @@ export function DocumentPreview({
 
             {selected ? (
               <>
-                <SectionTitle number="3" title="当前字段双层技术溯源" />
-                <LineageFlow record={selected} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} />
+                <SectionTitle number="3" title="当前字段技术溯源" />
+                <p className="text-xs">已登记来源：{sourcePath(selected)}</p>
+                <button className="button-secondary mt-2" onClick={()=>onTabChange("lineage")}>查看表字段关系与加工依据</button>
               </>
             ) : null}
 
-            <SectionTitle number="5" title="待业务 / 技术确认问题" />
-            {selectedQuestions.length ? (
+            <SectionTitle number={selected ? "4" : "3"} title="待业务 / 技术确认问题" />
+            {requirementId ? <RequirementGapList gaps={requirementGaps} records={records} onSelectField={onSelectField} /> : selectedQuestions.length ? (
               <ul className="space-y-2">
-                {selectedQuestions.slice(0, 6).map((question) => (
+                {selectedQuestions.map((question) => (
                   <li className="border-l-2 border-gold-300 bg-gold-50 px-3 py-2 text-[10px] leading-5 text-slate-700" key={question.id}>
                     <strong className="text-gold-800">{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}：</strong>{question.question_text}
                     <span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span>
                   </li>
                 ))}
               </ul>
-            ) : <p className="text-xs text-slate-500">当前目标表 / 字段没有未闭环问题。</p>}
+            ) : <p className="text-xs text-slate-500">未登记人工问题；这不代表定义、来源、加工规则和证据已完整。</p>}
 
             <footer className="mt-7 flex justify-between border-t border-line pt-3 text-[9px] text-slate-400">
               <span>来源：监管目标字段 + 场景口径 + 双层 Mapping + 已绑定证据</span>
@@ -198,14 +234,23 @@ export function DocumentPreview({
             </> : null}
             {activeTab === "structured" ? <StructuredCaliber onSelectField={onSelectField} records={records} selected={selected} /> : null}
             {activeTab === "structured" && selected ? <AiExplanationPanel evidenceCount={evidenceForSelected} martFieldsById={martFieldsById} martTablesById={martTablesById} record={selected} sourceMappings={sourceMappings} /> : null}
-            {activeTab === "lineage" ? <LineagePanel record={selected} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} /> : null}
+            {activeTab === "lineage" ? <RequirementLineagePanel tableId={table.id} fieldId={selectedFieldId} requirementId={requirementId} scenarioId={scenario?.id} onSelectField={onSelectField} contentVersion={contentVersion} /> : null}
             {activeTab === "evidence" ? <EvidencePanel evidenceCountByField={evidenceCountByField} onSelectField={onSelectField} onShowEvidence={onShowEvidence} records={records} selectedFieldId={selectedFieldId} /> : null}
-            {activeTab === "questions" ? <QuestionsPanel questions={selectedQuestions} /> : null}
+            {activeTab === "questions" ? requirementId ? <RequirementGapList gaps={requirementGaps} records={records} onSelectField={onSelectField} /> : <QuestionsPanel questions={selectedQuestions} /> : null}
           </article>
         </div>
       )}
     </section>
   );
+}
+
+function RequirementGapList({gaps, records, onSelectField}: {gaps?:RequirementGap[]; records:FieldWorkspaceRecord[]; onSelectField:(id:number)=>void}) {
+  if(!gaps)return <p role="status" className="my-3 text-xs">缺口尚未完成评估或读取，请刷新后核验。</p>;
+  if(!gaps.length)return <p className="my-3 text-xs">本次完整性检查未发现缺口，仍需完成审核确认。</p>;
+  return <ul aria-label="当前需求全部缺口" className="my-3 space-y-2">{gaps.map(gap=>{
+    const field=records.find(item=>item.field.id===gap.field_id)?.field;
+    return <li key={gap.id} className="rounded border border-gold-200 bg-gold-50 p-3 text-xs"><strong>{gap.origin==="manual"?"人工问题":"分析发现"} · {field?.field_name||"需求范围"}</strong><p className="my-1 whitespace-pre-wrap">{gap.message}</p>{field?<button className="underline" onClick={()=>onSelectField(field.id)}>定位字段</button>:null}<span className="ml-2">待核验闭环</span></li>;
+  })}</ul>;
 }
 
 function WorkspaceTabs({ activeTab, onChange }: { activeTab: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {
@@ -223,16 +268,13 @@ function StructuredCaliber({ records, selected, onSelectField }: {
   </div>;
 }
 
-function LineagePanel({ record, martFieldsById, martTablesById, sourceMappings }: { record: FieldWorkspaceRecord | null; martFieldsById: Map<number, MartField>; martTablesById: Map<number, MartTable>; sourceMappings: SourceMappingIndex }) {
-  return <div className="mt-5">{record ? <><p className="mb-3 text-xs text-slate-500">当前字段的 Source → Mart → YBT 可追溯链路</p><LineageFlow record={record} martFieldsById={martFieldsById} martTablesById={martTablesById} sourceMappings={sourceMappings} /></> : <p className="text-xs text-slate-500">请选择字段查看血缘。</p>}</div>;
-}
 
 function EvidencePanel({ records, selectedFieldId, evidenceCountByField, onSelectField, onShowEvidence }: { records: FieldWorkspaceRecord[]; selectedFieldId: number | null; evidenceCountByField: Record<number, number>; onSelectField: (id: number) => void; onShowEvidence: () => void }) {
-  return <div className="mt-5 space-y-2"><p className="text-xs text-slate-500">证据正文按字段懒加载，避免首屏返回大文本。</p>{records.map((record) => <div className="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2" key={record.field.id}><span className="text-xs text-ink">{record.field.field_name}</span><button className="button-secondary h-8 text-xs" onClick={() => { onSelectField(record.field.id); onShowEvidence(); }} type="button">查看 {evidenceCountByField[record.field.id] || 0} 条证据</button></div>)}</div>;
+  return <div className="mt-5 space-y-2"><p className="text-xs text-slate-500">按字段查看证据出处与原文。</p>{records.map((record) => <div className="flex items-center justify-between rounded-lg border border-line bg-white px-3 py-2" key={record.field.id}><span className="text-xs text-ink">{record.field.field_name}</span><button className="button-secondary h-8 text-xs" onClick={() => { onSelectField(record.field.id); onShowEvidence(); }} type="button">查看 {evidenceCountByField[record.field.id] || 0} 条证据</button></div>)}</div>;
 }
 
 function QuestionsPanel({ questions }: { questions: PendingQuestion[] }) {
-  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>当前没有未闭环问题</p></div>}</div>;
+  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>未登记人工问题；事实完整性仍需评估</p></div>}</div>;
 }
 
 function DocMeta({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
@@ -264,25 +306,4 @@ function RuleLayers({ source, target }: { source?: string | null; target?: strin
 function StatusBadge({ tone, value }: { tone: string; value: string }) {
   const className = tone === "success" ? "badge-success" : tone === "danger" ? "badge-danger" : tone === "warning" ? "badge-warning" : tone === "info" ? "badge-info" : "badge-neutral";
   return <span className={`${className} whitespace-normal text-center text-[9px]`}>{value}</span>;
-}
-
-function LineageFlow({ record, martFieldsById, martTablesById, sourceMappings }: { record: FieldWorkspaceRecord; martFieldsById: Map<number, MartField>; martTablesById: Map<number, MartTable>; sourceMappings: SourceMappingIndex }) {
-  const martMapping = record.martMappings[0] || null;
-  const martField = martMapping?.mart_field_id ? martFieldsById.get(martMapping.mart_field_id) || null : null;
-  const martTable = martField ? martTablesById.get(martField.mart_table_id) || null : null;
-  const sourceMapping = martField ? sourceMappings[martField.id]?.[0] || null : null;
-  const labels = buildLineageLabels({ lineage: record.lineage, sourceToMart: sourceMapping, martField, martTable, targetField: record.field });
-  return (
-    <div className="grid items-stretch gap-2 rounded-lg border border-line bg-slate-50/70 p-3 lg:grid-cols-[1fr_34px_1fr_34px_1fr]">
-      <LineageNode eyebrow="业务源系统" title={record.lineage?.source_system_name || "来源待确认"} detail={labels.source} />
-      <div className="flex items-center justify-center text-pine"><ArrowDown className="lg:-rotate-90" size={18} /></div>
-      <LineageNode eyebrow="监管集市" title={martTable?.table_name || "集市字段待确认"} detail={labels.mart} />
-      <div className="flex items-center justify-center text-pine"><ArrowDown className="lg:-rotate-90" size={18} /></div>
-      <LineageNode eyebrow="一表通目标" title={record.field.field_name} detail={labels.target} />
-    </div>
-  );
-}
-
-function LineageNode({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
-  return <div className="rounded-lg border border-line bg-white p-3"><span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">{eyebrow}</span><strong className="mt-1 block text-xs text-ink">{title}</strong><p className="mt-1 break-all font-mono text-[9px] leading-4 text-slate-500">{detail}</p></div>;
 }

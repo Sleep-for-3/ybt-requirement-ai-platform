@@ -1,121 +1,39 @@
 "use client";
-
-import { HelpCircle, MessagesSquare, Quote } from "lucide-react";
-import { useState } from "react";
-
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { apiPost } from "@/lib/api";
-
-type AskCitation = {
-  knowledge_unit_id: number;
-  source_file_name?: string | null;
-  source_sheet_name?: string | null;
-  source_cell_range?: string | null;
-  source_page_no?: number | null;
-  quoted_content?: string | null;
-};
-
-const CONFIDENCE_BADGE: Record<string, string> = {
-  high: "badge-success",
-  medium: "badge-warning",
-  low: "badge-neutral"
-};
-
-export default function Page() {
-  const { projectId } = useProjectWorkspace();
-  const [query, setQuery] = useState("");
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
-
-  const answer = result && typeof result.answer === "string" ? result.answer : "";
-  const confidence = result && typeof result.confidence_level === "string" ? result.confidence_level : "";
-  const citations = (result && Array.isArray(result.citations) ? result.citations : []) as AskCitation[];
-  const openQuestions = (result && Array.isArray(result.open_questions) ? result.open_questions : []) as string[];
-
-  return (
-    <main>
-      <WorkspaceHeader title="有证据问答" meta="无证据不下确定结论，引用必须对应真实知识单元" />
-      <div className="mx-auto max-w-4xl space-y-4 p-4 lg:p-6">
-        <div className="panel flex gap-2 p-4">
-          <input
-            className="control flex-1"
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="例如：客户证件类型取哪个字段？"
-            value={query}
-          />
-          <button
-            className="button-primary"
-            onClick={async () => projectId && setResult(await apiPost(`/projects/${projectId}/knowledge/ask`, { query, top_k: 10 }))}
-          >
-            提问
-          </button>
-        </div>
-
-        {result ? (
-          <section className="panel">
-            <div className="panel-header flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine-50 text-pine-600">
-                  <MessagesSquare size={15} />
-                </span>
-                <h2 className="text-[15px] font-semibold text-ink">回答</h2>
-              </div>
-              {confidence ? (
-                <span className={CONFIDENCE_BADGE[confidence] || "badge-neutral"}>置信度 {confidence}</span>
-              ) : null}
-            </div>
-            <div className="panel-body space-y-4">
-              <p className="text-sm leading-relaxed text-ink">{answer}</p>
-
-              {citations.length ? (
-                <div>
-                  <h3 className="text-xs font-semibold text-slate-500">引用来源（{citations.length}）</h3>
-                  <div className="mt-2 space-y-2">
-                    {citations.map((citation) => (
-                      <blockquote className="rounded-lg border border-line bg-mist/60 p-3" key={citation.knowledge_unit_id}>
-                        <div className="flex items-start gap-2">
-                          <Quote className="mt-0.5 shrink-0 text-slate-300" size={14} />
-                          <p className="text-sm leading-relaxed text-slate-600">{citation.quoted_content}</p>
-                        </div>
-                        <footer className="mt-2 border-t border-line pt-2 text-xs text-slate-500">
-                          #{citation.knowledge_unit_id} · {citation.source_file_name}
-                          {citation.source_sheet_name ? ` · ${citation.source_sheet_name}` : ""}
-                          {citation.source_cell_range ? ` · ${citation.source_cell_range}` : ""}
-                          {citation.source_page_no ? ` · 第${citation.source_page_no}页` : ""}
-                        </footer>
-                      </blockquote>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {openQuestions.length ? (
-                <div className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gold-700">
-                    <HelpCircle size={13} />
-                    待确认问题
-                  </div>
-                  <ul className="mt-1 space-y-1 text-sm text-gold-700">
-                    {openQuestions.map((question) => (
-                      <li key={question}>{question}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              <details className="text-xs text-slate-500">
-                <summary className="cursor-pointer select-none">查看原始返回</summary>
-                <pre className="mt-2 overflow-auto rounded-lg bg-mist p-3">{JSON.stringify(result, null, 2)}</pre>
-              </details>
-            </div>
-          </section>
-        ) : (
-          <div className="empty-state">
-            <MessagesSquare className="text-slate-300" size={28} />
-            <p>输入问题后提问，系统只依据知识库证据作答，证据不足时会标记为待确认</p>
-          </div>
-        )}
-      </div>
-    </main>
-  );
+import { KnowledgeCitations } from "@/components/knowledge/KnowledgeCitations";
+import { apiGet, apiPost, type TargetField, type ProductScenario } from "@/lib/api";
+import { MODES, answerMode, askPayload, askErrorMessage } from "@/lib/knowledge-contract.mjs";
+import type { KnowledgeAnswer, EvidenceRule } from "@/lib/knowledge-types";
+export default function Page(){return <Suspense fallback={<p>正在打开问答工作台…</p>}><Workbench/></Suspense>;}
+function Workbench(){
+ const {projectId}=useProjectWorkspace();const params=useSearchParams();const router=useRouter();const mode=answerMode(params.get("mode")),copy=MODES[mode];
+ const [query,setQuery]=useState(""),[result,setResult]=useState<KnowledgeAnswer|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
+ const [fields,setFields]=useState<TargetField[]>([]),[scenarios,setScenarios]=useState<ProductScenario[]>([]),[filter,setFilter]=useState(""),[target,setTarget]=useState<number|null>(null),[scenario,setScenario]=useState<number|null>(null),[selectionError,setSelectionError]=useState("");
+ const [includeHistory,setIncludeHistory]=useState(false),[historicalAsOf,setHistoricalAsOf]=useState("");
+ const generation=useRef(0),pending=useRef(false);
+ useEffect(()=>{generation.current++;pending.current=false;setBusy(false);setResult(null);setError("");setTarget(null);setScenario(null);setFilter("");setFields([]);setScenarios([]);setSelectionError("");
+   if(mode!=="data_field"||!projectId)return;const controller=new AbortController();
+   void Promise.all([apiGet<TargetField[]>(`/fields?project_id=${projectId}`,{signal:controller.signal}),apiGet<ProductScenario[]>(`/projects/${projectId}/scenarios?enabled=true`,{signal:controller.signal})]).then(([f,s])=>{if(!controller.signal.aborted){setFields(f);setScenarios(s);}}).catch(()=>{if(!controller.signal.aborted)setSelectionError("字段或场景列表暂不可用，仍可直接输入问题。");});
+   return()=>controller.abort();
+ },[mode,projectId]);
+ function switchMode(next:string){const updated=new URLSearchParams(params.toString());updated.set("mode",next);router.replace(`/knowledge/ask?${updated}`,{scroll:false});}
+ async function submit(event:React.FormEvent){event.preventDefault();if(pending.current)return;if(!projectId||!query.trim()){setError(!projectId?"请先选择项目。":"请输入问题。");return;}pending.current=true;setBusy(true);setError("");setResult(null);const request=++generation.current;
+   try{const value=await apiPost<KnowledgeAnswer>(`/projects/${projectId}/knowledge/ask`,askPayload(mode,query,target,scenario,includeHistory,historicalAsOf));if(request===generation.current)setResult(value);}catch(failure){if(request===generation.current)setError(askErrorMessage(failure));}finally{if(request===generation.current){setBusy(false);pending.current=false;}}
+ }
+ const sections=result?.sections;
+ function rules(title:string,rows:EvidenceRule[]|undefined){return <section className="panel p-5"><h3 className="mb-3 font-semibold">{title}</h3>{rows?.length?rows.map((row,i)=><div className="mb-3 whitespace-pre-wrap break-words" key={i}><p>{row.text}</p><span className="text-xs text-slate-500">{row.status==="candidate"?"候选，待确认":row.status==="draft"?"草稿，待确认":"持久化证据，需核验适用性"}</span></div>):<p className="text-sm text-slate-500">暂无证据，待确认。</p>}</section>;}
+ return <main><WorkspaceHeader title={copy.label} meta={copy.description}/><div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6"><div role="tablist" aria-label="问答模式" className="flex flex-wrap gap-3">{Object.entries(MODES).map(([key,value])=><button role="tab" aria-selected={mode===key} className={mode===key?"button-primary":"button-secondary"} key={key} onClick={()=>switchMode(key)} onKeyDown={e=>{if(["ArrowLeft","ArrowRight"].includes(e.key)){e.preventDefault();switchMode(mode==="regulatory"?"data_field":"regulatory");(e.currentTarget.parentElement?.querySelector(`[aria-selected="false"]`) as HTMLElement)?.focus();}}}>{value.label}</button>)}</div>
+ <form className="panel space-y-4 p-5" onSubmit={submit}><p className="text-sm">当前模式：{copy.label}</p>{mode==="data_field"?<div className="grid gap-3 sm:grid-cols-3"><label className="text-sm">搜索目标字段<input className="control mt-1" value={filter} onChange={e=>setFilter(e.target.value)} placeholder="字段名称或代码"/></label><label className="text-sm">目标字段（可选）<select className="control mt-1" value={target || ""} onChange={e=>setTarget(Number(e.target.value)||null)}><option value="">不指定，按问题查找</option>{fields.filter(f=>`${f.field_name} ${f.field_code}`.toLowerCase().includes(filter.toLowerCase())).map(f=><option key={f.id} value={f.id}>{f.field_name} · {f.field_code}</option>)}</select></label><label className="text-sm">业务场景（可选）<select className="control mt-1" value={scenario || ""} onChange={e=>setScenario(Number(e.target.value)||null)}><option value="">不指定场景</option>{scenarios.map(s=><option key={s.id} value={s.id}>{s.scenario_name}</option>)}</select></label>{selectionError?<p role="status" className="col-span-full text-sm">{selectionError}</p>:null}</div>:null}
+ <label className="block text-sm font-medium">你的问题<textarea className="control mt-2 min-h-28 w-full" value={query} onChange={e=>setQuery(e.target.value)} placeholder={copy.example}/></label>{mode==="regulatory"?<div className="grid gap-3 rounded-lg border border-line p-3 sm:grid-cols-2"><label className="flex items-center gap-2 text-sm"><input checked={includeHistory} onChange={e=>setIncludeHistory(e.target.checked)} type="checkbox"/>查询历史口径（答案会明确标记历史资料）</label>{includeHistory?<label className="text-sm">指定历史日期（可选）<input className="control mt-1" type="datetime-local" value={historicalAsOf} onChange={e=>setHistoricalAsOf(e.target.value)}/></label>:null}</div>:null}<div className="flex flex-wrap justify-between gap-3"><button type="button" className="text-left text-sm text-pine-700" onClick={()=>setQuery(copy.example)}>试试：{copy.example}</button><button className="button-primary" disabled={busy||!projectId||!query.trim()}>{busy?"正在查找依据…":"提交问题"}</button></div></form>
+ {!projectId?<p role="status">请先在顶部选择项目。</p>:null}{error?<p role="alert" className="rounded bg-red-50 p-4 text-red-800">{error}</p>:null}{busy?<p role="status">正在检索并核验依据，请稍候。</p>:null}
+ {result?<div className="space-y-4">{result.citations.some(item=>item.historical)?<p role="status" className="rounded border border-red-300 bg-red-50 p-3 font-medium text-red-900">当前回答包含历史口径，不代表现行监管要求。</p>:null}<p role="status" className="rounded bg-amber-50 p-3">{result.answer_status==="degraded"?"回答服务暂不可用，以下展示已获取的证据，结论待确认。":result.answer_status==="needs_confirmation"?"证据不足或尚未确认，请核验下方缺口。":"已找到依据，请核验适用范围与引用。"}</p>
+ {result.trustworthiness?<section className="panel p-5"><div className="flex flex-wrap items-start gap-4"><div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-2xl font-bold ${result.trustworthiness.grade==="A"?"bg-emerald-100 text-emerald-800":result.trustworthiness.grade==="B"?"bg-blue-100 text-blue-800":result.trustworthiness.grade==="C"?"bg-amber-100 text-amber-800":"bg-red-100 text-red-800"}`}>{result.trustworthiness.grade}</div><div className="min-w-0 flex-1"><h2 className="font-semibold">可信性说明</h2><p className="mt-1 text-sm text-slate-600">{result.trustworthiness.reason}</p><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(result.trustworthiness.dimensions).map(([key,value])=><div className="rounded-lg border border-line p-3 text-sm" key={key}><span className={value.ok===false?"text-amber-700":"text-slate-700"}>{value.label}</span></div>)}</div></div></div></section>:null}
+ {result.index_freshness?<section className={`rounded-lg border p-4 text-sm ${result.index_freshness.formal_index_current===false?"border-amber-300 bg-amber-50":"border-line bg-white"}`}><h3 className="font-semibold">正式索引覆盖状态</h3><p className="mt-1">{result.index_freshness.formal_index_current===true?"当前正式索引已覆盖最新生效资料。":result.index_freshness.formal_index_current===false?"当前正式索引尚未覆盖最新生效资料。": "当前环境未启用正式语义索引。"}{result.index_freshness.keyword_fallback?" 本次采用关键词降级检索。":""}{result.index_freshness.using_previous_formal_index?" 仍保留上一版正式索引，未静默混合新旧索引。":""}</p>{result.index_freshness.waiting_version_ids?.length?<p className="mt-1 text-amber-800">等待审核或激活的版本：{result.index_freshness.waiting_version_ids.join("、")}</p>:null}</section>:null}
+ {result.conflicts?.length?<section className="rounded-lg border border-red-300 bg-red-50 p-4"><h3 className="font-semibold text-red-900">资料冲突，不能静默合并</h3><ul className="mt-2 list-inside list-disc text-sm text-red-800">{result.conflicts.map(item=><li key={item.topic}>{item.topic}：{item.message}</li>)}</ul></section>:null}
+ <section className="panel p-5"><h2 className="mb-3 font-semibold">{mode==="regulatory"?"结论":"证据摘要"}</h2><p className="whitespace-pre-wrap break-words leading-7">{sections?.conclusion || result.answer}</p></section>
+ {mode==="regulatory"?<><section className="panel p-5"><h3 className="font-semibold">适用范围</h3><p className="mt-3">{sections?.applicable_scope || "现有回答未提供可核验的适用范围，请结合原文确认。"}</p></section><section className="panel p-5"><h3 className="font-semibold">监管依据</h3><p className="mt-3">{sections?.evidence_summary || (result.citations.length?"请逐项查看下方文档引用核验依据。":"暂无可引用的监管依据。")}</p></section></>:<><section className="panel p-5"><h3 className="font-semibold">目标字段</h3><p className="mt-2">{sections?.target_field?`${sections.target_field.field_name} · ${sections.target_field.field_code}`:"未指定目标字段，当前按问题搜索。"}</p></section><section className="panel p-5"><h3 className="mb-3 font-semibold">来源路径</h3>{sections?.source_paths?.length?<div className="grid gap-3 md:grid-cols-2">{sections.source_paths.map((path,i)=><article key={i} className="rounded-lg border p-4"><p className="mb-3 text-xs text-amber-800">{path.status==="candidate"?"候选，不代表已确认血缘":"已记录路径，请核验确认状态"}</p><dl className="grid grid-cols-[90px_1fr] gap-2 text-sm">{([['来源系统',path.source_system],['数据库',path.database],['Schema',path.schema],['表',path.table],['字段',path.field]]).map(([label,value])=><div className="contents" key={label}><dt className="text-slate-500">{label}</dt><dd className="break-all">{value || "待确认"}</dd></div>)}</dl></article>)}</div>:<p>暂无来源证据，不能推断真实来源。</p>}</section>{rules("Join/关联条件",sections?.join_conditions)}{rules("过滤和加工转换",sections?.transformations)}{rules("码值映射",sections?.code_mappings)}</>}
+ <section className="panel p-5"><h3 className="mb-3 font-semibold">{mode==="regulatory"?"待确认事项":"缺口和待确认事项"}</h3><ul className="list-inside list-disc space-y-2">{Array.from(new Set([...(sections?.gaps||[]),...(result.open_questions||[])])).map(q=><li key={q}>{q}</li>)}</ul></section><section className="panel p-5"><h3 className="mb-3 font-semibold">{mode==="regulatory"?"文档引用":"文档、目录字段、映射与血缘引用"}</h3>{result.citations.length&&projectId?<KnowledgeCitations items={result.citations} projectId={projectId}/>:<p>暂无可用证据。</p>}</section></div>:null}</div></main>;
 }

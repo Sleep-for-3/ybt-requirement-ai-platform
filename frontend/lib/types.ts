@@ -8,6 +8,8 @@ export type Project = {
   name: string;
   bank_name?: string | null;
   description?: string | null;
+  institution_id?: number | null;
+  project_status?: "active" | "suspended" | string;
 };
 
 export type ReadinessBlocker = { code:string;message:string;dimension:string;severity:"critical"|"warning" };
@@ -326,7 +328,7 @@ export type CandidateSourceRecommendation = {
 };
 
 export type CatalogSchema = { id:number; datasource_id:number; schema_name:string; schema_comment?:string|null; enabled:boolean };
-export type CatalogTable = { id:number; datasource_id:number; schema_name:string; table_name:string; table_comment?:string|null; table_type:string; estimated_row_count?:number|null; primary_key_columns_json:string[]; enabled:boolean };
+export type CatalogTable = { id:number; datasource_id:number; database_name?:string|null; schema_name:string; table_name:string; table_comment?:string|null; table_type:string; estimated_row_count?:number|null; primary_key_columns_json:string[]; enabled:boolean };
 export type CatalogColumn = { id:number; datasource_id:number; catalog_table_id:number; schema_name:string; table_name:string; column_name:string; column_comment?:string|null; data_type?:string|null; nullable:boolean; ordinal_position:number; is_primary_key:boolean; enabled:boolean };
 export type CatalogSearchItem = { catalog_column_id:number; datasource_id:number; datasource_name:string; schema_name:string; table_name:string; table_comment?:string|null; column_name:string; column_comment?:string|null; data_type?:string|null; nullable:boolean; is_primary_key:boolean; score:number; match_reasons:string[]; imported_source_field_id?:number|null; imported_mart_field_id?:number|null };
 export type SemanticConceptType = "business_term" | "metric" | "dimension" | "code_set" | "business_rule" | "regulatory_rule";
@@ -344,7 +346,7 @@ export type MetadataSyncTask = { id:number; datasource_id:number; status:string;
 export type MetadataDriftEvent = { id:number; sync_task_id:number; entity_type:"table"|"column"; entity_key:string; change_type:"added"|"removed"|"modified"; schema_name?:string|null; table_name?:string|null; column_name?:string|null; changed_attributes_json:string[]; previous_snapshot_json:Record<string,unknown>; current_snapshot_json:Record<string,unknown>; rename_candidate_key?:string|null; created_at:string };
 export type ColumnProfileTask = { id:number; status:string; catalog_column_id:number; profile_result_json:Record<string,unknown>; generated_sql_json:Array<{metric:string;sql:string}>; error_message?:string|null };
 export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog_column_id:number; profile_date:string; total_count?:number|null; null_rate?:number|null; distinct_count?:number|null; min_value_text?:string|null; max_value_text?:string|null; min_length?:number|null; max_length?:number|null; average_length?:number|null; top_values_json:unknown[]; warnings_json:unknown[] };
-export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; parse_summary_json:Record<string,unknown>; warnings_json:string[] };
+export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; current_version_id?:number|null;logical_code?:string|null;source_category?:string;regulatory_document_no?:string|null;publisher?:string|null;parse_summary_json:Record<string,unknown>; warnings_json:string[] };
 export type KnowledgeUnit = { id:number; document_id:number; knowledge_type:string; unit_type:string; title?:string|null; content:string; source_file_name:string; source_sheet_name?:string|null; source_page_no?:number|null; source_heading?:string|null; source_cell_range?:string|null; target_field_code?:string|null; enabled:boolean };
 export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[] };
 export type RenderIssue = { severity:"error"|"warning"|"info";code:string;message:string;sheet_name?:string|null;cell?:string|null;business_section?:string|null;business_field?:string|null;target_field_id?:number|null };
@@ -473,10 +475,15 @@ export type TemplateDocument = {
   parse_status: string;
   sheet_names_json: string[];
   error_message?: string | null;
+  template_code?: string | null;
+  display_name?: string | null;
+  current_version_id?: number | null;
 };
 
 export type TemplateUploadResponse = {
   template_id: number;
+  version_id?: number | null;
+  version_no?: number | null;
   file_name: string;
   parse_status: string;
   sheet_count: number;
@@ -522,6 +529,21 @@ export type DataSource = {
   last_database_version?: string | null;
   last_discovered_schemas_json: string[];
 };
+
+export type TemplateVersion = {
+  id:number;template_document_id:number;project_id:number;version_no:number;
+  regulatory_version?:string|null;release_batch?:string|null;template_code:string;
+  publisher?:string|null;published_at?:string|null;effective_at?:string|null;expires_at?:string|null;
+  status:string;replaces_version_id?:number|null;change_note?:string|null;file_name:string;file_type:string;
+  file_hash:string;sheet_names_json:string[];parsed_snapshot_json:Array<Record<string,unknown>>;
+  parse_status:string;uploaded_by?:string|null;reviewed_by?:string|null;reviewed_at?:string|null;
+  activated_at?:string|null;created_at:string;updated_at:string;
+};
+
+export type TemplateDetail = {template:TemplateDocument;versions:TemplateVersion[];applications:Array<{
+  id:number;template_version_id?:number|null;change_set_json:Array<Record<string,unknown>>;
+  impact_json:Record<string,number>;applied_by?:string|null;applied_at:string;
+}>};
 
 export type ProjectJobsSummary = {
   queued_count: number;

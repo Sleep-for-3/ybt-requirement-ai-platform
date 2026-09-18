@@ -60,6 +60,7 @@ class ScriptIngestionService:
         git_commit_sha: str | None = None,
         change_note: str | None = None,
         build_revision: bool = True,
+        commit: bool = True,
     ) -> IngestionResult:
         """Store one script version and project its parser facts.
 
@@ -67,6 +68,8 @@ class ScriptIngestionService:
         upload must publish a single atomic project revision for the whole
         batch instead of one intermediate revision per file. Individual
         uploads keep the default single-file behaviour.
+        ``commit=False`` lets a unified importer atomically persist the script
+        version together with its durable per-file result; legacy callers still commit.
         """
         safe_path = validate_script_path(relative_path or file_name)
         suffix = Path(file_name).suffix.lower()
@@ -135,7 +138,7 @@ class ScriptIngestionService:
                 actor_user_id=actor_id, institution_id=project.institution_id, project_id=project.id,
                 after={"script_file_id": script_file.id, "version_no": duplicate.version_no, "file_hash": digest},
             )
-            self.db.commit()
+            self.db.commit() if commit else self.db.flush()
             return IngestionResult(
                 script_file, duplicate, stored_file, True,
                 self._node_count(duplicate.id), self._edge_count(duplicate.id),
@@ -249,7 +252,7 @@ class ScriptIngestionService:
                 publish=version.parse_status == "parsed" and (impact is None or impact.severity == "low"),
             )
             revision_id = revision_result.revision.id
-        self.db.commit()
+        self.db.commit() if commit else self.db.flush()
         self.db.refresh(version)
         return IngestionResult(script_file, version, stored_file, False, self._node_count(version.id), self._edge_count(version.id), change_set, impact, categories, revision_id)
 

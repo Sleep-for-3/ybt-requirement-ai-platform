@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { Activity, Check, Clock3, Database, RefreshCw, Server, Upload } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { CatalogClassification } from "@/components/CatalogClassification";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
@@ -33,6 +35,9 @@ export default function DatasourceCatalogPage() {
   const [message, setMessage] = useState("");
   const [activeJob, setActiveJob] = useState<BackgroundJobSummary | null>(null);
   const [confirmApply, setConfirmApply] = useState(false);
+  const [tablePage,setTablePage]=useState(1);
+  const catalog=useQuery({queryKey:["datasource-catalog-tables",id,datasource?.project_id,tablePage],enabled:!!datasource,
+    queryFn:({signal})=>apiGet<{items:{id:number;database_name:string|null;schema_name:string;table_name:string}[];total:number}>(`/projects/${datasource!.project_id}/catalog/tables?datasource_id=${id}&page=${tablePage}&page_size=25`,{signal})});
   const syncAction = useAsyncAction<MetadataSyncTask | BackgroundJobSummary>({
     successMessage: (result) => "job_type" in result
       ? result.deduplicated ? "相同元数据同步正在执行，已打开当前任务" : "元数据同步任务已提交"
@@ -93,6 +98,14 @@ export default function DatasourceCatalogPage() {
     <main>
       <WorkspaceHeader title={`${datasource?.name || "数据源"} 元数据目录`} meta="元数据采集不读取业务表明细" />
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
+        <section className="space-y-3 border-b border-line pb-4" aria-label="数据源物理表归属">
+          <h2 className="font-semibold">物理表与架构归属</h2>
+          {catalog.isPending?<p role="status">正在读取目录表…</p>:null}
+          {catalog.isError?<p role="alert">目录表读取失败。<button onClick={()=>void catalog.refetch()}>重试</button></p>:null}
+          {catalog.data?.items.map(table=><div className="border-t pt-3" key={table.id}><h3 className="break-all text-sm">{[table.database_name,table.schema_name,table.table_name].filter(Boolean).join(".")}</h3><CatalogClassification projectId={datasource!.project_id} tableId={table.id}/></div>)}
+          {catalog.data&&!catalog.data.items.length?<p className="text-sm">暂无目录表</p>:null}
+          <div className="flex items-center gap-3 text-xs"><button className="button-secondary" disabled={tablePage===1} onClick={()=>setTablePage(p=>p-1)}>上一页</button><span>第 {tablePage} 页 · 共 {catalog.data?.total??0} 表</span><button className="button-secondary" disabled={!catalog.data||tablePage*25>=catalog.data.total} onClick={()=>setTablePage(p=>p+1)}>下一页</button></div>
+        </section>
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <HealthCard icon={<Activity size={17}/>} label="连接状态" value={datasource?.last_test_status || "未测试"} detail={datasource?.last_test_at ? `检查于 ${formatDate(datasource.last_test_at)}` : "尚未执行连接诊断"}/>
           <HealthCard icon={<Server size={17}/>} label="Connector / Driver" value={datasource?.db_type || "加载中"} detail={datasource?.last_database_version || "数据库版本待检测"}/>

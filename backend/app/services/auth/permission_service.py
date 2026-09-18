@@ -11,7 +11,7 @@ from app.services.auth.dependencies import Principal
 
 INSTITUTION_ROLES = {"institution_admin", "security_admin", "auditor", "member"}
 PROJECT_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "project_manager": {"project.view", "project.manage", "business.edit", "business.review", "technical.edit", "technical.review", "final.review", "knowledge.manage", "catalog.manage", "audit.read", "export", "task.manage", "lineage.view", "lineage.manage", "lineage.review", "script.upload", "script.sync", "impact.view", "impact.review", "deliverable.view", "deliverable.manage", "deliverable.generate", "deliverable.review", "deliverable.export", "template.manage", "historical_caliber.import", "historical_caliber.reuse", "question.manage", "question.answer", "uat.view", "uat.manage", "uat.execute", "uat.finding.manage", "uat.signoff", "deployment.readiness.view", "deployment.readiness.manage"},
+    "project_manager": {"project.view", "project.manage", "business.edit", "business.review", "technical.edit", "technical.review", "final.review", "knowledge.manage", "knowledge.search", "catalog.manage", "catalog.search", "audit.read", "export", "task.manage", "lineage.view", "lineage.manage", "lineage.review", "script.upload", "script.sync", "impact.view", "impact.review", "deliverable.view", "deliverable.manage", "deliverable.generate", "deliverable.review", "deliverable.export", "template.manage", "historical_caliber.import", "historical_caliber.reuse", "question.manage", "question.answer", "uat.view", "uat.manage", "uat.execute", "uat.finding.manage", "uat.signoff", "deployment.readiness.view", "deployment.readiness.manage"},
     "business_analyst": {"project.view", "business.edit", "knowledge.search", "export", "task.claim", "deliverable.view", "deliverable.generate", "question.answer", "uat.view", "uat.execute", "uat.finding.manage"},
     "technical_analyst": {"project.view", "technical.edit", "catalog.search", "profile.request", "knowledge.search", "export", "task.claim", "lineage.view", "script.upload", "impact.view", "deliverable.view", "deliverable.generate", "question.answer", "uat.view", "uat.execute", "uat.finding.manage"},
     "business_reviewer": {"project.view", "business.review", "knowledge.search", "export", "task.claim", "deliverable.view", "uat.view", "uat.signoff"},
@@ -116,8 +116,17 @@ class PermissionService:
             raise HTTPException(status_code=403, detail="Insufficient project role")
         return project
 
-    def require_project_permission(self, project_id: int, permission: str) -> Project:
-        project = self._visible_project(project_id)
+    def require_project_permission(
+        self,
+        project_id: int,
+        permission: str,
+        *,
+        allow_suspended: bool = False,
+    ) -> Project:
+        project = self._visible_project(
+            project_id,
+            allow_suspended=allow_suspended,
+        )
         if permission not in self._permissions_for_project(project):
             raise HTTPException(status_code=403, detail=f"Missing project permission: {permission}")
         return project
@@ -165,20 +174,34 @@ class PermissionService:
             InstitutionMembership.role.in_(["institution_admin", "security_admin", "auditor"]),
             Institution.status == "active",
         )
-        return list(self.db.scalars(select(Project.id).where(
-            (Project.id.in_(select(ProjectMembership.project_id).where(
+        member_projects = select(ProjectMembership.project_id).join(
+            Project, Project.id == ProjectMembership.project_id,
+        ).where(
                 ProjectMembership.user_id == self.principal.user_id,
                 ProjectMembership.status == "active",
-            ))) | (Project.institution_id.in_(managed_institutions))
+                Project.project_status == "active",
+        )
+        return list(self.db.scalars(select(Project.id).where(
+            Project.id.in_(member_projects) | Project.institution_id.in_(managed_institutions)
         )).all())
 
-    def _visible_project(self, project_id: int) -> Project:
+    def _visible_project(
+        self,
+        project_id: int,
+        *,
+        allow_suspended: bool = False,
+    ) -> Project:
         project = self.db.get(Project, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         if self.principal.is_legacy_system or self.is_platform_admin():
             return project
-        if self._project_membership(project_id) or self._has_institution_role(project, {"institution_admin", "security_admin", "auditor"}):
+        if (self._is_institution_admin(project)
+                or self._has_institution_role(project, {"auditor"})):
+            return project
+        if project.project_status != "active" and not allow_suspended:
+            raise HTTPException(status_code=409, detail="项目已停用")
+        if self._project_membership(project_id):
             return project
         raise HTTPException(status_code=404, detail="Project not found")
 

@@ -38,6 +38,7 @@ import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/compone
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ProjectJobsSummary, apiGet, clearSession } from "@/lib/api";
 import {
+  isResourcesPath,
   canViewNavigationAudience,
   navigationAccessForProject,
   type NavigationAccess,
@@ -57,65 +58,32 @@ type NavItem = {
 type NavGroup = { label: string; items: NavItem[] };
 
 const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "工作台",
-    items: [
-      { href: "/workspace", label: "需求文档工作台", icon: FileSpreadsheet },
-      { href: "/cockpit", label: "监管驾驶舱", icon: ChartNoAxesCombined, audience: "cockpit" },
-      { href: "/projects", label: "项目", icon: FolderKanban },
-      { href: "/work", label: "我的工作", icon: ClipboardCheck }
-    ]
-  },
-  {
-    label: "需求文档",
-    items: [
-      { href: "/fields", label: "字段与口径", icon: ListTree },
-      { href: "/questions", label: "待确认问题", icon: ListChecks },
-      { href: "/templates", label: "监管模板", icon: TableProperties }
-    ]
-  },
-  {
-    label: "数据资产",
-    items: [
-      { href: "/datasources", label: "数据源", icon: Database, audience: "technical" },
-      { href: "/catalog", label: "数据目录", icon: LibraryBig, audience: "technical" },
-      { href: "/semantics", label: "语义目录", icon: BookOpenCheck },
-      { href: "/quality", label: "质量期望", icon: ShieldCheck },
-      { href: "/business-systems", label: "业务系统", icon: Building2, audience: "technical" },
-      { href: "/mart", label: "监管集市", icon: Layers3, audience: "technical" }
-    ]
-  },
-  {
-    label: "知识库",
-    items: [
-      { href: "/knowledge", label: "知识检索", icon: BrainCircuit },
-      { href: "/historical-calibers", label: "历史口径库", icon: History }
-    ]
-  },
-  {
-    label: "交付中心",
-    items: [
-      { href: "/deliverables", label: "正式交付", icon: PackageCheck },
-      { href: "/export", label: "Excel 导出", icon: FileOutput }
-    ]
-  }
+  { label: "核心任务", items: [
+    { href: "/workspace", label: "需求文档", icon: FileSpreadsheet },
+    { href: "/lineage/nebula", match: "/lineage", label: "数据血缘", icon: GitBranch, audience: "technical" },
+    { href: "/resources", label: "资料与数据", icon: LibraryBig }
+  ] }
 ];
-
 const SECONDARY_NAV: NavItem[] = [
-  { href: "/traceability-templates", label: "历史口径模板", icon: TableProperties, audience: "technical" },
-  { href: "/lineage", label: "脚本血缘", icon: GitBranch, audience: "technical" },
-  { href: "/evaluations", label: "RAG 评测", icon: ChartNoAxesCombined, audience: "admin" },
+  { href: "/model-profiles", label: "模型配置", icon: BrainCircuit, audience: "admin" },
+  { href: "/prompt-versions", label: "提示模板版本", icon: History, audience: "admin" },
+  { href: "/projects", label: "项目管理", icon: FolderKanban },
+  { href: "/work", label: "审核与我的工作", icon: ClipboardCheck },
+  { href: "/cockpit", label: "监管概览", icon: ChartNoAxesCombined, audience: "cockpit" },
+  { href: "/semantics", label: "语义目录", icon: BookOpenCheck },
+  { href: "/quality", label: "质量期望", icon: ShieldCheck },
+  { href: "/evaluations", label: "生成评测", icon: ChartNoAxesCombined, audience: "admin" },
   { href: "/tasks", label: "安全查询", icon: Workflow, audience: "technical" },
   { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet, audience: "admin" },
-  { href: "/uat", label: "UAT 验收", icon: ShieldCheck, audience: "admin" },
+  { href: "/uat", label: "验收管理", icon: ShieldCheck, audience: "admin" },
   { href: "/notifications", label: "通知", icon: Bell },
   { href: "/jobs", label: "后台任务", icon: History, audience: "technical" },
   { href: "/audit", label: "审计", icon: ScrollText, audience: "admin" },
-  { href: "/admin", label: "系统管理", icon: Settings2, match: "/admin", audience: "admin" },
-  { href: "/legacy", label: "Legacy 综合工作台", icon: LayoutGrid, audience: "admin" }
+  { href: "/admin", label: "系统配置", icon: Settings2, audience: "admin" }
 ];
 
 function isActive(pathname: string, item: NavItem) {
+  if (item.href === "/resources") return isResourcesPath(pathname);
   const prefix = item.match || item.href;
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
@@ -165,7 +133,7 @@ function SidebarNav({ access, pathname, runningJobs = 0 }: { access: NavigationA
       ))}
       {secondaryItems.length ? <details className="group border-t border-white/[0.06] pt-3" onToggle={(event) => setSecondaryOpen(event.currentTarget.open)} open={secondaryOpen}>
         <summary className="mx-1 flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-emerald-50/45 hover:bg-white/[0.05] hover:text-white">
-          <Settings2 size={15} />系统管理与低频工具
+          <Settings2 size={15} />设置
           <span className="ml-auto text-[10px] transition group-open:rotate-180">⌄</span>
         </summary>
         <div className="mt-1 space-y-0.5">
@@ -193,7 +161,7 @@ function SidebarBrand() {
       </span>
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold text-white">监管数据智能治理平台</span>
-        <span className="block text-[11px] text-emerald-100/50">监管语义 · 需求口径 · 数据血缘 · 智能治理</span>
+        <span className="block text-[11px] text-emerald-100/50">需求文档 · 数据血缘</span>
       </span>
     </Link>
   );

@@ -7,6 +7,7 @@ import { formatApiErrorText } from "@/lib/http-response.mjs";
 import { jobDetailsHref } from "@/lib/job-links.mjs";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
+  resource_batch_import: "统一批量导入",
   batch_ai_generation_business: "批量生成业务口径草稿",
   batch_ai_generation_technical: "批量生成技术溯源草稿",
   batch_review_tasks: "批量创建审核任务",

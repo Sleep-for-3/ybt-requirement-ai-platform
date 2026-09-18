@@ -1234,3 +1234,24 @@ def revision_snapshot_traversal(
         "layer_filtered_node_count": int(layer_filtered_node_count),
         "dangling_edge_count": int(dangling_edge_count),
     }
+
+
+@router.get("/projects/{project_id}/lineage/assets")
+def lineage_assets(project_id: int, principal: CurrentPrincipal, q: str = Query("", max_length=200), db: Session = Depends(get_db)):
+    from app.services.lineage.table_graph import search_assets
+    PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
+    return search_assets(db, project_id, q)
+
+
+@router.get("/projects/{project_id}/lineage/table-graph")
+def lineage_table_graph(project_id: int, principal: CurrentPrincipal, kind: str,
+    table_id: int = Query(gt=0), direction: LineageDirection = "both", depth: int = Query(4, ge=1, le=10),
+    revision_id: int | None = Query(None, gt=0), db: Session = Depends(get_db)):
+    from app.services.lineage.table_graph import table_graph
+    PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
+    try:
+        return table_graph(db, project_id, kind, table_id, direction, depth, revision_id)
+    except LineagePathNotFound as exc:
+        raise HTTPException(404, "所选表或版本不存在或不可见") from exc
+    except ValueError as exc:
+        raise HTTPException(422, "请选择有效的表和探索范围") from exc

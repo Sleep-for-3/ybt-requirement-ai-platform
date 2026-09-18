@@ -22,6 +22,32 @@ from app.services.task_queue import get_task_queue
 router = APIRouter(tags=["uat"])
 
 
+@router.get("/uat-suites/{suite_id}/requirement-review")
+def requirement_suite_review(suite_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)):
+    PermissionService(db, principal).load_project_resource_or_404(UatSuite, suite_id, "uat.view")
+    from app.models.requirement import RequirementUatLink
+    from app.services.requirement_uat import link_view
+    link = db.scalar(select(RequirementUatLink).where(RequirementUatLink.suite_id == suite_id))
+    return link_view(db, link) if link else None
+
+
+@router.post("/uat-suites/{suite_id}/requirement-review", status_code=201)
+def submit_requirement_suite_review(suite_id: int, payload: EmptyRequest, principal: CurrentPrincipal,
+                                   db: Session = Depends(get_db)):
+    suite = PermissionService(db, principal).load_project_resource_or_404(UatSuite, suite_id, "uat.manage")
+    from app.models.requirement import RequirementUatLink
+    from app.services.requirement_uat import link_view, validate_link
+    from app.services.governance.workflow import start_workflow
+    link = db.scalar(select(RequirementUatLink).where(RequirementUatLink.suite_id == suite.id).with_for_update())
+    if link is None:
+        raise HTTPException(404, "该套件没有固定需求规则依据")
+    validate_link(db, link)
+    if link.status != "approved":
+        start_workflow(db, project_id=suite.project_id, workflow_key="requirement_uat_review",
+            target_type="requirement_uat_link", target_id=link.id, created_by=principal.user_id)
+    return link_view(db, link)
+
+
 @router.get("/projects/{project_id}/uat-suites")
 def list_uat_suites(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> list[dict]:
     project = PermissionService(db, principal).require_project_permission(project_id, "uat.view")
@@ -53,6 +79,9 @@ def get_uat_suite(suite_id: int, principal: CurrentPrincipal, db: Session = Depe
 @router.post("/uat-suites/{suite_id}/clone", status_code=201)
 def clone_uat_suite(suite_id: int, payload: UatSuiteCloneRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     source = PermissionService(db, principal).load_project_resource_or_404(UatSuite, suite_id, "uat.manage")
+    from app.models.requirement import RequirementUatLink
+    if db.scalar(select(RequirementUatLink.id).where(RequirementUatLink.suite_id == source.id)):
+        raise HTTPException(409, "需求规则套件请从新需求修订生成，不能复制以绕过审核")
     clone_name = payload.suite_name or f"{source.suite_name} - 自定义副本"
     if db.scalar(select(UatSuite.id).where(UatSuite.project_id == source.project_id, UatSuite.suite_name == clone_name)):
         raise HTTPException(409, "A UAT suite with this name already exists")
@@ -68,6 +97,8 @@ def clone_uat_suite(suite_id: int, payload: UatSuiteCloneRequest, principal: Cur
 @router.post("/uat-suites/{suite_id}/runs", status_code=201)
 def create_uat_run(suite_id: int, payload: UatRunCreate, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     suite = PermissionService(db, principal).load_project_resource_or_404(UatSuite, suite_id, "uat.execute")
+    from app.services.requirement_uat import validate_suite_execution
+    validate_suite_execution(db, suite.id)
     run_no = (db.scalar(select(func.max(UatRun.run_no)).where(UatRun.project_id == suite.project_id, UatRun.uat_suite_id == suite.id)) or 0) + 1
     run = UatRun(institution_id=suite.institution_id, project_id=suite.project_id, uat_suite_id=suite.id, run_name=payload.run_name, run_no=run_no, status="draft", environment_name=payload.environment_name, application_version=payload.application_version, git_commit_sha=payload.git_commit_sha, started_by=principal.user_id, summary_json={"attempt": 0})
     db.add(run); db.flush()
@@ -131,8 +162,12 @@ def complete_manual_result(result_id: int, payload: UatManualResultComplete, pri
         raise HTTPException(409, "Only manual or hybrid UAT cases can be completed manually")
     if run.status == "cancelled":
         raise HTTPException(409, "Cancelled UAT runs cannot be modified")
+    from app.services.requirement_uat import validate_manual_evidence
+    fixed_evidence = validate_manual_evidence(db, case, payload)
     from app.services.governance.audit import redact_summary
     result.status = payload.status; result.actual_result_json = redact_summary(payload.actual_result_json); result.evidence_json = redact_summary(payload.evidence_json); result.error_message = payload.error_message; result.executed_by = principal.user_id; result.executed_at = datetime.now(UTC)
+    if fixed_evidence:
+        result.evidence_json = {**result.evidence_json, "requirement_evidence": fixed_evidence}
     record_audit(db, action="complete_manual_uat_case", resource_type="uat_case_result", resource_id=result.id, actor_user_id=principal.user_id, institution_id=run.institution_id, project_id=run.project_id, after={"status": result.status})
     db.commit(); recalculate_uat_run(db, run)
     return _row(result)
@@ -146,6 +181,10 @@ def attach_result_evidence(result_id: int, payload: UatEvidenceAttach, principal
         raise HTTPException(404, "UAT case result not found")
     from app.services.governance.audit import redact_summary
     result.evidence_json = {**(result.evidence_json or {}), **redact_summary(payload.evidence)}
+    case = db.get(UatCase, result.uat_case_id)
+    from app.models.requirement import RequirementUatLink
+    if case and db.scalar(select(RequirementUatLink.id).where(RequirementUatLink.suite_id == case.uat_suite_id)):
+        result.evidence_json = {**result.evidence_json, "requirement_evidence": case.expected_result_json["requirement_evidence"]}
     record_audit(db, action="attach_uat_evidence", resource_type="uat_case_result", resource_id=result.id, actor_user_id=principal.user_id, institution_id=run.institution_id, project_id=run.project_id, after={"evidence_keys": sorted(result.evidence_json)})
     db.commit()
     return _row(result)
@@ -308,6 +347,8 @@ def _suite_detail(db: Session, suite: UatSuite) -> dict:
 
 
 def _enqueue_run(db: Session, run: UatRun, started_by: int | None, retry_statuses: set[str] | None) -> dict:
+    from app.services.requirement_uat import validate_suite_execution
+    validate_suite_execution(db, run.uat_suite_id)
     attempt = int((run.summary_json or {}).get("attempt", 0)) + 1
     run.summary_json = {**(run.summary_json or {}), "attempt": attempt}
     run.status = "queued"

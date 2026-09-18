@@ -16,7 +16,7 @@ async def ingest_metadata_excel(db,datasource,upload):
     rows,warnings=_parse(BytesIO(content)); doc=MetadataImportDocument(project_id=datasource.project_id,datasource_id=datasource.id,file_name=file_name,storage_path=storage_key,parse_status="success",parse_summary_json={"row_count":len(rows),"sheet_count":len({x['source_sheet'] for x in rows})},parsed_rows_json=rows,warnings_json=warnings)
     db.add(doc);db.commit();db.refresh(doc);return doc
 
-def _parse(path):
+def _parse(path, *, preserve_missing_schema=False):
     workbook=load_workbook(path,data_only=True); output=[];warnings=[]
     normalized={alias.lower().replace(" ",""):field for field,aliases in ALIASES.items() for alias in aliases}
     for sheet in workbook.worksheets:
@@ -28,7 +28,7 @@ def _parse(path):
         for row in range(header_row+1,sheet.max_row+1):
             item={field:sheet.cell(row,column).value for column,field in mapping.items()}
             if not item.get("table_name") or not item.get("column_name"):continue
-            item["schema_name"]=str(item.get("schema_name") or "main");item["source_sheet"]=sheet.title;item["source_row"]=row;item["source_cells"]={field:f"{sheet.title}!{get_column_letter(column)}{row}" for column,field in mapping.items()};output.append(item)
+            item["schema_name"]=str(item.get("schema_name") or ("" if preserve_missing_schema else "main"));item["source_sheet"]=sheet.title;item["source_row"]=row;item["source_cells"]={field:f"{sheet.title}!{get_column_letter(column)}{row}" for column,field in mapping.items()};output.append(item)
     return output,warnings
 
 def apply_metadata_excel(db,document):

@@ -2,16 +2,28 @@
 
 import { AlertTriangle, PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
-import { DocumentPreview } from "@/components/requirement-workspace/DocumentPreview";
+import { RequirementScopePanel, type RequirementScope } from "@/components/requirement-workspace/RequirementScopePanel";
+import { RequirementSnapshotsPanel } from "@/components/requirement-workspace/RequirementSnapshotsPanel";
+import { RequirementScriptPanel, type ScriptBasis } from "@/components/requirement-workspace/RequirementScriptPanel";
+import { RequirementGenerationPanel } from "@/components/requirement-workspace/RequirementGenerationPanel";
+import { RequirementDeliveryPanel } from "@/components/requirement-workspace/RequirementDeliveryPanel";
+import { RequirementUatPanel } from "@/components/requirement-workspace/RequirementUatPanel";
+import { RequirementRecheckPanel } from "@/components/requirement-workspace/RequirementRecheckPanel";
+import { DocumentPreview, type RequirementGap, type RequirementResourceSummary } from "@/components/requirement-workspace/DocumentPreview";
 import { EvidenceDrawer } from "@/components/requirement-workspace/EvidenceDrawer";
 import { RequirementInputPanel } from "@/components/requirement-workspace/RequirementInputPanel";
 import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import {
   BackgroundJobSummary,
+  MappingEvidence,
+  TargetTable,
+  ProductScenario,
+  MartTable,
+  MartField,
   MartToYbtMapping,
   RequirementWorkspaceFieldDetail,
   RequirementWorkspaceRecordSummary,
@@ -19,6 +31,7 @@ import {
   ScenarioTechnicalLineage,
   SourceToMartMapping,
   apiDownload,
+  apiGet,
   apiPost
 } from "@/lib/api";
 import { workspaceEvidenceOptions, workspaceFieldOptions, workspaceProjectionOptions, workspaceQueryKeys } from "@/lib/workspace-queries";
@@ -26,6 +39,9 @@ import { workspaceEvidenceOptions, workspaceFieldOptions, workspaceProjectionOpt
 export function RequirementWorkspace() {
   const { projectId, selectedProject } = useProjectWorkspace();
   const queryClient = useQueryClient();
+  const [requirement, setRequirement] = useState<RequirementScope | null>(null);
+  const pendingReturnField = useRef<number | null>(null);
+  const [scopeDirty, setScopeDirty] = useState(false);
   const [tableId, setTableId] = useState<number | null>(null);
   const [fieldId, setFieldId] = useState<number | null>(null);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
@@ -41,50 +57,94 @@ export function RequirementWorkspace() {
   const [businessJobSeed, setBusinessJobSeed] = useState<BackgroundJobSummary | null>(null);
   const [technicalJobSeed, setTechnicalJobSeed] = useState<BackgroundJobSummary | null>(null);
   const [activeTab, setActiveTab] = useState<"structured" | "lineage" | "evidence" | "questions" | "document">("structured");
+  const generationContext = `${projectId}:${tableId}:${scenarioId}:${fieldId}:${requirement?.id || "new"}:${requirement?.version || 0}`;
+  const generationContextRef = useRef(generationContext);
+  generationContextRef.current = generationContext;
+  const generationSequence = useRef(0);
+  const generationFlight = useRef<{context:string; sequence:number} | null>(null);
+  useEffect(() => {
+    // A response from a previous visit must not become current after switching back.
+    generationSequence.current += 1;
+    generationFlight.current = null;
+    setGenerating(false);
+    return () => { generationSequence.current += 1; };
+  }, [generationContext]);
   const projectionQuery = useQuery({
     ...workspaceProjectionOptions(projectId || 0, tableId, scenarioId),
     enabled:Boolean(projectId)
   });
   const projection = projectionQuery.data;
+  const scopedDocument = useQuery({
+    queryKey: ["requirement-document", projectId, requirement?.id, requirement?.version, tableId, scenarioId],
+    enabled: Boolean(projectId && requirement && requirement.project_id === projectId && requirement.target_table_id === tableId && requirement.scenario_id === scenarioId),
+    queryFn: ({signal}) => apiGet<{
+      fields: (RequirementWorkspaceFieldDetail & {evidence?:MappingEvidence[];path_confirmed?:boolean;
+        confirmed_path?:FieldWorkspaceRecord["confirmedPath"]})[];
+      content_hash: string;
+      script_basis?: ScriptBasis;
+      assessment: "unassessed" | "gaps" | "clear";
+      gaps: RequirementGap[];
+      resources: RequirementResourceSummary[];
+      revision?: {content_version:number;status:string;content_hash:string};
+      target_table?:TargetTable;scenario?:ProductScenario;mart_tables?:MartTable[];mart_fields?:MartField[];
+    }>(`/projects/${projectId}/requirements/${requirement?.id}/document`, {signal})
+  });
   const detailQuery = useQuery({
     ...workspaceFieldOptions(projectId || 0, fieldId || 0, scenarioId),
     enabled:Boolean(projectId && fieldId)
   });
   const evidenceQuery = useQuery({
     ...workspaceEvidenceOptions(projectId || 0, fieldId || 0, scenarioId),
-    enabled:Boolean(projectId && fieldId && evidenceOpen)
+    enabled:Boolean(projectId && fieldId && evidenceOpen && !requirement)
   });
 
   const tables = projection?.tables || [];
   const scenarios = projection?.scenarios || [];
   const assetSummary = projection?.asset_summary || { business_system_count: 0, datasource_count: 0, healthy_datasource_count: 0, mart_table_count: 0 };
-  const martTables = projection?.mart_tables || [];
-  const martFields = projection?.mart_fields || [];
+  const martTables = requirement ? scopedDocument.data?.mart_tables || [] : projection?.mart_tables || [];
+  const martFields = requirement ? scopedDocument.data?.mart_fields || [] : projection?.mart_fields || [];
   const questions = projection?.question_summaries || [];
   const fields = useMemo(() => (projection?.records || []).map((item) => summaryTargetField(item)), [projection?.records]);
   const summaryRecords = useMemo(() => (projection?.records || []).map((item) => summaryWorkspaceRecord(item, scenarioId)), [projection?.records, scenarioId]);
   const summarySourceMappings = useMemo(() => summarySourceMappingIndex(projection?.records || []), [projection?.records]);
-  const records = useMemo(() => mergeSelectedDetail(summaryRecords, detailQuery.data || null), [summaryRecords, detailQuery.data]);
-  const sourceMappings = useMemo(() => ({...summarySourceMappings, ...(detailQuery.data?.source_mappings || {})}), [summarySourceMappings, detailQuery.data]);
-  const selectedTable = tables.find((table) => table.id === tableId) || null;
-  const selectedScenario = scenarios.find((scenario) => scenario.id === scenarioId) || null;
+  const allRecords = useMemo(() => mergeSelectedDetail(summaryRecords, detailQuery.data || null), [summaryRecords, detailQuery.data]);
+  const sourceMappings = useMemo(() => requirement
+    ? Object.assign({}, ...(scopedDocument.data?.fields || []).map(record => record.source_mappings))
+    : ({...summarySourceMappings, ...(detailQuery.data?.source_mappings || {})}), [requirement, scopedDocument.data, summarySourceMappings, detailQuery.data]);
+  const records: FieldWorkspaceRecord[] = requirement
+    ? (scopedDocument.data?.fields || []).map(record => ({field:record.field, business:record.business || null, lineage:record.lineage || null,
+        martMappings:record.mart_mappings,pathConfirmed:record.path_confirmed,confirmedPath:record.confirmed_path}))
+    : allRecords;
+  const selectedTable = requirement ? scopedDocument.data?.target_table || null : tables.find((table) => table.id === tableId) || null;
+  const selectedScenario = requirement ? scopedDocument.data?.scenario || null : scenarios.find((scenario) => scenario.id === scenarioId) || null;
   const selectedRecord = records.find((record) => record.field.id === fieldId) || null;
   const selectedField = selectedRecord?.field || fields.find((field) => field.id === fieldId) || null;
   const tableQuestions = questions.filter((question) => question.target_table_id === tableId && (!question.scenario_id || question.scenario_id === scenarioId));
-  const selectedEvidence = evidenceQuery.data || [];
-  const evidenceCountByField = useMemo(() => Object.fromEntries((projection?.records || []).map((item) => [item.field.id, item.evidence_count])), [projection?.records]);
-  const deliverable = projection?.deliverable_summary || null;
-
+  const selectedEvidence = requirement ? scopedDocument.data?.fields.find(item=>item.field.id===fieldId)?.evidence || [] : evidenceQuery.data || [];
+  const evidenceCountByField = useMemo(() => requirement
+    ? Object.fromEntries((scopedDocument.data?.fields || []).map(item=>[item.field.id,item.evidence?.length||0]))
+    : Object.fromEntries((projection?.records || []).map((item) => [item.field.id, item.evidence_count])), [requirement, scopedDocument.data, projection?.records]);
   const refreshWorkspace = useCallback(async () => {
     if (!projectId) return;
-    await queryClient.invalidateQueries({queryKey:workspaceQueryKeys.project(projectId)});
+    await Promise.all([
+      queryClient.invalidateQueries({queryKey:workspaceQueryKeys.project(projectId)}),
+      queryClient.invalidateQueries({queryKey:["requirement-document", projectId]}),
+      queryClient.invalidateQueries({queryKey:["requirement-table-lineage", projectId]})
+    ]);
   }, [projectId, queryClient]);
 
   const businessJob = useJobPolling(businessJobId, { initialJob: businessJobSeed, onTerminal: () => { void refreshWorkspace(); } }) || businessJobSeed;
   const technicalJob = useJobPolling(technicalJobId, { initialJob: technicalJobSeed, onTerminal: () => { void refreshWorkspace(); } }) || technicalJobSeed;
 
   useEffect(() => {
-    setTableId(null); setFieldId(null); setScenarioId(null); setEvidenceOpen(false); setError(""); setNotice("");
+    setRequirement(null); setScopeDirty(false);
+  }, [projectId, tableId, scenarioId]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sameProject = Number(params.get("projectId")) === projectId;
+    const positiveId = (key: string) => {const id = Number(params.get(key)); return sameProject && Number.isSafeInteger(id) && id > 0 ? id : null;};
+    pendingReturnField.current = positiveId("fieldId");
+    setTableId(positiveId("tableId")); setFieldId(null); setScenarioId(positiveId("scenarioId")); setEvidenceOpen(false); setError(""); setNotice("");
     setActiveTab("structured");
   }, [projectId]);
   useEffect(() => {
@@ -92,7 +152,6 @@ export function RequirementWorkspace() {
     const nextTableId = tableId && projection.tables.some((item) => item.id === tableId) ? tableId : projection.selected_target_table_id || null;
     const nextScenarioId = scenarioId && projection.scenarios.some((item) => item.id === scenarioId) ? scenarioId : projection.selected_scenario_id || null;
     if (nextTableId !== tableId || nextScenarioId !== scenarioId) {
-      queryClient.setQueryData(workspaceProjectionOptions(projectId, nextTableId, nextScenarioId).queryKey, projection);
       setTableId(nextTableId); setScenarioId(nextScenarioId);
     }
     const recentBusiness = projection.recent_jobs.find((job) => job.job_type === "batch_ai_generation_business") || null;
@@ -103,15 +162,24 @@ export function RequirementWorkspace() {
   }, [projectId, projection, queryClient, scenarioId, tableId]);
   useEffect(() => {
     if (!fields.length) { setFieldId(null); return; }
-    setFieldId((current) => current && fields.some((field) => field.id === current) ? current : fields[0].id);
-  }, [fields]);
-  function guardUnsaved(action: () => void) {
+    if (projection?.selected_target_table_id !== tableId) return;
+    const requested = pendingReturnField.current;
+    const allowed = requirement ? fields.filter(field => requirement.field_ids.includes(field.id)) : fields;
+    if (requested && allowed.some(field => field.id === requested)) {
+      pendingReturnField.current = null;
+      setFieldId(requested);
+      return;
+    }
+    setFieldId((current) => current && allowed.some((field) => field.id === current) ? current : allowed[0]?.id || null);
+  }, [fields, requirement, projection?.selected_target_table_id, tableId]);
+    function guardUnsaved(action: () => void) {
     if (editorDirty && !window.confirm("当前字段有未保存修改。放弃修改并切换吗？")) return;
     setEditorDirty(false);
     action();
   }
 
-  function changeTable(nextTableId: number | null) {
+    function changeTable(nextTableId: number | null) {
+    if (scopeDirty && !window.confirm("需求说明尚未保存，确定放弃并切换？")) return;
     guardUnsaved(() => {
       if (projectId && nextTableId) void queryClient.prefetchQuery(workspaceProjectionOptions(projectId, nextTableId, scenarioId));
       setTableId(nextTableId); setFieldId(null);
@@ -119,6 +187,7 @@ export function RequirementWorkspace() {
   }
 
   function changeScenario(nextScenarioId: number | null) {
+    if (scopeDirty && !window.confirm("需求说明尚未保存，确定放弃并切换？")) return;
     guardUnsaved(() => {
       if (projectId) void queryClient.prefetchQuery(workspaceProjectionOptions(projectId, tableId, nextScenarioId));
       setScenarioId(nextScenarioId);
@@ -126,6 +195,7 @@ export function RequirementWorkspace() {
   }
 
   function changeField(nextFieldId: number) {
+    if (!fields.some(field => field.id === nextFieldId) || (requirement && !requirement.field_ids.includes(nextFieldId))) return;
     guardUnsaved(() => {
       if (projectId) void queryClient.prefetchQuery(workspaceFieldOptions(projectId, nextFieldId, scenarioId));
       setFieldId(nextFieldId);
@@ -134,7 +204,13 @@ export function RequirementWorkspace() {
 
   async function generateDrafts() {
     if (!projectId || !selectedField || !scenarioId) return;
+    if (scopeDirty) { setError("请先保存需求说明。"); return; }
+    if (requirement) { setError("该需求的范围生成暂不可用；已有内容仍可查看、编辑和导出草稿。"); return; }
     if (editorDirty) { setError("请先保存当前人工修改，再触发 AI 草稿任务。"); return; }
+    if (generationFlight.current?.context === generationContext) return;
+    const sequence = ++generationSequence.current;
+    generationFlight.current = {context:generationContext, sequence};
+    const isCurrent = () => generationSequence.current === sequence && generationContextRef.current === generationContext;
     setGenerating(true); setError(""); setNotice("");
     try {
       let business = selectedRecord?.business || null;
@@ -143,6 +219,7 @@ export function RequirementWorkspace() {
           business_definition: selectedField.regulatory_refined_definition || selectedField.regulatory_description || selectedField.field_definition || null
         });
       }
+      if (!isCurrent()) return;
       let lineage = selectedRecord?.lineage || null;
       if (!lineage) {
         lineage = await apiPost<ScenarioTechnicalLineage>(`/target-fields/${selectedField.id}/scenarios/${scenarioId}/technical-lineage`, {
@@ -150,18 +227,20 @@ export function RequirementWorkspace() {
           processing_logic_type: "pending_confirmation"
         });
       }
+      if (!isCurrent()) return;
       const [nextBusinessJob, nextTechnicalJob] = await Promise.all([
         apiPost<BackgroundJobSummary>(`/projects/${projectId}/batch/generate-business-drafts`, { field_ids: [selectedField.id], scenario_id: scenarioId }),
         apiPost<BackgroundJobSummary>(`/projects/${projectId}/batch/generate-technical-drafts`, { field_ids: [selectedField.id], scenario_id: scenarioId })
       ]);
+      if (!isCurrent()) return;
       setBusinessJobSeed(nextBusinessJob); setBusinessJobId(nextBusinessJob.id);
       setTechnicalJobSeed(nextTechnicalJob); setTechnicalJobId(nextTechnicalJob.id);
-      setNotice("真实 AI 草稿任务已提交；人工最终内容没有被自动修改。");
+      setNotice("当前字段的草稿任务已提交；生成结果仍需核验。");
       await refreshWorkspace();
     } catch (cause) {
-      setError(readError(cause, "AI 分析任务提交失败，现有人工口径未被修改"));
+      if (isCurrent()) setError(readError(cause, "AI 分析任务提交失败，现有人工口径未被修改"));
     } finally {
-      setGenerating(false);
+      if (isCurrent()) { generationFlight.current = null; setGenerating(false); }
     }
   }
 
@@ -177,10 +256,11 @@ export function RequirementWorkspace() {
   }
 
   async function exportWorkbook() {
-    if (!projectId) return;
+    if (!projectId || !tableId) return;
+    if (scopeDirty) { setError("请先保存需求说明后导出。"); return; }
     setExporting(true); setError("");
     try {
-      const file = await apiDownload(`/projects/${projectId}/export/traceability-workbook`);
+      const file = await apiDownload(requirement ? `/projects/${projectId}/requirements/${requirement.id}/export` : `/target-tables/${tableId}/export/traceability-workbook`);
       const url = URL.createObjectURL(file.blob);
       const anchor = document.createElement("a"); anchor.href = url; anchor.download = file.fileName; anchor.click();
       URL.revokeObjectURL(url); setNotice(`已生成 ${file.fileName}`);
@@ -201,8 +281,8 @@ export function RequirementWorkspace() {
       <main className="min-w-0">
         <div className="border-b border-line bg-white px-5 py-4">
           <div className="flex items-end gap-4">
-            <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold tracking-tight text-ink">生成监管需求文档</h1><p className="mt-1 text-xs text-slate-500">基于真实监管目标、源系统、监管集市、历史知识与双层 Mapping，形成字段级需求文档草稿并交由人工校核。</p></div>
-            <button className="button-secondary" disabled={projectionQuery.isFetching} onClick={() => { void refreshWorkspace(); }} type="button"><RefreshCw size={15} />{projectionQuery.isFetching?"刷新中…":"刷新真实数据"}</button>
+            <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold tracking-tight text-ink">监管需求文档</h1></div>
+            <button className="button-secondary" disabled={projectionQuery.isFetching} onClick={() => { void refreshWorkspace(); }} type="button"><RefreshCw size={15} />{projectionQuery.isFetching?"刷新中…":"刷新"}</button>
           </div>
         </div>
         <div className="px-5 pt-4">
@@ -219,6 +299,34 @@ export function RequirementWorkspace() {
               {inputPanelOpen ? "收起" : "展开"}
             </button>
           </div>
+          <RequirementScopePanel key={`${projectId}:${tableId}:${scenarioId}`} projectId={projectId} tableId={tableId} scenarioId={scenarioId} fields={fields} onSelect={setRequirement} onDirty={setScopeDirty} contentVersion={scopedDocument.data?.revision?.content_version} />
+          {requirement ? <RequirementScriptPanel key={`scripts:${projectId}:${requirement.id}:${scopedDocument.data?.revision?.content_version||0}`} projectId={projectId}
+            requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
+            fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
+            locked={Boolean(scopedDocument.data?.revision&&scopedDocument.data.revision.status!=="draft")}
+            basis={scopedDocument.data?.script_basis} onChanged={()=>{void refreshWorkspace();}}/> : null}
+          {requirement ? <RequirementGenerationPanel key={`generation:${projectId}:${requirement.id}`} projectId={projectId}
+            requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
+            currentFieldId={fieldId} fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
+            onSelectField={changeField} onChanged={()=>{setEditorDirty(false);void refreshWorkspace();}}/> : null}
+          {requirement ? <RequirementSnapshotsPanel key={`snapshots:${projectId}:${requirement.id}`} projectId={projectId} requirementId={requirement.id} version={requirement.version} contentHash={scopedDocument.isFetching?undefined:scopedDocument.data?.content_hash} dirty={scopeDirty||editorDirty} /> : null}
+          {requirement ? <section className="panel mb-3 p-4" aria-label="需求完整性评估">
+            <h2 className="text-sm font-semibold">需求缺口</h2>
+            {scopedDocument.isError ? <p role="alert">评估加载失败，不能判断是否可交付。<button onClick={()=>void scopedDocument.refetch()}>重试</button></p>
+              : !scopedDocument.data ? <p role="status">正在评估需求范围…</p>
+              : <><p className="my-2 text-xs">{scopedDocument.data.assessment === "unassessed" ? "尚未评估" : scopedDocument.data.gaps.length ? `发现 ${scopedDocument.data.gaps.length} 项待确认` : "本次完整性检查未发现缺口；仍需审核确认。"}</p>
+                <ul className="max-h-64 space-y-2 overflow-auto text-xs">{scopedDocument.data.gaps.map(gap=><li key={gap.id} className="rounded bg-amber-50 p-2"><span>{gap.origin === "manual" ? "人工问题" : "分析发现"}：</span><button className="text-left underline" onClick={()=>{if(gap.field_id)changeField(gap.field_id);}}>{gap.message}</button></li>)}</ul></>}
+          </section> : null}
+          {requirement ? <RequirementDeliveryPanel key={`delivery:${projectId}:${requirement.id}`} projectId={projectId}
+            requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
+            contentHash={scopedDocument.data?.revision?.content_hash} dirty={scopeDirty||editorDirty}
+            onChanged={()=>{setEditorDirty(false);void refreshWorkspace();}}/> : null}
+          {requirement && scopedDocument.data?.script_basis ? <RequirementUatPanel key={`uat:${projectId}:${requirement.id}`}
+            projectId={projectId} requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
+            dirty={scopeDirty||editorDirty}/> : null}
+          {requirement && scopedDocument.data?.script_basis ? <RequirementRecheckPanel key={`recheck:${projectId}:${requirement.id}`}
+            projectId={projectId} requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
+            dirty={scopeDirty||editorDirty} onChanged={()=>{void refreshWorkspace();}}/> : null}
           {inputPanelOpen ? <RequirementInputPanel
             assetSummary={assetSummary}
             businessJob={businessJob}
@@ -237,13 +345,20 @@ export function RequirementWorkspace() {
             tableId={tableId}
             tables={tables}
             technicalJob={technicalJob}
+            requirementMode={Boolean(requirement)}
           /> : null}
           </div>
           <div className="relative min-w-0">
-            {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在懒加载当前字段完整口径与双层 Mapping…</div> : null}
+            {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在读取字段口径与来源映射…</div> : null}
             <DocumentPreview
+              requirementId={requirement?.id}
+              requirementBackground={requirement?.background}
+              requirementScope={requirement || undefined}
+              requirementGaps={scopedDocument.isError?undefined:scopedDocument.data?.gaps}
+              requirementResources={scopedDocument.data?.resources}
+              contentVersion={scopedDocument.data?.revision?.content_version}
+              contentStatus={scopedDocument.data?.revision?.status}
               activeTab={activeTab}
-              deliverable={deliverable}
               detailReady={Boolean(detailQuery.data)}
               evidenceCountByField={evidenceCountByField}
               evidenceForSelected={fieldId ? evidenceCountByField[fieldId] || 0 : 0}
@@ -255,7 +370,7 @@ export function RequirementWorkspace() {
               onEditorDirtyChange={setEditorDirty}
               onEditorError={setError}
               onEditorNotice={setNotice}
-              onEditorSaved={() => { setEditorDirty(false); setNotice("人工最终内容已保存。AI 草稿仍独立保留。"); void refreshWorkspace(); }}
+              onEditorSaved={() => { setEditorDirty(false); setNotice(requirement ? "本需求内容版本已保存，尚未审核确认。" : "人工内容已保存。"); void refreshWorkspace(); }}
               onExport={() => void exportWorkbook()}
               onSelectField={changeField}
               onShowEvidence={() => setEvidenceOpen(true)}
@@ -284,7 +399,7 @@ function StepBar({ hasTable, hasScenario, hasDraft, hasFinal }: { hasTable: bool
     { label: "人工校核与导出", done: hasFinal }
   ];
   const active = Math.max(0, steps.findIndex((step) => !step.done));
-  return <div className="panel flex items-center px-4 py-3">{steps.map((step, index) => <div className="contents" key={step.label}><div className="flex min-w-[145px] items-center gap-2"><span className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-bold ${step.done || index === active ? "border-pine bg-pine text-white" : "border-slate-300 bg-white text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className={`text-xs font-semibold ${step.done ? "text-pine-700" : index === active ? "text-ink" : "text-slate-400"}`}>{step.label}</span></div>{index < steps.length - 1 ? <div className={`mx-2 h-px flex-1 ${step.done ? "bg-pine-300" : "bg-line"}`} /> : null}</div>)}</div>;
+  return <div className="panel grid grid-cols-2 gap-3 px-4 py-3 lg:flex lg:items-center">{steps.map((step, index) => <div className="contents" key={step.label}><div className="flex min-w-0 items-center gap-2 lg:min-w-[145px]"><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${step.done || index === active ? "border-pine bg-pine text-white" : "border-slate-300 bg-white text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className={`text-xs font-semibold ${step.done ? "text-pine-700" : index === active ? "text-ink" : "text-slate-400"}`}>{step.label}</span></div>{index < steps.length - 1 ? <div className={`mx-2 hidden h-px flex-1 lg:block ${step.done ? "bg-pine-300" : "bg-line"}`} /> : null}</div>)}</div>;
 }
 
 function WorkspaceSkeleton() {

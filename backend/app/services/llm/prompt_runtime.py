@@ -26,6 +26,7 @@ logger = logging.getLogger("app.llm")
 
 
 PROMPT_LABELS = {
+    "requirement_field_candidate": "需求字段候选",
     "scenario_business_mapping": "场景业务口径",
     "scenario_technical_lineage": "场景技术溯源",
     "source_to_mart_mapping": "业务系统到监管集市",

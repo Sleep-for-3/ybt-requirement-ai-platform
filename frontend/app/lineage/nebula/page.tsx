@@ -1,230 +1,40 @@
 "use client";
-
 import { useEffect, useState } from "react";
-
-import { LineageNebula } from "@/components/LineageNebula";
+import Link from "next/link";
 import { useProjectWorkspace } from "@/components/ProjectContext";
-import { WorkspaceHeader } from "@/components/WorkspaceHeader";
-import { LineagePathResponse, apiGet } from "@/lib/api";
-
-const ROOT_TYPES = [
-  { value: "target_field", label: "监管目标字段" },
-  { value: "mart_field", label: "监管集市字段" },
-  { value: "source_field", label: "源系统字段" },
-  { value: "catalog_column", label: "数据目录字段" },
-  { value: "lineage_node", label: "脚本血缘节点" }
-];
-
-const DIRECTIONS = [
-  { value: "upstream", label: "上游（取数来源）" },
-  { value: "downstream", label: "下游（影响范围）" },
-  { value: "both", label: "双向" }
-];
-
-type Revision = {
-  id: number;
-  revision_no?: number | null;
-  status?: string;
-  published_at?: string | null;
-  created_at?: string | null;
-};
-
-type FetchStatus = "idle" | "loading" | "error" | "ready";
-
-export default function Page() {
-  const { projectId } = useProjectWorkspace();
-  const [rootType, setRootType] = useState("target_field");
-  const [rootId, setRootId] = useState("");
-  const [direction, setDirection] = useState("upstream");
-  const [depth, setDepth] = useState(6);
-  const [view, setView] = useState("business");
-  const [revisionId, setRevisionId] = useState("");
-  const [revisions, setRevisions] = useState<Revision[]>([]);
-  const [payload, setPayload] = useState<LineagePathResponse | null>(null);
-  const [status, setStatus] = useState<FetchStatus>("idle");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const nextRootType = params.get("rootType");
-    if (nextRootType && ROOT_TYPES.some((item) => item.value === nextRootType)) setRootType(nextRootType);
-    const nextRootId = params.get("rootId");
-    if (nextRootId) setRootId(nextRootId);
-    const nextDirection = params.get("direction");
-    if (nextDirection && DIRECTIONS.some((item) => item.value === nextDirection)) setDirection(nextDirection);
-    const nextDepth = Number(params.get("depth"));
-    if (Number.isFinite(nextDepth) && nextDepth >= 1 && nextDepth <= 10) setDepth(nextDepth);
-    const nextRevision = params.get("revisionId");
-    if (nextRevision) setRevisionId(nextRevision);
-    const nextView = params.get("view");
-    if (nextView === "technical" || nextView === "business") setView(nextView);
-  }, []);
-
-  useEffect(() => {
-    if (!projectId) {
-      setRevisions([]);
-      return;
-    }
-    let cancelled = false;
-    void apiGet<Revision[]>(`/projects/${projectId}/lineage/revisions?status=published&limit=50`)
-      .then((items) => {
-        if (!cancelled) setRevisions(items);
-      })
-      .catch(() => {
-        if (!cancelled) setRevisions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  const numericRootId = Number(rootId);
-  const validRoot = Number.isFinite(numericRootId) && numericRootId > 0;
-
-  useEffect(() => {
-    if (!projectId || !validRoot) {
-      setPayload(null);
-      setStatus("idle");
-      return;
-    }
-    const controller = new AbortController();
-    const query = new URLSearchParams({
-      root_type: rootType,
-      root_id: String(numericRootId),
-      direction,
-      depth: String(depth),
-      view,
-      include_unresolved: "true",
-      max_paths: "60"
-    });
-    if (revisionId) query.set("revision_id", revisionId);
-    setStatus("loading");
-    setErrorMessage(null);
-    apiGet<LineagePathResponse>(`/projects/${projectId}/lineage/path?${query.toString()}`, {
-      signal: controller.signal
-    })
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        setPayload(result);
-        setStatus("ready");
-      })
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted) return;
-        setPayload(null);
-        setErrorMessage(cause instanceof Error ? cause.message : "加载血缘路径失败");
-        setStatus("error");
-      });
-    return () => controller.abort();
-  }, [projectId, rootType, numericRootId, validRoot, direction, depth, view, revisionId]);
-
-  return (
-    <main>
-      <WorkspaceHeader
-        title="数据星云"
-        meta="按层级浏览 源系统 → 数仓 → 监管集市 → 一表通/EAST/1104 的端到端血缘"
-      />
-      <div className="mx-auto max-w-[1600px] space-y-4 p-4 lg:p-6">
-        <section className="panel">
-          <div className="panel-header">
-            <strong className="text-ink">探索条件</strong>
-          </div>
-          <div className="panel-body grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <label className="text-xs text-slate-500">
-              根对象类型
-              <select className="control mt-1" value={rootType} onChange={(event) => setRootType(event.target.value)}>
-                {ROOT_TYPES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-slate-500">
-              根对象 ID
-              <input
-                className="control mt-1"
-                inputMode="numeric"
-                min={1}
-                onChange={(event) => setRootId(event.target.value)}
-                placeholder="例如 1024"
-                type="number"
-                value={rootId}
-              />
-            </label>
-            <label className="text-xs text-slate-500">
-              方向
-              <select className="control mt-1" value={direction} onChange={(event) => setDirection(event.target.value)}>
-                {DIRECTIONS.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-slate-500">
-              血缘版本
-              <select
-                className="control mt-1"
-                onChange={(event) => setRevisionId(event.target.value)}
-                value={revisionId}
-              >
-                <option value="">最近发布的正式版本</option>
-                {revisions.map((item) => (
-                  <option key={item.id} value={String(item.id)}>
-                    版本 v{item.revision_no ?? item.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-slate-500">
-              向上深度（1-10）
-              <input
-                className="control mt-1"
-                max={10}
-                min={1}
-                onChange={(event) => setDepth(Number(event.target.value) || 1)}
-                type="number"
-                value={depth}
-              />
-            </label>
-            <label className="text-xs text-slate-500">
-              视图
-              <select className="control mt-1" value={view} onChange={(event) => setView(event.target.value)}>
-                <option value="business">业务视图（中文业务名优先）</option>
-                <option value="technical">技术视图</option>
-              </select>
-            </label>
-            <div className="text-xs text-slate-500 lg:col-span-2">
-              说明
-              <p className="mt-1 leading-relaxed text-slate-600">
-                星云按血缘版本读取同一份端到端路径响应；无法证明的关联保持“未解析”，不会自动补全。查询有层数与节点预算，
-                超出时显式标记截断。
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {!projectId ? (
-          <section className="panel">
-            <div className="panel-body">
-              <div className="empty-state">请先在顶部选择项目，再查看项目内的数据血缘。</div>
-            </div>
-          </section>
-        ) : !validRoot && status === "idle" ? (
-          <section className="panel">
-            <div className="panel-body">
-              <div className="empty-state">
-                <p>请输入根对象 ID（例如某个监管目标字段），随后自动加载分层星云。</p>
-                <p className="text-xs text-slate-400">
-                  也可以从字段血缘页跳转：/lineage/nebula?rootType=target_field&amp;rootId=字段ID
-                </p>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        <LineageNebula errorMessage={errorMessage} payload={payload} status={status} />
-      </div>
-    </main>
-  );
+import { TableFieldGraph, type TableGraph, type FieldFact } from "@/components/TableFieldGraph";
+import { apiGet } from "@/lib/api";
+type Asset={kind:string;id:number;name:string;technical_name:string};
+export default function Page(){const {projectId}=useProjectWorkspace();return <LineageWorkspace key={projectId||0} projectId={projectId}/>;}
+function LineageWorkspace({projectId}:{projectId:number|null}){
+ const [query,setQuery]=useState("");const [assets,setAssets]=useState<Asset[]>([]);const [asset,setAsset]=useState<Asset|null>(null);
+ const [assetTruncated,setAssetTruncated]=useState(false);const [revision,setRevision]=useState("");const [revisions,setRevisions]=useState<{id:number;revision_no:number}[]>([]);
+ const [direction,setDirection]=useState("both");const [depth,setDepth]=useState(4);const [graph,setGraph]=useState<TableGraph|null>(null);
+ const [status,setStatus]=useState("idle");const [error,setError]=useState("");const [assetError,setAssetError]=useState("");const [revisionError,setRevisionError]=useState("");
+ const [returnContext,setReturnContext]=useState("");
+ const [selectedField,setSelectedField]=useState<FieldFact|null>(null);const [focusId,setFocusId]=useState("");const [requirementId,setRequirementId]=useState("");
+ useEffect(()=>{const p=new URLSearchParams(window.location.search);if(Number(p.get("projectId"))!==projectId)return;setRequirementId(String(Number(p.get("requirementId"))||""));const back=new URLSearchParams();for(const key of ["tableId","scenarioId","fieldId"]){const id=Number(p.get(key));if(Number.isSafeInteger(id)&&id>0)back.set(key,String(id));}setReturnContext(back.toString());const table=Number(p.get("tableId"));if(table)setAsset({kind:"target",id:table,name:"需求目标表",technical_name:""});const field=Number(p.get("fieldId")||p.get("rootId"));if(field)setFocusId(`asset:target_field:${field}`);},[projectId]);
+ useEffect(()=>{if(!projectId)return;const controller=new AbortController();setAssetError("");const timer=setTimeout(()=>{
+  apiGet<{items:Asset[];truncated:boolean}>(`/projects/${projectId}/lineage/assets?q=${encodeURIComponent(query)}`,{signal:controller.signal}).then(r=>{if(!controller.signal.aborted){setAssets(r.items);setAssetTruncated(r.truncated);}}).catch(()=>{if(!controller.signal.aborted){setAssets([]);setAssetError("无法读取资产，请检查登录权限或稍后重试。");}});
+ },200);return()=>{clearTimeout(timer);controller.abort();};},[projectId,query]);
+ useEffect(()=>{if(!projectId)return;let alive=true;apiGet<{id:number;revision_no:number}[]>(`/projects/${projectId}/lineage/revisions?status=published&limit=50`).then(r=>{if(alive)setRevisions(r);}).catch(()=>{if(alive)setRevisionError("历史版本加载失败");});return()=>{alive=false;};},[projectId]);
+ useEffect(()=>{if(!projectId||!asset)return;const controller=new AbortController();setStatus("loading");setGraph(null);setError("");setSelectedField(null);
+  const params=new URLSearchParams({kind:asset.kind,table_id:String(asset.id),direction,depth:String(depth)});if(revision)params.set("revision_id",revision);
+  apiGet<TableGraph>(`/projects/${projectId}/lineage/table-graph?${params}`,{signal:controller.signal}).then(r=>{if(!controller.signal.aborted){setGraph(r);setStatus("ready");}}).catch(()=>{if(!controller.signal.aborted){setError("无法加载所选表血缘：请核验访问权限、对象是否仍存在，或刷新重试。");setStatus("error");}});return()=>controller.abort();
+ },[projectId,asset,direction,depth,revision]);
+ if(!projectId)return <main className="p-8">请在顶部选择项目，然后搜索表或字段。</main>;
+ const backParams=new URLSearchParams(returnContext);
+ backParams.set("projectId",String(projectId));
+ if(requirementId)backParams.set("requirementId",requirementId);
+ const selectedTarget=selectedField?.entity_type==="target_field" && selectedField.canonical_entity_id;
+ const selectedTable=selectedField?.table_key.match(/^target:([1-9]\d*)$/)?.[1];
+ if(selectedTarget && selectedTable && (!requirementId || selectedTable===backParams.get("tableId"))){
+  backParams.set("tableId",selectedTable);backParams.set("fieldId",String(selectedTarget));
+ }
+ const returnField=backParams.get("fieldId");
+ return <main className="flex h-[calc(100vh-110px)] min-h-[650px] flex-col"><header className="flex flex-wrap items-center gap-3 border-b bg-white px-4 py-3"><h1 className="mr-auto text-lg font-semibold">数据血缘</h1><Link className="text-xs text-emerald-700" href="/lineage/scripts">脚本与解析记录</Link><Link className="button-secondary" href={`/workspace?${backParams}`} >返回需求{ returnField?"字段":"文档"}</Link></header>
+ <div className="flex min-h-0 flex-1"><aside className="w-56 shrink-0 overflow-auto border-r bg-white p-3"><label className="text-xs font-semibold">查找数据资产<input className="control my-2" aria-label="搜索表或字段" placeholder="业务名、表名或字段名" value={query} onChange={e=>setQuery(e.target.value)}/></label>{assetError?<p role="alert" className="text-xs text-red-700">{assetError}</p>:null}{assets.map(a=><button key={`${a.kind}:${a.id}`} className={`mb-2 block w-full rounded border p-2 text-left ${asset?.kind===a.kind&&asset.id===a.id?"border-emerald-500 bg-emerald-50":"border-slate-200"}`} onClick={()=>{setFocusId("");setAsset(a);}}><strong className="block text-xs">{a.name}</strong><span className="block break-all font-mono text-[10px] text-slate-500">{a.technical_name}</span><span className="text-[10px] text-slate-400">{{target:"监管目标",source:"来源系统",mart:"监管集市",catalog:"数据目录"}[a.kind]}</span></button>)}{!assets.length&&!assetError?<p className="text-xs text-slate-500">未找到匹配资产。可更换搜索词，或在资料与数据中导入目标模板和数据字典。</p>:null}{assetTruncated?<p className="text-xs text-amber-700">仅列出前 60 个匹配对象，请缩小搜索范围。</p>:null}</aside>
+ <section className="flex min-w-0 flex-1 flex-col"><div className="flex flex-wrap items-center gap-2 border-b bg-white p-2 text-xs"><select className="control w-28" aria-label="探索方向" value={direction} onChange={e=>setDirection(e.target.value)}><option value="both">双向探索</option><option value="upstream">上游来源</option><option value="downstream">下游影响</option></select><label>深度 <input className="control inline-block w-16" aria-label="探索深度" type="number" min={1} max={10} value={depth} onChange={e=>setDepth(Math.min(10,Math.max(1,Number(e.target.value)||1)))}/></label><select className="control w-60" aria-label="血缘版本" value={revision} onChange={e=>setRevision(e.target.value)}><option value="">当前业务映射 + 已发布脚本</option>{revisions.map(r=><option key={r.id} value={r.id}>历史脚本 v{r.revision_no}（不含当前业务映射）</option>)}</select>{revisionError?<span role="alert">{revisionError}</span>:null}</div>
+ {revision?<p className="bg-amber-50 px-3 py-1 text-xs text-amber-800">历史视图只回放脚本关系；表归属和类型仍来自当前目录，不代表当时的完整需求版本。</p>:null}
+ <div className="min-h-0 flex-1">{status==="loading"?<div className="p-10 text-sm">正在加载字段关系…</div>:error?<div role="alert" className="p-10 text-sm text-red-700">{error}<button className="button-secondary ml-3" onClick={()=>setAsset(a=>a?{...a}:null)}>重试</button></div>:graph?<TableFieldGraph key={`${projectId}:${asset?.kind}:${asset?.id}:${revision}`} graph={graph} focusId={focusId} onField={setSelectedField}/>:<div className="p-10 text-sm text-slate-500">从左侧选择一张表，查看表卡片、字段来源和下游影响。无需输入内部编号。</div>}</div></section></div></main>;
 }

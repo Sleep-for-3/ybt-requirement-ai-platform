@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Literal
+from fastapi.responses import JSONResponse
 from fastapi import APIRouter,Depends,File,Form,HTTPException,Response,UploadFile
 from pydantic import BaseModel,Field
 from sqlalchemy import func,select
@@ -8,6 +11,10 @@ from app.core.settings import get_settings
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.rag import grounded_answer
+from app.services.knowledge_evidence import mode_knowledge_types
+from app.services.rag.data_field_answer_service import data_field_answer, project_entity
+from app.services.rag.document_preview_service import authorized_version, preview_document, original_content
+from app.models import TargetField, ProductScenario
 from app.services.retrieval import HybridRetriever
 from app.services.storage import get_storage_service
 from app.services.task_queue.domain_handlers import knowledge_embedding_reindex_handler,knowledge_ingestion_handler,knowledge_reindex_handler,rag_evaluation_handler
@@ -27,27 +34,34 @@ from app.services.semantic_index.versioning import (
     build_model_fingerprint,
     get_active_index_version,
 )
+from app.services.knowledge_ingestion.ingestion_service import activate_knowledge_version, review_knowledge_version
 
 router=APIRouter(tags=["knowledge rag"])
 KNOWLEDGE_TYPES={"regulatory_qa","regulatory_policy","field_explanation","historical_mapping","historical_traceability","east_mapping","business_research","technical_research","data_dictionary","code_mapping","manual_note","sql_evidence"}
 KNOWLEDGE_SCOPES={"global","project","institution"}
 CONFIDENTIALITY_LEVELS={"public","internal","confidential","restricted"}
-class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_id:int|None=None;knowledge_types:list[str]=Field(default_factory=list);top_k:int=Field(20,ge=1,le=50);retrieval_mode:str="hybrid"
+SOURCE_CATEGORIES={"regulatory_formal","regulatory_qa","internal_policy","internal_interpretation","business_material","technical_evidence"}
+class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_id:int|None=None;knowledge_types:list[str]=Field(default_factory=list);top_k:int=Field(20,ge=1,le=50);retrieval_mode:str="hybrid";include_history:bool=False;historical_as_of:datetime|None=None
+class AskRequest(SearchRequest):
+    answer_mode: Literal["regulatory", "data_field"] | None = None
+
 class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None
 class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";query_text:str;target_field_id:int|None=None;scenario_id:int|None=None;expected_knowledge_unit_ids_json:list[int]=Field(default_factory=list);expected_source_system:str|None=None;expected_table_name:str|None=None;expected_field_name:str|None=None;expected_answer_keywords_json:list[str]=Field(default_factory=list);enabled:bool=True
 class EvaluationRunCreate(BaseModel):run_name:str;model_profile_id:int|None=None;retrieval_config_json:dict=Field(default_factory=dict)
 class FormalReindexRequest(BaseModel):force:bool=False
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
-async def upload(project_id:int,response:Response,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),db:Session=Depends(get_db)):
+async def upload(project_id:int,response:Response,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),document_id:int|None=Form(None),logical_code:str|None=Form(None),source_category:str|None=Form(None),regulatory_document_no:str|None=Form(None),regulatory_version:str|None=Form(None),internal_revision:str|None=Form(None),publisher:str|None=Form(None),published_at:str|None=Form(None),effective_at:str|None=Form(None),expires_at:str|None=Form(None),applicable_institutions:str|None=Form(None),applicable_fields:str|None=Form(None),applicable_scenarios:str|None=Form(None),db:Session=Depends(get_db)):
     if knowledge_type not in KNOWLEDGE_TYPES:raise HTTPException(400,"Invalid knowledge type")
     if knowledge_scope not in KNOWLEDGE_SCOPES:raise HTTPException(400,"Invalid knowledge scope")
     if confidentiality_level not in CONFIDENTIALITY_LEVELS:raise HTTPException(400,"Invalid confidentiality level")
+    if source_category is not None and source_category not in SOURCE_CATEGORIES:raise HTTPException(400,"Invalid source category")
     if knowledge_scope=="institution" and not institution_name:raise HTTPException(400,"Institution scope requires institution_name")
     project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
     content=await file.read();file_name=file.filename or "knowledge.txt"
     saved=get_storage_service().save(content,file_name=file_name,project_id=project_id)
-    job=submit_project_job(db,project,principal,job_type="knowledge_ingestion",payload={"storage_key":saved.storage_key,"file_name":file_name,"knowledge_type":knowledge_type,"knowledge_scope":knowledge_scope,"institution_name":institution_name,"confidentiality_level":confidentiality_level,"change_note":change_note},handler=knowledge_ingestion_handler)
+    governed=source_category is not None or document_id is not None or logical_code is not None
+    job=submit_project_job(db,project,principal,job_type="knowledge_ingestion",payload={"storage_key":saved.storage_key,"file_name":file_name,"knowledge_type":knowledge_type,"knowledge_scope":knowledge_scope,"institution_name":institution_name,"confidentiality_level":confidentiality_level,"change_note":change_note,"document_id":document_id,"logical_code":logical_code,"source_category":source_category,"regulatory_document_no":regulatory_document_no,"regulatory_version":regulatory_version,"internal_revision":internal_revision,"publisher":publisher,"published_at":published_at,"effective_at":effective_at,"expires_at":expires_at,"applicable_project_ids":[project_id] if governed else [],"applicable_institution_names":_csv(applicable_institutions),"applicable_field_codes":_csv(applicable_fields),"applicable_scenario_ids":[int(item) for item in _csv(applicable_scenarios) if item.isdigit()]},handler=knowledge_ingestion_handler)
     document_id=(job.result_summary_json or {}).get("document_id")
     if not document_id:
         response.status_code=202
@@ -59,7 +73,21 @@ def document(document_id:int,project_id:int,db:Session=Depends(get_db)):
     item=_visible_document_or_404(db,document_id,project_id)
     return _document(item)
 @router.get("/knowledge/documents/{document_id}/versions")
-def versions(document_id:int,project_id:int,db:Session=Depends(get_db)):_visible_document_or_404(db,document_id,project_id);return [_row(item) for item in db.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id==document_id).order_by(KnowledgeDocumentVersion.version_no.desc())).all()]
+def versions(document_id:int,project_id:int,db:Session=Depends(get_db)):_visible_document_or_404(db,document_id,project_id);return [_safe_version(item) for item in db.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id==document_id).order_by(KnowledgeDocumentVersion.version_no.desc())).all()]
+@router.post("/knowledge/document-versions/{version_id}/review")
+def review_document_version(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    version=db.get(KnowledgeDocumentVersion,version_id)
+    if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
+    try:return _safe_version(review_knowledge_version(db,version_id,principal.username))
+    except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+@router.post("/knowledge/document-versions/{version_id}/activate")
+def activate_document_version(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    version=db.get(KnowledgeDocumentVersion,version_id)
+    if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
+    try:return _safe_version(activate_knowledge_version(db,version_id))
+    except ValueError as exc:raise HTTPException(409,str(exc)) from exc
 @router.post("/knowledge/documents/{document_id}/reindex")
 def reindex(document_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     document=_visible_document_or_404(db,document_id,project_id,require_owner=True)
@@ -175,15 +203,51 @@ def unit(unit_id:int,project_id:int,db:Session=Depends(get_db)):
 @router.post("/projects/{project_id}/knowledge/hybrid-search")
 def hybrid_search(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     try:
-        log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k,retrieval_mode=payload.retrieval_mode)
+        log,items=HybridRetriever(db).search(project_id,payload.query,payload.target_field_id,payload.scenario_id,payload.knowledge_types,payload.top_k,retrieval_mode=payload.retrieval_mode,include_history=payload.include_history,historical_as_of=payload.historical_as_of)
     except ValueError as exc:
         raise HTTPException(400,str(exc)) from exc
     project=db.get(Project,project_id);record_audit(db,action="knowledge_search",resource_type="retrieval_log",resource_id=log.id,actor_user_id=principal.user_id,institution_id=project.institution_id if project else None,project_id=project_id,after={"result_count":len(items),"retrieval_mode":payload.retrieval_mode});db.commit();return {"retrieval_log_id":log.id,"retrieval_mode":payload.retrieval_mode,"items":items}
 @router.post("/projects/{project_id}/knowledge/ask")
-async def ask(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+async def ask(project_id:int,payload:AskRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.search")
+    project_entity(db,TargetField,payload.target_field_id,project_id)
+    project_entity(db,ProductScenario,payload.scenario_id,project_id)
+    if not payload.query.strip():raise HTTPException(400,"Question must not be empty")
+    if payload.retrieval_mode not in {"keyword_only","vector_only","hybrid"}:
+        raise HTTPException(400,"Invalid retrieval mode")
+    filters=dict(target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,
+                 knowledge_types=mode_knowledge_types(payload.answer_mode,payload.knowledge_types) if payload.answer_mode else payload.knowledge_types,
+                 top_k=payload.top_k,retrieval_mode=payload.retrieval_mode,
+                 include_history=payload.include_history,historical_as_of=payload.historical_as_of)
     try:
-        result=await grounded_answer(db,project_id,payload.query,target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,knowledge_types=payload.knowledge_types,top_k=payload.top_k,retrieval_mode=payload.retrieval_mode);project=db.get(Project,project_id);citations=result.get("citations") or [];needs_confirmation=not citations and "待确认" in str(result.get("answer") or "") and bool(result.get("open_questions"));answer_status=result.get("answer_status") or ("needs_confirmation" if needs_confirmation else "grounded");common={"actor_user_id":principal.user_id,"institution_id":project.institution_id if project else None,"project_id":project_id,"after":{"citation_count":len(citations),"retrieval_mode":payload.retrieval_mode,"answer_status":answer_status}};record_audit(db,action="knowledge_ask",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common);record_audit(db,action="model_call",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common);db.commit();return result
-    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
+        service=data_field_answer if payload.answer_mode=="data_field" else grounded_answer
+        result=await service(db,project_id,payload.query,**filters)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    result["answer_mode"]=payload.answer_mode
+    result.setdefault("sections",None)
+    citations=result.get("citations") or []
+    needs_confirmation=not citations and "待确认" in str(result.get("answer") or "") and bool(result.get("open_questions"))
+    result.setdefault("answer_status","needs_confirmation" if needs_confirmation else "grounded")
+    common={"actor_user_id":principal.user_id,"institution_id":project.institution_id,"project_id":project_id,
+            "after":{"citation_count":len(citations),"retrieval_mode":payload.retrieval_mode,
+                     "answer_status":result["answer_status"],"answer_mode":payload.answer_mode}}
+    record_audit(db,action="knowledge_ask",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common)
+    record_audit(db,action="model_call",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common)
+    db.commit()
+    return result
+
+@router.get("/knowledge/documents/{document_id}/preview")
+def preview(document_id:int,project_id:int,principal:CurrentPrincipal,version_id:int|None=None,db:Session=Depends(get_db)):
+    doc,version=authorized_version(db,principal,project_id,document_id,version_id)
+    return JSONResponse(preview_document(db,doc,version),
+                        headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+
+@router.get("/knowledge/documents/{document_id}/content")
+def content(document_id:int,project_id:int,principal:CurrentPrincipal,version_id:int|None=None,db:Session=Depends(get_db)):
+    _,version=authorized_version(db,principal,project_id,document_id,version_id)
+    return original_content(version)
+
 @router.post("/projects/{project_id}/evaluations/cases")
 def create_case(project_id:int,payload:EvaluationCaseCreate,db:Session=Depends(get_db)):
     item=RagEvaluationCase(project_id=project_id,**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
@@ -208,8 +272,10 @@ def feedback(project_id:int,payload:BindFeedback,db:Session=Depends(get_db)):
 @router.get("/prompt-versions")
 def prompt_versions(db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(PromptTemplateVersion).order_by(PromptTemplateVersion.prompt_key,PromptTemplateVersion.version_no.desc())).all()]
 
+def _csv(value):return [item.strip() for item in (value or "").replace("，",",").split(",") if item.strip()]
 def _row(item):return {key:value for key,value in item.__dict__.items() if not key.startswith("_")}
-def _document(item):return _row(item)
+def _document(item):return {key:value for key,value in _row(item).items() if key not in {"storage_path","error_message"}}
+def _safe_version(item):return {key:value for key,value in _row(item).items() if key not in {"storage_path","error_message"}}
 def _unit(item):return _row(item)
 def _job(job):return job_submission_response(job)
 
@@ -221,4 +287,27 @@ def _visible_document_or_404(db,document_id,project_id,require_owner=False):
 def _scope_visible(db,scope,owner_project_id,institution_name,request_project_id):
     project=db.get(Project,request_project_id)
     if project is None:return False
-    return scope=="global" or (scope=="project" and owner_project_id==request_project_id) or (scope=="institution" and bool(institution_name) and institution_name==project.bank_name)
+    return scope=="global" or (scope in {"project","institution"} and owner_project_id==request_project_id)
+
+
+@router.get("/projects/{project_id}/knowledge/evidence/{source_type}/{entity_id}")
+def evidence_detail(project_id:int,source_type:str,entity_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    """Read a citation's real entity with an explicit safe display-field allowlist."""
+    from app.models import CatalogColumn, SourceField, LineageEdge, ScenarioTechnicalLineage, SourceToMartMapping, MartToYbtMapping
+    definitions={
+        "catalog_column":(CatalogColumn,"catalog.search","id project_id catalog_table_id schema_name table_name column_name column_comment data_type"),
+        "source_field":(SourceField,"project.view","id project_id source_table_id field_code field_name field_comment physical_column_name"),
+        "lineage_edge":(LineageEdge,"lineage.view","id project_id source_node_id target_node_id edge_type transformation_expression join_condition filter_condition code_mapping_rule enabled"),
+        "scenario_technical":(ScenarioTechnicalLineage,"project.view","id project_id target_field_id scenario_id source_system_name source_database_name source_schema_name source_table_english_name source_field_english_name processing_logic tech_confirm_status"),
+        "source_to_mart":(SourceToMartMapping,"project.view","id project_id mart_field_id mapping_status source_system_summary source_tables_summary source_fields_summary business_rule join_condition filter_condition code_mapping_rule"),
+        "mart_to_ybt":(MartToYbtMapping,"project.view","id project_id target_field_id mart_field_id mapping_status mart_table_summary mart_field_summary business_rule join_condition filter_condition code_mapping_rule"),
+    }
+    if source_type not in definitions:raise HTTPException(404,"Resource not found")
+    model,permission,names=definitions[source_type]
+    try:
+        PermissionService(db,principal).require_project_permission(project_id,permission)
+        item=project_entity(db,model,entity_id,project_id)
+    except HTTPException:
+        raise HTTPException(404,"Resource not found") from None
+    if hasattr(item,"enabled") and not item.enabled:raise HTTPException(404,"Resource not found")
+    return {"source_type":source_type,"fields":{name:getattr(item,name) for name in names.split()}}

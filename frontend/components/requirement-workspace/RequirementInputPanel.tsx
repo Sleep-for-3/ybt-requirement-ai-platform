@@ -31,7 +31,8 @@ export function RequirementInputPanel({
   businessJob,
   technicalJob,
   generating,
-  onGenerate
+  onGenerate,
+  requirementMode = false
 }: {
   tables: TargetTable[];
   tableId: number | null;
@@ -50,6 +51,7 @@ export function RequirementInputPanel({
   technicalJob: BackgroundJobSummary | null;
   generating: boolean;
   onGenerate: () => void;
+  requirementMode?: boolean;
 }) {
   const contextText = selectedBusiness?.business_definition || selectedField?.regulatory_refined_definition || selectedField?.regulatory_description || selectedField?.field_definition || "";
   const canGenerate = Boolean(selectedField && scenarioId);
@@ -95,34 +97,35 @@ export function RequirementInputPanel({
       </section>
 
       <section className="panel overflow-hidden">
-        <PanelHeader title="② 数据分析范围" meta="真实内网资产" />
+        <PanelHeader title="② 项目资料与数据" meta="已登记资产" />
         <div className="space-y-2 p-4">
           <AssetRow icon={Building2} label="业务源系统" value={assetSummary.business_system_count ? `${assetSummary.business_system_count} 个已启用` : "尚未维护"} available={assetSummary.business_system_count > 0} href="/business-systems" />
           <AssetRow icon={Database} label="只读数据源" value={assetSummary.healthy_datasource_count ? `${assetSummary.healthy_datasource_count} 个连接正常` : assetSummary.datasource_count ? "连接状态待检查" : "尚未配置"} available={assetSummary.healthy_datasource_count > 0} href="/datasources" />
-          <AssetRow icon={Layers3} label="监管集市" value={assetSummary.mart_table_count ? `${assetSummary.mart_table_count} 张真实集市表` : "尚未维护"} available={assetSummary.mart_table_count > 0} href="/mart" />
-          <AssetRow icon={FileText} label="历史与知识" value="按当前字段检索真实证据" available href="/knowledge" />
+          <AssetRow icon={Layers3} label="监管集市" value={assetSummary.mart_table_count ? `${assetSummary.mart_table_count} 张已登记集市表` : "尚未维护"} available={assetSummary.mart_table_count > 0} href="/mart" />
+          <AssetRow icon={FileText} label="历史与知识" value="检索字段相关资料，核验依据" available href="/knowledge" />
         </div>
       </section>
 
       <section className="panel overflow-hidden">
-        <PanelHeader title="③ 业务需求说明" meta="来自已有字段与场景口径" />
+        <PanelHeader title="③ 字段定义参考" meta="来自已有字段与场景口径" />
         <div className="p-4">
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-600">当前监管 / 业务背景</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">当前字段定义（只读参考）</span>
             <textarea className="control min-h-28 resize-y bg-mist/50 leading-6" readOnly value={contextText} placeholder="当前字段尚无监管定义或业务口径，请进入字段场景工作台补充。" />
           </label>
-          <p className="mt-1.5 text-[11px] leading-5 text-slate-500">本轮不新增独立“需求背景”实体；人工最终口径在右侧文档区编辑并通过现有 Mapping API 保存。</p>
-          <div className="mt-3"><AiStatus businessJob={businessJob} technicalJob={technicalJob} /></div>
+          <p className="mt-1.5 text-[11px] leading-5 text-slate-500">需求背景请在上方“需求说明与生成范围”中填写并保存；字段口径在右侧编辑。</p>
+          {!requirementMode ? <><div className="mt-3"><AiStatus businessJob={businessJob} technicalJob={technicalJob} /></div>
           <button className="button-primary mt-3 h-10 w-full" disabled={!canGenerate || generating} onClick={onGenerate} type="button">
             <Sparkles size={16} />
-            {generating ? "正在提交真实 AI 任务…" : "生成业务口径与技术溯源草稿"}
+            {generating ? "正在提交草稿任务…" : "生成业务口径与技术溯源草稿"}
           </button>
           {selectedField ? (
             <Link className="button-secondary mt-2 w-full" href={`/fields/${selectedField.id}/scenarios`}>
               深度编辑、证据绑定与提交审核
             </Link>
           ) : null}
-          {!selectedBusiness || !selectedLineage ? <p className="mt-2 text-[11px] leading-5 text-gold-700">首次生成会通过现有 API 为当前字段与场景初始化缺失的空口径记录，再提交后台草稿任务。</p> : null}
+          {!selectedBusiness || !selectedLineage ? <p className="mt-2 text-[11px] leading-5 text-gold-700">首次生成将为当前字段和业务场景建立草稿，已有人工口径仍需保留和核验。</p> : null}
+          </> : <p className="mt-3 text-[11px] leading-5 text-slate-500">当前为需求独立版本，批量生成、失败重试和候选采用统一在“范围生成”中处理。</p>}
         </div>
       </section>
     </div>

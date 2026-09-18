@@ -17,6 +17,8 @@ def execute_uat_run(db: Session, run_id: int, *, retry_statuses: set[str] | None
     run = db.get(UatRun, run_id)
     if run is None:
         raise ValueError("UAT run not found")
+    from app.services.requirement_uat import validate_suite_execution
+    validate_suite_execution(db, run.uat_suite_id)
     cases = list(db.scalars(select(UatCase).where(UatCase.uat_suite_id == run.uat_suite_id, UatCase.enabled.is_(True)).order_by(UatCase.display_order, UatCase.id)).all())
     results = _ensure_results(db, run, cases)
     run.status = "running"

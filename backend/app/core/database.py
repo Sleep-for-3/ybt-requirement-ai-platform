@@ -13,7 +13,11 @@ class Base(DeclarativeBase):
 settings = get_settings()
 engine_options = {"pool_pre_ping": True}
 if not settings.database_url.startswith("sqlite"):
-    engine_options.update(pool_size=settings.database_pool_size, max_overflow=settings.database_max_overflow)
+    engine_options.update(
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        connect_args={"connect_timeout": 5}
+    )
 engine = create_engine(settings.database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

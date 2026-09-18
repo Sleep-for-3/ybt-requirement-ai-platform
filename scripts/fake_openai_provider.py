@@ -20,6 +20,21 @@ class EmbeddingRequest(BaseModel):
 
 @app.post("/v1/chat/completions")
 def chat(payload: ChatRequest) -> dict:
+    system_text = "\n".join(str(message.get("content") or "") for message in payload.messages if message.get("role") == "system")
+    if "需求字段候选" in system_text:
+        candidate = {
+            "business_definition": "隔离协议验证候选定义，需人工核验。",
+            "processing_logic": "隔离协议验证候选规则；关联、过滤和码值条件仍待确认。",
+            "final_content": "隔离测试候选，不可用于实际报送。",
+            "physical_references": [],
+            "evidence_unit_ids": [],
+            "gaps": ["隔离协议验证未提供真实业务证据。"],
+        }
+        return {
+            "id": "fake-chat-completion", "object": "chat.completion", "model": payload.model,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": __import__("json").dumps(candidate, ensure_ascii=False)}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50},
+        }
     content = {
         "status": "ok",
         "message": "连接成功",

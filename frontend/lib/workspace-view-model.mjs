@@ -10,13 +10,13 @@ export function preferredMappingContent(mapping, fallback = "") {
   );
 }
 
-export function combinedFieldStatus({ businessStatus, technicalStatus, martStatuses = [] }) {
+export function combinedFieldStatus({ businessStatus, technicalStatus, martStatuses = [], pathConfirmed = false }) {
   const values = [businessStatus, technicalStatus, ...martStatuses].filter(Boolean).map((value) => String(value).toLowerCase());
   if (values.some((value) => ["rejected", "returned", "failed"].includes(value))) return "rejected";
   const businessConfirmed = ["confirmed", "approved"].includes(String(businessStatus || "").toLowerCase());
   const technicalConfirmed = ["confirmed", "approved"].includes(String(technicalStatus || "").toLowerCase());
   const martsApproved = martStatuses.length > 0 && martStatuses.every((value) => ["approved", "confirmed"].includes(String(value || "").toLowerCase()));
-  if (businessConfirmed && technicalConfirmed && martsApproved) return "approved";
+  if (businessConfirmed && technicalConfirmed && (pathConfirmed || martsApproved)) return "approved";
   if (values.some((value) => value === "in_review")) return "in_review";
   if (values.some((value) => ["draft", "pending", "reviewed", "confirmed", "approved"].includes(value))) return "draft";
   return "pending";

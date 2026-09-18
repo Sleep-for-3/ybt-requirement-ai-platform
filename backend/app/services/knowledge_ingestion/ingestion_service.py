@@ -3,7 +3,7 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.settings import get_settings
 from app.models import (
@@ -42,6 +42,56 @@ from .parsers import parse_document
 ProgressCallback = Callable[[int, int], None]
 
 
+def review_knowledge_version(db, version_id: int, reviewer: str | None = None):
+    version = db.get(KnowledgeDocumentVersion, version_id)
+    if not version:
+        raise ValueError("Knowledge document version not found")
+    if version.parse_status not in {"parsed", "indexed"} or version.lifecycle_status not in {"draft", "pending_review"}:
+        raise ValueError("只有解析成功的待审核版本可以审核")
+    version.lifecycle_status = "approved"
+    version.reviewed_by = reviewer
+    version.reviewed_at = datetime.now(UTC)
+    db.commit(); db.refresh(version)
+    return version
+
+
+def activate_knowledge_version(db, version_id: int):
+    version = db.get(KnowledgeDocumentVersion, version_id)
+    if not version:
+        raise ValueError("Knowledge document version not found")
+    if version.lifecycle_status != "approved" or version.parse_status not in {"parsed", "indexed"}:
+        raise ValueError("版本必须解析成功并审核通过后才能激活")
+    document = db.get(KnowledgeDocument, version.document_id)
+    if not document:
+        raise ValueError("Knowledge document not found")
+    previous = db.get(KnowledgeDocumentVersion, document.current_version_id) if document.current_version_id else None
+    if previous and previous.id != version.id and previous.lifecycle_status == "active":
+        previous.lifecycle_status = "superseded"
+    version.replaces_version_id = version.replaces_version_id or (previous.id if previous else None)
+    version.lifecycle_status = "active"
+    version.activated_at = datetime.now(UTC)
+    db.execute(update(KnowledgeUnit).where(
+        KnowledgeUnit.document_id == document.id,
+        KnowledgeUnit.document_version_id != version.id,
+        KnowledgeUnit.enabled.is_(True),
+    ).values(enabled=False))
+    db.execute(update(KnowledgeUnit).where(
+        KnowledgeUnit.document_version_id == version.id,
+    ).values(enabled=True))
+    document.current_version_id = version.id
+    document.current_version_no = version.version_no
+    document.file_name, document.storage_path, document.file_hash = version.file_name, version.storage_path, version.file_hash
+    document.document_status = "active"
+    document.parse_status = version.parse_status
+    document.parse_summary_json = {**(version.parse_summary_json or {}),
+        "active_version_id": version.id,
+        "semantic_index_status": "pending_reindex" if get_settings().vector_store_provider == "milvus" else "indexed"}
+    document.warnings_json = version.warnings_json or []
+    document.error_message = None
+    db.commit(); db.refresh(version)
+    return version
+
+
 async def ingest_knowledge_document(
     db,
     project_id,
@@ -52,6 +102,20 @@ async def ingest_knowledge_document(
     confidentiality_level="internal",
     created_by=None,
     change_note=None,
+    document_id=None,
+    source_category=None,
+    logical_code=None,
+    regulatory_document_no=None,
+    regulatory_version=None,
+    internal_revision=None,
+    publisher=None,
+    published_at=None,
+    effective_at=None,
+    expires_at=None,
+    applicable_project_ids=None,
+    applicable_institution_names=None,
+    applicable_field_codes=None,
+    applicable_scenario_ids=None,
     *,
     batch_size: int | None = None,
     progress: ProgressCallback | None = None,
@@ -75,16 +139,28 @@ async def ingest_knowledge_document(
         )
     file_name = upload.filename or "knowledge.txt"
     digest = hashlib.sha256(content).hexdigest()
-    document = db.scalar(
-        select(KnowledgeDocument).where(
+    governed = source_category is not None or document_id is not None or logical_code is not None
+    if document_id is not None:
+        document = db.get(KnowledgeDocument, int(document_id))
+        if not document or document.project_id != project_id or document.document_status == "archived":
+            raise ValueError("Existing logical document not found")
+    elif logical_code:
+        document = db.scalar(select(KnowledgeDocument).where(
+            KnowledgeDocument.project_id == project_id,
+            KnowledgeDocument.logical_code == logical_code,
+            KnowledgeDocument.document_status != "archived",
+        ))
+    else:
+        # Legacy requests keep their filename-based grouping contract. Governed UI requests
+        # can always select document_id, so a renamed file is never forced into a new identity.
+        document = db.scalar(select(KnowledgeDocument).where(
             KnowledgeDocument.project_id == project_id,
             KnowledgeDocument.file_name == file_name,
             KnowledgeDocument.knowledge_type == knowledge_type,
             KnowledgeDocument.knowledge_scope == knowledge_scope,
             KnowledgeDocument.institution_name == institution_name,
             KnowledgeDocument.document_status != "archived",
-        )
-    )
+        ))
     if (
         document
         and document.file_hash == digest
@@ -114,7 +190,15 @@ async def ingest_knowledge_document(
             institution_name=institution_name,
             confidentiality_level=confidentiality_level,
             file_hash=digest,
-            current_version_no=1,
+            current_version_no=0 if governed else 1,
+            logical_code=logical_code,
+            source_category=source_category or "business_material",
+            regulatory_document_no=regulatory_document_no,
+            publisher=publisher,
+            applicable_project_ids_json=applicable_project_ids or [],
+            applicable_institution_names_json=applicable_institution_names or [],
+            applicable_field_codes_json=applicable_field_codes or [],
+            applicable_scenario_ids_json=applicable_scenario_ids or [],
             document_status="parsing",
             parse_status="parsing",
             created_by=created_by,
@@ -122,24 +206,37 @@ async def ingest_knowledge_document(
         db.add(document)
         db.flush()
     else:
-        document.current_version_no += 1
-        document.storage_path = storage_key
-        document.file_hash = digest
-        document.document_status = "parsing"
-        document.parse_status = "parsing"
-        document.confidentiality_level = confidentiality_level
-        document.error_message = None
+        document.source_category = source_category or document.source_category
+        document.regulatory_document_no = regulatory_document_no or document.regulatory_document_no
+        document.publisher = publisher or document.publisher
+        document.logical_code = logical_code or document.logical_code
+        if not governed:
+            document.document_status = "parsing"
+            document.parse_status = "parsing"
+            document.error_message = None
+
+    next_version_no = (db.scalar(select(func.max(KnowledgeDocumentVersion.version_no)).where(
+        KnowledgeDocumentVersion.document_id == document.id
+    )) or 0) + 1
 
     version = KnowledgeDocumentVersion(
         project_id=project_id,
         document_id=document.id,
-        version_no=document.current_version_no,
+        version_no=next_version_no,
         file_name=file_name,
         storage_path=storage_key,
         file_hash=digest,
         change_note=change_note,
         parse_status="parsing",
         created_by=created_by,
+        regulatory_version=regulatory_version,
+        internal_revision=internal_revision or f"R{next_version_no}",
+        publisher=publisher,
+        published_at=published_at,
+        effective_at=effective_at,
+        expires_at=expires_at,
+        lifecycle_status="draft" if governed else "active",
+        replaces_version_id=document.current_version_id,
     )
     db.add(version)
     db.flush()
@@ -268,23 +365,17 @@ async def ingest_knowledge_document(
             if progress:
                 progress(completed, total)
 
-        old_units = list(
-            db.scalars(
-                select(KnowledgeUnit).where(
-                    KnowledgeUnit.document_id == document.id,
-                    KnowledgeUnit.document_version_id != version.id,
-                    KnowledgeUnit.enabled.is_(True),
-                )
-            ).all()
-        )
-        old_vector_ids = [f"knowledge-unit-{item.id}" for item in old_units]
-        for item in old_units:
-            item.enabled = False
-        db.execute(
-            update(KnowledgeUnit)
-            .where(KnowledgeUnit.document_version_id == version.id)
-            .values(enabled=True)
-        )
+        old_units = list(db.scalars(select(KnowledgeUnit).where(
+            KnowledgeUnit.document_id == document.id,
+            KnowledgeUnit.document_version_id != version.id,
+            KnowledgeUnit.enabled.is_(True),
+        )).all())
+        old_vector_ids = []
+        if not governed:
+            old_vector_ids = [f"knowledge-unit-{item.id}" for item in old_units]
+            for item in old_units: item.enabled = False
+            db.execute(update(KnowledgeUnit).where(
+                KnowledgeUnit.document_version_id == version.id).values(enabled=True))
 
         final_status = (
             ("parsed" if not warnings else "parsed_with_warnings")
@@ -292,14 +383,29 @@ async def ingest_knowledge_document(
             else ("indexed" if not warnings else "partially_indexed")
         )
         version.parse_status = "parsed" if formal_versioned_index else "indexed"
-        document.document_status = final_status
-        document.parse_status = version.parse_status
-        document.parse_summary_json = {
+        version.parse_summary_json = {
             "unit_count": created_count,
             "version_no": version.version_no,
             "semantic_index_status": "pending_reindex" if formal_versioned_index else "indexed",
         }
-        document.warnings_json = warnings
+        version.warnings_json = warnings
+        if governed:
+            version.lifecycle_status = "pending_review"
+            document.document_status = document.document_status if document.current_version_id else "pending_review"
+            document.parse_status = document.parse_status if document.current_version_id else version.parse_status
+            document.parse_summary_json = {**(document.parse_summary_json or {}),
+                "candidate_version_id": version.id, "candidate_version_no": version.version_no,
+                "candidate_status": "pending_review"}
+        else:
+            version.lifecycle_status = "active"
+            version.reviewed_by = created_by or "legacy_import"
+            version.reviewed_at = version.activated_at = datetime.now(UTC)
+            document.current_version_id = version.id
+            document.current_version_no = version.version_no
+            document.file_name, document.storage_path, document.file_hash = file_name, storage_key, digest
+            document.document_status, document.parse_status = final_status, version.parse_status
+            document.parse_summary_json = version.parse_summary_json
+            document.warnings_json = warnings
         task.status = final_status
         task.unit_count = created_count
         task.indexed_count = indexed_count
@@ -328,10 +434,17 @@ async def ingest_knowledge_document(
         document = db.get(KnowledgeDocument, document.id)
         version = db.get(KnowledgeDocumentVersion, version.id)
         task = db.get(KnowledgeIngestionTask, task.id)
-        document.document_status = "failed"
-        document.parse_status = "failed"
-        document.error_message = str(exc)[:2000]
+        if not governed or not document.current_version_id:
+            document.document_status = "failed"
+            document.parse_status = "failed"
+            document.error_message = "文档解析失败，请检查文件格式。"
+        else:
+            document.parse_summary_json = {**(document.parse_summary_json or {}),
+                "failed_candidate_version_id": version.id,
+                "active_version_id": document.current_version_id}
         version.parse_status = "failed"
+        version.lifecycle_status = "draft"
+        version.error_message = type(exc).__name__
         task.status = "failed"
         task.failed_count = 1
         task.error_message = str(exc)[:2000]

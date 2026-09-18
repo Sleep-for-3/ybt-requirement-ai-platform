@@ -31,9 +31,13 @@ export function canViewNavigationAudience(
 
 export function navigationTrailForPath(pathname: string, queryString?: string): {
   parentHref: string | null;
+  parentLabel?: string;
   sectionHref: string | null;
   sectionLabel: string | null;
 };
 
 export function parentReturnHref(parentHref: string | null, queryString?: string): string | null;
 export function detailHrefWithReturnTo(detailHref: string, listPath: string, listQuery?: string): string;
+
+export function isResourcesPath(pathname: string): boolean;
+export const RESOURCE_MODULES: Record<string, string>;

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -13,6 +13,7 @@ class ProjectCreate(BaseModel):
     bank_name: str | None = None
     description: str | None = None
     institution_id: int | None = None
+    client_request_id: str | None = Field(default=None, min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     project_status: str = "active"
     confidentiality_level: str = "internal"
     governance_workflow_enabled: bool = False
@@ -254,6 +255,8 @@ class TemplatePreviewItem(BaseModel):
 
 class TemplateUploadResponse(BaseModel):
     template_id: int
+    version_id: int | None = None
+    version_no: int | None = None
     file_name: str
     parse_status: str
     sheet_count: int
@@ -271,6 +274,9 @@ class TemplateDocumentRead(OrmModel):
     sheet_names_json: list[Any]
     parse_status: str
     error_message: str | None
+    template_code: str | None = None
+    display_name: str | None = None
+    current_version_id: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -278,6 +284,7 @@ class TemplateDocumentRead(OrmModel):
 class TemplateParseResultRead(OrmModel):
     id: int
     template_document_id: int
+    template_version_id: int | None = None
     project_id: int
     sheet_name: str
     table_code: str | None
@@ -298,6 +305,43 @@ class TemplateApplyResponse(BaseModel):
     updated_fields: int
     skipped_rows: int
     warnings: list[str]
+    template_version_id: int | None = None
+    application_id: int | None = None
+    change_set: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class TemplateVersionRead(OrmModel):
+    id: int
+    template_document_id: int
+    project_id: int
+    version_no: int
+    regulatory_version: str | None = None
+    release_batch: str | None = None
+    template_code: str
+    publisher: str | None = None
+    published_at: datetime | None = None
+    effective_at: datetime | None = None
+    expires_at: datetime | None = None
+    status: str
+    replaces_version_id: int | None = None
+    change_note: str | None = None
+    file_name: str
+    file_type: str
+    file_hash: str
+    sheet_names_json: list[Any]
+    parsed_snapshot_json: list[Any]
+    parse_status: str
+    error_message: str | None = None
+    uploaded_by: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    activated_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectStatusUpdate(BaseModel):
+    project_status: Literal["active", "suspended"]
 
 
 class DataSourceCreate(BaseModel):

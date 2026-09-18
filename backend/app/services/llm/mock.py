@@ -15,6 +15,15 @@ class MockLLMService(LLMService):
     async def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
         if "connection test" in system_prompt.lower():
             return {"status": "ok", "message": "连接成功"}
+        if "需求字段候选" in system_prompt:
+            return {
+                "business_definition": "合成验收候选定义，需依据当前需求资料人工核验。",
+                "processing_logic": "合成验收候选规则；未确认的关联、过滤和码值条件保留为缺口。",
+                "final_content": "合成验收候选，仅用于验证生成、差异与采用流程，不可作为真实监管口径。",
+                "physical_references": [],
+                "evidence_unit_ids": [],
+                "gaps": ["当前隔离模型未提供可核验的业务证据。"],
+            }
         if "场景业务口径" in system_prompt:
             return {
                 "business_definition": "按当前产品场景确认一表通字段的实际业务含义和适用范围。",

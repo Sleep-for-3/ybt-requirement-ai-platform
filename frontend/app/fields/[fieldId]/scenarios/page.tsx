@@ -1,4 +1,6 @@
 "use client";
+import { KnowledgeCitations } from "@/components/knowledge/KnowledgeCitations";
+import type { KnowledgeCitation } from "@/lib/knowledge-types";
 
 import { Check, Clock3, DatabaseZap, Link2, Save, Search, Sparkles } from "lucide-react";
 import { useParams } from "next/navigation";
@@ -541,9 +543,7 @@ export default function FieldScenarioPage() {
                           {item.citation_summary_json?.length ? (
                             <div className="mt-2 rounded-lg border border-line bg-mist/60 p-2 text-xs">
                               <strong>知识引用</strong>
-                              {item.citation_summary_json.map((citation) => (
-                                <div key={citation.knowledge_unit_id}>#{citation.knowledge_unit_id} {citation.source_file_name} {citation.source_sheet_name || ""} {citation.source_cell_range || ""}</div>
-                              ))}
+                              {field?<KnowledgeCitations items={item.citation_summary_json} projectId={field.project_id}/>:null}
                             </div>
                           ) : null}
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -594,6 +594,7 @@ export default function FieldScenarioPage() {
                             <span className="shrink-0 text-sm font-semibold tabular-nums text-pine-600">{Math.round(item.rerank_score * 100)}%</span>
                           </div>
                           <p className="mt-2 text-slate-600">{item.content}</p>
+                          {field?<KnowledgeCitations items={[item]} projectId={field.project_id}/>:null}
                           <p className="mt-1 text-xs text-slate-500">{item.source_file_name} / {item.source_sheet_name || "-"} / {item.source_cell_range || (item.source_page_no ? `第 ${item.source_page_no} 页` : "-")}</p>
                           <div className="mt-2 flex gap-2">
                             <button className="button-secondary" onClick={() => submitFeedback(item.knowledge_unit_id, "correct")}>正确</button>
@@ -617,7 +618,9 @@ export default function FieldScenarioPage() {
                     <h2 className="text-[15px] font-semibold text-ink">字段解释与引用</h2>
                   </div>
                   <div className="panel-body">
-                    <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-mist/60 p-3 text-xs">{JSON.stringify(groundedAnswer, null, 2)}</pre>
+                    <p className="mb-4 whitespace-pre-wrap break-words text-sm leading-7">{String(groundedAnswer.answer || "结论待确认。")}</p>
+                    {field&&Array.isArray(groundedAnswer.citations)?<KnowledgeCitations items={groundedAnswer.citations as KnowledgeCitation[]} projectId={field.project_id}/>:null}
+                    {Array.isArray(groundedAnswer.open_questions)?<ul className="mt-4 list-inside list-disc text-sm">{groundedAnswer.open_questions.map((q,i)=><li key={i}>{String(q)}</li>)}</ul>:null}
                   </div>
                 </div>
               ) : null}

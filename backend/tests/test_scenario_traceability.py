@@ -439,11 +439,17 @@ def test_technical_generate_route_passes_exact_authorized_context_boundary(
         assert invalid.value.status_code in {401, 403}
 
 
+@pytest.mark.parametrize("human_owned", [False, True])
 def test_technical_generate_accepts_exact_context_physical_tuple(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    human_owned: bool,
 ) -> None:
     with _scenario_service_session(tmp_path, "technical-allowed") as (db, _, fixture):
+        if not human_owned:
+            fixture["lineage"].final_content = None
+            db.commit()
+        original_logic = fixture["lineage"].processing_logic
         actor = _principal(fixture)
         allowed = ("trusted_db", "ods", "trusted_table", "trusted_field")
         calls = {"context": 0, "model": 0}
@@ -493,13 +499,15 @@ def test_technical_generate_accepts_exact_context_physical_tuple(
         assert calls == {"context": 1, "model": 1}
         assert generated.final_content == before[4]
         assert generated.tech_confirm_status == before[5]
-        assert (
+        resulting_source = (
             generated.source_database_name.casefold(),
             generated.source_schema_name.casefold(),
             generated.source_table_english_name.casefold(),
             generated.source_field_english_name.casefold(),
-        ) == allowed
-        assert generated.processing_logic == "受治理的安全处理逻辑"
+        )
+        expected_source = tuple(value.casefold() for value in before[:4]) if human_owned else allowed
+        assert resulting_source == expected_source
+        assert generated.processing_logic == (original_logic if human_owned else "受治理的安全处理逻辑")
         assert generated.open_questions.startswith("人工技术问题保持原样")
         assert "[AI] 模型技术问题" in generated.open_questions
         assert generated.ai_generated_content == "受治理的场景技术草稿"
@@ -531,6 +539,7 @@ def test_technical_generate_skips_unknown_physical_tuple_but_keeps_safe_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with _scenario_service_session(tmp_path, "technical-unknown") as (db, _, fixture):
+        original_logic = fixture["lineage"].processing_logic
         allowed = ("trusted_db", "ods", "trusted_table", "trusted_field")
         monkeypatch.setattr(
             scenario_draft_generator,
@@ -564,7 +573,7 @@ def test_technical_generate_skips_unknown_physical_tuple_but_keeps_safe_output(
         )
 
         assert _technical_physical_tuple(generated) == before[:4]
-        assert generated.processing_logic == "仍可采用的安全处理逻辑"
+        assert generated.processing_logic == original_logic
         assert generated.confidence_level == "low"
         assert f"[CTX:{PHYSICAL_SOURCE_EVIDENCE_MISSING}]" in generated.open_questions
         assert generated.final_content == before[4]

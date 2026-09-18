@@ -5,7 +5,16 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Notification, ProjectMembership, ReviewDecision, ReviewTask, ScenarioReviewPackage, WorkflowInstance
+from app.models import (
+    Notification,
+    ProjectMembership,
+    RequirementReviewSubmission,
+    RequirementRevision,
+    ReviewDecision,
+    ReviewTask,
+    ScenarioReviewPackage,
+    WorkflowInstance,
+)
 from app.schemas.governance import BatchReviewTaskCreate, ImpactTaskDecisionRequest, ScenarioReviewSubmitRequest, TaskAssignRequest, TaskDecisionRequest
 from app.services.auth.dependencies import RealPrincipal
 from app.services.auth.permission_service import PermissionService
@@ -39,6 +48,32 @@ def get_task(task_id: int, principal: RealPrincipal, db: Session = Depends(get_d
     result = _task_dict(task)
     decisions = db.scalars(select(ReviewDecision).where(ReviewDecision.review_task_id == task.id).order_by(ReviewDecision.id)).all()
     result["decisions"] = [{column.key: getattr(row, column.key) for column in row.__table__.columns} for row in decisions]
+    if task.target_type == "requirement_review_submission":
+        submission = db.get(RequirementReviewSubmission, task.target_id)
+        revision = db.get(RequirementRevision, submission.revision_id) if submission is not None else None
+        if submission is not None and revision is not None and submission.project_id == task.project_id:
+            requirement = revision.content_json.get("requirement", {})
+            fields = revision.content_json.get("fields", [])
+            result["target_context"] = {
+                "requirement_id": submission.requirement_id,
+                "content_version": submission.content_version,
+                "content_hash": submission.content_hash,
+                "target_table_id": requirement.get("target_table_id"),
+                "scenario_id": requirement.get("scenario_id"),
+                "field_id": fields[0].get("field", {}).get("id") if fields else None,
+            }
+    if task.target_type == "requirement_uat_link":
+        from app.models.requirement import RequirementUatLink
+        from app.services.requirement_uat import link_view
+        link = db.get(RequirementUatLink, task.target_id)
+        if link and link.project_id == task.project_id:
+            result["uat_context"] = link_view(db, link)
+    if task.target_type == "requirement_recheck":
+        from app.models.requirement import RequirementRecheck
+        from app.services.requirement_recheck import recheck_view
+        row = db.get(RequirementRecheck, task.target_id)
+        if row and row.project_id == task.project_id:
+            result["recheck_context"] = recheck_view(db, row)
     return result
 
 

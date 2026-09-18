@@ -36,11 +36,32 @@ def knowledge_ingestion_handler(db: Session, job) -> dict:
         payload.get("confidentiality_level", "internal"),
         created_by=job.created_by,
         change_note=payload.get("change_note"),
+        document_id=payload.get("document_id"),
+        source_category=payload.get("source_category"),
+        logical_code=payload.get("logical_code"),
+        regulatory_document_no=payload.get("regulatory_document_no"),
+        regulatory_version=payload.get("regulatory_version"),
+        internal_revision=payload.get("internal_revision"),
+        publisher=payload.get("publisher"),
+        published_at=_payload_datetime(payload.get("published_at")),
+        effective_at=_payload_datetime(payload.get("effective_at")),
+        expires_at=_payload_datetime(payload.get("expires_at")),
+        applicable_project_ids=payload.get("applicable_project_ids"),
+        applicable_institution_names=payload.get("applicable_institution_names"),
+        applicable_field_codes=payload.get("applicable_field_codes"),
+        applicable_scenario_ids=payload.get("applicable_scenario_ids"),
         batch_size=get_settings().knowledge_ingestion_batch_size,
         progress=report_progress,
     ))
     _complete(db, job, "upload", "knowledge_document", document.id, "knowledge_parsed", "知识解析完成")
     return {"success_count": 1, "failed_count": 0, "document_id": document.id}
+
+
+def _payload_datetime(value):
+    if not value or not isinstance(value, str):
+        return value
+    from datetime import datetime
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def knowledge_reindex_handler(db: Session, job, vector_store=None) -> dict:

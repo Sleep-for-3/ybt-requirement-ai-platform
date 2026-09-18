@@ -13,6 +13,7 @@ from app.models import (
     MappingVersion,
     Project,
     ProjectMembership,
+    RequirementReviewSubmission,
     ReviewDecision,
     ReviewTask,
     ScenarioReviewPackage,
@@ -37,9 +38,17 @@ from app.services.governance.scenario_review import (
     validate_review_package,
 )
 from app.services.semantic.version_service import transition_concept_status, transition_version_status
+from app.models.requirement import RequirementUatLink, RequirementRecheck
 
 
 DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
+    "requirement_change_review": ("需求依据变更复核", [
+        {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
+    ]),
+    "requirement_uat_review": ("需求规则测试项审核", [
+        {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
+        {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
+    ]),
     "scenario_mapping_review": ("场景口径五阶段审核", [
         {"step_key": "business_draft", "task_type": "fill", "assignee_role": "business_analyst"},
         {"step_key": "business_review", "task_type": "review", "assignee_role": "business_reviewer"},
@@ -63,9 +72,16 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
         {"step_key": "business_review", "task_type": "review", "assignee_role": "business_reviewer"},
         {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
     ]),
+    "requirement_document_review": ("监管需求文档审核", [
+        {"step_key": "business_review", "task_type": "review", "assignee_role": "business_reviewer"},
+        {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
+        {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
+    ]),
 }
 
 TARGET_MODELS = {
+    "requirement_recheck": RequirementRecheck,
+    "requirement_uat_link": RequirementUatLink,
     "project": Project,
     "scenario_business": ScenarioBusinessMapping,
     "scenario_technical": ScenarioTechnicalLineage,
@@ -78,6 +94,7 @@ TARGET_MODELS = {
     "semantic_concept_version": SemanticConceptVersion,
     "semantic_binding": SemanticBinding,
     "semantic_relation": SemanticRelation,
+    "requirement_review_submission": RequirementReviewSubmission,
 }
 
 SEMANTIC_TARGET_TYPES = {"semantic_concept", "semantic_concept_version", "semantic_binding", "semantic_relation"}
@@ -98,6 +115,10 @@ def start_workflow(
     steps = list(definition.steps_json)
     if not steps:
         raise HTTPException(status_code=400, detail="Workflow has no steps")
+    if (workflow_key == "requirement_uat_review") != (target_type == "requirement_uat_link"):
+        raise HTTPException(400, "需求规则测试项必须使用专用测试项审核流程")
+    if (workflow_key == "requirement_change_review") != (target_type == "requirement_recheck"):
+        raise HTTPException(400, "需求依据变更必须使用需求复核流程")
     if workflow_key == "scenario_mapping_review" and target_type != "scenario_review_package":
         raise HTTPException(status_code=400, detail="Scenario review workflow requires a scenario_review_package target")
     if workflow_key == "lineage_change_review" and target_type != "impact_analysis":
@@ -110,9 +131,21 @@ def start_workflow(
         raise HTTPException(status_code=400, detail="Semantic governance review requires a semantic target")
     if workflow_key != "semantic_governance_review" and target_type in SEMANTIC_TARGET_TYPES:
         raise HTTPException(status_code=400, detail="Semantic targets require semantic_governance_review")
+    if workflow_key == "requirement_document_review" and target_type != "requirement_review_submission":
+        raise HTTPException(status_code=400, detail="Requirement document review requires a requirement_review_submission target")
+    if workflow_key != "requirement_document_review" and target_type == "requirement_review_submission":
+        raise HTTPException(status_code=400, detail="Requirement review submissions require requirement_document_review")
     package = validate_review_package(db, project_id, target_id) if target_type == "scenario_review_package" else None
     if package is None:
         _snapshot_target(db, project_id, target_type, target_id)
+    if target_type == "requirement_recheck" and db.get(RequirementRecheck, target_id).status == "reviewed":
+        raise HTTPException(409, "复核已关闭，不能重复发起审核")
+    if target_type == "requirement_uat_link":
+        from app.services.requirement_uat import validate_link
+        link = db.get(RequirementUatLink, target_id)
+        validate_link(db, link)
+        if link.status == "approved":
+            raise HTTPException(409, "测试项已审核通过，不能重复发起审核")
     existing = db.scalar(select(WorkflowInstance).where(
         WorkflowInstance.project_id == project_id,
         WorkflowInstance.workflow_key == workflow_key,
@@ -134,6 +167,8 @@ def start_workflow(
     )
     db.add(instance)
     db.flush()
+    if target_type == "requirement_uat_link":
+        db.get(RequirementUatLink, target_id).status = "in_review"
     if package is not None:
         if package.status == "withdrawn":
             package.current_version_no += 1
@@ -246,6 +281,16 @@ def decide_task(
             raise HTTPException(status_code=409, detail="Content author cannot perform final review")
         if decision == "approved" and instance.workflow_key == "double_layer_mapping_review":
             _validate_double_layer_target(db, task.target_type, task.target_id)
+    if instance.workflow_key == "requirement_document_review":
+        from app.services.requirement_review import validate_review_decision
+
+        validate_review_decision(db, task.target_id, task.step_key, int(principal.user_id), decision)
+    if instance.workflow_key == "requirement_uat_review":
+        from app.services.requirement_uat import validate_decision
+        validate_decision(db, db.get(RequirementUatLink, task.target_id), principal.user_id, decision)
+    if instance.workflow_key == "requirement_change_review":
+        from app.services.requirement_recheck import review_recheck
+        review_recheck(db, db.get(RequirementRecheck, task.target_id), principal.user_id, decision)
     if task.target_type == "scenario_review_package":
         package = validate_review_package(db, task.project_id, task.target_id)
         snapshot = snapshot_review_step(db, package, task.step_key, instance.id)
@@ -286,6 +331,14 @@ def decide_task(
                 _finalize_lineage_impact(db, task.target_id)
             elif instance.workflow_key == "semantic_governance_review":
                 _finalize_semantic_target(db, task.target_type, task.target_id, principal.username)
+            elif instance.workflow_key == "requirement_document_review":
+                from app.services.requirement_review import complete_review
+
+                complete_review(db, task.target_id, int(principal.user_id))
+            elif instance.workflow_key == "requirement_uat_review":
+                db.get(RequirementUatLink, task.target_id).status = "approved"
+            elif instance.workflow_key == "requirement_change_review":
+                db.get(RequirementRecheck, task.target_id).status = "reviewed"
         else:
             next_step = steps[position + 1]["step_key"]
             instance.status = "in_progress"
@@ -302,9 +355,15 @@ def decide_task(
         if target_position > current_position:
             raise HTTPException(status_code=400, detail="Return step must not be after the current step")
         instance.status = "rejected"
+        if instance.workflow_key == "requirement_uat_review":
+            db.get(RequirementUatLink, task.target_id).status = "returned"
         instance.current_step = target_step
         if package is not None:
             package.status = "returned"
+        if instance.workflow_key == "requirement_document_review":
+            from app.services.requirement_review import return_review
+
+            return_review(db, task.target_id, decision)
         reset_steps = {item["step_key"] for item in steps[target_position:current_position + 1]}
         reset_tasks = list(db.scalars(select(ReviewTask).where(
             ReviewTask.workflow_instance_id == instance.id,
@@ -395,6 +454,12 @@ def _snapshot_target(db: Session, project_id: int, target_type: str, target_id: 
     actual_project_id = target.id if isinstance(target, Project) else getattr(target, "project_id", None)
     if actual_project_id != project_id:
         raise HTTPException(status_code=404, detail="Workflow target not found")
+    if target_type == "requirement_uat_link":
+        from app.services.requirement_uat import review_snapshot
+        return review_snapshot(db, target)
+    if target_type == "requirement_recheck":
+        from app.services.requirement_recheck import recheck_view
+        return recheck_view(db, target)
     return {column.key: _json_value(getattr(target, column.key)) for column in sa_inspect(target).mapper.column_attrs}
 
 

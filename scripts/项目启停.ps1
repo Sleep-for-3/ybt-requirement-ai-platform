@@ -102,15 +102,41 @@ function Wait-Endpoint {
     return $false
 }
 
+function Invoke-BackendReadiness {
+    param([int]$Port, [int]$RequestTimeoutSeconds = 30)
+    # Readiness runs dependency checks sequentially (including Celery's
+    # reply collection window), so a three-second HTTP budget is too short.
+    try {
+        return Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/ready" -UseBasicParsing -TimeoutSec $RequestTimeoutSeconds
+    } catch {
+        # PowerShell 5.1 and 7 both put the HTTP error body in ErrorDetails.
+        # Preserve 503 dependency statuses instead of reporting only HTTP failure.
+        if ($_.Exception.PSObject.Properties.Name -contains "Response" -and
+            $null -ne $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 503 -and
+            $null -ne $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace($_.ErrorDetails.Message)) {
+            return ($_.ErrorDetails.Message | ConvertFrom-Json)
+        }
+        throw
+    }
+}
+
 function Wait-BackendReady {
     param([int]$Port, [int]$TimeoutSeconds = 90)
     $url = "http://127.0.0.1:$Port/health/ready"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $lastChecks = ""
+    $lastStatus = ""
+    $attemptCount = 0
+    $lastError = ""
     while ((Get-Date) -lt $deadline) {
+        $attemptCount++
         try {
-            $health = Invoke-RestMethod -Uri $url -UseBasicParsing -TimeoutSec 3
-            if ([string]$health.status -eq "ready") {
+            $remaining = [Math]::Max(1, [int][Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
+            $health = Invoke-BackendReadiness -Port $Port -RequestTimeoutSeconds ([Math]::Min(30, $remaining))
+            $lastError = ""
+            $lastStatus = [string]$health.status
+            if ($lastStatus -eq "ready") {
+                Write-Host "后端健康检查通过（尝试 $attemptCount 次）"
                 return $health
             }
             if ($null -ne $health.checks) {
@@ -118,19 +144,31 @@ function Wait-BackendReady {
                     "$($_.Name)=$($_.Value)"
                 }) -join ", ")
             }
+            # 每 10 次探测输出一次状态。
+            if ($attemptCount % 10 -eq 0) {
+                Write-Host "等待后端就绪... 状态: $lastStatus, 检查: $lastChecks"
+            }
         } catch {
             # 服务启动期间连接失败或返回 503 属于预期。
+            $lastError = $_.Exception.Message
+            if ($attemptCount % 10 -eq 0) {
+                Write-Host "等待后端响应... (尝试 $attemptCount 次，最后错误: $lastError)"
+            }
         }
         Start-Sleep -Seconds 1
     }
-    $suffix = if ([string]::IsNullOrWhiteSpace($lastChecks)) { "" } else { "；最近检查：$lastChecks" }
+    $suffix = if ([string]::IsNullOrWhiteSpace($lastChecks)) {
+        "；最后状态: $lastStatus；最后错误: $lastError"
+    } else {
+        "；最后状态: $lastStatus；检查详情：$lastChecks；最后错误: $lastError"
+    }
     throw "后端在 $TimeoutSeconds 秒内未通过 /health/ready：$url$suffix"
 }
 
 function Get-BackendReadiness {
     param([int]$Port)
     try {
-        return Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health/ready" -UseBasicParsing -TimeoutSec 3
+        return Invoke-BackendReadiness -Port $Port
     } catch {
         return $null
     }
@@ -451,14 +489,18 @@ function Get-DockerComposeArguments {
             "compose",
             "--project-name", "ybt-requirement-ai-platform",
             "--project-directory", (ConvertTo-WslPath -WindowsPath $repoRoot),
-            "--env-file", (ConvertTo-WslPath -WindowsPath $semanticComposeEnvPath)
+            "--env-file", (ConvertTo-WslPath -WindowsPath $semanticComposeEnvPath),
+            "-f", (ConvertTo-WslPath -WindowsPath (Join-Path $repoRoot "docker-compose.yml")),
+            "-f", (ConvertTo-WslPath -WindowsPath (Join-Path $repoRoot "docker-compose.dev-ports.yml"))
         )
     }
     return @(
         "compose",
         "--project-name", "ybt-requirement-ai-platform",
         "--project-directory", $repoRoot,
-        "--env-file", $semanticComposeEnvPath
+        "--env-file", $semanticComposeEnvPath,
+        "-f", (Join-Path $repoRoot "docker-compose.yml"),
+        "-f", (Join-Path $repoRoot "docker-compose.dev-ports.yml")
     )
 }
 
@@ -473,8 +515,26 @@ function Start-SemanticInfrastructure {
         "etcd", "milvus-minio", "milvus"
     )
     Invoke-DockerCommandWithRetry -Runtime $Runtime -Arguments $arguments | Out-Host
-    if (-not (Wait-Port -Port 19530 -TimeoutSeconds 180)) {
+
+    # Require both container health and reachability from the Windows backend.
+    $deadline = (Get-Date).AddSeconds(180)
+    $healthy = $false
+    while ((Get-Date) -lt $deadline) {
+        $healthStatus = Invoke-DockerCommand -Runtime $Runtime -AllowFailure -Arguments @(
+            "inspect", "--format", "{{.State.Health.Status}}",
+            "ybt-requirement-ai-platform-milvus-1"
+        )
+        if (([string]$healthStatus).Trim() -eq "healthy") {
+            $healthy = $true
+            break
+        }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $healthy) {
         throw "Milvus 未能在 180 秒内启动，请使用项目状态命令检查容器。"
+    }
+    if (-not (Wait-Port -Port 19530 -TimeoutSeconds 30)) {
+        throw "Milvus 容器已健康，但 Windows 无法连接 127.0.0.1:19530，请检查 WSL 端口转发。"
     }
 }
 
@@ -1186,7 +1246,7 @@ function Start-Project {
             -WindowStyle Hidden `
             -PassThru
 
-        $backendReadiness = Wait-BackendReady -Port $resolvedBackendPort -TimeoutSeconds 90
+        $backendReadiness = Wait-BackendReady -Port $resolvedBackendPort -TimeoutSeconds 180
         if (-not (Wait-Endpoint -Url "http://127.0.0.1:$FrontendPort/login")) {
             throw "前端在 90 秒内未就绪，请检查日志：$($logs.frontendErr)"
         }

@@ -141,3 +141,18 @@ test("list-to-detail links carry the complete list URL as return state", () => {
   );
   assert.equal(detailHrefWithReturnTo("/tasks/16", "/review-tasks", "page=2"), "/tasks/16");
 });
+
+test("resources has explicit list parents and no dependency on browser history", () => {
+  const lists=["/knowledge","/knowledge/ask","/knowledge/search","/knowledge/documents","/datasources","/catalog","/business-systems","/mart","/historical-calibers","/templates","/fields","/traceability-templates"];
+  assert.equal(navigationTrailForPath("/resources").parentHref,null);
+  for(const path of lists){
+    const trail=navigationTrailForPath(path);
+    assert.equal(trail.parentHref,"/resources",path);
+    assert.equal(trail.sectionHref,"/resources",path);
+  }
+  assert.equal(navigationTrailForPath("/knowledge/documents/7").parentHref,"/knowledge/documents");
+  assert.equal(navigationTrailForPath("/datasources/4/catalog").parentHref,"/datasources");
+  const link=detailHrefWithReturnTo("/knowledge/documents/7","/knowledge/documents","projectId=1&q=policy");
+  assert.equal(parentReturnHref("/knowledge/documents",new URL(link,"http://local").search),"/knowledge/documents?projectId=1&q=policy");
+  assert.equal(parentReturnHref("/resources","projectId=1&returnTo=%2Fworkspace"),"/resources?projectId=1");
+});

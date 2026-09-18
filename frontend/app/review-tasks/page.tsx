@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { useProjectWorkspace } from "@/components/ProjectContext";
+import { RequirementImpactQueue } from "@/components/requirement-workspace/RequirementRecheckPanel";
 import { PageState } from "@/components/feedback/PageState";
 import { apiGet, apiPost } from "@/lib/api";
 import { dueState, formatDateTime, statusLabel, targetTypeLabel, workflowStepLabel } from "@/lib/product-language";
@@ -38,6 +40,7 @@ function isVisibleInMode(task: Task, mode: FilterMode) {
 }
 
 export default function Page() {
+  const {projectId}=useProjectWorkspace();
   const [items, setItems] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -110,6 +113,7 @@ export default function Page() {
     <main>
       <WorkspaceHeader title="我的工作" meta={`${items.length} 个需要你处理的审核任务`} />
       <div className="mx-auto max-w-6xl space-y-4 p-4 lg:p-6">
+        {projectId&&<RequirementImpactQueue key={projectId} projectId={projectId}/>}
         <section className="panel p-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
             <div className="flex items-center gap-2 text-slate-600"><ClipboardList size={16} className="text-pine-600" /><strong className="text-ink">待我处理</strong><span className="tabular-nums">{items.length}</span></div>

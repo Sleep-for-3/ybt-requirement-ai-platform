@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+import re
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from app.services.sql_parser import parse_sql
@@ -7,6 +8,32 @@ from .base import KnowledgeUnitDraft
 
 QUESTION={"问题","答疑问题","监管问题","银行问题"};ANSWER={"回复","监管回复","答疑结果","处理意见"};SUGGESTION={"同业建议"};FIELD_CODE={"字段代码","数据项编码"};FIELD_NAME={"字段名称","字段中文名","数据项名称"};TABLE={"一表通表","表代码"};SCENARIO={"业务场景","产品场景","场景名称"};BUSINESS_SYSTEM={"来源系统","业务系统","系统名称"};SOURCE_TABLE={"来源表","来源表英文名","源表","源表英文名"};SOURCE_FIELD={"来源字段","来源字段英文名","源字段","源字段英文名"};MART_TABLE={"集市表","监管集市表"};MART_FIELD={"集市字段","监管集市字段"}
 def parse_document(file_name,content,knowledge_type):
+    units, warnings = _parse_document(file_name, content, knowledge_type)
+    for index, unit in enumerate(units, 1):
+        locator = unit.metadata.setdefault("locator", {})
+        locator.setdefault("block_id", f"parsed-block-{index}")
+        for key, value in (("page_no", unit.source_page_no), ("sheet_name", unit.source_sheet_name),
+                           ("cell_range", unit.source_cell_range), ("heading", unit.source_heading),
+                           ("row_no", unit.metadata.get("row")), ("paragraph_index", unit.metadata.get("paragraph"))):
+            if value is not None:
+                locator.setdefault(key, value)
+    return units, warnings
+
+
+def _text_units(text, file_name, unit_type="paragraph"):
+    units = []
+    for index, match in enumerate(re.finditer(r"[^\n]+(?:\n(?!\n)[^\n]+)*", text), 1):
+        if not match.group().strip():
+            continue
+        units.append(KnowledgeUnitDraft(unit_type, file_name, match.group(), metadata={"locator": {
+            "paragraph_index": index, "char_start": match.start(), "char_end": match.end(),
+            "line_start": text.count("\n", 0, match.start()) + 1,
+            "line_end": text.count("\n", 0, match.end()) + 1,
+        }}))
+    return units
+
+
+def _parse_document(file_name,content,knowledge_type):
     suffix=Path(file_name).suffix.lower()
     if suffix not in {".xlsx",".docx",".pdf",".txt",".md",".sql"}:raise ValueError(f"Unsupported knowledge document format: {suffix or 'missing extension'}")
     if suffix==".xlsx":return _excel(content,knowledge_type)
@@ -15,8 +42,8 @@ def parse_document(file_name,content,knowledge_type):
     text=content.decode("utf-8",errors="replace").replace("\r\n","\n").replace("\r","\n")
     if suffix==".sql":
         parsed=parse_sql(text);summary=f"来源表: {', '.join(parsed.source_tables)}\n来源字段: {', '.join(parsed.selected_fields)}\n关联条件: {'; '.join(parsed.joins)}\n过滤条件: {'; '.join(parsed.where_conditions)}"
-        return [KnowledgeUnitDraft("sql_summary",file_name,summary,metadata={"raw_sql":text,"parsed_success":parsed.parsed_success})],[parsed.error_message] if parsed.error_message else []
-    return [KnowledgeUnitDraft("paragraph",file_name,part) for part in text.split("\n\n") if part.strip()],[]
+        return [KnowledgeUnitDraft("sql_summary",file_name,summary,metadata={"raw_sql":text,"parsed_success":parsed.parsed_success,"locator":{"line_start":1,"line_end":len(text.splitlines()) or 1}}), *_text_units(text,file_name,"sql_text")],[parsed.error_message] if parsed.error_message else []
+    return _text_units(text,file_name),[]
 
 def _excel(content,knowledge_type):
     wb=load_workbook(BytesIO(content),data_only=True);units=[];warnings=[]
@@ -47,16 +74,21 @@ def _expanded_matrix(sheet):
 
 def _docx(content):
     from docx import Document
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
     doc=Document(BytesIO(content));units=[];heading=None
-    for index,p in enumerate(doc.paragraphs,1):
-        text=p.text.strip()
-        if not text:continue
-        if p.style and p.style.name.lower().startswith("heading"):heading=text;continue
-        units.append(KnowledgeUnitDraft("policy_clause",heading or f"段落 {index}",text,source_heading=heading,metadata={"paragraph":index}))
-    for table_index,table in enumerate(doc.tables,1):
-        for row_index,row in enumerate(table.rows,1):
-            text=" | ".join(cell.text.strip() for cell in row.cells)
-            if text.strip(" | "):units.append(KnowledgeUnitDraft("table_row",f"表格 {table_index} 第{row_index}行",text,source_heading=heading,source_cell_range=f"table:{table_index}:row:{row_index}"))
+    paragraph_index=0;table_index=0
+    for element in doc.element.body.iterchildren():
+        if element.tag.endswith("}p"):
+            paragraph_index+=1;p=Paragraph(element,doc);text=p.text.strip()
+            if not text:continue
+            if p.style and p.style.name.lower().startswith("heading"):heading=text
+            units.append(KnowledgeUnitDraft("policy_clause",heading or f"段落 {paragraph_index}",text,source_heading=heading,metadata={"paragraph":paragraph_index}))
+        elif element.tag.endswith("}tbl"):
+            table_index+=1;table=Table(element,doc)
+            for row_index,row in enumerate(table.rows,1):
+                text=" | ".join(cell.text.strip() for cell in row.cells)
+                if text.strip(" | "):units.append(KnowledgeUnitDraft("table_row",f"表格 {table_index} 第{row_index}行",text,source_heading=heading,source_cell_range=f"table:{table_index}:row:{row_index}",metadata={"locator":{"table_index":table_index,"row_no":row_index}}))
     return units,[]
 
 def _pdf(content):

@@ -46,6 +46,7 @@ from app.api import (
     project_readiness,
     retrieval,
     regulatory_context,
+    resource_governance,
     requirement_workspace,
     scenarios,
     scenario_mappings,
@@ -237,6 +238,7 @@ app.include_router(scenarios.router, prefix=settings.api_prefix, dependencies=se
 app.include_router(scenario_mappings.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(knowledge_items.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(knowledge_rag.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(resource_governance.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(traceability_templates.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(traceability_export.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(source_recommendations.router, prefix=settings.api_prefix, dependencies=secured)
@@ -253,3 +255,11 @@ app.include_router(quality.router, prefix=settings.api_prefix, dependencies=secu
 app.include_router(regulatory_context.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(global_search.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(requirement_workspace.router, prefix=settings.api_prefix, dependencies=secured)
+from app.api import requirements
+from app.api import data_architecture
+from app.api import batch_imports
+app.include_router(batch_imports.router, prefix=settings.api_prefix)
+# Architecture routes enforce their own project OR institution boundary.
+# The legacy project-only guard cannot resolve an institution template.
+app.include_router(data_architecture.router, prefix=settings.api_prefix)
+app.include_router(requirements.router, prefix=settings.api_prefix, dependencies=secured)

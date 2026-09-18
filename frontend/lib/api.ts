@@ -196,3 +196,10 @@ export async function apiPostDownload(path: string, body: unknown = {}): Promise
     throw normalizeRequestError(error);
   }
 }
+
+/** Authenticated original-file fetch; caller owns and revokes its Blob URL. */
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetchWithSessionRetry(path, () => ({ cache: "no-store", headers: authHeaders(), signal }));
+  if (!response.ok) return throwApiError(response, path, browserAuthEnvironment());
+  return response.blob();
+}

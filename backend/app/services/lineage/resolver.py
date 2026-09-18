@@ -94,6 +94,8 @@ def _candidate_groups(db: Session, node: LineageNode):
             func.lower(CatalogColumn.table_name) == table_name,
             func.lower(CatalogColumn.column_name) == column_name,
         )).all(), schema_name)
+        if node.database_name:
+            catalog = [item for item in catalog if (item.database_name or "").lower() == node.database_name.lower()]
         source = _scope(db.scalars(select(SourceField).join(SourceTable, SourceTable.id == SourceField.source_table_id).where(
             SourceField.project_id == node.project_id,
             func.lower(func.coalesce(SourceTable.physical_table_name, SourceTable.table_code)) == table_name,
@@ -119,6 +121,8 @@ def _candidate_groups(db: Session, node: LineageNode):
         CatalogTable.enabled.is_(True),
         func.lower(CatalogTable.table_name) == table_name,
     )).all(), schema_name)
+    if node.database_name:
+        catalog_tables = [item for item in catalog_tables if (item.database_name or "").lower() == node.database_name.lower()]
     source_tables = _scope(db.scalars(select(SourceTable).where(
         SourceTable.project_id == node.project_id,
         func.lower(func.coalesce(SourceTable.physical_table_name, SourceTable.table_code)) == table_name,

@@ -40,13 +40,8 @@ def validate_citations(
         unit.id
         for unit in units.values()
         if not (
-            unit.knowledge_scope == "global"
-            or (unit.knowledge_scope == "project" and unit.project_id == project_id)
-            or (
-                unit.knowledge_scope == "institution"
-                and institution_name
-                and unit.institution_name == institution_name
-            )
+            (unit.knowledge_scope == "global" and (unit.project_id == project_id or unit.confidentiality_level != "restricted"))
+            or (unit.knowledge_scope in {"project", "institution"} and unit.project_id == project_id)
         )
     ]
     if invisible:

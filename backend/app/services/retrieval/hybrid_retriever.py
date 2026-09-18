@@ -3,16 +3,21 @@ import time
 from sqlalchemy import and_, func, or_, select
 
 from app.core.settings import get_settings
-from app.models import KnowledgeKeywordIndex, KnowledgeUnit, Project, RetrievalLog, TargetField
+from app.models import (KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeKeywordIndex,
+                        KnowledgeUnit, Project, RetrievalLog, TargetField)
 from app.services.embeddings import get_embedding_service
 from app.services.embeddings.observability import embed_with_observability
 from app.services.semantic_index.versioning import get_active_index_version
 from app.services.vector import get_vector_store
 
 from .keyword_index import tokenize
+from app.services.knowledge_evidence import unit_locator
+from app.services.knowledge_eligibility import governed_unit_predicates, governed_document_visible
 
 
 RETRIEVAL_MODES = {"keyword_only", "vector_only", "hybrid"}
+AUTHORITY_RANK = {"regulatory_formal": 6, "regulatory_qa": 5, "internal_policy": 4,
+                  "internal_interpretation": 3, "business_material": 2, "technical_evidence": 1}
 
 
 class HybridRetriever:
@@ -29,6 +34,8 @@ class HybridRetriever:
         top_k=20,
         created_by=None,
         retrieval_mode="hybrid",
+        historical_as_of=None,
+        include_history=False,
     ):
         if retrieval_mode not in RETRIEVAL_MODES:
             raise ValueError("retrieval_mode must be keyword_only, vector_only, or hybrid")
@@ -38,20 +45,8 @@ class HybridRetriever:
         target = self.db.get(TargetField, target_field_id) if target_field_id else None
         if project is None:
             raise ValueError("Project not found")
-        visibility = or_(
-            and_(
-                KnowledgeUnit.knowledge_scope.in_(("project", "institution")),
-                KnowledgeUnit.project_id == project_id,
-            ),
-            and_(
-                KnowledgeUnit.knowledge_scope == "global",
-                or_(
-                    KnowledgeUnit.project_id == project_id,
-                    KnowledgeUnit.confidentiality_level != "restricted",
-                ),
-            ),
-        )
-        predicates = [KnowledgeUnit.enabled.is_(True), visibility]
+        historical = bool(include_history or historical_as_of)
+        predicates = governed_unit_predicates(project_id, historical=historical, historical_as_of=historical_as_of)
         if knowledge_types:
             predicates.append(KnowledgeUnit.knowledge_type.in_(knowledge_types))
         if scenario_id:
@@ -158,6 +153,26 @@ class HybridRetriever:
         normalized_vector = _normalize_scores(vector)
         unit_by_id = {unit.id: unit for unit in candidates}
         ids = set(normalized_keyword) | set(normalized_vector)
+        missing_unit_ids = ids - set(unit_by_id)
+        for unit_id in missing_unit_ids:
+            unit = self.db.get(KnowledgeUnit, unit_id)
+            if unit is not None:
+                unit_by_id[unit_id] = unit
+        candidate_units = [unit_by_id[unit_id] for unit_id in ids if unit_id in unit_by_id]
+        document_by_id = {
+            document.id: document for document in self.db.scalars(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.id.in_({unit.document_id for unit in candidate_units})
+                )
+            ).all()
+        } if candidate_units else {}
+        version_by_id = {
+            version.id: version for version in self.db.scalars(
+                select(KnowledgeDocumentVersion).where(
+                    KnowledgeDocumentVersion.id.in_({unit.document_version_id for unit in candidate_units})
+                )
+            ).all()
+        } if candidate_units else {}
         items = []
         vector_weight = settings.hybrid_vector_weight
         keyword_weight = settings.hybrid_keyword_weight
@@ -169,14 +184,19 @@ class HybridRetriever:
         keyword_weight = keyword_weight / weight_total if weight_total else 0.5
         vector_weight = vector_weight / weight_total if weight_total else 0.5
         for unit_id in ids:
-            unit = unit_by_id.get(unit_id) or self.db.get(KnowledgeUnit, unit_id)
+            unit = unit_by_id.get(unit_id)
             if not unit or not _visible(
                 unit,
                 project_id,
                 project.bank_name,
                 knowledge_types,
                 scenario_id,
+                historical,
             ):
+                continue
+            document = document_by_id.get(unit.document_id)
+            version = version_by_id.get(unit.document_version_id)
+            if not document or not version or not _governed_visible(document, version, project_id, project.bank_name, historical):
                 continue
             keyword_score = normalized_keyword.get(unit_id, 0.0)
             vector_score = normalized_vector.get(unit_id, 0.0)
@@ -196,6 +216,9 @@ class HybridRetriever:
                 reasons.append("场景匹配")
             if unit.knowledge_type == "regulatory_qa":
                 reasons.append("监管答疑优先")
+            authority_rank = AUTHORITY_RANK.get(document.source_category or "business_material", 0)
+            if authority_rank >= 5:
+                reasons.append("当前生效监管资料")
             rule_boost = 0.05 if reasons else 0.0
             final_score = min(
                 1.0,
@@ -205,6 +228,9 @@ class HybridRetriever:
             )
             items.append({
                 "knowledge_unit_id": unit.id,
+                "project_id": unit.project_id,
+                "source_heading": unit.source_heading,
+                "locator": unit_locator(unit),
                 "chunk_id": unit.id,
                 "document_id": unit.document_id,
                 "document_version_id": unit.document_version_id,
@@ -213,6 +239,7 @@ class HybridRetriever:
                 "embedding_index_version_id": active_index.id if active_index else None,
                 "title": unit.title,
                 "content": unit.content,
+                "target_field_code": unit.target_field_code,
                 "knowledge_type": unit.knowledge_type,
                 "confidentiality_level": unit.confidentiality_level,
                 "source_file_name": unit.source_file_name,
@@ -225,10 +252,19 @@ class HybridRetriever:
                 "rerank_score": round(final_score, 4),
                 "rank_sources": rank_sources,
                 "match_reasons": reasons,
+                "authority_rank": authority_rank,
+                "source_category": document.source_category,
+                "publisher": version.publisher or document.publisher,
+                "regulatory_version": version.regulatory_version,
+                "internal_revision": version.internal_revision,
+                "effective_at": version.effective_at,
+                "lifecycle_status": version.lifecycle_status,
+                "metadata_json": unit.metadata_json,
+                "historical": historical and version.lifecycle_status != "active",
             })
         items = sorted(
             items,
-            key=lambda item: (item["final_score"], -item["knowledge_unit_id"]),
+            key=lambda item: (item["authority_rank"], item["final_score"], -item["knowledge_unit_id"]),
             reverse=True,
         )[:top_k]
         log = RetrievalLog(
@@ -300,8 +336,8 @@ def _query_token_weight(token: str) -> float:
     return 1.0
 
 
-def _visible(unit, project_id, institution, knowledge_types=None, scenario_id=None):
-    if not unit.enabled:
+def _visible(unit, project_id, institution, knowledge_types=None, scenario_id=None, historical=False):
+    if not historical and not unit.enabled:
         return False
     scope_visible = (
         unit.project_id == project_id
@@ -315,3 +351,7 @@ def _visible(unit, project_id, institution, knowledge_types=None, scenario_id=No
     if knowledge_types and unit.knowledge_type not in knowledge_types:
         return False
     return not scenario_id or unit.scenario_id in {None, scenario_id}
+
+
+# Compatibility alias for existing callers; all consumers share one policy.
+_governed_visible = governed_document_visible

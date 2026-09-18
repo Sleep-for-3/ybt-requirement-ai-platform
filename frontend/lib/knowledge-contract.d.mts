@@ -1,0 +1,11 @@
+import type { KnowledgeLocator, KnowledgeCitation, PreviewBlock } from "./knowledge-types";
+export const MODES: Record<"regulatory" | "data_field", { label:string; description:string; example:string; sections:string[] }>;
+export function answerMode(value: unknown): "regulatory" | "data_field";
+export function knowledgeLabel(value:string|null|undefined):string;
+export function askPayload(mode:string, query:string, target?:number|null, scenario?:number|null, includeHistory?:boolean, historicalAsOf?:string): Record<string, unknown>;
+export function citationLocator(c: KnowledgeCitation): KnowledgeLocator;
+export function locateBlock(blocks: PreviewBlock[], locator?:KnowledgeLocator): string|null;
+export function viewerFormat(type:string): "pdf"|"grid"|"text"|"blocks";
+export function ownedBlobUrl(blob:Blob): {url:string;dispose():void};
+export function evidenceTarget(c:KnowledgeCitation,projectId:number): {kind:"document";documentId?:number;unitId?:number;versionId?:number;locator:KnowledgeLocator}|{kind:"entity";path:string}|null;
+export function askErrorMessage(error: unknown): string;

@@ -28,13 +28,17 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProjects = useCallback(async () => {
     const items = await apiGet<Project[]>("/projects");
+    const activeProjects = items.filter((item) => (item.project_status || "active") === "active");
     setProjects(items);
     setProjectId((current) => {
       const requested = Number(new URLSearchParams(window.location.search).get("projectId")) || null;
       const stored = Number(localStorage.getItem(STORAGE_KEY)) || null;
       const candidate = requested || current || stored;
-      const next = candidate && items.some((item) => item.id === candidate) ? candidate : items[0]?.id || null;
+      const next = candidate && activeProjects.some((item) => item.id === candidate)
+        ? candidate
+        : activeProjects[0]?.id || null;
       if (next) localStorage.setItem(STORAGE_KEY, String(next));
+      else localStorage.removeItem(STORAGE_KEY);
       return next;
     });
   }, []);
@@ -60,6 +64,7 @@ export function useProjectWorkspace() {
 
 export function ProjectSelector({ className = "w-56" }: { className?: string }) {
   const { projects, projectId, selectProject } = useProjectWorkspace();
+  const activeProjects = projects.filter((project) => (project.project_status || "active") === "active");
   const pathname = usePathname();
   const router = useRouter();
 
@@ -82,7 +87,7 @@ export function ProjectSelector({ className = "w-56" }: { className?: string }) 
       value={projectId || ""}
     >
       <option value="">选择项目</option>
-      {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+      {activeProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
     </select>
   );
 }

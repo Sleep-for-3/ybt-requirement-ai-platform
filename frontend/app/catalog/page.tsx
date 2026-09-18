@@ -5,6 +5,7 @@ import { Clock3, Columns3, DatabaseZap, Download, Search, Table2 } from "lucide-
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { CatalogClassification } from "@/components/CatalogClassification";
 import { CatalogColumn, CatalogSchema, CatalogSearchItem, CatalogTable, ColumnProfileSnapshot, DataSource, apiGet, apiPost } from "@/lib/api";
 
 const TABLE_PAGE_SIZE = 50;
@@ -138,14 +139,14 @@ export default function CatalogPage() {
             {tables.length ? (
               <div className="space-y-1.5 p-3">
                 {tables.map((table) => (
-                  <button
+                  <div
                     className={`block w-full rounded-lg border px-3 py-2 text-left text-sm transition ${selectedTable === table.id ? "border-pine bg-pine-50 text-pine-700" : "border-line bg-white hover:bg-mist"}`}
                     key={table.id}
-                    onClick={() => openTable(table.id)}
                   >
-                    <strong>{table.schema_name}.{table.table_name}</strong>
+                    <button className="w-full break-all text-left font-semibold" onClick={() => openTable(table.id)}>{[table.database_name,table.schema_name,table.table_name].filter(Boolean).join(".")}</button>
+                    {projectId&&<CatalogClassification projectId={projectId} tableId={table.id}/>}
                     <div className="text-xs text-slate-500">{table.table_comment || table.table_type}</div>
-                  </button>
+                  </div>
                 ))}
               </div>
             ) : (

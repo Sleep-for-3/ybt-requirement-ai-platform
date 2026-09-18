@@ -2,12 +2,14 @@
 
 import { AlertTriangle, CheckCircle2, History, RotateCcw, Send } from "lucide-react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { PageState } from "@/components/feedback/PageState";
 import { apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, statusLabel, targetTypeLabel, workflowStepLabel } from "@/lib/product-language";
+import type { Recheck } from "@/components/requirement-workspace/RequirementRecheckPanel";
 
 type Task = {
   id: number;
@@ -19,6 +21,15 @@ type Task = {
   target_id: number;
   due_at?: string | null;
   decisions: Array<{ decision: string; comment?: string | null; decided_at?: string | null }>;
+  uat_context?: {suite_id:number;content_version:number;pending_review:boolean;issue:string|null};
+  recheck_context?: Recheck;
+  target_context?: {
+    requirement_id: number;
+    content_version: number;
+    target_table_id?: number | null;
+    scenario_id?: number | null;
+    field_id?: number | null;
+  };
 };
 
 function decisionBadge(decision: string) {
@@ -36,6 +47,9 @@ export default function Page() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const contextHref = item?.target_context
+    ? `/workspace?projectId=${item.project_id}&requirementId=${item.target_context.requirement_id}&tableId=${item.target_context.target_table_id || ""}&scenarioId=${item.target_context.scenario_id || ""}&fieldId=${item.target_context.field_id || ""}`
+    : null;
 
   async function reload() {
     setLoading(true);
@@ -82,8 +96,18 @@ export default function Page() {
         {error && !item ? <PageState action={<button className="button-secondary" onClick={() => void reload()} type="button">重新加载</button>} description={error} kind="error" title="审核任务加载失败" /> : null}
         {loading && !item ? <PageState description="正在读取任务对象、当前步骤和历史意见。" kind="loading" title="正在加载审核任务" /> : null}
         {item ? <>
+          {item.recheck_context&&<section className="space-y-2 border-b border-line pb-3 text-sm">
+            <Link className="text-teal-800 underline" href={`/workspace?projectId=${item.project_id}&requirementId=${item.recheck_context.requirement_id}&tableId=${item.recheck_context.target_table_id}&scenarioId=${item.recheck_context.scenario_id}`}>查看需求复核与修订</Link>
+            <p>原内容 v{item.recheck_context.content_version} · 新修订 {item.recheck_context.replacement_content_version??"尚未关联"}</p>
+            <ul>{item.recheck_context.changes.map(change=><li key={change.code}>{change.message}</li>)}</ul>
+            <p>{item.recheck_context.resolution||"尚未填写复核处理依据"}</p>
+          </section>}
+          {item.uat_context&&<section className="border-b border-line pb-3 text-sm">
+            <Link className="text-teal-800 underline" href={`/uat/suites/${item.uat_context.suite_id}`}>查看需求 v{item.uat_context.content_version} 的固定规则测试项</Link>
+            {item.uat_context.pending_review&&<p role="alert" className="mt-2 text-amber-800">待复核：{item.uat_context.issue}</p>}
+          </section>}
           <section className="panel">
-            <div className="panel-header flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-[15px] font-semibold text-ink">任务上下文</h2><p className="mt-1 text-xs text-slate-500">先确认业务对象和当前流程，再提交审核决定。</p></div><span className={decisionBadge(item.status)}>{statusLabel(item.status)}</span></div>
+            <div className="panel-header flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-[15px] font-semibold text-ink">任务上下文</h2><p className="mt-1 text-xs text-slate-500">先确认业务对象和当前流程，再提交审核决定。</p></div><div className="flex items-center gap-2">{contextHref ? <Link className="button-secondary" href={contextHref}>查看送审需求 v{item.target_context?.content_version}</Link> : null}<span className={decisionBadge(item.status)}>{statusLabel(item.status)}</span></div></div>
             <dl className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4"><Info label="处理步骤" value={workflowStepLabel(item.step_key)} /><Info label="业务对象" value={`${targetTypeLabel(item.target_type)} · ${item.target_id}`} /><Info label="所属项目" value={`项目 ${item.project_id}`} /><Info label="截止时间" value={formatDateTime(item.due_at)} /></dl>
           </section>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">

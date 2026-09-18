@@ -1,7 +1,8 @@
 "use client";
 
 import { FileText, Search } from "lucide-react";
-import { useState } from "react";
+import { KnowledgeCitations } from "@/components/knowledge/KnowledgeCitations";
+import { useEffect, useRef, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
@@ -12,16 +13,22 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HybridKnowledgeItem[]>([]);
 
+  const [busy,setBusy]=useState(false),[error,setError]=useState("");
+  const generation=useRef(0);
+  useEffect(()=>{generation.current++;setItems([]);setError("");setBusy(false);return()=>{generation.current++;};},[projectId]);
   async function search() {
-    if (projectId)
-      setItems(
-        (await apiPost<{ items: HybridKnowledgeItem[] }>(`/projects/${projectId}/knowledge/hybrid-search`, { query, top_k: 20 })).items
-      );
+    if(busy||!projectId||!query.trim())return;
+    setBusy(true);setError("");
+    const request=++generation.current;
+    try {
+      const result=await apiPost<{ items: HybridKnowledgeItem[] }>(`/projects/${projectId}/knowledge/hybrid-search`, { query, top_k: 20 });
+      if(request===generation.current)setItems(result.items);
+    }catch{if(request===generation.current)setError("检索失败，请检查项目权限与网络后重试。");}finally{if(request===generation.current)setBusy(false);}
   }
 
   return (
     <main>
-      <WorkspaceHeader title="混合知识检索" meta="结构化过滤 + 关键词 + 向量 + 规则重排" />
+      <WorkspaceHeader title="混合知识检索" meta="根据关键词与业务含义查找可核验的资料" />
       <div className="mx-auto max-w-5xl space-y-4 p-4 lg:p-6">
         <div className="panel flex gap-2 p-4">
           <input
@@ -30,12 +37,13 @@ export default function Page() {
             placeholder="输入字段、口径或监管问题关键词"
             value={query}
           />
-          <button className="button-primary" onClick={search}>
+          <button className="button-primary" disabled={busy||!projectId||!query.trim()} onClick={search}>
             <Search size={16} />
             检索
           </button>
         </div>
 
+        {error?<p role="alert">{error}</p>:null}{busy?<p role="status">正在检索…</p>:null}
         {items.length ? (
           items.map((item) => (
             <article className="panel p-5" key={item.knowledge_unit_id}>
@@ -44,6 +52,7 @@ export default function Page() {
                 <span className="badge-info">重排 {Math.round(item.rerank_score * 100)}%</span>
               </div>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.content}</p>
+              {projectId?<KnowledgeCitations items={[item]} projectId={projectId}/>:null}
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-xs text-slate-500">
                 <span className="inline-flex items-center gap-1">
                   <FileText className="text-slate-400" size={13} />

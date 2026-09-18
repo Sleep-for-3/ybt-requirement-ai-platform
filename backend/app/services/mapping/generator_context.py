@@ -35,6 +35,15 @@ from app.services.semantic.context_builder import RegulatoryContextBuilder
 ProjectionT = TypeVar("ProjectionT")
 
 
+def build_requirement_generation_input(db, *, revision, field_ids, sections, actor, authorized_project):
+    """Requirement generation never falls back to the shared fact collector."""
+    validate_generation_actor(db, actor)
+    if revision.project_id != authorized_project.id:
+        raise GenerationActorError("Requirement revision does not belong to authorized project")
+    from app.services.mapping.requirement_input import build_requirement_input
+    return build_requirement_input(db, revision, field_ids, sections)
+
+
 class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 

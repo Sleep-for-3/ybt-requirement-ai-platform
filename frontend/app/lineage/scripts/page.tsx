@@ -56,7 +56,8 @@ export default function Page() {
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!projectId) return;
-    const form = new FormData(event.currentTarget);
+    const element = event.currentTarget;
+    const form = new FormData(element);
     const file = form.get("file") as File;
     const path = file.name.toLowerCase().endsWith(".zip")
       ? `/projects/${projectId}/scripts/upload-zip`
@@ -69,7 +70,7 @@ export default function Page() {
       } else {
         setMessage(`摄取完成：${String(result.status || result.parse_status || "completed")}`);
       }
-      event.currentTarget.reset();
+      element.reset();
       await load();
     }
   }
@@ -77,10 +78,11 @@ export default function Page() {
   async function createRepo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!projectId) return;
-    const form = new FormData(event.currentTarget);
+    const element = event.currentTarget;
+    const form = new FormData(element);
     const result = await repoAction.run(() => apiPost<Record<string, unknown>>(`/projects/${projectId}/code-repositories`, Object.fromEntries(form)));
     if (result) {
-      event.currentTarget.reset();
+      element.reset();
       setMessage("仓库配置已保存（凭据仅引用环境变量）");
       await load();
     }
@@ -98,6 +100,7 @@ export default function Page() {
     <main>
       <WorkspaceHeader title="脚本仓库" meta={`${items.length} 个脚本 / ${repos.length} 个 Git 仓库`} />
       <div className="mx-auto max-w-7xl space-y-5 p-4 lg:p-6">
+        <StatefulLink href="/resources/reverse-requirements" className="button-secondary"><FileCode2 size={16} />从已有跑批生成需求</StatefulLink>
         <div className="grid gap-5 lg:grid-cols-2">
           <form className="panel h-fit" onSubmit={upload}>
             <div className="panel-header">
@@ -113,7 +116,7 @@ export default function Page() {
                 <option value="mysql">MySQL</option>
                 <option value="oracle">Oracle 语法</option>
               </select>
-              <AsyncActionButton actionStatus={ingestAction.status} className="button-primary w-full" loadingText="正在上传…">
+              <AsyncActionButton type="submit" actionStatus={ingestAction.status} className="button-primary w-full" loadingText="正在上传…">
                 <Upload size={16} />
                 安全摄取
               </AsyncActionButton>
@@ -134,7 +137,7 @@ export default function Page() {
               <input className="control sm:col-span-2" name="repository_url" placeholder="仓库 URL 或银行内网本地路径" required />
               <input className="control" name="default_branch" defaultValue="main" />
               <input className="control" name="credential_env_name" placeholder="凭据环境变量名（可选）" />
-              <AsyncActionButton actionStatus={repoAction.status} className="button-primary sm:col-span-2">
+              <AsyncActionButton type="submit" actionStatus={repoAction.status} className="button-primary sm:col-span-2">
                 <GitPullRequest size={16} />
                 保存仓库
               </AsyncActionButton>

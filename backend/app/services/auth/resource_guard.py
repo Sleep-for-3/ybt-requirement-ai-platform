@@ -11,7 +11,7 @@ from app.models import (
     ProductScenario, RagEvaluationCase, RagEvaluationRun, ScenarioBusinessMapping, ScenarioTechnicalLineage,
     SourceField, SourceTable, SourceToMartMapping, TargetField, TargetTable, TemplateDocument,
     TraceabilityTemplateDocument, CodeRepository, LineageNode, LineageRevision, ScriptFile, ScriptChangeSet, ImpactAnalysis,
-    DataQualityExpectation,
+    DataQualityExpectation, KnowledgeDocumentVersion, TemplateVersion,
 )
 from app.services.auth.dependencies import Principal, get_current_principal
 from app.services.auth.permission_service import PermissionService
@@ -23,6 +23,11 @@ async def guard_project_resource(
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
     if principal.is_legacy_system:
+        return
+    # Preview routes own visibility (including shared documents), version checks,
+    # and uniform not-found errors. Do not resolve the owner project first here.
+    if (request.method == "GET" and "/knowledge/documents/" in request.url.path
+            and request.url.path.endswith(("/preview", "/content"))):
         return
     permission = _permission(request.method, request.url.path)
     if _authorize_global_route(db, principal, request.method, request.url.path):
@@ -55,6 +60,11 @@ async def guard_project_resource(
 
 
 def _permission(method: str, path: str) -> str:
+    if "requirements" in path.split("/") or path.endswith("/requirement-resources"):
+        # These endpoints own business-edit and draft-delivery permissions.
+        # The shared guard establishes membership without imposing project.manage
+        # or the unrelated legacy export permission before those checks.
+        return "project.view"
     if "export" in path:
         return "export"
     if "/requirement-workspace/snapshots" in path:
@@ -98,6 +108,9 @@ def _permission(method: str, path: str) -> str:
 
 
 def _path_resource(db: Session, path: str, params: dict):
+    if "version_id" in params:
+        model = KnowledgeDocumentVersion if "/knowledge/document-versions/" in path else TemplateVersion
+        return db.get(model, int(params["version_id"]))
     candidates = [
         ("datasource_id", DataSource), ("column_id", CatalogColumn), ("recommendation_id", CandidateSourceRecommendation),
         ("lineage_id", ScenarioTechnicalLineage), ("scenario_id", ProductScenario), ("system_id", BusinessSystem),

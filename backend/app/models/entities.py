@@ -36,6 +36,7 @@ class Project(Base, TimestampMixin):
     bank_name: Mapped[str | None] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
+    creation_request_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     project_status: Mapped[str] = mapped_column(String(50), default="active", index=True)
     project_owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     confidentiality_level: Mapped[str] = mapped_column(String(50), default="internal")
@@ -479,6 +480,15 @@ class KnowledgeDocument(Base):
     confidentiality_level: Mapped[str] = mapped_column(String(50), default="internal")
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     current_version_no: Mapped[int] = mapped_column(Integer, default=1)
+    current_version_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_document_versions.id", use_alter=True, name="fk_knowledge_current_version"), index=True)
+    logical_code: Mapped[str | None] = mapped_column(String(160), index=True)
+    source_category: Mapped[str] = mapped_column(String(50), default="business_material", index=True)
+    regulatory_document_no: Mapped[str | None] = mapped_column(String(160), index=True)
+    publisher: Mapped[str | None] = mapped_column(String(255))
+    applicable_project_ids_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    applicable_institution_names_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    applicable_field_codes_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    applicable_scenario_ids_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     parse_status: Mapped[str] = mapped_column(String(50), default="pending")
     parse_summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
@@ -508,6 +518,7 @@ class KnowledgeChunk(Base):
 class KnowledgeDocumentVersion(Base):
     __tablename__="knowledge_document_versions";__table_args__=(UniqueConstraint("document_id","version_no",name="uq_knowledge_document_version"),)
     id:Mapped[int]=mapped_column(Integer,primary_key=True,index=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);document_id:Mapped[int]=mapped_column(ForeignKey("knowledge_documents.id"),index=True);version_no:Mapped[int]=mapped_column(Integer);file_name:Mapped[str]=mapped_column(String(255));storage_path:Mapped[str]=mapped_column(String(500));file_hash:Mapped[str]=mapped_column(String(64),index=True);change_note:Mapped[str|None]=mapped_column(Text);parse_status:Mapped[str]=mapped_column(String(50),default="pending");created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
+    regulatory_version:Mapped[str|None]=mapped_column(String(160));internal_revision:Mapped[str|None]=mapped_column(String(160));publisher:Mapped[str|None]=mapped_column(String(255));published_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));effective_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));expires_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));lifecycle_status:Mapped[str]=mapped_column(String(50),default="draft",index=True);replaces_version_id:Mapped[int|None]=mapped_column(ForeignKey("knowledge_document_versions.id"),index=True);reviewed_by:Mapped[str|None]=mapped_column(String(100));reviewed_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));activated_at:Mapped[object|None]=mapped_column(DateTime(timezone=True));parse_summary_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);warnings_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);error_message:Mapped[str|None]=mapped_column(Text)
 
 class KnowledgeUnit(Base,TimestampMixin):
     __tablename__="knowledge_units";__table_args__=(Index("ix_knowledge_units_retrieval","project_id","knowledge_scope","institution_name","knowledge_type","target_field_code","scenario_id","enabled"),)
@@ -700,6 +711,9 @@ class TemplateDocument(Base, TimestampMixin):
     sheet_names_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     parse_status: Mapped[str] = mapped_column(String(50), default="pending")
     error_message: Mapped[str | None] = mapped_column(Text)
+    template_code: Mapped[str | None] = mapped_column(String(160), index=True)
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    current_version_id: Mapped[int | None] = mapped_column(ForeignKey("template_versions.id", use_alter=True, name="fk_template_current_version"), index=True)
 
     parse_results: Mapped[list["TemplateParseResult"]] = relationship(back_populates="template_document")
 
@@ -709,6 +723,7 @@ class TemplateParseResult(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     template_document_id: Mapped[int] = mapped_column(ForeignKey("template_documents.id"), index=True)
+    template_version_id: Mapped[int | None] = mapped_column(ForeignKey("template_versions.id"), index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     sheet_name: Mapped[str] = mapped_column(String(255), nullable=False)
     table_code: Mapped[str | None] = mapped_column(String(100))
@@ -719,6 +734,52 @@ class TemplateParseResult(Base, TimestampMixin):
     warnings_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
 
     template_document: Mapped[TemplateDocument] = relationship(back_populates="parse_results")
+
+
+class TemplateVersion(Base, TimestampMixin):
+    __tablename__ = "template_versions"
+    __table_args__ = (UniqueConstraint("template_document_id", "version_no", name="uq_template_version_no"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    template_document_id: Mapped[int] = mapped_column(ForeignKey("template_documents.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    regulatory_version: Mapped[str | None] = mapped_column(String(160))
+    release_batch: Mapped[str | None] = mapped_column(String(160))
+    template_code: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    publisher: Mapped[str | None] = mapped_column(String(255))
+    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    effective_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
+    replaces_version_id: Mapped[int | None] = mapped_column(ForeignKey("template_versions.id"), index=True)
+    change_note: Mapped[str | None] = mapped_column(Text)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sheet_names_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    parsed_snapshot_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    parse_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    uploaded_by: Mapped[str | None] = mapped_column(String(100))
+    reviewed_by: Mapped[str | None] = mapped_column(String(100))
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+
+
+class TemplateApplication(Base):
+    __tablename__ = "template_applications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    template_document_id: Mapped[int] = mapped_column(ForeignKey("template_documents.id"), index=True)
+    template_version_id: Mapped[int | None] = mapped_column(ForeignKey("template_versions.id"), index=True)
+    change_set_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    before_snapshot_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    after_snapshot_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    impact_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    applied_by: Mapped[str | None] = mapped_column(String(100))
+    applied_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class DataSource(Base, TimestampMixin):

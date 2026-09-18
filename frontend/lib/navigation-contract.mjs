@@ -16,6 +16,7 @@ const TECHNICAL_PERMISSIONS = new Set([
 const SECTIONS = [
   ["/deliverable-templates", "交付模板"],
   ["/historical-calibers", "历史口径"],
+  ["/templates", "监管目标模板"],
   ["/knowledge", "知识与证据"],
   ["/work", "我的工作"],
   ["/review-tasks", "我的工作"],
@@ -45,6 +46,7 @@ const DETAIL_PARENTS = [
   [/^\/evaluations\/\d+$/, "/evaluations"],
   [/^\/fields\/\d+\/scenarios$/, "/fields"],
   [/^\/historical-calibers\/\d+$/, "/historical-calibers"],
+  [/^\/templates\/\d+$/, "/templates"],
   [/^\/jobs\/\d+$/, "/jobs"],
   [/^\/knowledge\/documents\/\d+$/, "/knowledge/documents"],
   [/^\/lineage\/changes\/\d+$/, "/lineage/changes"],
@@ -76,7 +78,24 @@ export function canViewNavigationAudience(audience, access) {
   return access.isTechnical;
 }
 
+export const RESOURCE_MODULES = {
+  "/knowledge": "知识与证据", "/datasources": "只读数据源", "/catalog": "数据目录",
+  "/business-systems": "业务系统", "/mart": "监管集市", "/historical-calibers": "历史口径",
+  "/templates": "监管目标模板", "/fields": "目标字段与场景", "/traceability-templates": "历史口径模板"
+};
+export function isResourcesPath(pathname) {
+  return pathname === "/resources" || Object.keys(RESOURCE_MODULES).some(p => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 export function navigationTrailForPath(pathname, queryString = "") {
+  if (isResourcesPath(pathname)) {
+    const module = Object.keys(RESOURCE_MODULES).find(p => pathname === p || pathname.startsWith(`${p}/`));
+    const detail = DETAIL_PARENTS.find(([pattern]) => pattern.test(pathname));
+    const parentHref = pathname === "/resources" ? null : detail?.[1] || (module && pathname !== module && !pathname.startsWith("/knowledge/") ? module : "/resources");
+    return { parentHref, sectionHref: "/resources", sectionLabel: "资料与数据",
+      parentLabel: parentHref === "/knowledge/documents" ? "知识文档" : RESOURCE_MODULES[parentHref] || "资料与数据" };
+  }
+
   const section = SECTIONS.find(([route]) => pathname === route || pathname.startsWith(`${route}/`));
   let parent = DETAIL_PARENTS.find(([pattern]) => pattern.test(pathname));
   let resolvedSection = section;
@@ -105,7 +124,7 @@ export function parentReturnHref(parentHref, queryString = "") {
   if (returnTo === parentHref || returnTo?.startsWith(`${parentHref}?`)) return returnTo;
 
   const scope = new URLSearchParams();
-  for (const key of ["projectId", "as_of"]) {
+  for (const key of ["projectId", "project_id", "as_of"]) {
     const value = params.get(key);
     if (value) scope.set(key, value);
   }

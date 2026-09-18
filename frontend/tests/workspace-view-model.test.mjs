@@ -30,6 +30,12 @@ test("确认和审核中状态会锁定工作台直接编辑", () => {
   assert.equal(mappingStatusLabel("confirmed"), "已确认");
 });
 
+test("已核验实际路径支持无集市，仍要求业务技术确认", () => {
+  assert.equal(combinedFieldStatus({businessStatus:"confirmed",technicalStatus:"confirmed",pathConfirmed:true}), "approved");
+  assert.equal(combinedFieldStatus({businessStatus:"confirmed",technicalStatus:"draft",pathConfirmed:true}), "draft");
+  assert.equal(combinedFieldStatus({businessStatus:"confirmed",technicalStatus:"confirmed",pathConfirmed:false}), "draft");
+});
+
 test("仅未闭环问题计入待确认", () => {
   assert.equal(isQuestionOpen({ question_status: "open" }), true);
   assert.equal(isQuestionOpen({ question_status: "answered" }), true);

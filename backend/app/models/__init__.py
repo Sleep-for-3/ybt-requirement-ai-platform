@@ -1,3 +1,14 @@
+from app.models.data_architecture import DataArchitecture, DataArchitectureRevision, CatalogClassification
+from app.models.batch_import import ResourceImportBatch, ResourceImportItem
+from app.models.requirement import (
+    Requirement,
+    RequirementDelivery,
+    RequirementFormalDelivery,
+    RequirementGenerationInput,
+    RequirementGenerationItem,
+    RequirementReviewSubmission,
+    RequirementRevision,
+)
 from app.models.entities import (
     BusinessSystem,
     CandidateSourceRecommendation,
@@ -52,6 +63,8 @@ from app.models.entities import (
     TargetField,
     TargetTable,
     TemplateDocument,
+    TemplateVersion,
+    TemplateApplication,
     TemplateParseResult,
     TraceabilityTemplateDocument,
     TraceabilityTemplateParseResult,
@@ -95,6 +108,11 @@ from app.models.analytics import MetricSnapshot, ReportingCycle
 from app.models.requirement_snapshot import StructuredRequirementSnapshot
 
 __all__ = [
+    "ResourceImportBatch",
+    "ResourceImportItem",
+    "DataArchitecture",
+    "DataArchitectureRevision",
+    "CatalogClassification",
     "AuditLog",
     "BackgroundJob",
     "BackgroundJobItem",
@@ -151,6 +169,8 @@ __all__ = [
     "TargetField",
     "TargetTable",
     "TemplateDocument",
+    "TemplateVersion",
+    "TemplateApplication",
     "TemplateParseResult",
     "TraceabilityTemplateDocument",
     "TraceabilityTemplateParseResult",
@@ -209,6 +229,13 @@ __all__ = [
     "HistoricalCaliberImport",
     "HistoricalCaliberItem",
     "PendingQuestion",
+    "Requirement",
+    "RequirementDelivery",
+    "RequirementFormalDelivery",
+    "RequirementGenerationInput",
+    "RequirementGenerationItem",
+    "RequirementReviewSubmission",
+    "RequirementRevision",
     "TemplateColumnMapping",
     "TemplateSheetMapping",
 ]

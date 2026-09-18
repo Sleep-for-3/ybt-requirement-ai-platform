@@ -26,7 +26,9 @@ import urllib.request
 import websockets
 
 CDP_PORT = int(os.getenv("CDP_PORT", "9333"))
-BASE_URL = os.getenv("GUIDE_BASE_URL", "http://57008897.xyz").rstrip("/")
+# 默认用 IP:端口 直连：公网域名（57008897.xyz）没有 80 端口映射，
+# 不带端口访问不通；需要走域名时用 GUIDE_BASE_URL 覆盖成 http://57008897.xyz:18085。
+BASE_URL = os.getenv("GUIDE_BASE_URL", "http://103.236.97.210:18085").rstrip("/")
 USERNAME = os.environ["GUIDE_USER"]
 PASSWORD = os.environ["GUIDE_PASSWORD"]
 OUT_DIR = pathlib.Path(os.getenv("GUIDE_OUT", "docs/assets/system-guide")).resolve()

@@ -131,6 +131,7 @@ async def generate_business_draft(
         reauthorized = PermissionService(db, actor).require_project_permission(
             snapshot.project.id,
             "business.edit",
+            allow_suspended=True,
         )
         locked_project = db.scalar(
             select(Project)
@@ -220,6 +221,9 @@ def _apply_business_output(
     scenario_name: str | None,
 ) -> None:
     output = policy.output_fields
+    # A human-authored final document owns its structured facts as well as its
+    # prose. Regeneration may propose a draft, never silently replace those facts.
+    preserve_human = bool((mapping.final_content or "").strip())
     for key in (
         "business_definition",
         "source_system_screenshot_required",
@@ -229,8 +233,10 @@ def _apply_business_output(
         "business_owner",
         "remarks",
     ):
-        if key in output:
+        if key in output and not preserve_human:
             setattr(mapping, key, output[key])
+    # The governed merger retains human questions and appends attributed gaps;
+    # keep confidence caps, so preserved human prose cannot mask weak evidence.
     mapping.open_questions = policy.merged_questions.text
     mapping.confidence_level = policy.confidence_level
     draft = output.get("final_content_draft")
@@ -355,6 +361,7 @@ async def generate_technical_draft(
         reauthorized = PermissionService(db, actor).require_project_permission(
             snapshot.project.id,
             "technical.edit",
+            allow_suspended=True,
         )
         locked_project = db.scalar(
             select(Project)
@@ -463,6 +470,7 @@ def _apply_technical_output(
     supporting_evidence_summaries: tuple[str, ...] = (),
 ) -> None:
     output = policy.output_fields
+    preserve_human = bool((lineage.final_content or "").strip())
     for key in (
         "source_system_name",
         "source_database_name",
@@ -476,7 +484,7 @@ def _apply_technical_output(
         "tech_owner",
         "remarks",
     ):
-        if key in output:
+        if key in output and not preserve_human:
             setattr(lineage, key, output[key])
     lineage.open_questions = policy.merged_questions.text
     lineage.confidence_level = policy.confidence_level

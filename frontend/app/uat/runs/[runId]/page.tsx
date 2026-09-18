@@ -227,17 +227,24 @@ export default function RunPage() {
 function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: UatCaseResult; canComplete: boolean; canCreateFinding: boolean; onChanged: () => Promise<void> }) {
   const [actual, setActual] = useState("");
   const [message, setMessage] = useState("");
+  const [expected,setExpected]=useState("");
+  const [sampleActual,setSampleActual]=useState("");
+  const [evidence,setEvidence]=useState("");
+  const requirementCase=Boolean(item.expected_result_json.requirement_evidence);
 
   async function complete(status: "passed" | "failed" | "blocked") {
     if (!actual.trim()) {
       setMessage("请填写实际结果");
       return;
     }
+    if(requirementCase&&(!expected.trim()||!sampleActual.trim()||!evidence.trim())){
+      setMessage("请填写样本预期值、实际值和验证证据");return;
+    }
     try {
       await apiPost(`/uat-case-results/${item.id}/complete-manual`, {
         status,
-        actual_result_json: { summary: actual.trim() },
-        evidence_json: { source: "manual_uat_confirmation" },
+        actual_result_json: requirementCase?{expected_value:expected.trim(),actual_value:sampleActual.trim(),conclusion:actual.trim()}:{ summary: actual.trim() },
+        evidence_json: requirementCase?{source:"manual_uat_confirmation",verification:evidence.trim()}:{ source: "manual_uat_confirmation" },
         error_message: status === "failed" ? actual.trim() : null
       });
       setMessage("手工结果已保存");
@@ -304,6 +311,11 @@ function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: 
       </div>
       {(manual && canComplete) || canCreateFinding ? (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
+          {requirementCase&&manual&&canComplete&&<div className="grid w-full gap-3 sm:grid-cols-2">
+            <label className="text-sm">样本预期值<input className="control mt-1" value={expected} onChange={e=>setExpected(e.target.value)}/></label>
+            <label className="text-sm">样本实际值<input className="control mt-1" value={sampleActual} onChange={e=>setSampleActual(e.target.value)}/></label>
+            <label className="text-sm sm:col-span-2">验证证据<textarea className="control mt-1" value={evidence} onChange={e=>setEvidence(e.target.value)}/></label>
+          </div>}
           <input className="control min-w-64 flex-1" value={actual} onChange={event => setActual(event.target.value)} placeholder="填写实际结果或 Finding 摘要" />
           {manual && canComplete ? (
             <>
