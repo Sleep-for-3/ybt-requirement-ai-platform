@@ -44,7 +44,10 @@ type Profile = {
   api_key_present: boolean;
   local_only: boolean;
   enabled: boolean;
-  config_json: { last_connection_test?: { status: string; tested_at: string; error?: string | null } | null };
+  config_json: {
+    requirement_max_input_bytes?: number;
+    last_connection_test?: { status: string; tested_at: string; error?: string | null } | null;
+  };
 };
 type ModelCall = {
   id: number;
@@ -103,7 +106,14 @@ export default function Page() {
       model_name: modelName,
       api_key_env_name: String(form.get("api_key_env_name") || "") || null,
       local_only: provider.startsWith("local_"),
-      config_json: { json_mode: true, max_output_tokens: 2048, temperature: .2, timeout_seconds: 60, retry_count: 2 },
+      config_json: {
+        json_mode: true,
+        max_output_tokens: 2048,
+        temperature: .2,
+        timeout_seconds: 60,
+        retry_count: 2,
+        requirement_max_input_bytes: Number(form.get("requirement_max_input_bytes")),
+      },
     };
     try {
       if (editing) await apiPatch(`/model-profiles/${editing.id}`, payload);
@@ -213,6 +223,19 @@ export default function Page() {
               <p className="text-xs text-slate-500">
                 此处只填环境变量名，不能粘贴 API Key 本身。请在 <code>backend/.env</code> 中按“变量名=密钥”配置真实密钥。
               </p>
+              <Field label="需求生成输入预算（字节）">
+                <input
+                  className="control"
+                  name="requirement_max_input_bytes"
+                  type="number"
+                  min={1}
+                  max={64000}
+                  required
+                  defaultValue={editing?.config_json.requirement_max_input_bytes ?? 64000}
+                  key={`requirement-budget-${editing?.id || 0}`}
+                />
+              </Field>
+              <p className="text-xs text-slate-500">超出预算时系统会阻断生成，不会静默截断脚本与制度证据。</p>
               <div className="flex gap-2">
                 <button className="button-primary flex-1" disabled={busy === "save"}>
                   {busy === "save" ? "保存中…" : editing ? "保存修改" : "创建"}

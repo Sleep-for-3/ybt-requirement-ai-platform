@@ -206,3 +206,42 @@ def test_candidate_cannot_cite_unselected_script_rule(snapshot_api, monkeypatch)
     monkeypatch.setattr("app.services.requirement_generation_worker.execute_runtime_chat", fake_model)
     with pytest.raises(HTTPException, match="范围外脚本规则"):
         generate_candidate(db, SimpleNamespace(input_json=snapshot), SimpleNamespace(field_id=field.id, section="lineage"), project)
+
+
+def test_legacy_external_profile_uses_safe_requirement_input_budget(snapshot_api, monkeypatch):
+    from app.services.llm.prompt_runtime import PromptRuntime
+    from app.services.requirement_generation_worker import generate_candidate
+
+    client, db, project, field, req, _ = snapshot_api
+    base, _, _, payload, _ = seed(client, db, project, req, field)
+    assert client.post(base + "/script-basis", json=payload).status_code == 201
+    snapshot = build_requirement_input(db, load_revision(db, project.id, req.id, 2), [field.id], ["lineage"])
+    runtime = PromptRuntime(
+        prompt_key="requirement_field_candidate",
+        version=1,
+        system_prompt="system",
+        user_template="{target}",
+        model_profile_id=None,
+        provider_type="openai_compatible",
+        base_url="https://provider.example.com/v1",
+        model_name="example-model",
+        api_key_env_name="MODEL_API_KEY",
+        local_only=False,
+        config={},
+    )
+
+    async def fake_model(*_args, **_kwargs):
+        return {"final_content": "外部模型候选"}
+
+    monkeypatch.setattr("app.services.requirement_generation_worker.get_prompt_runtime", lambda *_args: runtime)
+    monkeypatch.setattr("app.services.requirement_generation_worker.execute_runtime_chat", fake_model)
+
+    candidate = generate_candidate(
+        db,
+        SimpleNamespace(input_json=snapshot),
+        SimpleNamespace(field_id=field.id, section="lineage"),
+        project,
+    )
+    assert candidate["final_content"] == "外部模型候选"
+    assert candidate["runtime"]["provider"] == "openai_compatible"
+    assert candidate["runtime"]["test_provider"] is False

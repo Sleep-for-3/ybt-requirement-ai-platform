@@ -31,6 +31,23 @@ def test_model_profile_rejects_api_key_fields() -> None:
         )
 
 
+def test_model_profile_accepts_requirement_input_budget() -> None:
+    profile = ModelProfileCreate(
+        profile_name="budgeted",
+        provider_type="openai_compatible",
+        base_url="https://provider.example.com/v1",
+        model_name="example-model",
+        api_key_env_name="OPENAI_API_KEY",
+        config_json={"requirement_max_input_bytes": 48000},
+    )
+
+    assert profile.config_json.requirement_max_input_bytes == 48000
+    assert ModelProfileCreate(
+        profile_name="default-budget",
+        provider_type="mock",
+    ).config_json.requirement_max_input_bytes == 64000
+
+
 def test_model_profile_validates_environment_variable_name() -> None:
     with pytest.raises(ValidationError):
         ModelProfileCreate(

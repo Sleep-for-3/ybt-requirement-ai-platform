@@ -18,6 +18,9 @@ from app.services.requirement_scope import content_digest
 from app.services.llm.prompt_runtime import get_prompt_runtime, prepare_model_input, execute_runtime_chat
 
 
+DEFAULT_REQUIREMENT_MAX_INPUT_BYTES = 64000
+
+
 class PhysicalReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["source", "mart"]
@@ -68,7 +71,7 @@ def authorize_input(db, row, actor):
 
 def generate_candidate(db, row, item, project):
     runtime = get_prompt_runtime(db, "requirement_field_candidate")
-    budget = runtime.config.get("requirement_max_input_bytes", 64000 if runtime.provider_type == "mock" else None)
+    budget = runtime.config.get("requirement_max_input_bytes", DEFAULT_REQUIREMENT_MAX_INPUT_BYTES)
     if not isinstance(budget, int) or isinstance(budget, bool) or not 1 <= budget <= 64000:
         raise HTTPException(422, "模型尚未配置经过核验的需求输入预算")
     context = deepcopy(row.input_json)

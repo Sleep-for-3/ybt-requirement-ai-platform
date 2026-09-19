@@ -53,6 +53,7 @@ class ModelCapabilityConfig(BaseModel):
     temperature: float = Field(0.2, ge=0, le=2)
     timeout_seconds: int = Field(60, ge=1, le=180)
     retry_count: int = Field(2, ge=0, le=2)
+    requirement_max_input_bytes: int = Field(64000, ge=1, le=64000)
     last_connection_test: ConnectionTestState | None = None
 
 
