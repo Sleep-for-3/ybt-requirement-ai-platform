@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 from typing import Literal
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from app.services.llm.prompt_runtime import get_prompt_runtime, prepare_model_in
 
 
 DEFAULT_REQUIREMENT_MAX_INPUT_BYTES = 64000
+logger = logging.getLogger("app.requirement_generation")
 
 
 class PhysicalReference(BaseModel):
@@ -47,6 +49,16 @@ class RequirementCandidate(BaseModel):
     script_rule_ids: list[str] = Field(default_factory=list, max_length=100)
     policy_comparisons: list[PolicyComparisonCandidate] = Field(default_factory=list, max_length=100)
     gaps: list[str] = Field(default_factory=list, max_length=100)
+
+
+def blocked_reason_code(exc: HTTPException) -> str:
+    if exc.status_code == 403:
+        return "generation_permission_denied"
+    if exc.status_code == 409:
+        return "generation_input_conflict"
+    if exc.status_code == 422:
+        return "generation_validation_blocked"
+    return "policy_or_scope_blocked"
 
 
 def authorize_input(db, row, actor):
@@ -144,8 +156,10 @@ def requirement_generation_handler(db, job):
             db.refresh(job)
             if job.status == "cancelled":
                 raise HTTPException(409, "任务已取消")
-        except HTTPException:
-            status, reason, candidate = "blocked", "policy_or_scope_blocked", None
+        except HTTPException as exc:
+            status, reason, candidate = "blocked", blocked_reason_code(exc), None
+            logger.warning("Requirement generation item blocked: item_id=%s code=%s detail=%s",
+                item.id, reason, exc.detail)
         except Exception:
             db.rollback()
             status, reason, candidate = "failed", "generation_failed", None

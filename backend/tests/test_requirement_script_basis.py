@@ -245,3 +245,12 @@ def test_legacy_external_profile_uses_safe_requirement_input_budget(snapshot_api
     assert candidate["final_content"] == "外部模型候选"
     assert candidate["runtime"]["provider"] == "openai_compatible"
     assert candidate["runtime"]["test_provider"] is False
+
+
+def test_requirement_generation_block_reason_preserves_actionable_classification():
+    from app.services.requirement_generation_worker import blocked_reason_code
+
+    assert blocked_reason_code(HTTPException(403, "denied")) == "generation_permission_denied"
+    assert blocked_reason_code(HTTPException(409, "changed")) == "generation_input_conflict"
+    assert blocked_reason_code(HTTPException(422, "invalid candidate")) == "generation_validation_blocked"
+    assert blocked_reason_code(HTTPException(503, "provider")) == "policy_or_scope_blocked"
