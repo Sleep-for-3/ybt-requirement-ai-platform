@@ -2,9 +2,9 @@
 
 ## Status
 
-- Deployed production baseline before this review: `8412e91`.
-- New frontend fix committed and pushed to `origin/main`: `01020be`.
-- `01020be` is not yet deployed to production. The temporary SSH verification session was closed by the remote host before the rebuild could be run.
+- Production follow-up deployed `3494894`, which contains the `01020be` client-id fix, after this review began. `origin/main` points to `3494894`.
+- Production backend, worker, beat, embedding, and frontend were verified healthy; backend health reported all 11 checks healthy and Alembic revision `202609180039`.
+- The production frontend bundle contains `client_request_id` and no longer contains the old `event.currentTarget.reset` defect.
 - No password was reset or changed. `smoke_admin` was not modified.
 - No production project was physically deleted. All lifecycle changes use suspend/restore.
 - No production database, credential, token, `.env` file, build output, or uploaded customer file is part of this report.
@@ -92,15 +92,15 @@ Evidence paths:
 - production architecture save: `.local-run/production-e2e-20260919/architecture-project26.png`;
 - HTTP fallback browser result: `.local-run/production-e2e-20260919/batch-import-http-fallback-local.json`.
 
-## Remaining Deployment Work
+## Local Database and Follow-up Verification (2026-09-19)
 
-Production still runs the old frontend image. Deployment of `01020be` requires a new safe SSH/operations channel with the user's existing credential mechanism. After access is available:
+- The WSL PostgreSQL container `ybt-pg-host` was read-only checked and reports PostgreSQL `16.15`; production and the compose contract use PostgreSQL 16 as well.
+- The currently running local API uses the workspace-managed Windows PostgreSQL on `127.0.0.1:5432`, not the WSL container on `15432`. The WSL database `ybt_pg_smoke` is currently at Alembic `202609120027`, and `ybt_host_probe` has no Alembic version table, so either WSL database would need the incremental migration to `202609180039` before the current API connects to it.
+- The local Windows development database initially reported Alembic `202609180038` while the application expected `039`. A logical backup was written to `.local-run/backups/ybt_local-before-202609180039-20260919-020754.dump`, then the existing Alembic migration was applied. The result is `202609180039`, `projects.creation_request_id` is nullable, all six pre-existing local projects remain, and backend readiness returned `ready`.
+- The open local browser was serving a stale JavaScript chunk from before the fix. The current `3000` bundle contains `client_request_id` and the fixed `formElement.reset()` path. Refreshing or restarting that page is required to discard the old chunk; the database backend does not change this.
+- A current-source production build and browser lifecycle regression passed against an isolated in-memory SQLite API: create, same-key replay returning the same project, suspend, hide from the selector, restore, and zero page errors. This is recorded as `databaseBackend=sqlite` and `realPostgresql=false`; it is not represented as a PostgreSQL browser test.
+- `projects-lifecycle.browser.acceptance.mjs` now requires the caller to declare `sqlite` or `postgresql` as its fourth argument. This removes the former hard-coded `realPostgresql: true` result, which could have misreported a non-PostgreSQL run.
 
-1. back up the production database and current images;
-2. place commit `01020be` in `/opt/ybt/source`;
-3. run the existing server release script for tag `01020be`;
-4. verify backend health, frontend HTTP, and the batch-import page over plain HTTP;
-5. repeat project/architecture browser smoke checks against the new image;
-6. retain suspended acceptance projects until an administrator reviews them.
+The historical production duplicate rows still require administrator review. Keep the project that owns assets, lineage, requirements, reviews, deliveries, or audit references and suspend confirmed empty duplicates; do not hard-delete them.
 
-No real-model test, production restore drill, or production reverse-requirement end-to-end generation was claimed in this review.
+No real external-model test, production restore drill, or production reverse-requirement end-to-end generation is claimed here.

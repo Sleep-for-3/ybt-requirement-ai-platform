@@ -8,6 +8,7 @@ import {chromium} from "playwright";
 
 const api = process.argv[2] || "http://127.0.0.1:18743/api";
 const output = path.resolve(process.argv[3] || "project-lifecycle-acceptance");
+const databaseBackend = process.argv[4] || "unknown";
 const frontendDir = fileURLToPath(new URL("..", import.meta.url));
 process.env.NEXT_DIST_DIR = ".next-project-lifecycle-isolated";
 const nextApp = next({dev: false, dir: frontendDir, conf: {distDir: ".next-project-lifecycle-isolated"}});
@@ -90,7 +91,8 @@ try {
   const result = {
     actualFrontend: true,
     actualApi: true,
-    realPostgresql: true,
+    databaseBackend,
+    realPostgresql: databaseBackend === "postgresql",
     projectId: createdBody.id,
     duplicateCreateReturnedSameProject: true,
     suspendedHiddenFromSelector: true,
