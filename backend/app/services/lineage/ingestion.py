@@ -133,6 +133,12 @@ class ScriptIngestionService:
             ScriptFileVersion.file_hash == digest,
         ))
         if duplicate is not None:
+            # A repeated upload is intentionally version-idempotent, but its raw
+            # parser facts may predate a later DDL/Excel import. Re-run only the
+            # conservative resolver so new catalog metadata can bind existing
+            # nodes without creating a duplicate script version or rewriting
+            # any historical parser facts.
+            self._reresolve_lineage_nodes(duplicate.id)
             record_audit(
                 self.db, action="duplicate_upload", resource_type="script_file_version", resource_id=duplicate.id,
                 actor_user_id=actor_id, institution_id=project.institution_id, project_id=project.id,
@@ -390,6 +396,15 @@ class ScriptIngestionService:
         for row in node_rows.values():
             if row.node_type in {"table", "temporary_table", "column"}:
                 resolve_lineage_node(self.db, row)
+        self.db.flush()
+
+    def _reresolve_lineage_nodes(self, version_id: int) -> None:
+        rows = list(self.db.scalars(select(LineageNode).where(
+            LineageNode.script_file_version_id == version_id,
+            LineageNode.node_type.in_(("table", "temporary_table", "column")),
+        )))
+        for row in rows:
+            resolve_lineage_node(self.db, row)
         self.db.flush()
 
     def _node_count(self, version_id: int) -> int:

@@ -136,6 +136,57 @@ def test_script_ingestion_persists_discovered_template_variables(tmp_path: Path,
     }
 
 
+def test_duplicate_script_ingest_reresolves_nodes_after_catalog_import(tmp_path: Path, db_session: Session) -> None:
+    institution = Institution(institution_code="rebind-bank", institution_name="Rebind Bank")
+    db_session.add(institution)
+    db_session.flush()
+    project = Project(name="rebind", institution_id=institution.id)
+    db_session.add(project)
+    db_session.flush()
+    sql = b"insert into MART.TARGET (CERT_TYPE) select CERT_TYPE from ODS.CUSTOMER"
+    service = ScriptIngestionService(db_session, LocalStorageService(tmp_path / "storage"))
+
+    first = service.ingest(project=project, data=sql, file_name="load.sql", relative_path="load.sql",
+        dialect="sqlite", actor_user_id=None, build_revision=False, commit=False)
+    initial_nodes = list(db_session.scalars(select(LineageNode).where(
+        LineageNode.script_file_version_id == first.version.id, LineageNode.node_type == "column")))
+    assert initial_nodes and all(node.catalog_column_id is None for node in initial_nodes)
+
+    datasource = DataSource(project_id=project.id, name="warehouse", db_type="sqlite")
+    db_session.add(datasource)
+    db_session.flush()
+    ods_schema = CatalogSchema(project_id=project.id, datasource_id=datasource.id, schema_name="ODS")
+    mart_schema = CatalogSchema(project_id=project.id, datasource_id=datasource.id, schema_name="MART")
+    db_session.add_all([ods_schema, mart_schema])
+    db_session.flush()
+    ods_table = CatalogTable(project_id=project.id, datasource_id=datasource.id,
+        catalog_schema_id=ods_schema.id, schema_name="ODS", table_name="CUSTOMER")
+    mart_table = CatalogTable(project_id=project.id, datasource_id=datasource.id,
+        catalog_schema_id=mart_schema.id, schema_name="MART", table_name="TARGET")
+    db_session.add_all([ods_table, mart_table])
+    db_session.flush()
+    ods_column = CatalogColumn(project_id=project.id, datasource_id=datasource.id,
+        catalog_table_id=ods_table.id, schema_name="ODS", table_name="CUSTOMER",
+        column_name="CERT_TYPE", ordinal_position=1)
+    mart_column = CatalogColumn(project_id=project.id, datasource_id=datasource.id,
+        catalog_table_id=mart_table.id, schema_name="MART", table_name="TARGET",
+        column_name="CERT_TYPE", ordinal_position=1)
+    db_session.add_all([ods_column, mart_column])
+    db_session.flush()
+
+    second = service.ingest(project=project, data=sql, file_name="load.sql", relative_path="load.sql",
+        dialect="sqlite", actor_user_id=None, build_revision=False, commit=False)
+
+    assert second.deduplicated is True
+    assert second.version.id == first.version.id
+    rebound = list(db_session.scalars(select(LineageNode).where(
+        LineageNode.script_file_version_id == first.version.id, LineageNode.node_type == "column")))
+    bindings = {node.logical_name: node.catalog_column_id for node in rebound}
+    assert bindings["ODS.CUSTOMER.CERT_TYPE"] == ods_column.id
+    assert bindings["MART.TARGET.CERT_TYPE"] == mart_column.id
+    assert all(node.catalog_column_id is not None for node in rebound)
+
+
 def test_manual_sql_upload_is_version_idempotent_and_queryable(tmp_path: Path, monkeypatch) -> None:
     import app.api.lineage as lineage_api
 
