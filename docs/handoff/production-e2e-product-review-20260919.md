@@ -1,5 +1,12 @@
 # Production E2E Product Review (2026-09-19)
 
+> Latest production status: this report is superseded by
+> `docs/handoff/production-product-optimization-aefe738.md`.
+> The production release is now `aefe738`, with a 13/13 E2E pass,
+> real-model success for both generated sections, and a confirmed direct
+> source-to-regulatory-target path. The historical sections below remain as
+> evidence for the earlier `3494894` and `f0825b4` investigations.
+
 ## Status
 
 - Production follow-up deployed `3494894`, which contains the `01020be` client-id fix, after this review began. `origin/main` points to `3494894`.
