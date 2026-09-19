@@ -187,6 +187,38 @@ def test_duplicate_script_ingest_reresolves_nodes_after_catalog_import(tmp_path:
     assert all(node.catalog_column_id is not None for node in rebound)
 
 
+def test_reimporting_an_older_script_restores_it_without_version_collision(tmp_path: Path, db_session: Session) -> None:
+    institution = Institution(institution_code="roll-forward-bank", institution_name="Roll Forward Bank")
+    db_session.add(institution)
+    db_session.flush()
+    project = Project(name="roll forward", institution_id=institution.id)
+    db_session.add(project)
+    db_session.flush()
+    service = ScriptIngestionService(db_session, LocalStorageService(tmp_path / "storage"))
+    original = b"insert into MART.TARGET (A) select A from ODS.SOURCE"
+    changed = original + b" where A is not null"
+
+    first = service.ingest(project=project, data=original, file_name="load.sql", relative_path="load.sql",
+        dialect="sqlite", actor_user_id=None, build_revision=False, commit=False)
+    second = service.ingest(project=project, data=changed, file_name="load.sql", relative_path="load.sql",
+        dialect="sqlite", actor_user_id=None, build_revision=False, commit=False)
+    restored = service.ingest(project=project, data=original, file_name="load.sql", relative_path="load.sql",
+        dialect="sqlite", actor_user_id=None, build_revision=False, commit=False)
+
+    assert first.version.version_no == 1
+    assert second.version.version_no == 2
+    assert restored.deduplicated is True
+    assert restored.version.version_no == 1
+    assert restored.script_file.current_version_no == 1
+
+    changed_again = service.ingest(project=project, data=changed + b" and A > 0",
+        file_name="load.sql", relative_path="load.sql", dialect="sqlite", actor_user_id=None,
+        build_revision=False, commit=False)
+    assert changed_again.version.version_no == 3
+    assert changed_again.script_file.current_version_no == 3
+    assert changed_again.change_set.from_version_id == first.version.id
+
+
 def test_manual_sql_upload_is_version_idempotent_and_queryable(tmp_path: Path, monkeypatch) -> None:
     import app.api.lineage as lineage_api
 

@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -139,6 +139,11 @@ class ScriptIngestionService:
             # nodes without creating a duplicate script version or rewriting
             # any historical parser facts.
             self._reresolve_lineage_nodes(duplicate.id)
+            # Re-importing an older immutable version deliberately restores
+            # that version as current. Version numbers remain allocated
+            # monotonically, so a later edit cannot collide with historical
+            # rows that are still present.
+            script_file.current_version_no = duplicate.version_no
             record_audit(
                 self.db, action="duplicate_upload", resource_type="script_file_version", resource_id=duplicate.id,
                 actor_user_id=actor_id, institution_id=project.institution_id, project_id=project.id,
@@ -152,13 +157,17 @@ class ScriptIngestionService:
 
         previous_version = self.db.scalar(select(ScriptFileVersion).where(
             ScriptFileVersion.script_file_id == script_file.id,
-        ).order_by(ScriptFileVersion.version_no.desc()).limit(1))
+            ScriptFileVersion.version_no == script_file.current_version_no,
+        ))
+        latest_version_no = self.db.scalar(select(func.max(ScriptFileVersion.version_no)).where(
+            ScriptFileVersion.script_file_id == script_file.id,
+        )) or 0
 
         normalized = _semantic_text(content)
         version = ScriptFileVersion(
             project_id=project.id,
             script_file_id=script_file.id,
-            version_no=script_file.current_version_no + 1,
+            version_no=latest_version_no + 1,
             git_commit_sha=git_commit_sha,
             file_hash=digest,
             normalized_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
