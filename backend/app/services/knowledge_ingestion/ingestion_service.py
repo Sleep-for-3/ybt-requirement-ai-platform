@@ -55,6 +55,30 @@ def review_knowledge_version(db, version_id: int, reviewer: str | None = None):
     return version
 
 
+def submit_knowledge_version_for_review(db, version_id: int):
+    """Move a successfully parsed draft into the human review queue."""
+    version = db.get(KnowledgeDocumentVersion, version_id)
+    if not version:
+        raise ValueError("Knowledge document version not found")
+    if version.parse_status not in {"parsed", "indexed"} or version.lifecycle_status != "draft":
+        raise ValueError("只有解析成功的草稿版本可以提交审核")
+    document = db.get(KnowledgeDocument, version.document_id)
+    if not document:
+        raise ValueError("Knowledge document not found")
+    version.lifecycle_status = "pending_review"
+    if not document.current_version_id:
+        document.document_status = "pending_review"
+        document.parse_status = version.parse_status
+        document.parse_summary_json = {
+            **(document.parse_summary_json or {}),
+            "candidate_version_id": version.id,
+            "candidate_version_no": version.version_no,
+            "candidate_status": "pending_review",
+        }
+    db.commit(); db.refresh(version)
+    return version
+
+
 def activate_knowledge_version(db, version_id: int):
     version = db.get(KnowledgeDocumentVersion, version_id)
     if not version:

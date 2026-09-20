@@ -22,6 +22,6 @@ test("template list and detail preserve governed version journey", async()=>{
 test("knowledge UI exposes authority lifecycle, existing logical document, trust and index state", async()=>{
   const [list,detail,ask]=await Promise.all([read("../app/knowledge/documents/page.tsx"),read("../app/knowledge/documents/[documentId]/page.tsx"),read("../app/knowledge/ask/page.tsx")]);
   for(const label of ["来源类别","为“","监管文号","内部修订版本","上传草稿并解析"])assert.ok(list.includes(label));
-  for(const label of ["仍在使用内部版本","监管版本","内部修订","变更说明","审核通过","激活生效"])assert.ok(detail.includes(label));
+  for(const label of ["仍在使用内部版本","监管版本","内部修订","变更说明","提交审核","审核通过","激活生效","禁用知识","查看解析警告"])assert.ok(detail.includes(label));
   for(const label of ["可信性说明","正式索引覆盖状态","关键词降级检索","资料冲突，不能静默合并","查询历史口径"])assert.ok(ask.includes(label));
 });

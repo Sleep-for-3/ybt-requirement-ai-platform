@@ -34,7 +34,11 @@ from app.services.semantic_index.versioning import (
     build_model_fingerprint,
     get_active_index_version,
 )
-from app.services.knowledge_ingestion.ingestion_service import activate_knowledge_version, review_knowledge_version
+from app.services.knowledge_ingestion.ingestion_service import (
+    activate_knowledge_version,
+    review_knowledge_version,
+    submit_knowledge_version_for_review,
+)
 
 router=APIRouter(tags=["knowledge rag"])
 KNOWLEDGE_TYPES={"regulatory_qa","regulatory_policy","field_explanation","historical_mapping","historical_traceability","east_mapping","business_research","technical_research","data_dictionary","code_mapping","manual_note","sql_evidence"}
@@ -81,6 +85,15 @@ def review_document_version(version_id:int,project_id:int,principal:CurrentPrinc
     if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
     try:return _safe_version(review_knowledge_version(db,version_id,principal.username))
     except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+
+@router.post("/knowledge/document-versions/{version_id}/submit-review")
+def submit_document_version_for_review(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    version=db.get(KnowledgeDocumentVersion,version_id)
+    if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
+    try:return _safe_version(submit_knowledge_version_for_review(db,version_id))
+    except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+
 @router.post("/knowledge/document-versions/{version_id}/activate")
 def activate_document_version(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")

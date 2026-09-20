@@ -9,7 +9,7 @@ from app.core.settings import get_settings
 from app.models import (KnowledgeDocumentVersion, KnowledgeUnit, Project, TargetField,
                         TemplateApplication, TemplateDocument, TemplateParseResult, TemplateVersion)
 from app.services.knowledge_ingestion.ingestion_service import (activate_knowledge_version,
-    ingest_knowledge_document, review_knowledge_version)
+    ingest_knowledge_document, review_knowledge_version, submit_knowledge_version_for_review)
 from app.services.retrieval.hybrid_retriever import HybridRetriever
 from app.services.storage import get_storage_service
 from app.services.template_service import (activate_template_version, apply_template,
@@ -75,6 +75,9 @@ def test_governed_knowledge_renamed_version_waits_and_failed_parse_keeps_active(
     candidate = db_session.query(KnowledgeDocumentVersion).filter_by(document_id=first.id, version_no=2).one()
     assert same.id == first.id and first.current_version_id == active_id
     assert candidate.lifecycle_status == "pending_review"
+    candidate.lifecycle_status = "draft"; db_session.commit()
+    submitted = submit_knowledge_version_for_review(db_session, candidate.id)
+    assert submitted.lifecycle_status == "pending_review"
     assert db_session.query(KnowledgeUnit).filter_by(document_version_id=active_id, enabled=True).count() > 0
     assert db_session.query(KnowledgeUnit).filter_by(document_version_id=candidate.id, enabled=True).count() == 0
 
