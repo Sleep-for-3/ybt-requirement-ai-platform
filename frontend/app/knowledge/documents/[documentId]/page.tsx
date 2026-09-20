@@ -80,6 +80,15 @@ export default function Page() {
   }
   const parsedUnitCount=Number(doc?.parse_summary_json?.unit_count);
   const unitCount=Number.isFinite(parsedUnitCount)&&parsedUnitCount>0?parsedUnitCount:units.length;
+  function versionWarnings(version:DocumentVersion){
+    if(version.warnings_json?.length)return version.warnings_json;
+    return doc?.current_version_no===version.version_no?doc.warnings_json:[];
+  }
+  function versionUnitCount(version:DocumentVersion){
+    if(typeof version.parse_summary_json?.unit_count==="number")return version.parse_summary_json.unit_count;
+    const fallback=Number(doc?.parse_summary_json?.unit_count);
+    return doc?.current_version_no===version.version_no&&Number.isFinite(fallback)?fallback:undefined;
+  }
 
   return (
     <main>
@@ -139,8 +148,8 @@ export default function Page() {
               <strong>内部版本 {v.version_no}</strong>
               <p className="mt-1 text-sm text-slate-500">监管版本：{v.regulatory_version||"未提供"} · 内部修订：{v.internal_revision||`R${v.version_no}`}</p>
               <p className="mt-1 text-sm">{v.file_name} · {knowledgeLabel(v.parse_status)} · <span className={v.lifecycle_status==="active"?"badge-success":v.lifecycle_status==="pending_review"?"badge-warning":"badge-neutral"}>{LIFE[v.lifecycle_status||""]||"历史导入"}</span></p>
-              {typeof v.parse_summary_json?.unit_count==="number"?<p className="mt-1 text-sm text-slate-500">解析知识单元：{v.parse_summary_json.unit_count}</p>:null}
-              {v.warnings_json?.length?<details className="mt-2 text-sm text-amber-800"><summary className="cursor-pointer font-medium">查看解析警告（{v.warnings_json.length}）</summary><ul className="mt-1 list-disc space-y-1 pl-5">{v.warnings_json.map((warning,index)=><li key={`${v.id}-${index}`}>{warning}</li>)}</ul></details>:null}
+              {versionUnitCount(v)!==undefined?<p className="mt-1 text-sm text-slate-500">解析知识单元：{versionUnitCount(v)}</p>:null}
+              {versionWarnings(v).length?<details className="mt-2 text-sm text-amber-800"><summary className="cursor-pointer font-medium">查看解析警告（{versionWarnings(v).length}）</summary><ul className="mt-1 list-disc space-y-1 pl-5">{versionWarnings(v).map((warning,index)=><li key={`${v.id}-${index}`}>{warning}</li>)}</ul></details>:null}
             </div>
             <div className="text-sm text-slate-600">
               <p>发布机构：{v.publisher||doc?.publisher||"未提供"}</p>
