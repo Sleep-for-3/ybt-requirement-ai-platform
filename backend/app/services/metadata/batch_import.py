@@ -5,7 +5,7 @@ import json
 from pathlib import PurePosixPath
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.models import (BackgroundJob, BackgroundJobItem, BusinessSystem, CatalogColumn, CatalogSchema, CatalogTable, DataSource,
@@ -39,9 +39,23 @@ def table_key(table):
 
 
 def find_tables(db, project_id, table):
-    return list(db.scalars(select(CatalogTable).where(CatalogTable.project_id == project_id,
+    exact = list(db.scalars(select(CatalogTable).where(CatalogTable.project_id == project_id,
         CatalogTable.database_name == table["database_name"], CatalogTable.schema_name == table["schema_name"],
         CatalogTable.table_name == table["table_name"]).order_by(CatalogTable.id)))
+    if exact:
+        return exact
+    identity = [table.get(key) for key in ("database_name", "schema_name", "table_name")]
+    if not all(identity):
+        return []
+    # DDL dialects such as Oracle/Hive commonly fold unquoted identifiers to a
+    # different case than SQL references. Fall back to a full three-part
+    # case-insensitive match only when database and schema still agree.
+    return list(db.scalars(select(CatalogTable).where(
+        CatalogTable.project_id == project_id,
+        func.lower(CatalogTable.database_name) == str(identity[0]).lower(),
+        func.lower(CatalogTable.schema_name) == str(identity[1]).lower(),
+        func.lower(CatalogTable.table_name) == str(identity[2]).lower(),
+    ).order_by(CatalogTable.id)))
 
 
 def fingerprint(db, table):

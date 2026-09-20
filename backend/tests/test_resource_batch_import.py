@@ -204,6 +204,22 @@ def test_batch_reresolves_earlier_sql_after_later_ddl_is_applied(sample):
     assert all(reference["catalog_table_id"] is not None for reference in sql_references)
 
 
+def test_script_references_match_case_folded_identity_without_cross_schema_merge(sample):
+    db, project, _, _ = sample
+    batch = make_batch(sample, [
+        ("01_load.sql", b"INSERT INTO B.S1.TARGET (ID) SELECT ID FROM B.S2.TARGET;"),
+        ("02_tables.ddl", b"CREATE TABLE b.s1.target (id INT); CREATE TABLE b.s2.target (id INT);"),
+    ])
+    result, _ = apply_batch(sample, batch, "case-folded-identity-job")
+
+    assert result["success_count"] == 2 and not result["failed_count"]
+    db.refresh(batch)
+    references = next(item for item in batch.preview_json["items"] if item["path"] == "01_load.sql")["references"]
+    resolved = {reference["table_name"].lower(): reference["catalog_table_id"] for reference in references}
+    assert resolved["target"] is not None
+    assert len({reference["catalog_table_id"] for reference in references}) == 2
+
+
 @pytest.mark.parametrize("path", ["../escape.sql", "/absolute.sql", "..\\escape.sql"])
 def test_zip_path_traversal_rejected_without_assets(sample, path):
     stream = BytesIO()
