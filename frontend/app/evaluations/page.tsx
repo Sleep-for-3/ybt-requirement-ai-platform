@@ -23,15 +23,39 @@ type EvaluationCase = {
   enabled?: boolean;
 };
 
+type FeedbackItem = {
+  id: number;
+  feedback_type?: string | null;
+  target_type?: string | null;
+  target_id?: number | null;
+  rating?: string | null;
+  comment?: string | null;
+  execution_kind?: string | null;
+  output_hash?: string | null;
+};
+
 export default function Page() {
   const { projectId } = useProjectWorkspace();
   const router = useRouter();
   const [cases, setCases] = useState<EvaluationCase[]>([]);
+  const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [retrievalMode, setRetrievalMode] = useState("hybrid");
+  const [convertingId, setConvertingId] = useState<number | null>(null);
+  const [message, setMessage] = useState("");
   const runAction = useAsyncAction<{ id: number }>({ successMessage: "评测任务已创建" });
 
+  async function reload() {
+    if (!projectId) return;
+    const [nextCases, nextFeedback] = await Promise.all([
+      apiGet<EvaluationCase[]>(`/projects/${projectId}/evaluations/cases`),
+      apiGet<FeedbackItem[]>(`/projects/${projectId}/feedback`),
+    ]);
+    setCases(nextCases);
+    setFeedback(nextFeedback);
+  }
+
   useEffect(() => {
-    if (projectId) void apiGet<EvaluationCase[]>(`/projects/${projectId}/evaluations/cases`).then(setCases);
+    void reload();
   }, [projectId]);
 
   const enabledCount = cases.filter((item) => item?.enabled).length;
@@ -46,10 +70,26 @@ export default function Page() {
     if (run) router.push(detailHrefWithReturnTo(`/evaluations/${run.id}`, "/evaluations", window.location.search.slice(1)));
   }
 
+  async function convertFeedback(feedbackId: number) {
+    if (!projectId) return;
+    setConvertingId(feedbackId);
+    setMessage("");
+    try {
+      await apiPost(`/projects/${projectId}/feedback/${feedbackId}/evaluation-case`, {});
+      setMessage("反馈已转为回归样例");
+      await reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "转换失败");
+    } finally {
+      setConvertingId(null);
+    }
+  }
+
   return (
     <main>
       <WorkspaceHeader title="RAG 评测" meta="Recall@K、MRR、来源字段命中与 groundedness" />
       <div className="mx-auto max-w-5xl space-y-4 p-4 lg:p-6">
+        {message ? <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p> : null}
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="stat-card">
             <div className="stat-label">案例总数</div>
@@ -128,6 +168,33 @@ export default function Page() {
                 <p>暂无评测案例，先录入带期望结果的评测用例，再运行回归评测</p>
               </div>
             </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="panel-header flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink">反馈回归队列</h2>
+              <p className="mt-1 text-xs text-slate-500">把已关联运行记录的反馈固化为可追溯的评测样例，不覆盖原始反馈。</p>
+            </div>
+            <span className="badge-neutral">{feedback.length} 条</span>
+          </div>
+          {feedback.length ? (
+            <div className="divide-y divide-line">
+              {feedback.slice(0, 50).map((item) => (
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3" key={item.id}>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{item.target_type || "未标记对象"} #{item.target_id ?? "—"}</p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">{item.comment || "无补充说明"} · {item.execution_kind || "执行类型未标记"} · {item.output_hash ? item.output_hash.slice(0, 10) : "无输出哈希"}</p>
+                  </div>
+                  <button className="button-secondary shrink-0" disabled={convertingId === item.id} onClick={() => void convertFeedback(item.id)} type="button">
+                    <FlaskConical size={15} />{convertingId === item.id ? "转换中…" : "转为评测样例"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="panel-body"><p className="text-sm text-slate-500">暂无反馈。业务页面提交反馈后，可在这里转为回归样例。</p></div>
           )}
         </section>
 

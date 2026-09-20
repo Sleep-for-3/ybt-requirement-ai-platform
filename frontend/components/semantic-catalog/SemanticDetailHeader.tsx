@@ -74,7 +74,7 @@ export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: 
 
         {!version && shell.candidate_versions.length ? (
           <section className="rounded-lg border border-gold-200 bg-gold-50 p-4" aria-labelledby="semantic-candidate-heading">
-            <h2 className="text-base font-semibold text-gold-900" id="semantic-candidate-heading">AI 建议，尚未成为正式监管语义</h2>
+            <h2 className="text-base font-semibold text-gold-900" id="semantic-candidate-heading">候选建议，尚未成为正式监管语义</h2>
             <div className="mt-3 space-y-3">{shell.candidate_versions.map((candidate) => <article className="border-t border-gold-200 pt-3 first:border-0 first:pt-0" key={candidate.id}><div className="font-mono text-xs text-gold-800">v{candidate.version_no} · {candidate.status}</div><p className="mt-1 whitespace-pre-wrap break-words text-sm text-gold-900">{candidate.definition || candidate.description || "候选版本未提供定义文本。"}</p></article>)}</div>
           </section>
         ) : null}

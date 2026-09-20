@@ -1189,7 +1189,12 @@ async def _compile_mapping(
     except GenerationBlockedError as exc:
         raise HTTPException(
             status_code=409,
-            detail={"code": "generation-blocked", "reasons": list(exc.reasons)},
+            detail={
+                "code": "generation-blocked",
+                "reasons": list(exc.reasons),
+                "context_budget": exc.context_budget or None,
+                "context_gaps": list(exc.context_gaps),
+            },
         ) from exc
     except GenerationStaleError as exc:
         raise HTTPException(

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.schemas import SourceRecommendationResponse, SourceRecommendationSelectionResponse
+from app.services.llm.execution_metadata import deterministic_execution_metadata, stable_hash
 from app.services.recommendation import adopt_recommendation, recommend_source_fields, select_recommendation
 
 router = APIRouter(tags=["source recommendations"])
@@ -11,7 +12,18 @@ router = APIRouter(tags=["source recommendations"])
 @router.post("/target-fields/{field_id}/scenarios/{scenario_id}/recommend-sources", response_model=SourceRecommendationResponse)
 def recommend_sources(field_id: int, scenario_id: int, db: Session = Depends(get_db)) -> SourceRecommendationResponse:
     try:
-        return SourceRecommendationResponse(recommendations=recommend_source_fields(db, field_id, scenario_id))
+        recommendations = recommend_source_fields(db, field_id, scenario_id)
+        return SourceRecommendationResponse(
+            recommendations=recommendations,
+            execution_metadata=deterministic_execution_metadata(
+                "source_recommendation",
+                context_hash=stable_hash({
+                    "target_field_id": field_id,
+                    "scenario_id": scenario_id,
+                    "candidate_ids": [item.id for item in recommendations],
+                }),
+            ),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

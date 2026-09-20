@@ -23,8 +23,9 @@ from app.services.governance.double_layer_review import (
     MappingGenerationNotEditable,
     ensure_double_layer_mapping_editable,
 )
+from app.services.llm.execution_metadata import normalize_runtime_result
 from app.services.llm.prompt_runtime import (
-    execute_runtime_chat,
+    execute_runtime_chat_with_metadata as _execute_runtime_chat_with_metadata,
     get_prompt_runtime,
     prepare_model_input,
 )
@@ -33,6 +34,10 @@ from app.services.mapping.context_adapters import (
     GenerationOutputPolicy,
     SourceToMartContextAdapter,
     apply_generation_output_policy,
+    context_projection_block_reasons,
+    projection_context_budget,
+    projection_context_complete,
+    projection_selected_fact_refs,
     redacted_generation_output_trace,
 )
 from app.services.mapping.generator_context import (
@@ -44,6 +49,11 @@ from app.services.mapping.generator_context import (
     snapshot_source_to_mart_generation,
     validate_generation_actor,
 )
+
+
+async def execute_runtime_chat(*args, **kwargs):
+    """Compatibility seam for tests and callers that still inject a model call."""
+    return await _execute_runtime_chat_with_metadata(*args, **kwargs)
 
 
 _CLASSIFICATION_RANK = {
@@ -112,6 +122,27 @@ async def generate_source_to_mart_draft(
             list(envelope.projection.readiness.blocking_reasons)
         )
 
+    projection_block_reasons = context_projection_block_reasons(envelope.projection)
+    if projection_block_reasons:
+        _record_generation_audit(
+            db,
+            envelope,
+            action="generate_source_to_mart_blocked",
+            result="blocked",
+            actor=actor,
+            extra={
+                "blocking_reasons": projection_block_reasons,
+                "context_budget": projection_context_budget(envelope.projection),
+                "context_gaps": list(envelope.projection.context_gaps),
+            },
+        )
+        db.commit()
+        raise GenerationBlockedError(
+            projection_block_reasons,
+            context_budget=projection_context_budget(envelope.projection),
+            context_gaps=list(envelope.projection.context_gaps),
+        )
+
     runtime = get_prompt_runtime(db, "source_to_mart_mapping")
     model_input = prepare_model_input(
         runtime,
@@ -120,7 +151,7 @@ async def generate_source_to_mart_draft(
         db=db,
         project_id=snapshot.project.id,
     )
-    output = await execute_runtime_chat(
+    model_result = await execute_runtime_chat(
         db,
         snapshot.project.id,
         runtime,
@@ -132,6 +163,15 @@ async def generate_source_to_mart_draft(
         retrieval_log_id=_first_retrieval_log_id(
             envelope.trace.retrieval_log_ids
         ),
+        context_complete=projection_context_complete(envelope.projection),
+        context_budget=projection_context_budget(envelope.projection),
+        allowed_citation_refs=projection_selected_fact_refs(envelope.projection),
+    )
+    output, execution_metadata = normalize_runtime_result(
+        model_result,
+        runtime,
+        context_complete=projection_context_complete(envelope.projection),
+        context_budget=projection_context_budget(envelope.projection),
     )
 
     # Persist the model attempt independently, then discard every ORM value
@@ -222,7 +262,10 @@ async def generate_source_to_mart_draft(
                 action="generate_source_to_mart",
                 result="success",
                 actor=actor,
-                extra={"output": output_trace.model_dump(mode="json")},
+            extra={
+                "output": output_trace.model_dump(mode="json"),
+                "execution_metadata": execution_metadata,
+            },
             )
             result = locked_mapping
 
@@ -233,6 +276,7 @@ async def generate_source_to_mart_draft(
     if result is None:  # pragma: no cover - defensive invariant
         raise RuntimeError("Source-to-mart generation produced no write result")
     db.refresh(result)
+    setattr(result, "execution_metadata", execution_metadata)
     return result
 
 

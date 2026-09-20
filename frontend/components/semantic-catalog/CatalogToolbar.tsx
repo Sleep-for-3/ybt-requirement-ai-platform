@@ -29,7 +29,7 @@ const TYPE_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   confirmed: "已确认",
   draft: "草稿",
-  ai_suggested: "AI 建议",
+  ai_suggested: "候选建议",
   rejected: "已拒绝（审计）",
   deprecated: "已废弃（审计）"
 };

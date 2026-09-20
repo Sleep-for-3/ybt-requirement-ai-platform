@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, date, datetime
 import inspect
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -36,16 +38,20 @@ from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.llm.prompt_runtime import PromptRuntime, prepare_model_input
 from app.services.mapping.context_adapters import (
+    ContextProjectionBudget,
     MartToYbtContextAdapter,
     ScenarioBusinessContextAdapter,
     ScenarioTechnicalContextAdapter,
     SourceToMartContextAdapter,
+    SourceToMartProjection,
     apply_generation_output_policy,
     audit_scenario_physical_coverage,
     build_physical_source_whitelist,
+    context_projection_block_reasons,
     redacted_generation_output_trace,
 )
 from app.services.mapping.generation_readiness import (
+    GenerationReadiness,
     evaluate_generation_readiness,
     merge_generation_questions,
 )
@@ -56,6 +62,7 @@ from app.services.mapping import (
 )
 from app.services.mapping.generator_context import (
     GenerationActorError,
+    GenerationBlockedError,
     build_generation_context,
     recover_queued_actor,
     resolve_generation_as_of,
@@ -837,6 +844,147 @@ def test_source_to_mart_snapshot_is_explicit_frozen_and_actor_identity_fails_clo
         db_session,
         Principal(None, "legacy-system", "Legacy", True),
     ).is_legacy_system is True
+
+
+def test_context_projection_budget_distinguishes_exact_limit_and_truncation() -> None:
+    readiness = GenerationReadiness(
+        can_generate=True,
+        confidence_cap="high",
+        blocking_reasons=[],
+        warnings=[],
+    )
+    exact = SourceToMartProjection(
+        prompt_text="x" * 6000,
+        confidentiality_levels=["internal"],
+        selected_fact_refs=[],
+        context_questions=[],
+        readiness=readiness,
+        projection_hash="exact",
+        truncated=False,
+        context_budget=ContextProjectionBudget(
+            limit=6000,
+            used=6000,
+            remaining=0,
+            complete=True,
+            facts_available=30,
+            facts_included=30,
+        ),
+    )
+    truncated = exact.model_copy(
+        update={
+            "prompt_text": "x" * 6000,
+            "truncated": True,
+            "context_budget": ContextProjectionBudget(
+                limit=6000,
+                used=6000,
+                remaining=0,
+                complete=False,
+                facts_available=30,
+                facts_included=30,
+                truncation_reason="prompt_limit_reached",
+            ),
+            "context_gaps": ["prompt_limit_reached"],
+        }
+    )
+    facts_omitted = exact.model_copy(
+        update={
+            "context_budget": ContextProjectionBudget(
+                limit=6000,
+                used=100,
+                remaining=5900,
+                complete=False,
+                facts_available=35,
+                facts_included=30,
+                facts_omitted=5,
+                truncation_reason="fact_limit_reached",
+            ),
+            "context_gaps": ["fact_limit_reached:5"],
+        }
+    )
+
+    assert context_projection_block_reasons(exact) == []
+    assert context_projection_block_reasons(truncated) == [
+        "CONTEXT_PROMPT_LIMIT_EXCEEDED"
+    ]
+    assert context_projection_block_reasons(facts_omitted) == [
+        "CONTEXT_FACT_LIMIT_EXCEEDED"
+    ]
+
+
+def test_source_to_mart_blocks_incomplete_context_before_model_call(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _seed_source_to_mart_task(db_session, suffix="BUDGET")
+    actor = Principal(
+        fixture["user"].id,
+        fixture["user"].username,
+        fixture["user"].display_name,
+        False,
+    )
+    readiness = GenerationReadiness(
+        can_generate=True,
+        confidence_cap="medium",
+        blocking_reasons=[],
+        warnings=[],
+    )
+    projection = SourceToMartProjection(
+        prompt_text="x" * 6000,
+        confidentiality_levels=["internal"],
+        selected_fact_refs=[],
+        context_questions=[],
+        readiness=readiness,
+        projection_hash="truncated",
+        truncated=True,
+        context_budget=ContextProjectionBudget(
+            limit=6000,
+            used=6000,
+            remaining=0,
+            complete=False,
+            facts_available=30,
+            facts_included=30,
+            truncation_reason="prompt_limit_reached",
+        ),
+        context_gaps=["prompt_limit_reached"],
+    )
+    model_calls = 0
+
+    monkeypatch.setattr(
+        source_to_mart_generator,
+        "build_generation_context",
+        lambda *args, **kwargs: SimpleNamespace(projection=projection),
+    )
+    monkeypatch.setattr(
+        source_to_mart_generator,
+        "_record_generation_audit",
+        lambda *args, **kwargs: None,
+    )
+
+    async def forbidden_model_call(*args, **kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        raise AssertionError("model call must be blocked for incomplete context")
+
+    monkeypatch.setattr(
+        source_to_mart_generator,
+        "execute_runtime_chat",
+        forbidden_model_call,
+    )
+
+    with pytest.raises(GenerationBlockedError) as raised:
+        asyncio.run(
+            source_to_mart_generator.generate_source_to_mart_draft(
+                db_session,
+                fixture["mapping"].id,
+                authorized_project=fixture["project"],
+                actor=actor,
+            )
+        )
+
+    assert raised.value.reasons == ("CONTEXT_PROMPT_LIMIT_EXCEEDED",)
+    assert raised.value.context_budget["used"] == 6000
+    assert raised.value.context_gaps == ("prompt_limit_reached",)
+    assert model_calls == 0
 
 
 def _seed_source_to_mart_task(

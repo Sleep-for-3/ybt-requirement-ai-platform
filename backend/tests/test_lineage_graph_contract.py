@@ -196,6 +196,7 @@ def _seed_chain(db: Session, *, code: str) -> dict:
     db.commit()
     return {
         "project_id": project.id,
+        "target_table_id": target_table.id,
         "target_field_id": target_field.id,
         "source_field_id": source_field.id,
         "node_ids": {"source": source_node.id, "mart": mart_node.id, "target": target_node.id},

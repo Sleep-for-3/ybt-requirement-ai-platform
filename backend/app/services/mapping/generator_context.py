@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import date, datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -55,8 +55,16 @@ class GenerationActorError(ValueError):
 class GenerationBlockedError(RuntimeError):
     """Typed generation policy blocked model execution."""
 
-    def __init__(self, reasons: list[str]):
+    def __init__(
+        self,
+        reasons: list[str],
+        *,
+        context_budget: dict[str, object] | None = None,
+        context_gaps: list[str] | None = None,
+    ):
         self.reasons = tuple(reasons)
+        self.context_budget = dict(context_budget or {})
+        self.context_gaps = tuple(context_gaps or [])
         super().__init__("Generation blocked: " + ", ".join(self.reasons))
 
 
@@ -240,6 +248,8 @@ class GenerationTraceSummary(_FrozenModel):
     readiness_confidence_cap: str
     prompt_projection_hash: str
     prompt_projection_truncated: bool
+    prompt_projection_budget: dict[str, object] = Field(default_factory=dict)
+    prompt_projection_gaps: list[str] = Field(default_factory=list)
 
 
 class GenerationContextEnvelope(BaseModel, Generic[ProjectionT]):
@@ -536,6 +546,12 @@ def build_generation_context(
         readiness_confidence_cap=readiness.confidence_cap,
         prompt_projection_hash=str(getattr(projection, "projection_hash")),
         prompt_projection_truncated=bool(getattr(projection, "truncated")),
+        prompt_projection_budget=(
+            getattr(projection, "context_budget").model_dump(mode="json")
+            if getattr(projection, "context_budget", None) is not None
+            else {}
+        ),
+        prompt_projection_gaps=list(getattr(projection, "context_gaps", []) or []),
     )
     return GenerationContextEnvelope[ProjectionT](
         actor=validated_actor,

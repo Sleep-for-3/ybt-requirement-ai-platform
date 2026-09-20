@@ -3,6 +3,7 @@
 import {useEffect, useRef, useState} from "react";
 import {useQuery} from "@tanstack/react-query";
 import {apiGet, apiPost} from "@/lib/api";
+import {aiExecutionPresentation} from "@/lib/ai-execution-label.mjs";
 
 type Decision = {unit_id:number;rule_ids:string[];status:"matched"|"conflict"|"missing_implementation"|"pending";
   rationale:string;difference:string;confirmed_by?:number;confirmed_at?:string};
@@ -13,7 +14,7 @@ type Rule = {rule_id:string;script_version_id:number;source_line_start:number|nu
 type Comparison = {basis_hash:string;rules:Rule[];units:{unit_id:number;title:string|null;content:string;
   document_version_id:number;regulatory_version:string|null}[];decisions:Record<string,Decision>;
   excluded_unit_count:number;issues:{code:string;message:string}[];
-  ai_suggestions?:{item_id:number;test_provider:boolean;comparisons:{unit_id:number;rule_ids:string[];status:string;explanation:string;difference:string}[]}[]};
+  ai_suggestions?:{item_id:number;test_provider:boolean;execution_metadata?:{execution_kind?:string;provider?:string;context_complete?:boolean};comparisons:{unit_id:number;rule_ids:string[];status:string;explanation:string;difference:string}[]}[]};
 const labels = {matched:"匹配",conflict:"存在冲突",missing_implementation:"缺少实现",pending:"待确认"};
 
 export function RequirementPolicyPanel({projectId,requirementId,contentVersion,dirty,locked,onChanged}:{
@@ -58,9 +59,9 @@ export function RequirementPolicyPanel({projectId,requirementId,contentVersion,d
     {unit&&draft&&<div className="space-y-2">
       <p className="font-semibold">制度要求 · 文档版本 #{unit.document_version_id} · {unit.regulatory_version||"未标注监管版本"}</p>
       <p className="whitespace-pre-wrap rounded border p-2">{unit.content}</p>
-      <details><summary>AI 解释候选（不代表人工确认）</summary>
+      <details><summary>模型/规则对照候选（不代表人工确认）</summary>
         {(query.data?.ai_suggestions||[]).flatMap(s=>s.comparisons.filter(c=>c.unit_id===unit.unit_id).map((c,i)=><div key={`${s.item_id}:${i}`} className="my-2 rounded border p-2">
-          <p>候选 #{s.item_id}{s.test_provider?" · Mock 测试输出":""} · {c.status}</p>
+          <p>候选 #{s.item_id} · {aiExecutionPresentation(s.execution_metadata||{provider:s.test_provider?"mock":undefined}).label} · {c.status}</p>
           <p>{c.explanation}</p><p>差异：{c.difference||"未说明"}</p><p>规则：{c.rule_ids.join("、")}</p>
         </div>))}
         {!(query.data?.ai_suggestions||[]).some(s=>s.comparisons.some(c=>c.unit_id===unit.unit_id))&&<p className="my-2">尚无本固定依据的 AI 对照候选，可使用现有范围生成，也可直接人工核验。</p>}

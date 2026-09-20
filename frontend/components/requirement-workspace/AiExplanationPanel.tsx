@@ -32,7 +32,7 @@ export function AiExplanationPanel({
     .filter((item, index, all) => all.indexOf(item) === index)
     .slice(0, 4);
 
-  return <section aria-label="AI 判断依据" className="mt-4 border-t border-line pt-4">
+  return <section aria-label="规则与证据汇总" className="mt-4 border-t border-line pt-4">
     <div className="flex items-center gap-2"><HelpCircle className="text-pine-600" size={16} /><h3 className="text-sm font-semibold text-ink">为什么这样判断？</h3><span className="text-xs text-slate-400">基于已检索上下文，不会再次调用 AI</span></div>
     <div className="mt-3 grid gap-x-6 gap-y-3 text-xs sm:grid-cols-2">
       <ExplanationRow label="监管依据" value={shortText(record.field.regulatory_refined_definition || record.field.regulatory_description || record.field.field_definition, "尚未维护监管定义")} />

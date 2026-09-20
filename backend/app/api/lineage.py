@@ -17,6 +17,11 @@ from app.services.lineage.archive_ingestion import read_safe_script_archive
 from app.services.lineage.ingestion import ScriptIngestionService, ensure_actor_user_id
 from app.services.lineage.impact_view import ImpactDetailBuilder
 from app.services.lineage.exporter import export_lineage_workbook
+from app.services.lineage.explanation import (
+    LineageEdgeExplanationRequest,
+    LineageExplanationNotFound,
+    explain_lineage_edge,
+)
 from app.services.lineage.git_repository import validate_repository_location
 from app.services.lineage.jobs import lineage_export_handler, script_archive_ingestion_handler
 from app.services.lineage.monitoring import (
@@ -1255,3 +1260,17 @@ def lineage_table_graph(project_id: int, principal: CurrentPrincipal, kind: str,
         raise HTTPException(404, "所选表或版本不存在或不可见") from exc
     except ValueError as exc:
         raise HTTPException(422, "请选择有效的表和探索范围") from exc
+
+
+@router.post("/projects/{project_id}/lineage/edge-explanations")
+async def lineage_edge_explanation(
+    project_id: int,
+    payload: LineageEdgeExplanationRequest,
+    principal: CurrentPrincipal,
+    db: Session = Depends(get_db),
+) -> dict:
+    PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
+    try:
+        return await explain_lineage_edge(db, project_id, payload)
+    except LineageExplanationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

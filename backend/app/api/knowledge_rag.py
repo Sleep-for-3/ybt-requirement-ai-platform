@@ -6,7 +6,7 @@ from pydantic import BaseModel,Field
 from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models import (AIUserFeedback,EmbeddingIndexVersion,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,Project,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
+from app.models import (AIUserFeedback,EmbeddingIndexVersion,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelCallLog,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
 from app.core.settings import get_settings
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
@@ -49,7 +49,7 @@ class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_
 class AskRequest(SearchRequest):
     answer_mode: Literal["regulatory", "data_field"] | None = None
 
-class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None
+class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None;model_call_log_id:int|None=None;output_hash:str|None=None;execution_kind:Literal["real_model","mock_model","deterministic","degraded"]|None=None;execution_metadata_json:dict|None=None
 class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";query_text:str;target_field_id:int|None=None;scenario_id:int|None=None;expected_knowledge_unit_ids_json:list[int]=Field(default_factory=list);expected_source_system:str|None=None;expected_table_name:str|None=None;expected_field_name:str|None=None;expected_answer_keywords_json:list[str]=Field(default_factory=list);enabled:bool=True
 class EvaluationRunCreate(BaseModel):run_name:str;model_profile_id:int|None=None;retrieval_config_json:dict=Field(default_factory=dict)
 class FormalReindexRequest(BaseModel):force:bool=False
@@ -262,31 +262,144 @@ def content(document_id:int,project_id:int,principal:CurrentPrincipal,version_id
     return original_content(version)
 
 @router.post("/projects/{project_id}/evaluations/cases")
-def create_case(project_id:int,payload:EvaluationCaseCreate,db:Session=Depends(get_db)):
-    item=RagEvaluationCase(project_id=project_id,**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
+def create_case(project_id:int,payload:EvaluationCaseCreate,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    item=RagEvaluationCase(project_id=project_id,institution_id=project.institution_id,created_by=principal.username,**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
 @router.get("/projects/{project_id}/evaluations/cases")
-def cases(project_id:int,db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(RagEvaluationCase).where(RagEvaluationCase.project_id==project_id)).all()]
+def cases(project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    PermissionService(db,principal).require_project_permission(project_id,"project.view")
+    return [_row(item) for item in db.scalars(select(RagEvaluationCase).where(RagEvaluationCase.project_id==project_id)).all()]
 @router.post("/projects/{project_id}/evaluations/runs")
 async def create_run(project_id:int,payload:EvaluationRunCreate,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
-    run=RagEvaluationRun(project_id=project_id,status="pending",**payload.model_dump());db.add(run);db.commit();db.refresh(run)
+    run=RagEvaluationRun(project_id=project_id,institution_id=project.institution_id,status="pending",created_by=principal.username,**payload.model_dump());db.add(run);db.commit();db.refresh(run)
     submit_project_job(db,project,principal,job_type="rag_evaluation",payload={"evaluation_run_id":run.id},handler=rag_evaluation_handler)
     db.refresh(run);return _row(run)
 @router.get("/evaluation-runs/{run_id}")
-def evaluation_run(run_id:int,db:Session=Depends(get_db)):
+def evaluation_run(run_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     item=db.get(RagEvaluationRun,run_id)
     if not item:raise HTTPException(404,"Evaluation run not found")
+    PermissionService(db,principal).require_project_permission(item.project_id,"project.view")
     return _row(item)
 @router.get("/evaluation-runs/{run_id}/results")
-def evaluation_results(run_id:int,db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(RagEvaluationResult).where(RagEvaluationResult.evaluation_run_id==run_id)).all()]
+def evaluation_results(run_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    run=db.get(RagEvaluationRun,run_id)
+    if not run:raise HTTPException(404,"Evaluation run not found")
+    PermissionService(db,principal).require_project_permission(run.project_id,"project.view")
+    return [_row(item) for item in db.scalars(select(RagEvaluationResult).where(RagEvaluationResult.evaluation_run_id==run_id)).all()]
+@router.get("/projects/{project_id}/feedback")
+def feedback_list(project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    PermissionService(db,principal).require_project_permission(project_id,"project.view")
+    items=db.scalars(select(AIUserFeedback).where(AIUserFeedback.project_id==project_id).order_by(AIUserFeedback.id.desc()).limit(500)).all()
+    return [_row(item) for item in items]
 @router.post("/projects/{project_id}/feedback")
-def feedback(project_id:int,payload:BindFeedback,db:Session=Depends(get_db)):
-    item=AIUserFeedback(project_id=project_id,**payload.model_dump());db.add(item);db.commit();db.refresh(item);return _row(item)
+def feedback(project_id:int,payload:BindFeedback,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    values=payload.model_dump()
+    model_call_log_id=values.pop("model_call_log_id")
+    requested_execution_kind=values.pop("execution_kind",None)
+    values.pop("output_hash",None)
+    values.pop("execution_metadata_json",None)
+    if model_call_log_id is not None:
+        run=db.get(ModelCallLog,model_call_log_id)
+        if not run or run.project_id!=project_id:raise HTTPException(404,"Model call not found")
+        values["output_hash"]=run.output_hash
+        values["execution_kind"]=run.execution_kind
+        values["execution_metadata_json"]=run.execution_metadata_json or {}
+    elif requested_execution_kind=="deterministic":
+        values["output_hash"]=None
+        values["execution_kind"]="deterministic"
+        values["execution_metadata_json"]={"execution_kind":"deterministic","provider":"none"}
+    else:
+        values["output_hash"]=None
+        values["execution_kind"]=None
+        values["execution_metadata_json"]=None
+    item=AIUserFeedback(project_id=project_id,institution_id=project.institution_id,created_by=principal.username,model_call_log_id=model_call_log_id,**values);db.add(item);db.commit();db.refresh(item);return _row(item)
+@router.post("/projects/{project_id}/feedback/{feedback_id}/evaluation-case")
+def feedback_to_evaluation_case(project_id:int,feedback_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
+    feedback_item=db.get(AIUserFeedback,feedback_id)
+    if not feedback_item or feedback_item.project_id!=project_id:
+        raise HTTPException(404,"Feedback not found")
+    existing=db.scalar(select(RagEvaluationCase).where(RagEvaluationCase.source_feedback_id==feedback_id))
+    if existing:
+        return _row(existing)
+    correct_values=[
+        value for value in (
+            feedback_item.correct_source_system,
+            feedback_item.correct_table_name,
+            feedback_item.correct_field_name,
+        )
+        if value
+    ]
+    assertions=[]
+    if feedback_item.execution_kind:
+        assertions.append({"assertion_type":"execution_kind_matches","expected":feedback_item.execution_kind})
+    if feedback_item.output_hash:
+        assertions.append({"assertion_type":"output_hash_matches","expected":feedback_item.output_hash})
+    model_log=db.get(ModelCallLog,feedback_item.model_call_log_id) if feedback_item.model_call_log_id else None
+    if model_log:
+        assertions.append({"assertion_type":"skill_key_matches","expected":model_log.skill_key or model_log.prompt_key})
+        assertions.append({"assertion_type":"prompt_version_matches","expected":model_log.prompt_version})
+        if model_log.context_hash:
+            assertions.append({"assertion_type":"context_hash_matches","expected":model_log.context_hash})
+        if model_log.context_complete is not None:
+            assertions.append({"assertion_type":"context_complete_is","expected":bool(model_log.context_complete)})
+    if correct_values:
+        assertions.append({"assertion_type":"required_terms","expected":correct_values})
+    execution_metadata=feedback_item.execution_metadata_json or {}
+    item=RagEvaluationCase(
+        project_id=project_id,
+        institution_id=project.institution_id,
+        case_name=f"反馈回归 #{feedback_item.id} {feedback_item.target_type}",
+        case_type="feedback_regression",
+        query_text=(feedback_item.comment or f"回归 {feedback_item.target_type}:{feedback_item.target_id}").strip(),
+        expected_source_system=feedback_item.correct_source_system,
+        expected_table_name=feedback_item.correct_table_name,
+        expected_field_name=feedback_item.correct_field_name,
+        expected_answer_keywords_json=correct_values,
+        source_feedback_id=feedback_item.id,
+        model_call_log_id=feedback_item.model_call_log_id,
+        target_type=feedback_item.target_type,
+        target_id=feedback_item.target_id,
+        execution_kind=feedback_item.execution_kind,
+        output_hash=feedback_item.output_hash,
+        input_context_json={
+            "context_hash":execution_metadata.get("context_hash"),
+            "context_budget":execution_metadata.get("context_budget"),
+            "context_complete":execution_metadata.get("context_complete"),
+            "citations":execution_metadata.get("citations") or [],
+        },
+        expected_output_json={
+            "rating":feedback_item.rating,
+            "correct_source_system":feedback_item.correct_source_system,
+            "correct_table_name":feedback_item.correct_table_name,
+            "correct_field_name":feedback_item.correct_field_name,
+            "comment":feedback_item.comment,
+        },
+        assertions_json=assertions,
+        enabled=True,
+        created_by=principal.username,
+    )
+    db.add(item);db.commit();db.refresh(item);return _row(item)
 @router.get("/prompt-versions")
-def prompt_versions(db:Session=Depends(get_db)):return [_row(item) for item in db.scalars(select(PromptTemplateVersion).order_by(PromptTemplateVersion.prompt_key,PromptTemplateVersion.version_no.desc())).all()]
+def prompt_versions(principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    if not PermissionService(db,principal).is_platform_admin():raise HTTPException(403,"Platform administrator required")
+    return [_prompt_version(item) for item in db.scalars(select(PromptTemplateVersion).order_by(PromptTemplateVersion.prompt_key,PromptTemplateVersion.version_no.desc())).all()]
 
 def _csv(value):return [item.strip() for item in (value or "").replace("，",",").split(",") if item.strip()]
 def _row(item):return {key:value for key,value in item.__dict__.items() if not key.startswith("_")}
+def _prompt_version(item):
+    return {
+        **_row(item),
+        "runtime_binding": {
+            "editable": False,
+            "activation": "latest_enabled_by_prompt_key",
+            "system_prompt": "effective",
+            "user_prompt_template": "read_only_not_rendered",
+            "note": "当前版本记录仅供技术查看；编辑、测试、发布和回滚尚未开放。",
+        },
+    }
 def _document(item):return {key:value for key,value in _row(item).items() if key not in {"storage_path","error_message"}}
 def _safe_version(item):return {key:value for key,value in _row(item).items() if key not in {"storage_path","error_message"}}
 def _unit(item):return _row(item)

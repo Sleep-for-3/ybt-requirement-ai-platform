@@ -1,4 +1,5 @@
 import hashlib
+import json
 from typing import Any
 
 from app.services.llm.base import LLMService, ModelCallMetadata, StructuredResponse
@@ -87,6 +88,34 @@ class MockLLMService(LLMService):
                 "supported_claims": ["CERT_TYPE 表示客户证件类型。"],
                 "unsupported_claims": [],
                 "open_questions": ["请确认当前场景采用的真实来源表字段。"],
+            }
+        if "血缘关系业务解释" in system_prompt or ('"relation"' in user_prompt and '"facts"' in user_prompt):
+            try:
+                payload = json.loads(user_prompt)
+            except (TypeError, ValueError):
+                payload = {}
+            source = payload.get("relation", {}).get("source", {}) if isinstance(payload, dict) else {}
+            target = payload.get("relation", {}).get("target", {}) if isinstance(payload, dict) else {}
+            facts = payload.get("facts", []) if isinstance(payload, dict) else []
+            fact_ids = {str(item.get("id")) for item in facts if isinstance(item, dict) and item.get("id")}
+            source_name = source.get("business_name") or source.get("technical_name") or "来源字段"
+            target_name = target.get("business_name") or target.get("technical_name") or "目标字段"
+            evidence = payload.get("regulatory_evidence", []) if isinstance(payload, dict) else []
+            relation_refs = [item for item in ("source_entity", "target_entity", "edge_type") if item in fact_ids]
+            rule_ref = next((item for item in ("transformation", "join", "filter", "code_mapping", "aggregation") if item in fact_ids), None)
+            if not relation_refs:
+                relation_refs = sorted(fact_ids)[:1]
+            return {
+                "business_summary": f"“{target_name}”的业务取值与“{source_name}”存在已解析的数据关系，具体业务用途仍需结合目标字段说明确认。",
+                "plain_language_steps": [{
+                    "text": f"脚本显示“{source_name}”会流转或影响“{target_name}”。",
+                    "fact_ids": relation_refs,
+                }] + ([{"text": "该关系还包含脚本加工或关联规则，应按已解析表达式核验业务口径。", "fact_ids": [rule_ref]}] if rule_ref else []),
+                "regulatory_interpretation": "当前输入未提供可引用的正式制度条款，不能把脚本现状解释为监管要求；如存在相应制度，请另行选择并核验。" if not evidence else "已提供制度证据，但具体匹配与差异仍需人工逐条确认。",
+                "regulatory_status": "missing_basis" if not evidence else "needs_confirmation",
+                "risks": [{"text": "脚本事实只能说明当前实现，不能单独证明该实现符合监管要求。", "fact_ids": relation_refs}],
+                "open_questions": ["请业务人员确认该字段关系的业务用途、统计范围和验收口径。"],
+                "confidence_level": "low",
             }
         return {
             "business_to_mart_rule": "建议从客户主数据系统抽取目标字段，按监管集市客户维度统一代码值和空值处理规则。",

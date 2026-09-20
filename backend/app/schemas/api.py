@@ -1,11 +1,22 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 
 class OrmModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExecutionAwareOrmModel(OrmModel):
+    execution_metadata: dict[str, Any] | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_execution_metadata(self, handler):
+        payload = handler(self)
+        if self.execution_metadata is None:
+            payload.pop("execution_metadata", None)
+        return payload
 
 
 class ProjectCreate(BaseModel):
@@ -686,7 +697,7 @@ class SourceToMartMappingUpdate(BaseModel):
     confidence_level: str | None = None
 
 
-class SourceToMartMappingRead(OrmModel):
+class SourceToMartMappingRead(ExecutionAwareOrmModel):
     id: int
     project_id: int
     mart_field_id: int
@@ -755,7 +766,7 @@ class MartToYbtMappingUpdate(BaseModel):
     confidence_level: str | None = None
 
 
-class MartToYbtMappingRead(OrmModel):
+class MartToYbtMappingRead(ExecutionAwareOrmModel):
     id: int
     project_id: int
     target_field_id: int
@@ -924,7 +935,7 @@ class ScenarioBusinessMappingUpdate(BaseModel):
     open_questions: str | None = None
 
 
-class ScenarioBusinessMappingRead(OrmModel):
+class ScenarioBusinessMappingRead(ExecutionAwareOrmModel):
     id: int
     project_id: int
     target_field_id: int
@@ -988,7 +999,7 @@ class ScenarioTechnicalLineageUpdate(BaseModel):
     open_questions: str | None = None
 
 
-class ScenarioTechnicalLineageRead(OrmModel):
+class ScenarioTechnicalLineageRead(ExecutionAwareOrmModel):
     id: int
     project_id: int
     target_field_id: int
@@ -1172,6 +1183,7 @@ class CandidateSourceRecommendationRead(OrmModel):
 
 class SourceRecommendationResponse(BaseModel):
     recommendations: list[CandidateSourceRecommendationRead]
+    execution_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SourceRecommendationSelectionResponse(BaseModel):

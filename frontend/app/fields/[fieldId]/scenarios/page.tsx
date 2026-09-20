@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { aiExecutionPresentation } from "@/lib/ai-execution-label.mjs";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
@@ -52,6 +53,7 @@ export default function FieldScenarioPage() {
   const [ragKnowledge, setRagKnowledge] = useState<HybridKnowledgeItem[]>([]);
   const [groundedAnswer, setGroundedAnswer] = useState<Record<string, unknown> | null>(null);
   const [recommendations, setRecommendations] = useState<CandidateSourceRecommendation[]>([]);
+  const [recommendationExecution, setRecommendationExecution] = useState<Record<string, unknown> | null>(null);
   const [selectedRecommendationId, setSelectedRecommendationId] = useState<number | null>(null);
   const [profileTask, setProfileTask] = useState<ColumnProfileTask>(EMPTY_PROFILE);
   const [profileHistory, setProfileHistory] = useState<{ columnId: number; items: ColumnProfileSnapshot[] } | null>(null);
@@ -227,8 +229,8 @@ export default function FieldScenarioPage() {
   }
   async function recommend() {
     if (!scenarioId) return;
-    const result = await apiPost<{ recommendations: CandidateSourceRecommendation[] }>(`/target-fields/${fieldId}/scenarios/${scenarioId}/recommend-sources`, {});
-    setRecommendations(result.recommendations); setMessage(`生成 ${result.recommendations.length} 个候选来源`);
+    const result = await apiPost<{ recommendations: CandidateSourceRecommendation[]; execution_metadata?: Record<string, unknown> }>(`/target-fields/${fieldId}/scenarios/${scenarioId}/recommend-sources`, {});
+    setRecommendations(result.recommendations); setRecommendationExecution(result.execution_metadata || null); setMessage(`生成 ${result.recommendations.length} 个候选来源`);
   }
   async function selectCatalogCandidate(item: CandidateSourceRecommendation) {
     const result = await apiPost<{ recommendation: CandidateSourceRecommendation }>(`/source-recommendations/${item.id}/select`, {});
@@ -510,7 +512,7 @@ export default function FieldScenarioPage() {
           <section className="mt-5 grid gap-5 xl:grid-cols-2">
             <div className="panel h-fit overflow-hidden">
               <div className="panel-header flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-[15px] font-semibold text-ink">候选来源</h2>
+                <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">候选来源<span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-normal text-slate-700">{aiExecutionPresentation(recommendationExecution).label}</span></h2>
                 <div className="flex gap-2">
                   <select className="control" onChange={(e) => setDatasourceFilter(e.target.value)} value={datasourceFilter}>
                     <option value="">全部数据源</option>

@@ -80,7 +80,7 @@ export default function Page() {
       setMessage(
         result.final_content_overwritten
           ? "复用结果异常：服务端报告覆盖最终内容。"
-          : "已复用到 AI 建议区，人工 final_content 保持不变。"
+          : "已复用到系统候选区，人工 final_content 保持不变。"
       );
     } catch (error) {
       setMessage(readError(error));

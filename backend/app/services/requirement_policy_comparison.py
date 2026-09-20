@@ -154,6 +154,11 @@ def ai_suggestions(db, project_id, requirement_id, content):
             "requirement": {"scenario_id": frozen["requirement"].get("scenario_id")}, "evidence": frozen["evidence"]}
         if basis_hash(basis) != expected:
             continue
-        result.append({"item_id": item.id, "test_provider": bool(item.candidate_json.get("runtime", {}).get("test_provider")),
-            "comparisons": deepcopy(item.candidate_json["policy_comparisons"])})
+        runtime = item.candidate_json.get("runtime", {})
+        result.append({
+            "item_id": item.id,
+            "test_provider": bool(runtime.get("test_provider")),
+            "execution_metadata": deepcopy(item.candidate_json.get("execution_metadata") or runtime),
+            "comparisons": deepcopy(item.candidate_json["policy_comparisons"]),
+        })
     return result

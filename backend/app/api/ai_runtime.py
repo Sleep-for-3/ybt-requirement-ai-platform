@@ -18,6 +18,7 @@ from app.services.auth.dependencies import CurrentPrincipal, Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.embeddings.factory import get_embedding_service
 from app.services.llm.base import LLMRuntimeError
+from app.services.llm.execution_metadata import provider_scope
 from app.services.llm.factory import get_interactive_llm_service
 from app.services.llm.providers import (
     is_local_provider,
@@ -694,8 +695,33 @@ def _model_call_response(item: ModelCallLog) -> dict[str, Any]:
         "retrieval_log_id": item.retrieval_log_id,
         "prompt_key": item.prompt_key,
         "prompt_version": item.prompt_version,
+        "skill_key": item.skill_key,
+        "skill_version": item.skill_version,
         "provider": item.provider,
         "model_name": item.model_name,
+        "execution_kind": item.execution_kind,
+        "execution_metadata": item.execution_metadata_json or {
+            "execution_kind": item.execution_kind,
+            "provider": provider_scope(item.provider),
+            "provider_type": item.provider,
+            "model_name": item.model_name,
+            "model_profile_id": item.model_profile_id,
+            "prompt_key": item.prompt_key,
+            "prompt_version": item.prompt_version,
+            "skill_key": item.skill_key,
+            "skill_version": item.skill_version,
+            "context_hash": item.context_hash,
+            "context_complete": item.context_complete,
+            "context_budget": item.context_budget_json,
+            "output_hash": item.output_hash,
+            "citations": item.citations_json or [],
+            "rejected_claims": item.rejected_claims_json or [],
+        },
+        "context_hash": item.context_hash,
+        "context_complete": item.context_complete,
+        "output_hash": item.output_hash,
+        "citations": item.citations_json or [],
+        "rejected_claims": item.rejected_claims_json or [],
         "status": item.status,
         "latency_ms": item.latency_ms,
         "token_usage": item.token_usage_json,

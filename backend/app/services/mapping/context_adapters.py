@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.regulatory_context import (
     CandidateContextValue,
@@ -58,6 +58,20 @@ class ContextQuestionConstraint(BaseModel):
     target_id: int | None
 
 
+class ContextProjectionBudget(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    unit: str = "characters"
+    limit: int = 0
+    used: int = 0
+    remaining: int = 0
+    complete: bool = True
+    facts_available: int = 0
+    facts_included: int = 0
+    facts_omitted: int = 0
+    truncation_reason: str | None = None
+
+
 class GenerationProjectionBase(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -69,6 +83,10 @@ class GenerationProjectionBase(BaseModel):
     readiness: GenerationReadiness
     projection_hash: str
     truncated: bool
+    context_budget: ContextProjectionBudget = Field(
+        default_factory=ContextProjectionBudget
+    )
+    context_gaps: list[str] = Field(default_factory=list)
 
 
 class ScenarioPhysicalCoverageAudit(BaseModel):
@@ -152,7 +170,7 @@ class SourceToMartContextAdapter:
         if context.target.mart_field_id != snapshot.task.mart_field_id:
             raise ValueError("Context mart field does not match the generation snapshot")
 
-        selected = _select_facts(context)
+        selected, facts_available = _select_facts(context)
         questions = [
             ContextQuestionConstraint(
                 question_code=item.question_code,
@@ -189,6 +207,17 @@ class SourceToMartContextAdapter:
             readiness=readiness,
             projection_hash=sha256(prompt.encode("utf-8")).hexdigest(),
             truncated=truncated,
+            context_budget=_projection_budget(
+                prompt,
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
+            context_gaps=_projection_gaps(
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
         )
 
 
@@ -209,7 +238,14 @@ class MartToYbtContextAdapter:
         if context.target.mart_field_id != snapshot.task.mart_field_id:
             raise ValueError("Context mart field does not match the generation snapshot")
 
-        selected, questions, readiness, confidentiality, references = _projection_inputs(
+        (
+            selected,
+            facts_available,
+            questions,
+            readiness,
+            confidentiality,
+            references,
+        ) = _projection_inputs(
             context,
             "mart_to_ybt",
             snapshot.project.confidentiality_level,
@@ -236,6 +272,17 @@ class MartToYbtContextAdapter:
             readiness=readiness,
             projection_hash=sha256(prompt.encode("utf-8")).hexdigest(),
             truncated=truncated,
+            context_budget=_projection_budget(
+                prompt,
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
+            context_gaps=_projection_gaps(
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
             upstream_rule_summaries=upstream,
         )
 
@@ -258,7 +305,14 @@ class ScenarioBusinessContextAdapter:
             snapshot.task.target_field_id,
             snapshot.task.scenario_id,
         )
-        selected, questions, readiness, confidentiality, references = _projection_inputs(
+        (
+            selected,
+            facts_available,
+            questions,
+            readiness,
+            confidentiality,
+            references,
+        ) = _projection_inputs(
             context,
             "scenario_business",
             snapshot.project.confidentiality_level,
@@ -284,6 +338,17 @@ class ScenarioBusinessContextAdapter:
             readiness=readiness,
             projection_hash=sha256(prompt.encode("utf-8")).hexdigest(),
             truncated=truncated,
+            context_budget=_projection_budget(
+                prompt,
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
+            context_gaps=_projection_gaps(
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
         )
 
 
@@ -305,7 +370,14 @@ class ScenarioTechnicalContextAdapter:
             snapshot.task.target_field_id,
             snapshot.task.scenario_id,
         )
-        selected, questions, readiness, confidentiality, references = _projection_inputs(
+        (
+            selected,
+            facts_available,
+            questions,
+            readiness,
+            confidentiality,
+            references,
+        ) = _projection_inputs(
             context,
             "scenario_technical",
             snapshot.project.confidentiality_level,
@@ -351,6 +423,17 @@ class ScenarioTechnicalContextAdapter:
             readiness=readiness,
             projection_hash=sha256(prompt.encode("utf-8")).hexdigest(),
             truncated=truncated,
+            context_budget=_projection_budget(
+                prompt,
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
+            context_gaps=_projection_gaps(
+                truncated=truncated,
+                facts_available=facts_available,
+                facts_included=len(selected),
+            ),
             physical_whitelist=whitelist,
             physical_coverage=coverage,
             supporting_evidence_summaries=supporting_evidence,
@@ -649,12 +732,13 @@ def _projection_inputs(
     project_confidentiality: str,
 ) -> tuple[
     list[ContextFact],
+    int,
     list[ContextQuestionConstraint],
     GenerationReadiness,
     list[str],
     list[str],
 ]:
-    selected = _select_facts(context)
+    selected, facts_available = _select_facts(context)
     questions = [
         ContextQuestionConstraint(
             question_code=item.question_code,
@@ -682,7 +766,7 @@ def _projection_inputs(
         f"{fact.source_type}:{fact.source_id or '-'}:{fact.fact_type}"
         for fact in selected
     ]
-    return selected, questions, readiness, confidentiality, references
+    return selected, facts_available, questions, readiness, confidentiality, references
 
 
 def _approved_upstream_rules(
@@ -744,7 +828,95 @@ def _task_prompt(
     return prompt[:allowed] + TRUNCATION_MARKER, True
 
 
-def _select_facts(context: RegulatoryContext) -> list[ContextFact]:
+def _projection_budget(
+    prompt: str,
+    *,
+    truncated: bool,
+    facts_available: int,
+    facts_included: int,
+) -> ContextProjectionBudget:
+    used = len(prompt)
+    facts_omitted = max(facts_available - facts_included, 0)
+    truncation_reason = (
+        "prompt_limit_reached"
+        if truncated
+        else "fact_limit_reached"
+        if facts_omitted
+        else None
+    )
+    return ContextProjectionBudget(
+        unit="characters",
+        limit=SOURCE_TO_MART_PROJECTION_LIMIT,
+        used=used,
+        remaining=max(SOURCE_TO_MART_PROJECTION_LIMIT - used, 0),
+        complete=not truncated and facts_omitted == 0,
+        facts_available=facts_available,
+        facts_included=facts_included,
+        facts_omitted=facts_omitted,
+        truncation_reason=truncation_reason,
+    )
+
+
+def _projection_gaps(
+    *,
+    truncated: bool,
+    facts_available: int,
+    facts_included: int,
+) -> list[str]:
+    gaps: list[str] = []
+    if truncated:
+        gaps.append("prompt_limit_reached")
+    if facts_available > facts_included:
+        gaps.append(f"fact_limit_reached:{facts_available - facts_included}")
+    return gaps
+
+
+def context_projection_block_reasons(
+    projection: GenerationProjectionBase,
+) -> list[str]:
+    """Return stable block codes when a projection is not complete."""
+
+    reasons: list[str] = []
+    if bool(getattr(projection, "truncated", False)):
+        reasons.append("CONTEXT_PROMPT_LIMIT_EXCEEDED")
+    budget = getattr(projection, "context_budget", None)
+    if budget is not None and getattr(budget, "facts_omitted", 0):
+        reasons.append("CONTEXT_FACT_LIMIT_EXCEEDED")
+    if budget is not None and not getattr(budget, "complete", True) and not reasons:
+        reasons.append("CONTEXT_INCOMPLETE")
+    return reasons
+
+
+def projection_context_complete(projection: GenerationProjectionBase) -> bool:
+    budget = getattr(projection, "context_budget", None)
+    if budget is None:
+        return not bool(getattr(projection, "truncated", False))
+    return bool(getattr(budget, "complete", True))
+
+
+def projection_context_budget(projection: GenerationProjectionBase) -> dict[str, object]:
+    budget = getattr(projection, "context_budget", None)
+    if budget is not None:
+        return budget.model_dump(mode="json")
+    prompt = str(getattr(projection, "prompt_text", "") or "")
+    return {
+        "unit": "characters",
+        "limit": len(prompt),
+        "used": len(prompt),
+        "remaining": 0,
+        "complete": projection_context_complete(projection),
+        "facts_available": len(getattr(projection, "selected_fact_refs", []) or []),
+        "facts_included": len(getattr(projection, "selected_fact_refs", []) or []),
+        "facts_omitted": 0,
+        "truncation_reason": None,
+    }
+
+
+def projection_selected_fact_refs(projection: GenerationProjectionBase) -> list[str]:
+    return [str(item) for item in (getattr(projection, "selected_fact_refs", []) or [])]
+
+
+def _select_facts(context: RegulatoryContext) -> tuple[list[ContextFact], int]:
     facts = [
         *context.metadata,
         *context.candidates,
@@ -756,7 +928,8 @@ def _select_facts(context: RegulatoryContext) -> list[ContextFact]:
         *context.lineage,
         *context.quality,
     ]
-    return sorted(facts, key=_fact_sort_key)[:MAX_SELECTED_FACTS]
+    ordered = sorted(facts, key=_fact_sort_key)
+    return ordered[:MAX_SELECTED_FACTS], len(ordered)
 
 
 def _fact_sort_key(fact: ContextFact) -> tuple[int, str, str, int]:
@@ -876,6 +1049,7 @@ def _normalize_physical_identifier(value: object | None) -> str:
 
 
 __all__ = [
+    "ContextProjectionBudget",
     "ContextQuestionConstraint",
     "GenerationOutputPolicy",
     "GenerationOutputTraceSummary",
@@ -895,5 +1069,9 @@ __all__ = [
     "apply_generation_output_policy",
     "audit_scenario_physical_coverage",
     "build_physical_source_whitelist",
+    "context_projection_block_reasons",
+    "projection_context_budget",
+    "projection_context_complete",
+    "projection_selected_fact_refs",
     "redacted_generation_output_trace",
 ]

@@ -140,6 +140,8 @@ async def generate_scenario_business_draft(
             detail={
                 "code": "generation-blocked",
                 "reasons": list(exc.reasons),
+                "context_budget": exc.context_budget or None,
+                "context_gaps": list(exc.context_gaps),
             },
         ) from exc
     except GenerationStaleError as exc:
@@ -275,6 +277,8 @@ async def generate_scenario_technical_draft(
             detail={
                 "code": "generation-blocked",
                 "reasons": list(exc.reasons),
+                "context_budget": exc.context_budget or None,
+                "context_gaps": list(exc.context_gaps),
             },
         ) from exc
     except GenerationStaleError as exc:

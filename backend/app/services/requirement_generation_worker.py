@@ -16,11 +16,21 @@ from app.services.auth.permission_service import PermissionService
 from app.services.mapping.generator_context import recover_queued_actor
 from app.services.mapping.requirement_input import validate_physical_references
 from app.services.requirement_scope import content_digest
-from app.services.llm.prompt_runtime import get_prompt_runtime, prepare_model_input, execute_runtime_chat
+from app.services.llm.execution_metadata import build_execution_metadata
+from app.services.llm.prompt_runtime import (
+    execute_runtime_chat_with_metadata as _execute_runtime_chat_with_metadata,
+    get_prompt_runtime,
+    prepare_model_input,
+)
 
 
 DEFAULT_REQUIREMENT_MAX_INPUT_BYTES = 64000
 logger = logging.getLogger("app.requirement_generation")
+
+
+async def execute_runtime_chat(*args, **kwargs):
+    """Keep the legacy monkeypatch seam while the runtime returns metadata."""
+    return await _execute_runtime_chat_with_metadata(*args, **kwargs)
 
 
 class PhysicalReference(BaseModel):
@@ -96,8 +106,28 @@ def generate_candidate(db, row, item, project):
     runtime.system_prompt += "\n存在 script_basis 时，可在 policy_comparisons 提供制度对照解释。unit_id只能引用regulatory_formal、regulatory_qa、internal_policy类别的evidence；rule_ids只能引用固定规则。逐项说明匹配或差异；无法判断标记pending。所有解释均为AI候选，不是人工确认。"
     levels = [project.confidentiality_level or "internal"] + [unit["confidentiality_level"] for unit in context["evidence"]]
     prompt = prepare_model_input(runtime, prompt, levels, db=db, project_id=project.id)
-    output = asyncio.run(execute_runtime_chat(db, project.id, runtime, prompt, RequirementCandidate,
-        confidentiality=project.confidentiality_level or "internal"))
+    used_bytes = len(prompt.encode("utf-8"))
+    result = asyncio.run(execute_runtime_chat(
+        db,
+        project.id,
+        runtime,
+        prompt,
+        RequirementCandidate,
+        confidentiality=project.confidentiality_level or "internal",
+        context_complete=True,
+        context_budget={"unit": "bytes", "limit": budget, "used": used_bytes, "complete": True},
+    ))
+    if isinstance(result, tuple):
+        output, execution_metadata = result
+    else:
+        output = result
+        execution_metadata = build_execution_metadata(
+            runtime,
+            context_hash=None,
+            context_complete=True,
+            context_budget={"unit": "bytes", "limit": budget, "used": used_bytes, "complete": True},
+            output=output,
+        )
     candidate = RequirementCandidate.model_validate(output).model_dump()
     validate_physical_references(context, candidate["physical_references"])
     evidence_ids = {unit["unit_id"] for unit in context["evidence"]}
@@ -117,8 +147,14 @@ def generate_candidate(db, row, item, project):
         candidate["gaps"].append("AI 解释尚未引用固定脚本规则，需核验解释与事实的一致性")
     if not evidence_ids:
         candidate["gaps"] = list(dict.fromkeys([*candidate["gaps"], "缺少明确纳入的知识证据，正文仅为待核验候选"]))
-    candidate["runtime"] = {"provider": runtime.provider_type, "model": runtime.model_name,
-        "prompt_version": runtime.version, "test_provider": runtime.provider_type == "mock"}
+    candidate["runtime"] = {
+        "provider": runtime.provider_type,
+        "model": runtime.model_name,
+        "prompt_version": runtime.version,
+        "test_provider": runtime.provider_type == "mock",
+        "execution_kind": execution_metadata["execution_kind"],
+    }
+    candidate["execution_metadata"] = execution_metadata
     return candidate
 
 

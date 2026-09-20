@@ -421,7 +421,7 @@ class LineagePathResolver:
             unresolved = self.nodes[source_id]["unresolved_flag"] or self.nodes[target_id]["unresolved_flag"]
             edge_key = str(snapshot.get("edge_key") or row.edge_key)
             self._add_edge({
-                "id": f"revision:{revision.id}:edge:{_stable_id(edge_key)}",
+                "id": revision_edge_output_id(revision.id, edge_key),
                 "source_node_id": source_id,
                 "target_node_id": target_id,
                 "edge_type": str(snapshot.get("edge_type") or "projection"),
@@ -1065,6 +1065,12 @@ def _append_unique(values: list[Any], value: Any) -> None:
 
 def _stable_id(value: Any) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:20]
+
+
+def revision_edge_output_id(revision_id: int, edge_key: Any) -> str:
+    """Return the stable UI id used for one immutable revision edge."""
+
+    return f"revision:{int(revision_id)}:edge:{_stable_id(edge_key)}"
 
 
 def _text(value: Any, limit: int = 500) -> str | None:

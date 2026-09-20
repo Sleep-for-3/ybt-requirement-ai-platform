@@ -652,3 +652,42 @@ node tests/batch-import-reverse.browser.acceptance.mjs <temporary-sample-directo
 
 - 本任务启动的 18743 隔离后端已按命令行身份停止；未启动或停止用户当前 3000/8000 服务。隔离构建目录因当前策略拒绝递归清理而保留为未跟踪产物，不属于源码交付。
 - 本次未提交、未推送、未部署。上线前仍需在服务器维护窗口应用 `202609180039` 迁移，先备份 PostgreSQL，再发布对应前端和后端镜像；不要在迁移前单独替换前端，否则请求键字段还未存在。现有重复项目需由管理员人工确认后停用，不自动删除。
+
+## 2026-09-20 血缘连线的 AI 业务解释
+
+### 核验结论
+
+- 核验前，大模型确实主要用于需求候选、业务/技术 Mapping 草稿、监管字段问答等“语义归纳和解释”场景；血缘解析、表字段投影、脚本版本和 revision 固定属于确定性事实，并不需要也不应该交给模型。
+- 血缘连线的产品缺口不是“解析不够 AI”，而是解释层没有模型：点击边后原本只展示 `transformation_expression`、`join_condition`、`filter_condition`、字段 ID 和 revision 等技术事实，业务人员无法直接理解。
+- 采用“确定性事实为主、模型负责翻译和组织”的边界：模型不能发明来源、目标、关联、监管条款或 SQL；模型失败时血缘事实必须继续可用。
+
+### 新增闭环
+
+- 新增 `POST /api/projects/{project_id}/lineage/edge-explanations`。输入只有关系 ID 和可选 revision；后端按项目和固定 revision 重新读取事实，不信任浏览器提交的表名、SQL 或字段列表。
+- 新增提示词键 `lineage_edge_explanation`，复用现有 `PromptRuntime`、模型配置、数据分类脱敏、调用日志和失败审计，不另建模型调用通道。
+- 模型输入包括来源/目标业务名与技术名、关系类型、转换/关联/过滤/聚合/码值规则、脚本版本、语句位置和解析证据；制度证据通过现有 `HybridRetriever` 和知识生命周期规则检索，仅将 `regulatory_formal`、`regulatory_qa`、`internal_policy` 作为正式对照依据。
+- 模型输出必须引用输入事实 ID；范围外引用会被隐藏。没有制度证据时后端强制返回 `missing_basis`，不能把脚本现状升级成监管要求。
+- 页面“数据血缘 → 点击连线”现在先显示“业务语言速览”，再显示“AI 业务解释（候选·未人工确认）”，并分别展示制度状态、风险和待确认事项；原始 SQL 与解析证据收进“技术证据与原始表达式”。
+- AI 生成失败返回 `degraded`，保留确定性摘要、事实和知识证据供重试；不会删除已有血缘 revision 或需求内容。
+
+### 主要文件
+
+- `backend/app/services/lineage/explanation.py`
+- `backend/app/api/lineage.py`
+- `backend/app/services/llm/prompt_runtime.py`
+- `backend/app/services/llm/mock.py`
+- `frontend/components/TableFieldGraph.tsx`
+- `frontend/lib/lineage-explanation.mjs` / `.d.mts`
+
+### 验证结果
+
+- 后端定向回归：`test_lineage_edge_explanation.py + test_table_field_graph.py + test_lineage_graph_contract.py + test_lineage_paths.py`，**24 passed**。覆盖固定 revision 事实、缺少制度依据、范围外模型引用拦截、跨项目隔离、模型故障降级。
+- 前端全量：**152 passed**；`npx tsc --noEmit` 通过；隔离生产构建使用 `.next-ai-lineage-isolated`，52 个页面全部生成，未覆盖 `.next`。
+- 浏览器隔离验收：`node tests/table-field-graph.acceptance.mjs` 通过。点击关系后验证“业务语言速览”“AI 业务解释”“缺少制度依据”先展示，展开技术证据后才看到原始关联表达式。截图：`docs/ux/acceptance/table-field-rules.png`。
+- `npm run lint` 全量仍会被仓库既有 `.d.mts` 解析错误和历史 Hook 告警阻断；本功能定向 `npx eslint components/TableFieldGraph.tsx lib/lineage-explanation.mjs lib/lineage-explanation.d.mts` 通过。
+
+### 当前限制
+
+- 本闭环解释的是单条血缘关系，不替代需求工作台中已有的逐条制度对照和人工审核流程。
+- 制度证据检索使用现有知识治理与关键词检索；没有可引用条款时会明确显示“缺少制度依据”，不会让模型自行补写。
+- 本次没有新增数据库迁移，也没有执行或修改生产环境；状态仍为未提交、未推送、未部署。`frontend/.next-ai-lineage-isolated/` 是隔离构建产物，删除命令被当前策略拒绝，目录仍保留为未跟踪产物，不属于源码交付。

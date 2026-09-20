@@ -6,9 +6,10 @@ from app.core.settings import get_settings
 from app.models import KnowledgeDocumentVersion, Project
 from app.services.llm.prompt_runtime import (
     get_prompt_runtime,
-    execute_runtime_chat,
+    execute_runtime_chat_with_metadata,
     prepare_model_input,
 )
+from app.services.llm.execution_metadata import build_execution_metadata, deterministic_execution_metadata, stable_hash
 from app.services.llm.base import LLMRuntimeError
 from app.services.llm.structured_outputs import RegulatoryFieldExplanationOutput
 from app.services.retrieval import HybridRetriever
@@ -50,6 +51,10 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             "trustworthiness": _empty_trust(),
             "index_freshness": _index_freshness(db, project_id, filters.get("retrieval_mode", "hybrid")),
             "conflicts": [],
+            "execution_metadata": deterministic_execution_metadata(
+                "knowledge_grounded_answer",
+                context_hash=stable_hash({"query": query, "filters": filters}),
+            ),
         }
 
     citations = [document_citation(item, project_id) for item in items[:10]]
@@ -60,13 +65,13 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
         f"[{item['knowledge_unit_id']}] {item['content']}" for item in items[:10]
     )
     prompt = f"问题：{query}\n只允许引用以下知识单元，不得新增来源表字段：\n{evidence}"
+    runtime = evidence_runtime(get_prompt_runtime(db, "regulatory_field_explanation"))
     try:
-        runtime = evidence_runtime(get_prompt_runtime(db, "regulatory_field_explanation"))
         model_input = prepare_model_input(
             runtime, prompt, [item["confidentiality_level"] for item in items],
             db=db, project_id=project_id,
         )
-        output = await execute_runtime_chat(
+        output, execution_metadata = await execute_runtime_chat_with_metadata(
             db,
             project_id,
             runtime,
@@ -77,8 +82,21 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             interactive=interactive,
         )
     except LLMRuntimeError as exc:
-        return _degraded_answer(citations, retrieval_log.id, exc, items, conflicts, index_freshness)
-    except Exception:
+        return _degraded_answer(
+            citations,
+            retrieval_log.id,
+            exc,
+            items,
+            conflicts,
+            index_freshness,
+            getattr(exc, "execution_metadata", None),
+        )
+    except Exception as exc:
+        execution_metadata = getattr(exc, "execution_metadata", None) or build_execution_metadata(
+            runtime,
+            execution_kind="degraded",
+            degraded_reason=getattr(exc, "error_type", type(exc).__name__),
+        )
         return {
             "answer": DEGRADED_ANSWER_TEXT, "confidence_level": "low", "citations": citations,
             "supported_claims": [], "unsupported_claims": [],
@@ -86,6 +104,7 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             "retrieval_log_id": retrieval_log.id, "answer_status": "degraded",
             "trustworthiness": _trust(items, citations, conflicts, index_freshness, "degraded"),
             "index_freshness": index_freshness, "conflicts": conflicts,
+            "execution_metadata": execution_metadata,
         }
     answer = str(output.get("answer") or "").strip()
     supported_claims = _string_list(output.get("supported_claims"))
@@ -131,10 +150,19 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             "normal" if not invalid_output else "needs_confirmation"),
         "index_freshness": index_freshness,
         "conflicts": conflicts,
+        "execution_metadata": execution_metadata,
     }
 
 
-def _degraded_answer(citations, retrieval_log_id, exc: LLMRuntimeError, items=None, conflicts=None, index_freshness=None) -> dict:
+def _degraded_answer(
+    citations,
+    retrieval_log_id,
+    exc: LLMRuntimeError,
+    items=None,
+    conflicts=None,
+    index_freshness=None,
+    execution_metadata=None,
+) -> dict:
     return {
         "answer": DEGRADED_ANSWER_TEXT,
         "confidence_level": "low",
@@ -150,6 +178,7 @@ def _degraded_answer(citations, retrieval_log_id, exc: LLMRuntimeError, items=No
         "trustworthiness": _trust(items or [], citations, conflicts or [], index_freshness or {}, "degraded"),
         "index_freshness": index_freshness or {},
         "conflicts": conflicts or [],
+        "execution_metadata": execution_metadata or {},
     }
 
 

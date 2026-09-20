@@ -135,7 +135,7 @@ export default function QualityExpectationsPage() {
     <main>
       <WorkspaceHeader
         title="质量期望"
-        meta="可复用到需求、映射、UAT 与生产监控；AI 建议必须经人工确认"
+        meta="可复用到需求、映射、UAT 与生产监控；候选建议必须经人工确认"
         actions={actions}
       />
       <div className="mx-auto max-w-[1400px] space-y-4 p-4 lg:p-6">
@@ -246,7 +246,7 @@ export default function QualityExpectationsPage() {
         ))}
       </div>
       <ModalDialog
-        description="规则仅被治理和复用；自定义表达式不会在此页面执行。AI 建议需要人工确认后才会成为已确认规则。"
+        description="规则仅被治理和复用；自定义表达式不会在此页面执行。候选建议可能来自规则或模型，需结合运行元数据核验并人工确认后才会成为已确认规则。"
         onClose={() => setCreateOpen(false)}
         open={createOpen}
         title="新建质量期望"
@@ -298,7 +298,7 @@ export default function QualityExpectationsPage() {
             </select>
             <select className="control" defaultValue="draft" name="status">
               <option value="draft">人工草稿</option>
-              <option value="ai_suggested">AI 建议</option>
+              <option value="ai_suggested">候选建议</option>
             </select>
           </div>
           <textarea
@@ -396,7 +396,7 @@ function StatusBadge({ status }: { status: string }) {
     (
       {
         draft: "草稿",
-        ai_suggested: "AI 建议",
+        ai_suggested: "候选建议",
         confirmed: "已确认",
         rejected: "已拒绝",
         retired: "已退役",

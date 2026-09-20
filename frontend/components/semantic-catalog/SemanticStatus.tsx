@@ -7,7 +7,7 @@ import type { SemanticCatalogReviewSummary, SemanticLifecycleStatus } from "@/li
 const LIFECYCLE = {
   confirmed: { label: "已确认 / Confirmed", className: "badge-success", icon: CircleCheck },
   draft: { label: "草稿", className: "badge-neutral", icon: FilePenLine },
-  ai_suggested: { label: "AI 建议", className: "badge-info", icon: Sparkles },
+  ai_suggested: { label: "候选建议", className: "badge-info", icon: Sparkles },
   rejected: { label: "已拒绝 · 非当前事实", className: "badge-danger", icon: Ban },
   deprecated: { label: "已废弃 · 非当前事实", className: "badge-neutral", icon: Archive }
 } satisfies Record<SemanticLifecycleStatus, { label:string;className:string;icon:typeof CircleCheck }>;

@@ -13,7 +13,8 @@ from app.models import (
 )
 from app.schemas.metadata import CatalogSearchRequest
 from app.services.knowledge_evidence import document_citation, evidence_runtime, mode_knowledge_types
-from app.services.llm.prompt_runtime import get_prompt_runtime, prepare_model_input, execute_runtime_chat
+from app.services.llm.execution_metadata import build_execution_metadata, deterministic_execution_metadata, stable_hash
+from app.services.llm.prompt_runtime import get_prompt_runtime, prepare_model_input, execute_runtime_chat_with_metadata
 from app.services.metadata.catalog_service import search_catalog, like_pattern
 from app.services.retrieval import HybridRetriever
 from .citation_validator import validate_citations
@@ -238,21 +239,31 @@ async def data_field_answer(db, project_id, query, **filters):
     evidence.extend(citations)
     result = {"answer": "现有证据不足，结论待确认。", "confidence_level": "low", "citations": evidence,
               "supported_claims": [], "unsupported_claims": [], "open_questions": sections["gaps"],
-              "retrieval_log_id": log_id, "answer_status": "needs_confirmation", "answer_mode": "data_field", "sections": sections}
+              "retrieval_log_id": log_id, "answer_status": "needs_confirmation", "answer_mode": "data_field", "sections": sections,
+              "execution_metadata": deterministic_execution_metadata(
+                  "data_field_answer",
+                  context_hash=stable_hash({"query": query, "filters": filters}),
+              )}
     if not evidence:
         return result
+    runtime = evidence_runtime(get_prompt_runtime(db, "regulatory_field_explanation"))
     try:
-        runtime = evidence_runtime(get_prompt_runtime(db, "regulatory_field_explanation"))
         runtime.system_prompt += "\n返回claims数组，每条仅含citation_id和从该证据quoted_content逐字摘录的text；候选不是已确认关系。无可靠摘录返回空数组。"
         prompt = json.dumps({"question": query, "context": context, "evidence": evidence}, ensure_ascii=False)
         levels = [item["confidentiality_level"] for item in items] + ["internal"]
         model_input = prepare_model_input(runtime, prompt, levels, db=db, project_id=project_id)
-        output = await execute_runtime_chat(db, project_id, runtime, model_input, DataFieldOutput,
+        output, execution_metadata = await execute_runtime_chat_with_metadata(db, project_id, runtime, model_input, DataFieldOutput,
             confidentiality=max(levels, key=lambda level: {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}.get(level, 1)),
             retrieval_log_id=log_id, interactive=True)
-    except Exception:
+    except Exception as exc:
+        execution_metadata = getattr(exc, "execution_metadata", None) or build_execution_metadata(
+            runtime,
+            execution_kind="degraded",
+            degraded_reason=getattr(exc, "error_type", type(exc).__name__),
+        )
         result.update(answer="模型生成暂时不可用，已返回结构化证据，结论待确认。", answer_status="degraded")
         sections["gaps"].append("模型生成失败或数据分类策略禁止外发，请人工核验证据。")
+        result["execution_metadata"] = execution_metadata
         return result
     by_id = {e["citation_id"]: e for e in evidence}
     claims = []
@@ -271,4 +282,5 @@ async def data_field_answer(db, project_id, query, **filters):
         result["answer"] = "证据摘录（候选及草稿不代表已确认取值关系）：\n" + "\n".join(claims)
         result["supported_claims"] = claims
     result["answer_status"] = "degraded" if retrieval_failed else "needs_confirmation" if rejected or sections["gaps"] or not claims else "grounded"
+    result["execution_metadata"] = execution_metadata
     return result

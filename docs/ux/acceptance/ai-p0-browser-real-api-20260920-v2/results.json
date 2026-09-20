@@ -1,0 +1,22 @@
+{
+  "actualFrontend": true,
+  "apiTransport": "real",
+  "realModel": false,
+  "executedAt": "2026-09-20T11:39:12.329Z",
+  "checks": {
+    "promptReadOnly": true,
+    "missingPolicyBasisVisible": true,
+    "contextCompletenessVisible": true,
+    "executionLabelVisible": true,
+    "mockLabelVisible": true,
+    "feedbackToRegressionVisible": true
+  },
+  "screenshots": {
+    "promptReadOnly": "C:\\Users\\李儒伟\\Documents\\智能分析智能体平台\\docs\\ux\\acceptance\\ai-p0-browser-real-api-20260920-v2\\prompt-readonly.png",
+    "lineageExplanation": "C:\\Users\\李儒伟\\Documents\\智能分析智能体平台\\docs\\ux\\acceptance\\ai-p0-browser-real-api-20260920-v2\\lineage-explanation.png",
+    "feedbackRegression": "C:\\Users\\李儒伟\\Documents\\智能分析智能体平台\\docs\\ux\\acceptance\\ai-p0-browser-real-api-20260920-v2\\feedback-regression.png"
+  },
+  "pageErrors": [],
+  "executionLabel": "Mock 流程",
+  "passed": true
+}

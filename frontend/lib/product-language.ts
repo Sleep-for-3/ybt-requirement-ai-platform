@@ -11,7 +11,7 @@ const STATUS_LABELS: Record<string, string> = {
   claimed: "已领取",
   answered: "已回答",
   draft: "草稿",
-  ai_suggested: "AI 建议",
+  ai_suggested: "候选建议",
   parsed: "已解析",
   open: "待处理",
   approved: "已通过",
