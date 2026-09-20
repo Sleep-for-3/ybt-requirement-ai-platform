@@ -1,4 +1,36 @@
-# 知识文档审核入口热修复（68179e8）
+# 知识治理与监管问答热修复（4b8883b）
+
+## 监管问答“问题或筛选条件无效”（4b8883b）
+
+### 现象与根因
+
+- 监管知识问答是“确定性检索 + 大模型组织回答”，不是把整份文档直接交给模型自由回答。检索先确定可引用知识单元，模型只能基于这些单元生成结论。
+- 生产项目 `1` 当时没有 `embedding_index_versions` 的 active 正式索引。Milvus 模式下，原 `hybrid` 检索在项目尚无正式索引时抛出 `No active formal semantic index exists for this project`。
+- 接口将该错误返回为 `400`，前端 `askErrorMessage` 对 `400/422` 统一显示“问题或筛选条件无效”，因此文档已经生效但页面仍表现为输入无效。
+- `vector_store=healthy` 只说明 Milvus 组件可用，不能证明每个项目都已经发布正式向量索引。
+
+### 修复
+
+- `HybridRetriever` 在 Milvus 模式下遇到项目无 active 正式索引时，不再让 `hybrid` 问答失败；保留确定性关键词检索，并明确记录 `keyword_only` 降级。
+- `keyword_only` 和 `vector_only` 的既有语义不变；`vector_only` 仍要求正式索引，避免把降级伪装成向量检索。
+- 检索日志、索引状态和回答可信度继续暴露“正式索引未覆盖/关键词降级”，不伪造索引证据。
+
+### 验证
+
+- `backend/tests/test_hybrid_retriever.py`：`3 passed`。
+- 与 `backend/tests/test_knowledge_rag.py` 联合回归：`24 passed`。
+- `backend/tests/test_release_hardening.py`：`4 passed`。
+- 生产容器代码已确认包含无正式索引时的关键词降级逻辑。
+- 生产项目 `1` 直接调用 `grounded_answer`，问题“客户证件类型的报送范围和监管依据是什么？”返回 `answer_status=grounded`、`citations=10`、`retrieval_log_id=529`，索引状态为 `keyword_fallback=true`，未再出现“无正式索引”异常。
+
+### 发布
+
+- GitHub `main`：`4b8883b`。
+- backend / frontend / worker / beat / embedding：`4b8883b` 镜像，全部 healthy。
+- readiness 门禁：11 项全部 healthy。
+- 发布前备份：`/data/ybt/backups/release-4b8883b/db.dump`。
+
+## 知识文档审核入口热修复（68179e8）
 
 ## 问题
 
