@@ -89,43 +89,63 @@ class HybridRetriever:
 
         vector: dict[int, float] = {}
         active_index = None
+        effective_retrieval_mode = retrieval_mode
         if retrieval_mode in {"vector_only", "hybrid"}:
-            embedding = get_embedding_service()
-            query_vector = embed_with_observability(
-                self.db,
-                project_id,
-                embedding,
-                [query],
-                ["internal"],
-                input_type="query",
-            )[0]
             if settings.vector_store_provider == "milvus":
                 active_index = get_active_index_version(self.db, project_id)
                 if active_index is None:
-                    raise ValueError(
-                        "No active formal semantic index exists for this project; run reindex first"
+                    if retrieval_mode == "vector_only":
+                        raise ValueError(
+                            "No active formal semantic index exists for this project; run reindex first"
+                        )
+                    # Hybrid Q&A must remain usable before a project has completed
+                    # its first formal index. Keyword retrieval is the explicit
+                    # degradation path and is reported through index freshness.
+                    effective_retrieval_mode = "keyword_only"
+                else:
+                    embedding = get_embedding_service()
+                    query_vector = embed_with_observability(
+                        self.db,
+                        project_id,
+                        embedding,
+                        [query],
+                        ["internal"],
+                        input_type="query",
+                    )[0]
+                    if len(query_vector) != active_index.vector_dimension:
+                        raise ValueError(
+                            "Query embedding dimension does not match the active index dimension"
+                        )
+                    store = get_vector_store(
+                        active_index.collection_name,
+                        active_index.vector_dimension,
                     )
-                if len(query_vector) != active_index.vector_dimension:
-                    raise ValueError(
-                        "Query embedding dimension does not match the active index dimension"
+                    filters = {
+                        "embedding_index_version_id": active_index.id,
+                        "project_id": project_id,
+                    }
+                    if knowledge_types:
+                        filters["knowledge_type"] = knowledge_types
+                    vector_results = store.search(
+                        query_vector,
+                        top_k=max(top_k * 3, settings.vector_top_k),
+                        filters=filters,
                     )
-                store = get_vector_store(
-                    active_index.collection_name,
-                    active_index.vector_dimension,
-                )
-                filters = {
-                    "embedding_index_version_id": active_index.id,
-                    "project_id": project_id,
-                }
-                if knowledge_types:
-                    filters["knowledge_type"] = knowledge_types
-                vector_results = store.search(
-                    query_vector,
-                    top_k=max(top_k * 3, settings.vector_top_k),
-                    filters=filters,
-                )
+                    for item in vector_results:
+                        if item.metadata.get("knowledge_unit_id"):
+                            unit_id = int(item.metadata["knowledge_unit_id"])
+                            vector[unit_id] = max(vector.get(unit_id, -1.0), float(item.score))
             else:
                 # The in-memory store remains a deterministic test adapter only.
+                embedding = get_embedding_service()
+                query_vector = embed_with_observability(
+                    self.db,
+                    project_id,
+                    embedding,
+                    [query],
+                    ["internal"],
+                    input_type="query",
+                )[0]
                 store = get_vector_store()
                 scope_filters = [
                     {"knowledge_scope": "project", "project_id": project_id},
@@ -144,10 +164,10 @@ class HybridRetriever:
                         top_k=max(top_k * 3, settings.vector_top_k),
                         filters=filters,
                     ))
-            for item in vector_results:
-                if item.metadata.get("knowledge_unit_id"):
-                    unit_id = int(item.metadata["knowledge_unit_id"])
-                    vector[unit_id] = max(vector.get(unit_id, -1.0), float(item.score))
+                for item in vector_results:
+                    if item.metadata.get("knowledge_unit_id"):
+                        unit_id = int(item.metadata["knowledge_unit_id"])
+                        vector[unit_id] = max(vector.get(unit_id, -1.0), float(item.score))
 
         normalized_keyword = _normalize_scores(keyword)
         normalized_vector = _normalize_scores(vector)
@@ -270,7 +290,7 @@ class HybridRetriever:
         log = RetrievalLog(
             project_id=project_id,
             query_text=query,
-            query_type=retrieval_mode,
+            query_type=effective_retrieval_mode,
             target_field_id=target_field_id,
             scenario_id=scenario_id,
             filters_json={
@@ -280,7 +300,7 @@ class HybridRetriever:
                 "keyword_weight": keyword_weight,
                 "vector_weight": vector_weight,
             },
-            retrieval_strategy=retrieval_mode,
+            retrieval_strategy=effective_retrieval_mode,
             keyword_result_count=len(keyword),
             vector_result_count=len(vector),
             final_result_count=len(items),

@@ -123,3 +123,34 @@ def test_vector_only_and_hybrid_merge_each_chunk_once(db_session, monkeypatch):
     assert len({item["knowledge_unit_id"] for item in hybrid_items}) == len(hybrid_items)
     assert hybrid_items[0]["final_score"] == hybrid_items[0]["rerank_score"]
     assert {"keyword", "vector"} <= set(hybrid_items[0]["rank_sources"])
+
+
+def test_hybrid_falls_back_to_keywords_before_first_formal_index(db_session, monkeypatch):
+    project, units = _seed(db_session)
+    settings = _settings()
+    settings.vector_store_provider = "milvus"
+    monkeypatch.setattr("app.services.retrieval.hybrid_retriever.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.services.retrieval.hybrid_retriever.get_active_index_version",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.hybrid_retriever.get_embedding_service",
+        lambda: (_ for _ in ()).throw(AssertionError("keyword fallback must not embed")),
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.hybrid_retriever.get_vector_store",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("keyword fallback must not search vectors")),
+    )
+
+    log, items = HybridRetriever(db_session).search(
+        project.id,
+        "贷款余额",
+        top_k=5,
+        retrieval_mode="hybrid",
+    )
+
+    assert log.retrieval_strategy == "keyword_only"
+    assert items and items[0]["knowledge_unit_id"] == units[0].id
+    assert items[0]["rank_sources"] == ["keyword"]
+    assert items[0]["vector_score"] == 0
