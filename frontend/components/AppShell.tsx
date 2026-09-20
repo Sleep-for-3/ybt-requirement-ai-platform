@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Database,
   FileOutput,
+  FileUp,
   FileSpreadsheet,
   FolderKanban,
   GitBranch,
@@ -51,6 +52,7 @@ type NavItem = {
   label: string;
   icon: typeof Bell;
   audience?: NavigationAudience;
+  children?: NavItem[];
   /** Prefix used for the active check when it differs from href. */
   match?: string;
 };
@@ -61,7 +63,10 @@ const NAV_GROUPS: NavGroup[] = [
   { label: "核心任务", items: [
     { href: "/workspace", label: "需求文档", icon: FileSpreadsheet },
     { href: "/lineage/nebula", match: "/lineage", label: "数据血缘", icon: GitBranch, audience: "technical" },
-    { href: "/resources", label: "资料与数据", icon: LibraryBig }
+    { href: "/resources", label: "资料与数据", icon: LibraryBig, children: [
+      { href: "/resources/architecture", label: "数据架构与表归属", icon: Layers3, audience: "technical" },
+      { href: "/resources/import", label: "统一批量导入", icon: FileUp, audience: "technical" }
+    ] }
   ] }
 ];
 const SECONDARY_NAV: NavItem[] = [
@@ -110,22 +115,33 @@ function SidebarNav({ access, pathname, runningJobs = 0 }: { access: NavigationA
             {group.items.map((item) => {
               const active = isActive(pathname, item);
               const Icon = item.icon;
+              const children = (item.children || []).filter(canSee);
               return (
-                <Link
-                  className={`group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition ${
-                    active ? "bg-white/[0.09] text-white" : "text-emerald-50/65 hover:bg-white/[0.05] hover:text-white"
-                  }`}
-                  href={item.href}
-                  key={item.href}
-                >
-                  <Icon className={active ? "text-pine-300" : "text-emerald-100/40 transition group-hover:text-emerald-100/75"} size={16} />
-                  {item.label}
-                  {item.href === "/jobs" && runningJobs > 0 ? (
-                    <span className="ml-auto min-w-5 rounded-full bg-amber-300 px-1.5 text-center text-[10px] font-bold leading-5 text-amber-950" aria-label={`${runningJobs} 个活动任务`}>
-                      {runningJobs > 99 ? "99+" : runningJobs}
-                    </span>
-                  ) : null}
-                </Link>
+                <div key={item.href}>
+                  <Link
+                    className={`group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition ${
+                      active ? "bg-white/[0.09] text-white" : "text-emerald-50/65 hover:bg-white/[0.05] hover:text-white"
+                    }`}
+                    href={item.href}
+                  >
+                    <Icon className={active ? "text-pine-300" : "text-emerald-100/40 transition group-hover:text-emerald-100/75"} size={16} />
+                    {item.label}
+                    {item.href === "/jobs" && runningJobs > 0 ? (
+                      <span className="ml-auto min-w-5 rounded-full bg-amber-300 px-1.5 text-center text-[10px] font-bold leading-5 text-amber-950" aria-label={`${runningJobs} 个活动任务`}>
+                        {runningJobs > 99 ? "99+" : runningJobs}
+                      </span>
+                    ) : null}
+                  </Link>
+                  {children.length ? <div className="ml-4 mt-0.5 space-y-0.5 border-l border-white/[0.08] pl-2">
+                    {children.map((child) => {
+                      const childActive = isActive(pathname, child);
+                      const ChildIcon = child.icon;
+                      return <Link className={`group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] transition ${childActive ? "bg-white/[0.08] text-white" : "text-emerald-50/55 hover:bg-white/[0.05] hover:text-white"}`} href={child.href} key={child.href}>
+                        <ChildIcon className={childActive ? "text-pine-300" : "text-emerald-100/35"} size={14} />{child.label}
+                      </Link>;
+                    })}
+                  </div> : null}
+                </div>
               );
             })}
           </div>

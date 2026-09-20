@@ -8,8 +8,8 @@ from fastapi import HTTPException
 from openpyxl import Workbook
 from sqlalchemy import select, func
 
-from app.models import (BackgroundJob, CatalogColumn, CatalogTable, Institution, Project, ResourceImportBatch,
-                        ScriptFileVersion, User)
+from app.models import (BackgroundJob, CatalogColumn, CatalogTable, Institution, LineageNode, LineageRevision,
+                        LineageRevisionNode, Project, ResourceImportBatch, ScriptFileVersion, User)
 from app.models.data_architecture import CatalogClassification
 from app.services.metadata import batch_import as service
 from app.services.metadata.batch_parser import parse_file
@@ -173,6 +173,30 @@ def test_cross_layer_script_reads_never_inherit_batch_default(sample):
     assert db.scalar(select(func.count()).select_from(ScriptFileVersion)) == 1
     bindings = list(db.scalars(select(CatalogClassification)))
     assert len(bindings) == 1 and db.get(CatalogTable, bindings[0].catalog_table_id).table_name == "target"
+
+
+def test_batch_reresolves_earlier_sql_after_later_ddl_is_applied(sample):
+    db, project, _, _ = sample
+    # The SQL item is applied first and initially cannot see the tables created
+    # by the following DDL item. The final batch pass must rebind those nodes
+    # before building the immutable lineage revision.
+    batch = make_batch(sample, [
+        ("01_load.sql", b"INSERT INTO b.s.target (id) SELECT id FROM b.s.source;"),
+        ("02_tables.ddl", b"CREATE TABLE b.s.source (id INT); CREATE TABLE b.s.target (id INT);"),
+    ])
+    result, _ = apply_batch(sample, batch, "interleaved-metadata-job")
+
+    assert result["success_count"] == 2 and not result["failed_count"]
+    columns = list(db.scalars(select(LineageNode).where(
+        LineageNode.project_id == project.id,
+        LineageNode.node_type == "column",
+    )))
+    assert columns and all(node.catalog_column_id is not None for node in columns)
+
+    revision = db.scalar(select(LineageRevision).where(LineageRevision.project_id == project.id))
+    snapshots = list(db.scalars(select(LineageRevisionNode).where(LineageRevisionNode.revision_id == revision.id)))
+    assert snapshots
+    assert any(row.snapshot_json.get("catalog_column_id") is not None for row in snapshots)
 
 
 @pytest.mark.parametrize("path", ["../escape.sql", "/absolute.sql", "..\\escape.sql"])

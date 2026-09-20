@@ -13,7 +13,7 @@ from app.models import (BackgroundJob, BackgroundJobItem, BusinessSystem, Catalo
 from app.models.data_architecture import CatalogClassification
 from app.services import data_architecture
 from app.services.lineage.archive_ingestion import read_safe_script_archive
-from app.services.lineage.ingestion import ScriptIngestionService, validate_script_path
+from app.services.lineage.ingestion import ScriptIngestionService, reresolve_lineage_version, validate_script_path
 from app.services.lineage.revisions import LineageRevisionService
 from app.services.metadata.batch_parser import parse_file
 from app.services.storage import get_storage_service
@@ -392,6 +392,16 @@ def batch_import_handler(db, job):
             progress.status = "failed"; progress.result_summary_json = {}; progress.error_message = item.result_json["error"]
             db.commit()
     current = items(db, batch)
+    script_version_ids = sorted({
+        int(item.result_json["script_version_id"])
+        for item in current
+        if item.status == "completed" and item.result_json.get("script_version_id")
+    })
+    # Catalog and SQL files can be applied in separate attempts of the same
+    # preview. Re-run binding for every completed script version after the
+    # whole batch, not only for files handled in this pass.
+    for version_id in script_version_ids:
+        reresolve_lineage_version(db, version_id)
     succeeded = sum(x.status == "completed" for x in current)
     failed = sum(x.status not in {"completed", "skipped"} for x in current)
     skipped = sum(x.status == "skipped" for x in current)

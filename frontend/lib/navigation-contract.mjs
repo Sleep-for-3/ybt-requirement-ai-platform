@@ -81,7 +81,9 @@ export function canViewNavigationAudience(audience, access) {
 export const RESOURCE_MODULES = {
   "/knowledge": "知识与证据", "/datasources": "只读数据源", "/catalog": "数据目录",
   "/business-systems": "业务系统", "/mart": "监管集市", "/historical-calibers": "历史口径",
-  "/templates": "监管目标模板", "/fields": "目标字段与场景", "/traceability-templates": "历史口径模板"
+  "/templates": "监管目标模板", "/fields": "目标字段与场景", "/traceability-templates": "历史口径模板",
+  "/resources/architecture": "数据架构与表归属", "/resources/import": "统一批量导入",
+  "/resources/reverse-requirements": "从跑批生成需求"
 };
 export function isResourcesPath(pathname) {
   return pathname === "/resources" || Object.keys(RESOURCE_MODULES).some(p => pathname === p || pathname.startsWith(`${p}/`));

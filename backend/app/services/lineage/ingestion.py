@@ -138,7 +138,7 @@ class ScriptIngestionService:
             # conservative resolver so new catalog metadata can bind existing
             # nodes without creating a duplicate script version or rewriting
             # any historical parser facts.
-            self._reresolve_lineage_nodes(duplicate.id)
+            reresolve_lineage_version(self.db, duplicate.id)
             # Re-importing an older immutable version deliberately restores
             # that version as current. Version numbers remain allocated
             # monotonically, so a later edit cannot collide with historical
@@ -407,20 +407,30 @@ class ScriptIngestionService:
                 resolve_lineage_node(self.db, row)
         self.db.flush()
 
-    def _reresolve_lineage_nodes(self, version_id: int) -> None:
-        rows = list(self.db.scalars(select(LineageNode).where(
-            LineageNode.script_file_version_id == version_id,
-            LineageNode.node_type.in_(("table", "temporary_table", "column")),
-        )))
-        for row in rows:
-            resolve_lineage_node(self.db, row)
-        self.db.flush()
-
     def _node_count(self, version_id: int) -> int:
         return len(self.db.scalars(select(LineageNode.id).where(LineageNode.script_file_version_id == version_id)).all())
 
     def _edge_count(self, version_id: int) -> int:
         return len(self.db.scalars(select(LineageEdge.id).where(LineageEdge.script_file_version_id == version_id)).all())
+
+
+def reresolve_lineage_version(db: Session, version_id: int) -> int:
+    """Re-run conservative node binding against the current project catalog.
+
+    Offline batches can finish their SQL items before later files in the same
+    batch create the catalog rows. Replaying the resolver after the whole
+    batch is applied makes the operation idempotent without rewriting parser
+    facts or creating another script version.
+    """
+
+    rows = list(db.scalars(select(LineageNode).where(
+        LineageNode.script_file_version_id == int(version_id),
+        LineageNode.node_type.in_(("table", "temporary_table", "column")),
+    )))
+    for row in rows:
+        resolve_lineage_node(db, row)
+    db.flush()
+    return len(rows)
 
 
 def validate_script_path(value: str) -> str:

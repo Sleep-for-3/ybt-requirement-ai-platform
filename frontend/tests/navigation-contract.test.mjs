@@ -143,7 +143,7 @@ test("list-to-detail links carry the complete list URL as return state", () => {
 });
 
 test("resources has explicit list parents and no dependency on browser history", () => {
-  const lists=["/knowledge","/knowledge/ask","/knowledge/search","/knowledge/documents","/datasources","/catalog","/business-systems","/mart","/historical-calibers","/templates","/fields","/traceability-templates"];
+  const lists=["/knowledge","/knowledge/ask","/knowledge/search","/knowledge/documents","/datasources","/catalog","/business-systems","/mart","/historical-calibers","/templates","/fields","/traceability-templates","/resources/architecture","/resources/import","/resources/reverse-requirements"];
   assert.equal(navigationTrailForPath("/resources").parentHref,null);
   for(const path of lists){
     const trail=navigationTrailForPath(path);
