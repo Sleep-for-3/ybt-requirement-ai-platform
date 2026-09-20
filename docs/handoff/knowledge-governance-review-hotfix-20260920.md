@@ -18,6 +18,8 @@
 - 前端自动化测试：`148 passed`。
 - `npx tsc --noEmit`：通过。
 - 隔离生产构建：通过，未覆盖现有 `.next`。
+- 生产库核对：当前活跃项目 `天津农商银行智能监管平台`（ID `28`）已存在当前账号的 `project_manager + active` 成员关系，说明项目权限关系创建正常，消失原因确为前端旧权限缓存。
+- 生产发布：`f6261b1`，backend / frontend / worker / beat / embedding 全部 healthy，readiness 11 项 healthy；发布前备份为 `/data/ybt/backups/release-f6261b1/db.dump`。
 
 ## 监管问答“问题或筛选条件无效”（4b8883b）
 
