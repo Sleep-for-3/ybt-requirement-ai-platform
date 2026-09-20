@@ -205,8 +205,15 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const runningJobs = jobsQuery.data?.active_count || 0;
 
   useEffect(() => {
-    apiGet<NonNullable<typeof user>>("/auth/me").then(setUser).catch(() => setUser(null));
-  }, []);
+    let cancelled = false;
+    // Project permissions are scoped by project. Refresh them whenever the
+    // selected project changes so a newly-created project cannot inherit the
+    // previous project's stale navigation permissions.
+    apiGet<NonNullable<typeof user>>("/auth/me")
+      .then((nextUser) => { if (!cancelled) setUser(nextUser); })
+      .catch(() => { if (!cancelled) setUser(null); });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   useEffect(() => {
     setDrawerOpen(false);
