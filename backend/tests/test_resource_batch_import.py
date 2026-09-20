@@ -198,6 +198,11 @@ def test_batch_reresolves_earlier_sql_after_later_ddl_is_applied(sample):
     assert snapshots
     assert any(row.snapshot_json.get("catalog_column_id") is not None for row in snapshots)
 
+    db.refresh(batch)
+    sql_references = next(item for item in batch.preview_json["items"] if item["path"] == "01_load.sql")["references"]
+    assert sql_references
+    assert all(reference["catalog_table_id"] is not None for reference in sql_references)
+
 
 @pytest.mark.parametrize("path", ["../escape.sql", "/absolute.sql", "..\\escape.sql"])
 def test_zip_path_traversal_rejected_without_assets(sample, path):

@@ -402,6 +402,10 @@ def batch_import_handler(db, job):
     # whole batch, not only for files handled in this pass.
     for version_id in script_version_ids:
         reresolve_lineage_version(db, version_id)
+    # The editable preview is also the post-apply result view. Rebuild it after
+    # catalog and script files have all been applied so references no longer
+    # show pre-apply "missing catalog asset" warnings.
+    batch.preview_json = preview(db, batch)
     succeeded = sum(x.status == "completed" for x in current)
     failed = sum(x.status not in {"completed", "skipped"} for x in current)
     skipped = sum(x.status == "skipped" for x in current)
