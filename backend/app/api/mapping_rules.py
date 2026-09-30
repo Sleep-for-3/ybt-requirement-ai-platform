@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -19,8 +19,10 @@ from app.schemas import (
     SourceToMartMappingUpdate,
 )
 from app.services.auth.dependencies import CurrentPrincipal
+from app.schemas.mapping_adoption import MappingDraftAdoption
+from app.services.llm.execution_metadata import stable_hash
 from app.services.auth.permission_service import PermissionService
-from app.services.governance.double_layer_review import MappingGenerationNotEditable
+from app.services.governance.double_layer_review import MappingGenerationNotEditable, ensure_double_layer_mapping_editable
 from app.services.mapping.generator_context import (
     GenerationActorError,
     GenerationBlockedError,
@@ -155,10 +157,12 @@ async def generate_source_to_mart_mapping_draft(
 
 
 @router.post("/source-to-mart-mappings/{mapping_id}/adopt-ai-draft", response_model=SourceToMartMappingRead)
-def adopt_source_to_mart_draft(mapping_id: int, db: Session = Depends(get_db)) -> SourceToMartMapping:
+def adopt_source_to_mart_draft(mapping_id: int, principal: CurrentPrincipal, payload: MappingDraftAdoption | None = None, db: Session = Depends(get_db)) -> SourceToMartMapping:
     mapping = _get_source_to_mart_or_404(db, mapping_id)
+    _guard_adoption(db, principal, "source_to_mart", mapping)
     if not _has_text(mapping.ai_generated_content):
         raise HTTPException(status_code=400, detail="AI draft is empty")
+    _guard_confirmed_draft(mapping, payload)
     mapping.final_content = mapping.ai_generated_content
     mapping.mapping_status = "draft"
     db.commit()
@@ -294,10 +298,12 @@ async def generate_mart_to_ybt_mapping_draft(
 
 
 @router.post("/mart-to-ybt-mappings/{mapping_id}/adopt-ai-draft", response_model=MartToYbtMappingRead)
-def adopt_mart_to_ybt_draft(mapping_id: int, db: Session = Depends(get_db)) -> MartToYbtMapping:
+def adopt_mart_to_ybt_draft(mapping_id: int, principal: CurrentPrincipal, payload: MappingDraftAdoption | None = None, db: Session = Depends(get_db)) -> MartToYbtMapping:
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    _guard_adoption(db, principal, "mart_to_ybt", mapping)
     if not _has_text(mapping.ai_generated_content):
         raise HTTPException(status_code=400, detail="AI draft is empty")
+    _guard_confirmed_draft(mapping, payload)
     mapping.final_content = mapping.ai_generated_content
     mapping.mapping_status = "draft"
     db.commit()
@@ -440,6 +446,23 @@ def _delete_mapping_dependencies(db: Session, mapping_type: str, mapping_id: int
         rows = db.scalars(select(model).where(model.mapping_type == mapping_type, model.mapping_id == mapping_id)).all()
         for row in rows:
             db.delete(row)
+
+
+def _guard_adoption(db, principal, mapping_type, mapping):
+    PermissionService(db, principal).require_project_permission(mapping.project_id, "technical.edit")
+    model = type(mapping)
+    db.execute(update(model).where(model.id == mapping.id, model.project_id == mapping.project_id)
+        .values(updated_at=model.updated_at).execution_options(synchronize_session=False))
+    db.refresh(mapping)
+    try:
+        ensure_double_layer_mapping_editable(db, mapping_type, mapping)
+    except MappingGenerationNotEditable as exc:
+        raise _generation_governance_http_error(exc) from exc
+
+
+def _guard_confirmed_draft(mapping, payload: MappingDraftAdoption | None) -> None:
+    if payload is None or payload.expected_draft_hash != stable_hash(mapping.ai_generated_content):
+        raise HTTPException(status_code=409, detail={"error_code": "mapping_draft_changed"})
 
 
 def _has_text(value: str | None) -> bool:

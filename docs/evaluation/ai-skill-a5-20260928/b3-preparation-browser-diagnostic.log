@@ -1,0 +1,10 @@
+AssertionError [ERR_ASSERTION]: {"detail":"Missing project permission: profile.request","error_code":"permission_denied","user_message":"当前账号无权执行此操作","technical_message":null,"trace_id":"3a1d8308355b43d1bfa74b3bcbf3317d","retryable":false,"suggested_actions":["联系管理员申请相应权限"]}
+    at file:///C:/Users/%E6%9D%8E%E5%84%92%E4%BC%9F/Documents/%E6%99%BA%E8%83%BD%E5%88%86%E6%9E%90%E6%99%BA%E8%83%BD%E4%BD%93%E5%B9%B3%E5%8F%B0/frontend/tests/ai-skill-candidate-preparation.browser.acceptance.mjs:69:10 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"none","checks":["prepare_in_browser_preserves_mapping_and_requires_explicit_selection","selected_candidate_cannot_bypass_server_profile_gate"],"errors":[],"screenshots":["failure.png"],"passed":false,"error":"{\"detail\":\"Missing project permission: profile.request\",\"error_code\":\"permission_denied\",\"user_message\":\"当前账号无权执行此操作\",\"technical_message\":null,\"trace_id\":\"3a1d8308355b43d1bfa74b3bcbf3317d\",\"retryable\":false,\"suggested_actions\":[\"联系管理员申请相应权限\"]}"}

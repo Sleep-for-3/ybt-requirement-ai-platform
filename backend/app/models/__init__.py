@@ -1,3 +1,4 @@
+from app.models.ai_skill import AISkillDefinition, AISkillVersion, AISkillScopeBinding, AISkillReleaseEvent, AISkillTestCase, AISkillTestRun, AISkillTestResult
 from app.models.data_architecture import DataArchitecture, DataArchitectureRevision, CatalogClassification
 from app.models.batch_import import ResourceImportBatch, ResourceImportItem
 from app.models.requirement import (
@@ -236,6 +237,13 @@ __all__ = [
     "RequirementGenerationItem",
     "RequirementReviewSubmission",
     "RequirementRevision",
+    "AISkillDefinition",
+    "AISkillVersion",
+    "AISkillScopeBinding",
+    "AISkillReleaseEvent",
+    "AISkillTestCase",
+    "AISkillTestRun",
+    "AISkillTestResult",
     "TemplateColumnMapping",
     "TemplateSheetMapping",
 ]

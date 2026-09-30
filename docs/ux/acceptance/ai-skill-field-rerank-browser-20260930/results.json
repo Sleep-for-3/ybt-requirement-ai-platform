@@ -1,0 +1,17 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "deterministic_recall_renders_without_any_model_call",
+    "explicit_action_applies_mock_rerank_and_displays_fixed_skill_provenance",
+    "model_rerank_writes_no_mapping_or_recommendation",
+    "edited_query_discards_the_previous_model_ordering"
+  ],
+  "errors": [],
+  "screenshots": [
+    "field-rerank.png"
+  ],
+  "passed": true
+}

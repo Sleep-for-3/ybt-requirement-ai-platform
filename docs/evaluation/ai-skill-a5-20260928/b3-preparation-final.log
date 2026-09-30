@@ -1,0 +1,13 @@
+..........................................................               [100%]
+============================== warnings summary ===============================
+tests/test_planned_search.py::test_fixed_rank_fusion_comparison[consensus_promotes_supported_clause]
+tests/test_planned_search.py::test_fixed_rank_fusion_comparison[authority_survives_frequency]
+tests/test_planned_search.py::test_fixed_rank_fusion_comparison[separate_question_evidence_retained]
+tests/test_planned_search.py::test_fixed_rank_fusion_comparison[ties_resolve_by_stable_id]
+tests/test_planned_search.py::test_fixed_rank_fusion_comparison[no_evidence_stays_empty]
+  tests\test_planned_search.py:18: PytestWarning: record_property is incompatible with junit_family 'xunit2' (use 'legacy' or 'xunit1')
+    @pytest.mark.parametrize("case", GOLDEN, ids=[case["name"] for case in GOLDEN])
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: C:\Users\李儒伟\Documents\智能分析智能体平台\docs\evaluation\ai-skill-a5-20260928\b3-preparation-final.xml -
+58 passed, 5 warnings in 24.98s

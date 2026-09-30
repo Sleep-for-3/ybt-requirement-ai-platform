@@ -110,6 +110,7 @@ def start_workflow(
     created_by: int,
     assignments: dict[str, int] | None = None,
     due_at=None,
+    commit: bool = True,
 ) -> WorkflowInstance:
     definition = _definition(db, workflow_key)
     steps = list(definition.steps_json)
@@ -202,7 +203,10 @@ def start_workflow(
         db.flush()
         notify_user(db, assignee, "task_assigned", "新审核任务", f"已分派 {step['step_key']} 任务", project_id=project_id, resource_type="review_task", resource_id=task.id)
     record_audit(db, action="assign", resource_type="workflow_instance", resource_id=instance.id, actor_user_id=created_by, project_id=project_id, after={"workflow_key": workflow_key, "target_type": target_type, "target_id": target_id})
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(instance)
     return instance
 

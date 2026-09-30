@@ -1,0 +1,28 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "variable_insertion_and_unsaved_switch_guard",
+    "draft_saved",
+    "deterministic_and_mock_passed",
+    "author_cannot_publish_in_ui",
+    "independent_publish_and_binding",
+    "auxiliary_context_enabled_with_explicit_missing_history",
+    "real_lineage_skill_four_layers",
+    "feedback_exact_input_regression",
+    "restore_new_draft_keeps_old_binding",
+    "readable_version_comparison"
+  ],
+  "errors": [],
+  "screenshots": [
+    "pending-approval.png",
+    "published.png",
+    "lineage-layers.png",
+    "feedback-regression.png",
+    "restored-draft.png",
+    "version-comparison.png"
+  ],
+  "passed": true
+}

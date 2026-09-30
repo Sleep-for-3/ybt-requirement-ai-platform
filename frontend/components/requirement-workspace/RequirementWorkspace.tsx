@@ -9,6 +9,7 @@ import { RequirementScopePanel, type RequirementScope } from "@/components/requi
 import { RequirementSnapshotsPanel } from "@/components/requirement-workspace/RequirementSnapshotsPanel";
 import { RequirementScriptPanel, type ScriptBasis } from "@/components/requirement-workspace/RequirementScriptPanel";
 import { RequirementGenerationPanel } from "@/components/requirement-workspace/RequirementGenerationPanel";
+import { RequirementDocumentAssistance } from "@/components/requirement-workspace/RequirementDocumentAssistance";
 import { RequirementDeliveryPanel } from "@/components/requirement-workspace/RequirementDeliveryPanel";
 import { RequirementUatPanel } from "@/components/requirement-workspace/RequirementUatPanel";
 import { RequirementRecheckPanel } from "@/components/requirement-workspace/RequirementRecheckPanel";
@@ -309,6 +310,7 @@ export function RequirementWorkspace() {
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
             currentFieldId={fieldId} fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
             onSelectField={changeField} onChanged={()=>{setEditorDirty(false);void refreshWorkspace();}}/> : null}
+          {requirement ? <RequirementDocumentAssistance key={`document-assistance:${projectId}:${requirement.id}:${scopedDocument.data?.revision?.content_version||0}`} projectId={projectId} requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0} dirty={scopeDirty||editorDirty}/> : null}
           {requirement ? <RequirementSnapshotsPanel key={`snapshots:${projectId}:${requirement.id}`} projectId={projectId} requirementId={requirement.id} version={requirement.version} contentHash={scopedDocument.isFetching?undefined:scopedDocument.data?.content_hash} dirty={scopeDirty||editorDirty} /> : null}
           {requirement ? <section className="panel mb-3 p-4" aria-label="需求完整性评估">
             <h2 className="text-sm font-semibold">需求缺口</h2>
@@ -360,6 +362,7 @@ export function RequirementWorkspace() {
               contentStatus={scopedDocument.data?.revision?.status}
               activeTab={activeTab}
               detailReady={Boolean(detailQuery.data)}
+              editorDirty={editorDirty}
               evidenceCountByField={evidenceCountByField}
               evidenceForSelected={fieldId ? evidenceCountByField[fieldId] || 0 : 0}
               exporting={exporting}

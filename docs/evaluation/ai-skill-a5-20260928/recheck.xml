@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="11" time="14.945" timestamp="2026-09-28T21:55:22.479871+08:00" hostname="LAPTOP-1CLFROQ1"><testcase classname="tests.test_requirement_recheck_concurrency" name="test_concurrent_same_event_creates_one_recheck_and_workflow" time="1.221" /><testcase classname="tests.test_requirement_recheck_concurrency" name="test_stale_loaded_requirement_cannot_create_old_recheck" time="0.726" /><testcase classname="tests.test_requirement_recheck_concurrency" name="test_recheck_and_workflow_rollback_together" time="0.643"><failure message="assert 1 == 0&#10; +  where 1 = scalar(&lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FAE70&gt;)&#10; +    where scalar = &lt;sqlalchemy.orm.session.Session object at 0x00000142A0FC8380&gt;.scalar&#10; +    and   &lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FAE70&gt; = select_from(RequirementRecheck)&#10; +      where select_from = &lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FA090&gt;.select_from&#10; +        where &lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FA090&gt; = select(&lt;sqlalchemy.sql.functions.count at 0x142a10db500; count&gt;)&#10; +          where &lt;sqlalchemy.sql.functions.count at 0x142a10db500; count&gt; = &lt;sqlalchemy.sql.functions._FunctionGenerator object at 0x00000142A0CAE5D0&gt;()&#10; +            where &lt;sqlalchemy.sql.functions._FunctionGenerator object at 0x00000142A0CAE5D0&gt; = func.count">concurrent_recheck_db = (Engine(sqlite:///C:/Users/李儒伟/AppData/Local/Temp/pytest-of-李儒伟/pytest-434/test_recheck_and_workflow_roll0/rechecks.sqlite), (1, 1, 1, 'ee7fdb8de122503ece7382fa2f82370f20523da95378de6c1398b7c53948c9e4'))
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x00000142A1384980&gt;
+
+    def test_recheck_and_workflow_rollback_together(concurrent_recheck_db, monkeypatch):
+        engine, (_, requirement_id, actor_id, change_hash) = concurrent_recheck_db
+        from app.services.governance import workflow
+        original = workflow.start_workflow
+    
+        def fail_after_creation(*args, **kwargs):
+            original(*args, **kwargs)
+            raise RuntimeError("synthetic transaction failure")
+    
+        monkeypatch.setattr(workflow, "start_workflow", fail_after_creation)
+        with Session(engine) as db:
+            with pytest.raises(RuntimeError, match="synthetic"):
+                create_recheck(db, db.get(Requirement, requirement_id), 4, change_hash, actor_id)
+            db.rollback()
+&gt;           assert db.scalar(select(func.count()).select_from(RequirementRecheck)) == 0
+E           assert 1 == 0
+E            +  where 1 = scalar(&lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FAE70&gt;)
+E            +    where scalar = &lt;sqlalchemy.orm.session.Session object at 0x00000142A0FC8380&gt;.scalar
+E            +    and   &lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FAE70&gt; = select_from(RequirementRecheck)
+E            +      where select_from = &lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FA090&gt;.select_from
+E            +        where &lt;sqlalchemy.sql.selectable.Select object at 0x00000142A13FA090&gt; = select(&lt;sqlalchemy.sql.functions.count at 0x142a10db500; count&gt;)
+E            +          where &lt;sqlalchemy.sql.functions.count at 0x142a10db500; count&gt; = &lt;sqlalchemy.sql.functions._FunctionGenerator object at 0x00000142A0CAE5D0&gt;()
+E            +            where &lt;sqlalchemy.sql.functions._FunctionGenerator object at 0x00000142A0CAE5D0&gt; = func.count
+
+tests\test_requirement_recheck_concurrency.py:98: AssertionError</failure></testcase><testcase classname="tests.test_requirement_recheck" name="test_impact_tasks_are_idempotent_and_never_modify_history" time="0.608" /><testcase classname="tests.test_requirement_recheck" name="test_explicit_new_revision_preserves_authored_content_and_requires_reconfirmation" time="0.759" /><testcase classname="tests.test_requirement_recheck" name="test_resolution_requires_new_current_verified_revision_and_approval_is_not_requirement_approval" time="0.610" /><testcase classname="tests.test_requirement_recheck" name="test_unresolved_parser_gaps_cannot_close_recheck" time="0.759" /><testcase classname="tests.test_requirement_recheck" name="test_recheck_access_isolation_and_in_review_protection" time="0.688" /><testcase classname="tests.test_requirement_recheck" name="test_metadata_template_and_policy_drift_require_explicit_review[metadata-script:metadata]" time="0.788" /><testcase classname="tests.test_requirement_recheck" name="test_metadata_template_and_policy_drift_require_explicit_review[template-script:template]" time="0.637" /><testcase classname="tests.test_requirement_recheck" name="test_metadata_template_and_policy_drift_require_explicit_review[policy-script:policy]" time="0.675" /></testsuite></testsuites>

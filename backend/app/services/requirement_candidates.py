@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.models import RequirementGenerationInput, RequirementGenerationItem
 from app.services.auth.permission_service import PermissionService
+from app.services.ai_skills.provenance import safe_execution_metadata
 from app.services.requirement_gaps import reevaluate_field
 from app.services.requirement_revisions import append_revision, load_revision, lock_requirement
 from app.services.requirement_scope import content_digest, load_requirement
@@ -88,6 +89,7 @@ def candidate_detail(db, project_id, requirement_id, item_id, principal):
         "decision": item.decision, "decision_reason": item.decision_reason,
         "adopted_content_version": item.adopted_content_version,
         "changes": changes, "physical_references": physical, "evidence": evidence,
+        "execution_metadata": safe_execution_metadata(candidate.get("execution_metadata"), candidate.get("runtime")),
         "script_rules": [deepcopy(rule) for rule in generation_input.input_json.get("script_basis", {}).get("rules", [])
             if rule["rule_id"] in candidate.get("script_rule_ids", [])],
         "gaps": [str(value) for value in candidate.get("gaps", []) if str(value).strip()]}

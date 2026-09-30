@@ -1,0 +1,22 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "requirement_skill_tested_and_independently_published",
+    "browser_generation_keeps_document_unchanged",
+    "candidate_shows_skill_mock_and_run_provenance",
+    "human_adoption_creates_pending_revision",
+    "historical_revision_unchanged",
+    "both_scenario_mapping_sources_match_displayed_text",
+    "changed_mapping_text_loses_current_source_badge"
+  ],
+  "errors": [],
+  "screenshots": [
+    "candidate-provenance.png",
+    "adopted-pending-review.png",
+    "mapping-provenance.png"
+  ],
+  "passed": true
+}

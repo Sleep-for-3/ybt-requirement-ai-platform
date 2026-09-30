@@ -1,0 +1,11 @@
+{
+  "backend": "full FastAPI app with isolated in-memory database and test principal; no startup hooks",
+  "fields": 8,
+  "independentEdits": true,
+  "historyReadOnly": true,
+  "realExport": true,
+  "lineageSnapshot": true,
+  "limitations": [
+    "Not a generation, formal review, PostgreSQL or real-model acceptance test."
+  ]
+}

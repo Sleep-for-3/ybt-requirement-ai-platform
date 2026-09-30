@@ -197,6 +197,9 @@ def test_scope_revision_keeps_fixed_basis_and_unresolved_script_gaps(snapshot_ap
 
 def test_candidate_cannot_cite_unselected_script_rule(snapshot_api, monkeypatch):
     from app.services.requirement_generation_worker import generate_candidate
+    # This unit test isolates Legacy generation from a synthetic input object;
+    # real persisted actors/bindings are covered by test_ai_skill_requirement.
+    monkeypatch.setattr("app.services.requirement_generation_worker.generate_if_bound", lambda *args: None)
     client, db, project, field, req, _ = snapshot_api
     base, _, _, payload, _ = seed(client, db, project, req, field)
     assert client.post(base + "/script-basis", json=payload).status_code == 201
@@ -205,12 +208,13 @@ def test_candidate_cannot_cite_unselected_script_rule(snapshot_api, monkeypatch)
         return {"final_content": "仅合成测试", "script_rule_ids": ["script-edge-999999"]}
     monkeypatch.setattr("app.services.requirement_generation_worker.execute_runtime_chat", fake_model)
     with pytest.raises(HTTPException, match="范围外脚本规则"):
-        generate_candidate(db, SimpleNamespace(input_json=snapshot), SimpleNamespace(field_id=field.id, section="lineage"), project)
+        generate_candidate(db, SimpleNamespace(input_json=snapshot), SimpleNamespace(id=1, field_id=field.id, section="lineage"), project)
 
 
 def test_legacy_external_profile_uses_safe_requirement_input_budget(snapshot_api, monkeypatch):
     from app.services.llm.prompt_runtime import PromptRuntime
     from app.services.requirement_generation_worker import generate_candidate
+    monkeypatch.setattr("app.services.requirement_generation_worker.generate_if_bound", lambda *args: None)
 
     client, db, project, field, req, _ = snapshot_api
     base, _, _, payload, _ = seed(client, db, project, req, field)

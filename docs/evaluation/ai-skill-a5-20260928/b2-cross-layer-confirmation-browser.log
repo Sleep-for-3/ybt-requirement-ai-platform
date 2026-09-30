@@ -1,0 +1,11 @@
+locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('alert').filter({ hasText: '候选草稿已变化' }) to be visible
+
+    at C:\Users\李儒伟\Documents\智能分析智能体平台\frontend\tests\ai-skill-cross-layer.browser.acceptance.mjs:77:64 {
+  log: [
+    "  - waiting for getByRole('alert').filter({ hasText: '候选草稿已变化' }) to be visible"
+  ],
+  name: 'TimeoutError'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"mock","checks":["source_to_mart_published_mock_generation_preserves_final_and_displays_provenance"],"errors":[],"screenshots":["failure.png"],"passed":false,"error":"locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('alert').filter({ hasText: '候选草稿已变化' }) to be visible\u001b[22m\n"}

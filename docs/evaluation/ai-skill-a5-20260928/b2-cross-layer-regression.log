@@ -1,0 +1,202 @@
+..F                                                                      [100%]
+================================== FAILURES ===================================
+__________________ test_double_layer_mapping_end_to_end_api ___________________
+
+    def test_double_layer_mapping_end_to_end_api() -> None:
+        with _client() as client:
+            project = _post(
+                client,
+                "/api/projects",
+                {"name": "双层口径项目", "bank_name": "示例银行", "description": "验证双层业务口径"},
+            )
+            table = _post(
+                client,
+                "/api/target-tables",
+                {"project_id": project["id"], "table_code": "YBT_CUSTOMER", "table_name": "客户信息表"},
+            )
+            target_field = _post(
+                client,
+                "/api/fields",
+                {
+                    "project_id": project["id"],
+                    "target_table_id": table["id"],
+                    "field_code": "CERT_TYPE",
+                    "field_name": "客户证件类型",
+                    "field_type": "varchar(20)",
+                    "required_flag": True,
+                    "field_definition": "客户身份证件类型",
+                    "regulatory_description": "按一表通证件类型代码集报送",
+                },
+            )
+    
+            business_system = _post(
+                client,
+                f"/api/projects/{project['id']}/business-systems",
+                {"system_code": "ECIF", "system_name": "客户信息系统", "owner_department": "数据管理部", "enabled": True},
+            )
+            source_table = _post(
+                client,
+                f"/api/business-systems/{business_system['id']}/source-tables",
+                {"table_code": "ecif_customer", "table_name": "客户基本信息表", "table_comment": "ECIF 客户主表"},
+            )
+            source_field = _post(
+                client,
+                f"/api/source-tables/{source_table['id']}/source-fields",
+                {"field_code": "cert_type", "field_name": "证件类型", "field_type": "varchar(20)", "field_comment": "客户证件类型"},
+            )
+            mart_table = _post(
+                client,
+                f"/api/projects/{project['id']}/mart-tables",
+                {
+                    "table_code": "mart_customer",
+                    "table_name": "监管客户集市表",
+                    "subject_area": "客户",
+                    "table_comment": "监管报送客户主题",
+                    "is_existing": False,
+                },
+            )
+            mart_field = _post(
+                client,
+                f"/api/mart-tables/{mart_table['id']}/mart-fields",
+                {
+                    "field_code": "cert_type",
+                    "field_name": "客户证件类型",
+                    "field_type": "varchar(20)",
+                    "field_comment": "统一监管集市证件类型",
+                    "is_existing": False,
+                },
+            )
+    
+            source_to_mart = _post(
+                client,
+                f"/api/mart-fields/{mart_field['id']}/source-to-mart-mappings",
+                {
+                    "mapping_name": "ECIF 证件类型入集市",
+                    "source_system_summary": "ECIF",
+                    "source_tables_summary": "ecif_customer",
+                    "source_fields_summary": "cert_type",
+                    "business_rule": "从 ECIF 客户基本信息取客户证件类型。",
+                },
+            )
+            mart_to_ybt = _post(
+                client,
+                f"/api/target-fields/{target_field['id']}/mart-to-ybt-mappings",
+                {
+                    "mart_field_id": mart_field["id"],
+                    "mapping_name": "监管集市证件类型到一表通",
+                    "mart_table_summary": "mart_customer",
+                    "mart_field_summary": "cert_type",
+                    "business_rule": "从监管客户集市表取证件类型并转换为一表通代码。",
+                },
+            )
+    
+            empty_approval = client.post(f"/api/source-to-mart-mappings/{source_to_mart['id']}/approve", json={"reviewed_by": "tester"})
+            assert empty_approval.status_code == 400
+            assert "final_content" in empty_approval.json()["detail"]
+    
+            source_evidence = _post(
+                client,
+                f"/api/mappings/source_to_mart/{source_to_mart['id']}/evidence",
+                {
+                    "evidence_type": "source_field",
+                    "evidence_id": source_field["id"],
+                    "source_name": "ECIF.ecif_customer.cert_type",
+                    "location_text": "源字段",
+                    "quoted_content": "客户证件类型字段",
+                    "evidence_summary": "证明监管集市字段来源于 ECIF 证件类型。",
+                },
+            )
+            ybt_evidence = _post(
+                client,
+                f"/api/mappings/mart_to_ybt/{mart_to_ybt['id']}/evidence",
+                {
+                    "evidence_type": "target_field",
+                    "evidence_id": target_field["id"],
+                    "source_name": "一表通模板",
+                    "location_text": "YBT_CUSTOMER.CERT_TYPE",
+                    "quoted_content": "按一表通证件类型代码集报送",
+                    "evidence_summary": "证明一表通目标字段定义。",
+                },
+            )
+    
+            source_manual = "人工维护的业务系统到监管集市口径"
+            ybt_manual = "人工维护的监管集市到一表通口径"
+            source_draft = _post(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}/generate-draft", {})
+            ybt_draft = _post(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}/generate-draft", {})
+    
+            assert source_draft["final_content"] is None
+            assert ybt_draft["final_content"] is None
+            assert "select " not in source_draft["ai_generated_content"].lower()
+            assert "业务系统到监管集市" in source_draft["ai_generated_content"]
+            assert "监管集市到一表通" in ybt_draft["ai_generated_content"]
+            assert ybt_draft["mart_field_summary"]
+    
+            _put(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}", {"final_content": source_manual})
+            _put(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}", {"final_content": ybt_manual})
+    
+            no_evidence_mapping = _post(
+                client,
+                f"/api/mart-fields/{mart_field['id']}/source-to-mart-mappings",
+                {"final_content": "已有人工最终口径，但尚未绑定证据。"},
+            )
+            no_evidence_approval = client.post(
+                f"/api/source-to-mart-mappings/{no_evidence_mapping['id']}/approve",
+                json={"reviewed_by": "tester"},
+            )
+            assert no_evidence_approval.status_code == 400
+            assert "evidence" in no_evidence_approval.json()["detail"].lower()
+    
+>           source_adopted = _post(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}/adopt-ai-draft", {})
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_double_layer_mapping.py:188: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_double_layer_mapping.py:1696: in _post
+    response.raise_for_status()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Response [409 Conflict]>
+
+    def raise_for_status(self) -> Response:
+        """
+        Raise the `HTTPStatusError` if one occurred.
+        """
+        request = self._request
+        if request is None:
+            raise RuntimeError(
+                "Cannot call `raise_for_status` as the request instance has not been set on this response."
+            )
+    
+        if self.is_success:
+            return self
+    
+        if self.has_redirect_location:
+            message = (
+                "{error_type} '{0.status_code} {0.reason_phrase}' for url '{0.url}'\n"
+                "Redirect location: '{0.headers[location]}'\n"
+                "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{0.status_code}"
+            )
+        else:
+            message = (
+                "{error_type} '{0.status_code} {0.reason_phrase}' for url '{0.url}'\n"
+                "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{0.status_code}"
+            )
+    
+        status_class = self.status_code // 100
+        error_types = {
+            1: "Informational response",
+            3: "Redirect response",
+            4: "Client error",
+            5: "Server error",
+        }
+        error_type = error_types.get(status_class, "Invalid status code")
+        message = message.format(self, error_type=error_type)
+>       raise HTTPStatusError(message, request=request, response=self)
+E       httpx2.HTTPStatusError: Client error '409 Conflict' for url 'http://testserver/api/source-to-mart-mappings/1/adopt-ai-draft'
+E       For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\httpx2\_models.py:815: HTTPStatusError
+- generated xml file: C:\Users\李儒伟\Documents\智能分析智能体平台\docs\evaluation\ai-skill-a5-20260928\b2-cross-layer-regression.xml -
+=========================== short test summary info ===========================
+FAILED tests/test_double_layer_mapping.py::test_double_layer_mapping_end_to_end_api
+1 failed, 2 passed, 46 deselected in 39.96s

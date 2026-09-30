@@ -4,13 +4,13 @@ from sqlalchemy import and_, func, or_, select
 
 from app.core.settings import get_settings
 from app.models import (KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeKeywordIndex,
-                        KnowledgeUnit, Project, RetrievalLog, TargetField)
+                        KnowledgeUnit, ProductScenario, Project, RetrievalLog, TargetField)
 from app.services.embeddings import get_embedding_service
 from app.services.embeddings.observability import embed_with_observability
 from app.services.semantic_index.versioning import get_active_index_version
 from app.services.vector import get_vector_store
 
-from .keyword_index import tokenize
+from .keyword_index import tokenize, token_matches
 from app.services.knowledge_evidence import unit_locator
 from app.services.knowledge_eligibility import governed_unit_predicates, governed_document_visible
 
@@ -36,6 +36,7 @@ class HybridRetriever:
         retrieval_mode="hybrid",
         historical_as_of=None,
         include_history=False,
+        commit=True,
     ):
         if retrieval_mode not in RETRIEVAL_MODES:
             raise ValueError("retrieval_mode must be keyword_only, vector_only, or hybrid")
@@ -45,6 +46,12 @@ class HybridRetriever:
         target = self.db.get(TargetField, target_field_id) if target_field_id else None
         if project is None:
             raise ValueError("Project not found")
+        if target_field_id is not None and (target is None or target.project_id != project_id):
+            raise ValueError("Target field not found in project")
+        if scenario_id is not None:
+            scenario = self.db.get(ProductScenario, scenario_id)
+            if scenario is None or scenario.project_id != project_id:
+                raise ValueError("Scenario not found in project")
         historical = bool(include_history or historical_as_of)
         predicates = governed_unit_predicates(project_id, historical=historical, historical_as_of=historical_as_of)
         if knowledge_types:
@@ -56,12 +63,20 @@ class HybridRetriever:
                     KnowledgeUnit.scenario_id.is_(None),
                 )
             )
-        tokens = tokenize(" ".join(filter(None, [
-            query,
-            target.field_code if target else None,
-            target.field_name if target else None,
-            target.field_definition if target else None,
-        ])))
+        tokens = tokenize(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        query,
+                        target.field_code if target else None,
+                        target.field_name if target else None,
+                        target.field_definition if target else None,
+                    ],
+                )
+            ),
+            expand_synonyms=True,
+        )
 
         keyword: dict[int, float] = {}
         candidates: list[KnowledgeUnit] = []
@@ -74,7 +89,7 @@ class HybridRetriever:
                 .join(KnowledgeUnit, KnowledgeUnit.id == KnowledgeKeywordIndex.knowledge_unit_id)
                 .where(*predicates, KnowledgeKeywordIndex.token.in_(tokens))
                 .group_by(KnowledgeKeywordIndex.knowledge_unit_id)
-                .order_by(func.sum(KnowledgeKeywordIndex.weight).desc())
+                .order_by(func.sum(KnowledgeKeywordIndex.weight).desc(), KnowledgeKeywordIndex.knowledge_unit_id.asc())
                 .limit(max(top_k * 20, settings.keyword_top_k))
             )
             candidate_ids = [row[0] for row in self.db.execute(ranked).all()]
@@ -309,7 +324,10 @@ class HybridRetriever:
             created_by=created_by,
         )
         self.db.add(log)
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         self.db.refresh(log)
         return log, items
 
@@ -334,7 +352,7 @@ def _keyword_score(unit, tokens, target, scenario):
     matched_weight = sum(
         _query_token_weight(token)
         for token in unique_tokens
-        if token in text
+        if token_matches(text, token)
     )
     score = matched_weight / max(total_weight, 1.0) * 0.7
     if (

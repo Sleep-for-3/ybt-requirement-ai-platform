@@ -2,7 +2,7 @@
 from copy import deepcopy
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models import Requirement, RequirementRevision, ReviewTask, WorkflowInstance
 from app.models.requirement import RequirementRecheck
@@ -44,8 +44,17 @@ def recheck_view(db, row):
 
 
 def create_recheck(db, requirement, version, change_hash, actor_id):
-    if requirement.content_version != version:
+    # Serialize the whole read/create/workflow operation, including SQLite where
+    # SELECT FOR UPDATE is ignored. Preserve timestamps and all authored values:
+    # this conditional no-op update is only a transaction-scoped write lock.
+    locked = db.execute(update(Requirement).where(
+        Requirement.id == requirement.id, Requirement.project_id == requirement.project_id,
+        Requirement.content_version == version,
+    ).values(content_version=Requirement.content_version, updated_at=Requirement.updated_at)
+      .execution_options(synchronize_session=False))
+    if locked.rowcount != 1:
         raise HTTPException(409, "需求内容已变化，请重新读取影响范围")
+    db.refresh(requirement)
     impact = impact_summary(db, requirement)
     if impact is None or impact["change_hash"] != change_hash:
         raise HTTPException(409, "变化依据已更新，请重新核验")
@@ -59,7 +68,7 @@ def create_recheck(db, requirement, version, change_hash, actor_id):
         db.add(row); db.flush()
     from app.services.governance.workflow import start_workflow
     start_workflow(db, project_id=row.project_id, workflow_key="requirement_change_review",
-        target_type="requirement_recheck", target_id=row.id, created_by=actor_id)
+        target_type="requirement_recheck", target_id=row.id, created_by=actor_id, commit=False)
     return row
 
 

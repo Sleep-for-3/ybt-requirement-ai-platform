@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiGet, apiPost } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
+import { SkillRunProvenance, type CandidateExecution } from "@/components/SkillRunProvenance";
 
 type Section = "business" | "lineage";
 type RunItem = {id:number;field_id:number;section:Section;status:string;reason_code?:string|null;decision:string;adopted_content_version?:number|null};
@@ -15,7 +16,9 @@ type Difference = {field:string;current:string;proposed:string;changed:boolean;m
 type Candidate = {id:number;field_id:number;section:Section;candidate_hash:string;input_content_version:number;
   current_content_version:number;stale:boolean;decision:string;changes:Difference[];
   physical_references:{kind:string;table_code:string;table_name:string;field_code:string;field_name:string;field_type?:string|null}[];
-  evidence:{unit_id:number;title:string;content:string}[];gaps:string[]};
+  evidence:{unit_id:number;title:string;content:string}[];gaps:string[];execution_metadata?:CandidateExecution;
+  script_rules?:{rule_id:string;script_version_id:number;source_line_start?:number;source_line_end?:number;
+    transformation_expression?:string;join_condition?:string;filter_condition?:string;aggregation_rule?:string;code_mapping_rule?:string}[]};
 type BasketSelection={item_id:number;candidate_hash:string;selected_fields:string[];replace_manual_fields:string[]};
 
 const labels:Record<string,string>={business_definition:"业务定义",processing_logic:"加工规则",final_content:"章节正文",
@@ -132,6 +135,10 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
 function CandidateBody({data,selected,replace,onSelected,onReplace}:{data:Candidate;selected:string[];replace:string[];onSelected:(value:string[])=>void;onReplace:(value:string[])=>void}){
   const toggle=(values:string[],field:string,checked:boolean)=>checked?Array.from(new Set([...values,field])):values.filter(value=>value!==field);
   return <div className="mt-4 space-y-3">{data.stale?<p className="border border-amber-200 bg-amber-50 p-3 text-xs">这是内容 v{data.input_content_version} 的历史候选，只能查看或拒绝，不能写入当前 v{data.current_content_version}。</p>:null}
+    <SkillRunProvenance metadata={data.execution_metadata}/>
+    {!!data.script_rules?.length && <section aria-label="候选引用的固定脚本规则" className="rounded border p-3 text-xs"><h3 className="font-semibold">固定脚本规则 · 事实依据</h3><p className="mt-1 text-slate-500">这些规则描述脚本现状，不能替代有效制度条款。</p>{data.script_rules.map(rule => <details key={rule.rule_id} className="mt-2 rounded border p-2"><summary className="cursor-pointer">{rule.rule_id} · 脚本版本 #{rule.script_version_id}{rule.source_line_start ? ` · 第 ${rule.source_line_start} 行` : ""}</summary>{[
+      ["加工表达式", rule.transformation_expression], ["关联条件", rule.join_condition], ["过滤条件", rule.filter_condition], ["聚合规则", rule.aggregation_rule], ["码值规则", rule.code_mapping_rule]
+    ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="mt-2"><strong>{label}</strong><pre className="mt-1 overflow-auto whitespace-pre-wrap break-all">{value}</pre></div>)}</details>)}</section>}
     {data.changes.map(change=><div className="border border-line p-3" key={change.field}><label className="flex items-center gap-2 text-sm font-semibold"><input checked={selected.includes(change.field)} disabled={!change.changed||data.stale} onChange={event=>onSelected(toggle(selected,change.field,event.target.checked))} type="checkbox"/>{labels[change.field]||change.field}{change.manual?<span className="badge-warning">人工内容</span>:null}</label><div className="mt-2 grid gap-3 sm:grid-cols-2"><TextBlock label="当前内容" value={change.current||"空"}/><TextBlock label="候选内容" value={change.proposed}/></div>{change.manual&&selected.includes(change.field)?<label className="mt-2 block text-xs text-amber-800"><input checked={replace.includes(change.field)} onChange={event=>onReplace(toggle(replace,change.field,event.target.checked))} type="checkbox"/> 我确认用候选替换这项人工内容</label>:null}</div>)}
     {data.physical_references.length?<OptionalChoice field="physical_references" label="物理字段引用" selected={selected} disabled={data.stale} onSelected={onSelected}><ul className="mt-2 text-xs">{data.physical_references.map(item=><li key={`${item.kind}:${item.table_code}:${item.field_code}`}>{item.kind==="source"?"来源":"集市"}：{item.table_code}.{item.field_code} · {item.table_name}.{item.field_name}</li>)}</ul></OptionalChoice>:null}
     {data.evidence.length?<OptionalChoice field="evidence" label="证据引用" selected={selected} disabled={data.stale} onSelected={onSelected}>{data.evidence.map(item=><div className="mt-2 text-xs" key={item.unit_id}><strong>{item.title}</strong><p className="mt-1 whitespace-pre-wrap text-slate-600">{item.content}</p></div>)}</OptionalChoice>:null}

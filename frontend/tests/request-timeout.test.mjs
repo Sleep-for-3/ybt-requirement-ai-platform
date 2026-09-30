@@ -25,6 +25,7 @@ test("generation endpoints get the long budget instead of reporting a false time
     "/knowledge/documents/1/reindex?project_id=1",
     "/code-repositories/1/sync",
     "/projects/1/evaluations/runs",
+    "/ai-skills/lineage_edge_explanation/test-runs",
     "/uat-suites/1/runs",
     "/uat-runs/1/execute",
     "/deliverables/1/render",

@@ -1,0 +1,37 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "variable_insertion_and_unsaved_switch_guard",
+    "draft_saved",
+    "deterministic_and_mock_passed",
+    "independent_human_review_with_comment_and_no_self_review",
+    "author_cannot_publish_in_ui",
+    "independent_publish_and_binding",
+    "auxiliary_context_enabled_with_explicit_missing_history",
+    "real_lineage_skill_four_layers",
+    "feedback_exact_input_regression",
+    "restore_new_draft_keeps_old_binding",
+    "readable_version_comparison",
+    "explicit_pinned_adoption_changes_binding_without_changing_versions",
+    "platform_institution_task_drafts_keep_exact_scope",
+    "dirty_editor_locks_scope_switch",
+    "platform_registers_another_native_skill",
+    "unauthorized_scope_is_denied_and_project_recovers"
+  ],
+  "errors": [],
+  "screenshots": [
+    "human-review.png",
+    "pending-approval.png",
+    "published.png",
+    "lineage-layers.png",
+    "feedback-regression.png",
+    "restored-draft.png",
+    "version-comparison.png",
+    "explicit-binding.png",
+    "scope-registration.png"
+  ],
+  "passed": true
+}

@@ -70,6 +70,7 @@ const NAV_GROUPS: NavGroup[] = [
   ] }
 ];
 const SECONDARY_NAV: NavItem[] = [
+  { href: "/ai-control/skills", label: "AI Skill 配置中心", icon: BrainCircuit, audience: "technical" },
   { href: "/model-profiles", label: "模型配置", icon: BrainCircuit, audience: "admin" },
   { href: "/prompt-versions", label: "提示模板版本", icon: History, audience: "admin" },
   { href: "/projects", label: "项目管理", icon: FolderKanban },

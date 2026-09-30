@@ -1,0 +1,13 @@
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+false !== true
+
+    at file:///C:/Users/%E6%9D%8E%E5%84%92%E4%BC%9F/Documents/%E6%99%BA%E8%83%BD%E5%88%86%E6%9E%90%E6%99%BA%E8%83%BD%E4%BD%93%E5%B9%B3%E5%8F%B0/frontend/tests/ai-skill.browser.acceptance.mjs:155:12 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"mock","checks":["variable_insertion_and_unsaved_switch_guard","draft_saved","deterministic_and_mock_passed","independent_human_review_with_comment_and_no_self_review","author_cannot_publish_in_ui","independent_publish_and_binding","auxiliary_context_enabled_with_explicit_missing_history","real_lineage_skill_four_layers","feedback_exact_input_regression","restore_new_draft_keeps_old_binding","readable_version_comparison","explicit_pinned_adoption_changes_binding_without_changing_versions"],"errors":[],"screenshots":["human-review.png","pending-approval.png","published.png","lineage-layers.png","feedback-regression.png","restored-draft.png","version-comparison.png","explicit-binding.png","failure.png"],"passed":false,"error":"Expected values to be strictly equal:\n\nfalse !== true\n"}

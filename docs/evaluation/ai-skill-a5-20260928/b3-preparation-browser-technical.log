@@ -1,0 +1,11 @@
+locator.fill: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('region', { name: '目录字段候选核验', exact: true }).getByLabel('补充检索词', { exact: true })
+
+    at C:\Users\李儒伟\Documents\智能分析智能体平台\frontend\tests\ai-skill-candidate-preparation.browser.acceptance.mjs:45:52 {
+  log: [
+    "  - waiting for getByRole('region', { name: '目录字段候选核验', exact: true }).getByLabel('补充检索词', { exact: true })"
+  ],
+  name: 'TimeoutError'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"none","checks":[],"errors":["当前账号无权执行此操作","当前账号无权执行此操作"],"screenshots":["failure.png"],"passed":false,"error":"locator.fill: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('region', { name: '目录字段候选核验', exact: true }).getByLabel('补充检索词', { exact: true })\u001b[22m\n"}

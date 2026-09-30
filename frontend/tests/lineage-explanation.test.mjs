@@ -74,4 +74,6 @@ test("execution labels keep mock, real, rule, and degraded results distinguishab
   assert.equal(aiExecutionPresentation(null).label, "来源未标记");
   assert.equal(aiContextPresentation({ context_complete: true }).label, "上下文完整");
   assert.match(aiContextPresentation({ context_complete: false }).label, /截断/);
+  assert.match(aiContextPresentation({ runtime_mode: "skill", context_complete: false }).label, /证据缺口/);
+  assert.doesNotMatch(aiContextPresentation({ runtime_mode: "skill", context_complete: false }).label, /截断/);
 });

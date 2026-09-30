@@ -1,0 +1,532 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.4, pytest-8.4.2, pluggy-1.6.0 -- C:\Program Files\Python312\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\李儒伟\Documents\智能分析智能体平台\backend
+plugins: anyio-4.14.1, asyncio-0.26.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 8 items
+
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[allowed-source_to_mart] PASSED [ 12%]
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[allowed-mart_to_ybt] PASSED [ 25%]
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[human-source_to_mart] PASSED [ 37%]
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[human-mart_to_ybt] PASSED [ 50%]
+Timeout (0:00:20)!
+Thread 0x000055c8 (most recent call first):
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 952 in do_execute
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1969 in _exec_single_context
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1848 in _execute_context
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1532 in _execute_ddl
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\ddl.py", line 188 in _execute_on_connection
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1421 in execute
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\ddl.py", line 322 in _invoke_with
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\ddl.py", line 1210 in visit_table
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\visitors.py", line 661 in traverse_single
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\ddl.py", line 1143 in visit_metadata
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\visitors.py", line 661 in traverse_single
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 2469 in _run_ddl_visitor
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 3270 in _run_ddl_visitor
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\schema.py", line 5958 in drop_all
+  File "C:\Users\\u674e\u5112\u4f1f\Documents\\u667a\u80fd\u5206\u6790\u667a\u80fd\u4f53\u5e73\u53f0\backend\tests\test_double_layer_mapping.py", line 1439 in _source_service_session
+  File "C:\Program Files\Python312\Lib\contextlib.py", line 144 in __exit__
+  File "C:\Users\\u674e\u5112\u4f1f\Documents\\u667a\u80fd\u5206\u6790\u667a\u80fd\u4f53\u5e73\u53f0\backend\tests\test_cross_layer_adoption_guards.py", line 15 in test_adoption_never_overwrites_human_or_reviewed_content
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\python.py", line 157 in pytest_pyfunc_call
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\python.py", line 1671 in runtest
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\runner.py", line 178 in pytest_runtest_call
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\runner.py", line 246 in <lambda>
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\runner.py", line 344 in from_call
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\runner.py", line 245 in call_and_report
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\runner.py", line 136 in runtestprotocol
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\runner.py", line 117 in pytest_runtest_protocol
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\main.py", line 367 in pytest_runtestloop
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\main.py", line 343 in _main
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\main.py", line 289 in wrap_session
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\main.py", line 336 in pytest_cmdline_main
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\config\__init__.py", line 175 in main
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\_pytest\config\__init__.py", line 201 in console_main
+  File "C:\Users\\u674e\u5112\u4f1f\AppData\Roaming\Python\Python312\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[approved-source_to_mart] PASSED [ 62%]
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[approved-mart_to_ybt] PASSED [ 75%]
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[review-source_to_mart] FAILED [ 87%]
+tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[review-mart_to_ybt] FAILED [100%]
+
+================================== FAILURES ===================================
+_ test_adoption_never_overwrites_human_or_reviewed_content[review-source_to_mart] _
+
+self = <sqlalchemy.engine.base.Connection object at 0x000001FE05A370E0>
+dialect = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x000001FE05798560>
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x000001FE05AD8560>
+statement = <sqlalchemy.dialects.sqlite.base.SQLiteCompiler object at 0x000001FE05AD8350>
+parameters = [(1, 'double_layer_mapping_review', 'source_to_mart', 1, 'in_progress', None, ...)]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1969: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x000001FE05798560>
+cursor = <sqlite3.Cursor object at 0x000001FE05ABAF40>
+statement = 'INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at'
+parameters = (1, 'double_layer_mapping_review', 'source_to_mart', 1, 'in_progress', None, ...)
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x000001FE05AD8560>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlite3.IntegrityError: NOT NULL constraint failed: workflow_instances.created_by
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py:952: IntegrityError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/李儒伟/AppData/Local/Temp/pytest-of-李儒伟/pytest-446/test_adoption_never_overwrites6')
+kind = 'source_to_mart', state = 'review'
+
+    @pytest.mark.parametrize("kind", ["source_to_mart", "mart_to_ybt"])
+    @pytest.mark.parametrize("state", ["allowed", "human", "approved", "review"])
+    def test_adoption_never_overwrites_human_or_reviewed_content(tmp_path, kind, state):
+        with _source_service_session(tmp_path, kind + state) as (db, _, fixture):
+            mapping = fixture["mapping"] if kind == "source_to_mart" else _seed_mart_to_ybt_mapping(db, fixture, "guard")
+            mapping.ai_generated_content = "可核验候选"
+            if state == "human": mapping.final_content = "人工编辑保持原样"
+            if state == "approved": mapping.mapping_status = "approved"
+            if state == "review":
+                db.add(WorkflowInstance(project_id=mapping.project_id, workflow_key="double_layer_mapping_review",
+                    target_type=kind, target_id=mapping.id, status="in_progress"))
+>           db.commit()
+
+tests\test_cross_layer_adoption_guards.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:2035: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py:137: in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:1316: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py:137: in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:1290: in _prepare_impl
+    self.session.flush()
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:4353: in flush
+    self._flush(objects)
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:4488: in _flush
+    with util.safe_reraise():
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\util\langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:4449: in _flush
+    flush_context.execute()
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py:465: in execute
+    rec.execute(self)
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py:641: in execute
+    util.preloaded.orm_persistence.save_obj(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py:94: in save_obj
+    _emit_insert_statements(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py:1234: in _emit_insert_statements
+    result = connection.execute(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1421: in execute
+    return meth(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\elements.py:526: in _execute_on_connection
+    return connection._execute_clauseelement(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1643: in _execute_clauseelement
+    ret = self._execute_context(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1848: in _execute_context
+    return self._exec_single_context(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1988: in _exec_single_context
+    self._handle_dbapi_exception(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:2365: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1969: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x000001FE05798560>
+cursor = <sqlite3.Cursor object at 0x000001FE05ABAF40>
+statement = 'INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at'
+parameters = (1, 'double_layer_mapping_review', 'source_to_mart', 1, 'in_progress', None, ...)
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x000001FE05AD8560>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) NOT NULL constraint failed: workflow_instances.created_by
+E       [SQL: INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at]
+E       [parameters: (1, 'double_layer_mapping_review', 'source_to_mart', 1, 'in_progress', None, None, None, None)]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py:952: IntegrityError
+_ test_adoption_never_overwrites_human_or_reviewed_content[review-mart_to_ybt] _
+
+self = <sqlalchemy.engine.base.Connection object at 0x000001FE05D09580>
+dialect = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x000001FE05ADAA50>
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x000001FE05CBB7A0>
+statement = <sqlalchemy.dialects.sqlite.base.SQLiteCompiler object at 0x000001FE05CB9C10>
+parameters = [(1, 'double_layer_mapping_review', 'mart_to_ybt', 1, 'in_progress', None, ...)]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1969: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x000001FE05ADAA50>
+cursor = <sqlite3.Cursor object at 0x000001FE068AB1C0>
+statement = 'INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at'
+parameters = (1, 'double_layer_mapping_review', 'mart_to_ybt', 1, 'in_progress', None, ...)
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x000001FE05CBB7A0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlite3.IntegrityError: NOT NULL constraint failed: workflow_instances.created_by
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py:952: IntegrityError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/李儒伟/AppData/Local/Temp/pytest-of-李儒伟/pytest-446/test_adoption_never_overwrites7')
+kind = 'mart_to_ybt', state = 'review'
+
+    @pytest.mark.parametrize("kind", ["source_to_mart", "mart_to_ybt"])
+    @pytest.mark.parametrize("state", ["allowed", "human", "approved", "review"])
+    def test_adoption_never_overwrites_human_or_reviewed_content(tmp_path, kind, state):
+        with _source_service_session(tmp_path, kind + state) as (db, _, fixture):
+            mapping = fixture["mapping"] if kind == "source_to_mart" else _seed_mart_to_ybt_mapping(db, fixture, "guard")
+            mapping.ai_generated_content = "可核验候选"
+            if state == "human": mapping.final_content = "人工编辑保持原样"
+            if state == "approved": mapping.mapping_status = "approved"
+            if state == "review":
+                db.add(WorkflowInstance(project_id=mapping.project_id, workflow_key="double_layer_mapping_review",
+                    target_type=kind, target_id=mapping.id, status="in_progress"))
+>           db.commit()
+
+tests\test_cross_layer_adoption_guards.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:2035: in commit
+    trans.commit(_to_root=True)
+<string>:2: in commit
+    ???
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py:137: in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:1316: in commit
+    self._prepare_impl()
+<string>:2: in _prepare_impl
+    ???
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py:137: in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:1290: in _prepare_impl
+    self.session.flush()
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:4353: in flush
+    self._flush(objects)
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:4488: in _flush
+    with util.safe_reraise():
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\util\langhelpers.py:122: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py:4449: in _flush
+    flush_context.execute()
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py:465: in execute
+    rec.execute(self)
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py:641: in execute
+    util.preloaded.orm_persistence.save_obj(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py:94: in save_obj
+    _emit_insert_statements(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py:1234: in _emit_insert_statements
+    result = connection.execute(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1421: in execute
+    return meth(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\elements.py:526: in _execute_on_connection
+    return connection._execute_clauseelement(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1643: in _execute_clauseelement
+    ret = self._execute_context(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1848: in _execute_context
+    return self._exec_single_context(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1988: in _exec_single_context
+    self._handle_dbapi_exception(
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:2365: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py:1969: in _exec_single_context
+    self.dialect.do_execute(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sqlalchemy.dialects.sqlite.pysqlite.SQLiteDialect_pysqlite object at 0x000001FE05ADAA50>
+cursor = <sqlite3.Cursor object at 0x000001FE068AB1C0>
+statement = 'INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at'
+parameters = (1, 'double_layer_mapping_review', 'mart_to_ybt', 1, 'in_progress', None, ...)
+context = <sqlalchemy.dialects.sqlite.base.SQLiteExecutionContext object at 0x000001FE05CBB7A0>
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+>       cursor.execute(statement, parameters)
+E       sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) NOT NULL constraint failed: workflow_instances.created_by
+E       [SQL: INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at]
+E       [parameters: (1, 'double_layer_mapping_review', 'mart_to_ybt', 1, 'in_progress', None, None, None, None)]
+E       (Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+..\..\..\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py:952: IntegrityError
+- generated xml file: C:\Users\李儒伟\Documents\智能分析智能体平台\docs\evaluation\ai-skill-a5-20260928\b2-cross-layer-guards.xml -
+=========================== short test summary info ===========================
+FAILED tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[review-source_to_mart] - sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) NOT NULL constraint failed: workflow_instances.created_by
+[SQL: INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at]
+[parameters: (1, 'double_layer_mapping_review', 'source_to_mart', 1, 'in_progress', None, None, None, None)]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+FAILED tests/test_cross_layer_adoption_guards.py::test_adoption_never_overwrites_human_or_reviewed_content[review-mart_to_ybt] - sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) NOT NULL constraint failed: workflow_instances.created_by
+[SQL: INSERT INTO workflow_instances (project_id, workflow_key, target_type, target_id, status, current_step, started_at, completed_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at, updated_at]
+[parameters: (1, 'double_layer_mapping_review', 'mart_to_ybt', 1, 'in_progress', None, None, None, None)]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+=================== 2 failed, 6 passed in 130.17s (0:02:10) ===================

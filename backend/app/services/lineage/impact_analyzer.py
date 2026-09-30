@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from fastapi import HTTPException
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -24,6 +25,35 @@ def persist_change_impact(
     created_by: int | None,
     change_type: str = "modified",
 ) -> tuple[ScriptChangeSet, ImpactAnalysis]:
+    if from_version is None and to_version is None:
+        raise HTTPException(422, "A script change requires a version")
+    for version in (from_version, to_version):
+        if version is not None and (version.project_id != script_file.project_id or version.script_file_id != script_file.id):
+            raise HTTPException(404, "Script version not found in scope")
+    # Keep the event, evidence links and review tasks in the caller's transaction.
+    # SQLite ignores FOR UPDATE, so use a value-preserving write lock on its
+    # mutable parent. No historical version or timestamp is rewritten.
+    locked = db.execute(update(ScriptFile).where(ScriptFile.id == script_file.id,
+        ScriptFile.project_id == script_file.project_id).values(
+            current_version_no=ScriptFile.current_version_no, updated_at=ScriptFile.updated_at)
+        .execution_options(synchronize_session=False))
+    if locked.rowcount != 1:
+        raise HTTPException(404, "Script not found in scope")
+    existing = db.scalar(select(ScriptChangeSet).where(
+        ScriptChangeSet.script_file_id == script_file.id,
+        ScriptChangeSet.from_version_id == (from_version.id if from_version else None),
+        ScriptChangeSet.to_version_id == (to_version.id if to_version else None)))
+    if existing is not None:
+        impact = db.scalar(select(ImpactAnalysis).where(ImpactAnalysis.change_set_id == existing.id,
+            ImpactAnalysis.project_id == script_file.project_id))
+        previous_items = list(db.scalars(select(ScriptChangeItem).where(
+            ScriptChangeItem.change_set_id == existing.id).order_by(ScriptChangeItem.id)))
+        previous = [(i.change_category, i.entity_type, i.old_value_json, i.new_value_json, i.severity) for i in previous_items]
+        requested = [(i.change_category, i.entity_type, i.old_value, i.new_value, i.severity) for i in diff.items]
+        if (impact is None or existing.change_type != change_type or existing.summary_json != diff.summary
+                or impact.severity != diff.severity or previous != requested):
+            raise HTTPException(409, "Script change event differs from its persisted version pair")
+        return existing, impact
     change_set = ScriptChangeSet(
         project_id=script_file.project_id,
         script_file_id=script_file.id,
@@ -45,11 +75,13 @@ def persist_change_impact(
             severity=item.severity,
         ))
     version_ids = [item.id for item in (from_version, to_version) if item is not None]
-    nodes = list(db.scalars(select(LineageNode).where(LineageNode.script_file_version_id.in_(version_ids))).all()) if version_ids else []
+    nodes = list(db.scalars(select(LineageNode).where(LineageNode.project_id == script_file.project_id,
+        LineageNode.script_file_version_id.in_(version_ids))).all()) if version_ids else []
     source_ids = sorted({item.source_field_id for item in nodes if item.source_field_id})
     target_ids = sorted({item.target_field_id for item in nodes if item.target_field_id})
     mart_ids = sorted({item.mart_field_id for item in nodes if item.mart_field_id})
-    edge_ids = list(db.scalars(select(LineageEdge.id).where(LineageEdge.script_file_version_id.in_(version_ids))).all()) if version_ids else []
+    edge_ids = list(db.scalars(select(LineageEdge.id).where(LineageEdge.project_id == script_file.project_id,
+        LineageEdge.script_file_version_id.in_(version_ids))).all()) if version_ids else []
     scenario_rows = list(db.scalars(select(ScenarioTechnicalLineage).where(
         ScenarioTechnicalLineage.project_id == script_file.project_id,
         ScenarioTechnicalLineage.target_field_id.in_(target_ids),
@@ -166,6 +198,7 @@ def persist_change_impact(
             db, project_id=script_file.project_id, workflow_key="lineage_change_review",
             target_type="impact_analysis", target_id=impact.id, created_by=created_by or 0,
             assignments={key: value for key, value in assignments.items() if key in {"technical_analyst", "technical_reviewer", "final_reviewer"}},
+            commit=False,
         )
         impact.affected_review_task_ids_json = sorted(
             db.scalars(

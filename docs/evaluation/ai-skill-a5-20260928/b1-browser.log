@@ -1,0 +1,11 @@
+locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: '保存草稿', exact: true }) to be visible
+
+    at C:\Users\李儒伟\Documents\智能分析智能体平台\frontend\tests\ai-skill.browser.acceptance.mjs:32:65 {
+  log: [
+    "  - waiting for getByRole('button', { name: '保存草稿', exact: true }) to be visible"
+  ],
+  name: 'TimeoutError'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"mock","checks":[],"errors":["无法连接服务"],"screenshots":["failure.png"],"passed":false,"error":"locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: '保存草稿', exact: true }) to be visible\u001b[22m\n"}

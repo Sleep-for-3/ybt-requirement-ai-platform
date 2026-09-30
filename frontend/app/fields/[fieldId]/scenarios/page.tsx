@@ -1,5 +1,7 @@
 "use client";
 import { KnowledgeCitations } from "@/components/knowledge/KnowledgeCitations";
+import { MappingGenerationProvenance } from "@/components/MappingGenerationProvenance";
+import { FieldCandidateRecall } from "@/components/FieldCandidateRecall";
 import type { KnowledgeCitation } from "@/lib/knowledge-types";
 
 import { Check, Clock3, DatabaseZap, Link2, Save, Search, Sparkles } from "lucide-react";
@@ -233,9 +235,14 @@ export default function FieldScenarioPage() {
     setRecommendations(result.recommendations); setRecommendationExecution(result.execution_metadata || null); setMessage(`生成 ${result.recommendations.length} 个候选来源`);
   }
   async function selectCatalogCandidate(item: CandidateSourceRecommendation) {
-    const result = await apiPost<{ recommendation: CandidateSourceRecommendation }>(`/source-recommendations/${item.id}/select`, {});
-    setSelectedRecommendationId(result.recommendation.id); setMessage("候选已选择，尚未探查或采用");
-    if (!item.catalog_column_id) await reload();
+    if (busy) return;
+    setBusy(true); setMessage(""); setSelectedRecommendationId(null); setProfileTask(EMPTY_PROFILE); setActiveProfileJob(null);
+    try {
+      const result = await apiPost<{ recommendation: CandidateSourceRecommendation }>(`/source-recommendations/${item.id}/select`, {});
+      setSelectedRecommendationId(result.recommendation.id); setMessage("候选已选择，尚未探查或采用");
+      if (!item.catalog_column_id) await reload();
+    } catch (error) {setMessage(error instanceof Error ? error.message : "选择失败，请重新检索候选。");}
+    finally {setBusy(false);}
   }
   async function profileCatalogCandidate(item: CandidateSourceRecommendation) {
     if (!field || !scenarioId || !item.catalog_column_id) return;
@@ -412,6 +419,7 @@ export default function FieldScenarioPage() {
               </Field>
               <Field label="AI 草稿" wide>
                 <textarea className="control min-h-28 bg-mist/60" readOnly value={String(businessForm.ai_generated_content || "")} />
+                {business && <MappingGenerationProvenance mappingType="scenario_business" mappingId={business.id} draftText={business.ai_generated_content}/>}
               </Field>
               <Field label="最终口径" wide>
                 <textarea className="control min-h-32" value={String(businessForm.final_content || "")} onChange={(e) => setBusinessForm({ ...businessForm, final_content: e.target.value })} />
@@ -473,6 +481,7 @@ export default function FieldScenarioPage() {
               </Field>
               <Field label="AI 草稿" wide>
                 <textarea className="control min-h-28 bg-mist/60" readOnly value={lineageForm.ai_generated_content} />
+                {lineage && <MappingGenerationProvenance mappingType="scenario_technical" mappingId={lineage.id} draftText={lineage.ai_generated_content}/>}
               </Field>
               <Field label="最终技术口径" wide>
                 <textarea className="control min-h-32" value={lineageForm.final_content} onChange={(e) => setLineageForm({ ...lineageForm, final_content: e.target.value })} />
@@ -507,6 +516,11 @@ export default function FieldScenarioPage() {
             ) : null}
           </section>
         </div>
+
+        <FieldCandidateRecall key={`${field.project_id}:${fieldId}:${scenarioId}`} projectId={field.project_id} fieldId={fieldId} scenarioId={scenarioId}
+          onPrepared={item => {setRecommendations(old => [item, ...old.filter(row => row.id !== item.id)]);
+            setRecommendationExecution({execution_kind: "deterministic"});
+            setMessage("已加入下方来源候选。请先选择，再按需进行安全探查，最后人工采用；本次未改写技术来源。");}} />
 
         {(recommendations.length || knowledge.length || ragKnowledge.length || groundedAnswer) ? (
           <section className="mt-5 grid gap-5 xl:grid-cols-2">
@@ -549,7 +563,7 @@ export default function FieldScenarioPage() {
                             </div>
                           ) : null}
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <button className="button-secondary" onClick={() => selectCatalogCandidate(item)}><Check size={16} />选择候选</button>
+                            <button className="button-secondary" disabled={busy} onClick={() => void selectCatalogCandidate(item)}><Check size={16} />选择候选</button>
                             {item.catalog_column_id ? (
                               <button className="button-secondary" onClick={() => showProfileHistory(item)}><Clock3 size={16} />探查历史</button>
                             ) : null}
@@ -559,7 +573,7 @@ export default function FieldScenarioPage() {
                             {item.catalog_column_id ? (
                               <button
                                 className="button-primary"
-                                disabled={selectedRecommendationId !== item.id || !profileTask || profileTask.catalog_column_id !== item.catalog_column_id || !profileTask.status.includes("completed")}
+                                disabled={busy || selectedRecommendationId !== item.id || !profileTask || profileTask.catalog_column_id !== item.catalog_column_id || !["completed", "partially_completed"].includes(profileTask.status) || profileTask.profile_result_json.total_count == null}
                                 onClick={() => adoptCatalogCandidate(item)}
                               >
                                 <Check size={16} />采用为技术来源

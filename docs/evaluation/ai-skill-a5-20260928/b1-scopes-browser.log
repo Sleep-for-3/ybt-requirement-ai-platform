@@ -1,0 +1,11 @@
+locator.selectOption: Error: strict mode violation: getByLabel('配置范围', { exact: true }) resolved to 2 elements:
+    1) <section aria-label="配置范围" class="panel space-y-2 p-3">…</section> aka getByRole('region', { name: '配置范围' })
+    2) <select aria-label="配置范围" class="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-sm">…</select> aka getByRole('region', { name: '配置范围' }).getByLabel('配置范围')
+
+Call log:
+  - waiting for getByLabel('配置范围', { exact: true })
+
+    at C:\Users\李儒伟\Documents\智能分析智能体平台\frontend\tests\ai-skill.browser.acceptance.mjs:151:52 {
+  log: [ "  - waiting for getByLabel('配置范围', { exact: true })" ]
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"mock","checks":["variable_insertion_and_unsaved_switch_guard","draft_saved","deterministic_and_mock_passed","independent_human_review_with_comment_and_no_self_review","author_cannot_publish_in_ui","independent_publish_and_binding","auxiliary_context_enabled_with_explicit_missing_history","real_lineage_skill_four_layers","feedback_exact_input_regression","restore_new_draft_keeps_old_binding","readable_version_comparison","explicit_pinned_adoption_changes_binding_without_changing_versions"],"errors":[],"screenshots":["human-review.png","pending-approval.png","published.png","lineage-layers.png","feedback-regression.png","restored-draft.png","version-comparison.png","explicit-binding.png","failure.png"],"passed":false,"error":"locator.selectOption: Error: strict mode violation: getByLabel('配置范围', { exact: true }) resolved to 2 elements:\n    1) <section aria-label=\"配置范围\" class=\"panel space-y-2 p-3\">…</section> aka getByRole('region', { name: '配置范围' })\n    2) <select aria-label=\"配置范围\" class=\"mt-1 w-full rounded border border-slate-300 bg-white p-2 text-sm\">…</select> aka getByRole('region', { name: '配置范围' }).getByLabel('配置范围')\n\nCall log:\n\u001b[2m  - waiting for getByLabel('配置范围', { exact: true })\u001b[22m\n"}

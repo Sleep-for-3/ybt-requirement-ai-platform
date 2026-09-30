@@ -1,0 +1,13 @@
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /需求候选/. Input:
+
+'依据固定需求输入生成候选。物理字段、证据与脚本规则必须在输入白名单内；报告缺口，不改变人工正文或确认结果。'
+
+    at file:///C:/Users/%E6%9D%8E%E5%84%92%E4%BC%9F/Documents/%E6%99%BA%E8%83%BD%E5%88%86%E6%9E%90%E6%99%BA%E8%83%BD%E4%BD%93%E5%B9%B3%E5%8F%B0/frontend/tests/ai-skill.browser.acceptance.mjs:169:10 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '依据固定需求输入生成候选。物理字段、证据与脚本规则必须在输入白名单内；报告缺口，不改变人工正文或确认结果。',
+  expected: /需求候选/,
+  operator: 'match',
+  diff: 'simple'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"mock","checks":["variable_insertion_and_unsaved_switch_guard","draft_saved","deterministic_and_mock_passed","independent_human_review_with_comment_and_no_self_review","author_cannot_publish_in_ui","independent_publish_and_binding","auxiliary_context_enabled_with_explicit_missing_history","real_lineage_skill_four_layers","feedback_exact_input_regression","restore_new_draft_keeps_old_binding","readable_version_comparison","explicit_pinned_adoption_changes_binding_without_changing_versions","platform_institution_task_drafts_keep_exact_scope","dirty_editor_locks_scope_switch"],"errors":[],"screenshots":["human-review.png","pending-approval.png","published.png","lineage-layers.png","feedback-regression.png","restored-draft.png","version-comparison.png","explicit-binding.png","failure.png"],"passed":false,"error":"The input did not match the regular expression /需求候选/. Input:\n\n'依据固定需求输入生成候选。物理字段、证据与脚本规则必须在输入白名单内；报告缺口，不改变人工正文或确认结果。'\n"}

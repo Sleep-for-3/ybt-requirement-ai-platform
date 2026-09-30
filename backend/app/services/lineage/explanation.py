@@ -341,12 +341,16 @@ def _degraded_reason(exc: Exception) -> str:
     return "模型暂时不可用，已保留脚本事实，可稍后重试。"
 
 
-async def explain_lineage_edge(db, project_id: int, request: LineageEdgeExplanationRequest) -> dict[str, Any]:
+async def explain_lineage_edge(db, project_id: int, request: LineageEdgeExplanationRequest, *, principal=None) -> dict[str, Any]:
     edge_key = str(request.edge_id)
     if not edge_key or len(edge_key) > 500:
         raise LineageExplanationNotFound("血缘关系编号无效")
     context = build_lineage_edge_context(db, project_id, edge_key, request.revision_id)
     deterministic = deterministic_explanation(context)
+    from app.services.ai_skills.lineage_adapter import explain_if_bound
+    skill_result = await explain_if_bound(db, principal, project_id, request, context, deterministic)
+    if skill_result is not None:
+        return skill_result
     factual = {"edge_id": edge_key, "revision_id": request.revision_id, "facts": context["facts"]}
     knowledge = _knowledge_evidence(db, project_id, context)
     fact_ids = {item["id"] for item in context["facts"]} | {item["citation_id"] for item in knowledge}

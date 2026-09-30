@@ -31,6 +31,7 @@ from app.models import (
 )
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
+from app.services.llm.execution_metadata import stable_hash
 from app.services.mapping import source_to_mart_generator
 from app.services.mapping import mart_to_ybt_generator
 from app.services.mapping.generator_context import (
@@ -185,10 +186,16 @@ def test_double_layer_mapping_end_to_end_api() -> None:
         assert no_evidence_approval.status_code == 400
         assert "evidence" in no_evidence_approval.json()["detail"].lower()
 
-        source_adopted = _post(client, f"/api/source-to-mart-mappings/{source_to_mart['id']}/adopt-ai-draft", {})
-        ybt_adopted = _post(client, f"/api/mart-to-ybt-mappings/{mart_to_ybt['id']}/adopt-ai-draft", {})
-        assert source_adopted["final_content"] == source_adopted["ai_generated_content"]
-        assert ybt_adopted["final_content"] == ybt_adopted["ai_generated_content"]
+        for kind, mapping, manual in (
+            ("source-to-mart", source_to_mart, source_manual),
+            ("mart-to-ybt", mart_to_ybt, ybt_manual),
+        ):
+            draft = source_draft if kind == "source-to-mart" else ybt_draft
+            response = client.post(f"/api/{kind}-mappings/{mapping['id']}/adopt-ai-draft", json={"expected_draft_hash": stable_hash(draft["ai_generated_content"])})
+            assert response.status_code == 409
+            current = client.get(f"/api/{kind}-mappings/{mapping['id']}")
+            current.raise_for_status()
+            assert current.json()["final_content"] == manual
 
         source_saved = _put(
             client,

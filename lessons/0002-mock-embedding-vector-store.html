@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>看懂 Mock、Embedding 与向量存储</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Lesson 0002 · 约 15 分钟</div>
+    <h1>看懂 Mock、Embedding 与向量存储</h1>
+    <p class="lede">目标只有一个：看到“Mock 模式”时，能判断系统哪些能力是真的、哪些只是为了跑通流程。</p>
+  </header>
+
+  <section>
+    <h2>先找到三种“状态”</h2>
+    <div class="grid">
+      <article class="card">
+        <h3>项目进程状态</h3>
+        <p><code>scripts\项目启停.ps1 status</code></p>
+        <p>回答前端、后端、PostgreSQL、Redis、Celery 是否存活，以及访问地址。</p>
+      </article>
+      <article class="card">
+        <h3>AI 运行状态</h3>
+        <p><code>http://127.0.0.1:3000/model-profiles</code></p>
+        <p>回答聊天模型、Embedding、向量存储当前使用哪个 Provider，是真实配置还是 Mock。</p>
+      </article>
+      <article class="card">
+        <h3>后台健康检查</h3>
+        <p><code>http://127.0.0.1:8300/health/ready</code></p>
+        <p>回答数据库、迁移、存储、Redis、队列、模型、向量服务和磁盘是否就绪。</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>用“图书馆”记住 4 个核心词</h2>
+    <div class="flow" aria-label="RAG 检索生成链路">
+      <span class="node">Embedding：编坐标</span><span class="arrow">→</span>
+      <span class="node">Vector Store：存坐标、找近邻</span><span class="arrow">→</span>
+      <span class="node">Retrieval：取证据</span><span class="arrow">→</span>
+      <span class="node">LLM：依据证据写回答</span>
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <h3>LLM</h3>
+        <p><strong>Large Language Model，大语言模型。</strong>像写作员，负责理解问题并组织答案。DeepSeek Chat 属于这一层。</p>
+      </article>
+      <article class="card">
+        <h3>Embedding</h3>
+        <p><strong>嵌入/向量化。</strong>像图书管理员给每段文字编一组“含义坐标”。含义接近的文本，坐标应更接近。</p>
+      </article>
+      <article class="card">
+        <h3>Vector Store</h3>
+        <p><strong>向量存储。</strong>保存这些坐标，并快速查找与问题坐标最相近的 Top-K 记录。Milvus 是本项目已适配的正式实现。</p>
+      </article>
+      <article class="card">
+        <h3>RAG</h3>
+        <p><strong>Retrieval-Augmented Generation，检索增强生成。</strong>先从知识库检索证据，再让 LLM 依据证据回答。</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Mock 到底是什么意思</h2>
+    <p><strong>Mock</strong> 可译为“模拟实现”或“测试替身”。它保留真实组件的接口，让整套系统在没有外部模型、密钥或向量数据库时仍能开发、测试和演示。</p>
+    <div class="callout warning">
+      <strong>Mock 不是报错，也不等于真实能力。</strong>它说明流程接线可以验收，但不能据此评价真实大模型质量或生产级语义召回能力。
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <h3>Mock LLM</h3>
+        <p>返回代码里预设的固定结构化答案，不调用 DeepSeek，也不消耗 Token。</p>
+      </article>
+      <article class="card">
+        <h3>Mock Embedding</h3>
+        <p>当前源码用 SHA-256 把文本稳定地变成 64 维数字。它可重复，但不真正理解中文语义。</p>
+      </article>
+      <article class="card">
+        <h3>Mock Vector Store</h3>
+        <p>把向量保存在当前 Python 进程的内存字典里。进程重启会丢失，而且 API 与 Celery Worker 之间不共享。</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>为什么现在仍能检索到 Excel</h2>
+    <p>本项目不是只靠向量搜索，而是混合检索：</p>
+    <div class="flow" aria-label="当前混合检索">
+      <span class="node">PostgreSQL 关键词索引</span><span class="arrow">+</span>
+      <span class="node">Mock 向量分数</span><span class="arrow">+</span>
+      <span class="node">监管答疑等规则加分</span><span class="arrow">→</span>
+      <span class="node">Rerank 重新排序</span>
+    </div>
+    <p>上传的知识单元、来源文件、工作表、单元格范围和关键词索引都真实保存在 PostgreSQL。因此即使向量得分是 <code>0.00</code>，精确关键词仍能召回本地 Excel 内容。</p>
+  </section>
+
+  <section>
+    <h2>三个容易混淆的组件</h2>
+    <div class="grid">
+      <article class="card">
+        <h3>PostgreSQL</h3>
+        <p>正式关系数据库，保存项目、知识单元、任务、日志、权限及关键词索引。</p>
+      </article>
+      <article class="card">
+        <h3>Redis</h3>
+        <p>高速键值存储；当前主要作为 Celery 的消息 Broker 和结果后端。它不是本项目的向量数据库。</p>
+      </article>
+      <article class="card">
+        <h3>Celery Worker</h3>
+        <p>后台工作进程，负责文档解析、批量索引等耗时任务，避免前台请求一直等待。</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>从当前模式升级到正式语义检索</h2>
+    <ol class="checklist">
+      <li>激活 DeepSeek Profile，只会升级“聊天模型/答案生成”这一层。</li>
+      <li>另行配置真实 Embedding Provider 和 Embedding 模型。</li>
+      <li>启用共享、持久化的 Milvus 向量存储。</li>
+      <li>对现有知识文档重新索引，生成同一维度的新向量并写入 Milvus。</li>
+      <li>用 RAG 评测比较 Recall@K、MRR、引用覆盖率和回答正确性。</li>
+    </ol>
+    <p><strong>只配置 DeepSeek，不会自动把 Mock Embedding 和 Mock Vector Store 变成正式模式。</strong></p>
+  </section>
+
+  <section>
+    <h2>闭卷自测</h2>
+    <details>
+      <summary>Mock 是不是系统故障？</summary>
+      <p>不是。它是主动选择的测试替身；流程可运行，但不代表真实 AI 或生产语义检索能力。</p>
+    </details>
+    <details>
+      <summary>为什么向量得分为 0，仍能搜到 Excel？</summary>
+      <p>因为 PostgreSQL 的关键词索引和规则重排仍在工作，当前结果主要来自关键词召回。</p>
+    </details>
+    <details>
+      <summary>激活 DeepSeek 后，Embedding 会自动变真实吗？</summary>
+      <p>不会。聊天模型与 Embedding 是两套独立 Provider，向量存储又是第三套配置。</p>
+    </details>
+  </section>
+
+  <section>
+    <h2>推荐原始资料</h2>
+    <p><a href="https://developers.openai.com/api/docs/guides/embeddings">OpenAI Embeddings 指南</a>用于理解文本向量；<a href="https://arxiv.org/abs/2005.11401">RAG 原始论文</a>用于理解检索与生成的分工；<a href="https://milvus.io/docs/overview.md">Milvus 官方概览</a>用于理解共享向量数据库。</p>
+  </section>
+
+  <footer>
+    <p>读完后，可以用一句话回答我：“DeepSeek、Embedding 和 Milvus 各负责什么？”我会根据你的回答继续讲正式配置方案。</p>
+    <p><a href="0001-llm-call-chain.html">上一课：LLM 调用链</a> · <a href="../reference/0001-enterprise-ai-glossary.html">术语速查</a></p>
+  </footer>
+</main>
+</body>
+</html>

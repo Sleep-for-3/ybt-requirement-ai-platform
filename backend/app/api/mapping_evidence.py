@@ -5,10 +5,17 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import MappingEvidenceReference, MartToYbtMapping, ScenarioBusinessMapping, ScenarioTechnicalLineage, SourceToMartMapping
 from app.schemas import MappingEvidenceCreate, MappingEvidenceRead
+from app.services.auth.dependencies import RealPrincipal
 
 router = APIRouter(tags=["mapping evidence"])
 
 VALID_MAPPING_TYPES = {"source_to_mart", "mart_to_ybt", "scenario_business", "scenario_technical"}
+
+
+@router.get("/mappings/{mapping_type}/{mapping_id}/generation-provenance")
+def generation_provenance(mapping_type: str, mapping_id: int, principal: RealPrincipal, db: Session = Depends(get_db)):
+    from app.services.mapping.provenance import mapping_provenance
+    return mapping_provenance(db, principal, mapping_type, mapping_id)
 
 
 @router.post("/mappings/{mapping_type}/{mapping_id}/evidence", response_model=MappingEvidenceRead)

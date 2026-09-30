@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>首课：从一次口径生成看懂 LLM 调用链</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Lesson 0001 · 约 20 分钟</div>
+    <h1>从一次口径生成看懂 LLM 调用链</h1>
+    <p class="lede">今天只拿下一个结果：你能从业务生成器一路追到模型请求和调用日志，并说出三个企业级控制点。</p>
+  </header>
+
+  <section>
+    <h2>任务</h2>
+    <p>假设用户为一个字段场景点击“生成业务口径草稿”。请沿下面的链路阅读源码，不要横向浏览整个项目。</p>
+    <div class="flow" aria-label="LLM调用流程">
+      <span class="node">Generator</span><span class="arrow">→</span>
+      <span class="node">PromptRuntime</span><span class="arrow">→</span>
+      <span class="node">LLMService</span><span class="arrow">→</span>
+      <span class="node">Provider</span><span class="arrow">→</span>
+      <span class="node">ModelCallLog</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>按顺序打开 5 个文件</h2>
+    <div class="grid">
+      <article class="card">
+        <h3>1. 业务入口</h3>
+        <p class="path"><code>backend/app/services/mapping/scenario_draft_generator.py</code></p>
+        <p>找 <code>generate_business_draft</code>：它先取字段和场景，再检索证据，最后调用模型。</p>
+      </article>
+      <article class="card">
+        <h3>2. Prompt 运行时</h3>
+        <p class="path"><code>backend/app/services/llm/prompt_runtime.py</code></p>
+        <p>找 <code>get_prompt_runtime</code>、<code>prepare_model_input</code> 和 <code>record_model_call</code>。</p>
+      </article>
+      <article class="card">
+        <h3>3. 抽象接口</h3>
+        <p class="path"><code>backend/app/services/llm/base.py</code></p>
+        <p>观察业务代码为何只知道 <code>chat_json</code>，而不知道具体供应商。</p>
+      </article>
+      <article class="card">
+        <h3>4. 供应商适配</h3>
+        <p class="path"><code>backend/app/services/llm/openai_compatible.py</code></p>
+        <p>找 temperature、JSON mode、timeout 和 fallback；区分“合法 JSON”与“业务 Schema”。</p>
+      </article>
+      <article class="card">
+        <h3>5. 可复现测试</h3>
+        <p class="path"><code>backend/tests/test_llm_gateway.py</code></p>
+        <p>观察 Mock 如何让 CI 不依赖真实密钥和网络。</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>你应看到的三个架构思想</h2>
+    <h3>模型是可替换依赖</h3>
+    <p><code>LLMService</code> 把供应商差异封装在适配器后面。生成器依赖稳定接口，模型可以替换，业务规则不随 SDK 漂移。</p>
+
+    <h3>敏感数据在外发前控制</h3>
+    <p><code>prepare_model_input</code> 根据本地/外部模型和敏感等级阻断或脱敏。权限不是写在 Prompt 里请模型自觉。</p>
+
+    <h3>每次生成都必须能追溯</h3>
+    <p><code>ModelCallLog</code> 关联项目、Prompt 版本、模型和 RetrievalLog。以后出现错误口径，才能回答“当时用了什么证据和配置”。</p>
+
+    <div class="callout warning">
+      <strong>主动找缺口：</strong>当前 JSON mode 不是严格 JSON Schema；Token usage 仍为空；temperature 固定而 top-p 未显式记录。这三个缺口就是第一轮改造候选。
+    </div>
+  </section>
+
+  <section>
+    <h2>闭卷自测</h2>
+    <details>
+      <summary>为什么要有 Mock LLM？</summary>
+      <p>验证接口、状态和业务护栏，保证 CI 可复现且不依赖网络/密钥。它不能代替真实模型质量评测。</p>
+    </details>
+    <details>
+      <summary>为什么 response_format=json_object 仍不够？</summary>
+      <p>它最多保证 JSON 可解析，不保证字段、类型、枚举、citation 和物理字段符合业务契约；仍需 Pydantic 与业务验证器。</p>
+    </details>
+    <details>
+      <summary>temperature=0.2 为什么不能保证口径正确？</summary>
+      <p>温度只调采样随机性，不验证事实。正确性来自可见证据、目录/血缘校验、拒答和人工审核。</p>
+    </details>
+  </section>
+
+  <section>
+    <h2>今天的作品</h2>
+    <ul class="checklist">
+      <li>手画或用 Mermaid 画出这条 5 节点时序图。</li>
+      <li>写出三个“已实现控制点”和三个“当前缺口”。</li>
+      <li>录音回答 90 秒：“为什么这个项目不是直接调用一次大模型？”</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>推荐原始资料</h2>
+    <p>先读摘要和架构图即可：<a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a>。应用工程阶段无需推导全部公式，重点理解 Transformer 是概率序列模型而非事实数据库。</p>
+  </section>
+
+  <footer>
+    <p>完成后，把你的 90 秒回答或时序图发给我。我会像高级面试官一样追问并指出表达漏洞。</p>
+    <p><a href="../reference/0001-enterprise-ai-glossary.html">打开术语速查表</a> · <a href="../AI_AGENT_LEARNING_PATH/README.md">返回知识库目录</a></p>
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "version": "a6-synthetic-1",
+  "data_origin": "synthetic; no customer or production data",
+  "execution_mode": "deterministic_and_replay",
+  "field_recall": [
+    {"id": "english_balance", "field_code": "balance", "field_name": "余额", "query": "account balance", "expected_first": "balance"},
+    {"id": "chinese_balance", "field_code": "", "field_name": "账户余额", "query": "账户余额", "expected_first": "balance"},
+    {"id": "english_identifier", "field_code": "id", "field_name": "账户编号", "query": "id", "expected_first": "id"},
+    {"id": "chinese_identifier", "field_code": "", "field_name": "账户编号", "query": "账户编号", "expected_first": "id"}
+  ],
+  "grounded_answers": [
+    {"id": "observed_script", "has_policy": false, "accepted": true, "output": {"claims": [{"claim_type": "observed_fact", "text": "脚本使用上期余额。", "fact_ids": ["script:1"]}]}},
+    {"id": "valid_policy", "has_policy": true, "accepted": true, "output": {"claims": [{"claim_type": "policy_requirement", "text": "所附条款要求期末余额，仍需人工核验。", "policy_clause_ids": ["policy:1"]}]}},
+    {"id": "fact_is_not_policy", "has_policy": false, "accepted": false, "output": {"claims": [{"claim_type": "policy_requirement", "text": "脚本即监管依据。", "policy_clause_ids": ["script:1"]}]}},
+    {"id": "unknown_citation", "has_policy": true, "accepted": false, "output": {"claims": [{"claim_type": "interpretation", "text": "未知来源。", "fact_ids": ["other:99"]}]}},
+    {"id": "structured_conflict", "has_policy": true, "accepted": true, "output": {"policy_comparisons": [{"status": "conflict", "fact_ids": ["script:1"], "policy_clause_ids": ["policy:1"], "rationale": "两侧余额时点不同。", "difference": "脚本为上期，条款为期末，需人工核验。"}]}},
+    {"id": "unsupported_conflict", "has_policy": true, "accepted": false, "output": {"policy_comparisons": [{"status": "conflict", "fact_ids": ["script:1"], "policy_clause_ids": ["policy:1"], "rationale": "不同但未说明差异。"}]}},
+    {"id": "automatic_confirmation", "has_policy": true, "accepted": false, "output": {"claims": [{"claim_type": "policy_requirement", "text": "已自动确认。", "policy_clause_ids": ["policy:1"], "requires_human_confirmation": false}]}},
+    {"id": "missing_basis", "has_policy": false, "accepted": true, "output": {"gaps": [{"code": "missing_basis", "message": "未找到有效制度条款，不能据脚本确认监管要求。"}]}}
+  ]
+}

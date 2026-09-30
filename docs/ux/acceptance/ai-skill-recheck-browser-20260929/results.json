@@ -1,0 +1,17 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "browser_impact_queue_opens_review_without_editing_frozen_requirement",
+    "repeated_event_reuses_review_and_task",
+    "explicit_browser_revision_preserves_history_and_requires_reconfirmation",
+    "unverified_replacement_rejected_and_review_remains_pending"
+  ],
+  "errors": [],
+  "screenshots": [
+    "requirement-recheck.png"
+  ],
+  "passed": true
+}

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.requirement_revisions import append_revision, load_revision
 from app.services.requirement_scope import content_digest
+from app.services.ai_skills.provenance import safe_execution_metadata
 
 NORMATIVE_CATEGORIES = {"regulatory_formal", "regulatory_qa", "internal_policy"}
 LEGACY_PENDING = "制度条款与脚本规则的逐条对照尚未人工确认"
@@ -158,7 +159,7 @@ def ai_suggestions(db, project_id, requirement_id, content):
         result.append({
             "item_id": item.id,
             "test_provider": bool(runtime.get("test_provider")),
-            "execution_metadata": deepcopy(item.candidate_json.get("execution_metadata") or runtime),
+            "execution_metadata": safe_execution_metadata(item.candidate_json.get("execution_metadata"), runtime),
             "comparisons": deepcopy(item.candidate_json["policy_comparisons"]),
         })
     return result

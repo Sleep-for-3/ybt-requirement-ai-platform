@@ -1,0 +1,9 @@
+locator.inputValue: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByLabel('输入模板', { exact: true })
+
+    at C:\Users\李儒伟\Documents\智能分析智能体平台\frontend\tests\ai-skill.browser.acceptance.mjs:35:43 {
+  log: [ "  - waiting for getByLabel('输入模板', { exact: true })" ],
+  name: 'TimeoutError'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"mock","checks":[],"errors":[],"screenshots":["failure.png"],"passed":false,"error":"locator.inputValue: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByLabel('输入模板', { exact: true })\u001b[22m\n"}

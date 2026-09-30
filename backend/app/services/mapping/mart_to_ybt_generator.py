@@ -16,7 +16,8 @@ from app.services.governance.double_layer_review import (
     MappingGenerationNotEditable,
     ensure_double_layer_mapping_editable,
 )
-from app.services.llm.execution_metadata import normalize_runtime_result
+from app.services.llm.execution_metadata import normalize_runtime_result, stable_hash
+from app.services.ai_skills.mapping_adapter import generate_mapping_if_bound
 from app.services.llm.prompt_runtime import (
     execute_runtime_chat_with_metadata as _execute_runtime_chat_with_metadata,
     get_prompt_runtime,
@@ -136,36 +137,40 @@ async def generate_mart_to_ybt_draft(
             context_gaps=list(envelope.projection.context_gaps),
         )
 
-    runtime = get_prompt_runtime(db, "mart_to_ybt_mapping")
-    model_input = prepare_model_input(
-        runtime,
-        envelope.projection.prompt_text,
-        envelope.projection.confidentiality_levels,
-        db=db,
-        project_id=snapshot.project.id,
-    )
-    model_result = await execute_runtime_chat(
-        db,
-        snapshot.project.id,
-        runtime,
-        model_input,
-        MartToYbtOutput,
-        confidentiality=_highest_confidentiality(
-            envelope.projection.confidentiality_levels
-        ),
-        retrieval_log_id=_first_retrieval_log_id(
-            envelope.trace.retrieval_log_ids
-        ),
-        context_complete=projection_context_complete(envelope.projection),
-        context_budget=projection_context_budget(envelope.projection),
-        allowed_citation_refs=projection_selected_fact_refs(envelope.projection),
-    )
-    output, execution_metadata = normalize_runtime_result(
-        model_result,
-        runtime,
-        context_complete=projection_context_complete(envelope.projection),
-        context_budget=projection_context_budget(envelope.projection),
-    )
+    skill_result = await generate_mapping_if_bound(db, actor, envelope, "mart_to_ybt_mapping")
+    if skill_result is None:
+        runtime = get_prompt_runtime(db, "mart_to_ybt_mapping")
+        model_input = prepare_model_input(
+            runtime,
+            envelope.projection.prompt_text,
+            envelope.projection.confidentiality_levels,
+            db=db,
+            project_id=snapshot.project.id,
+        )
+        model_result = await execute_runtime_chat(
+            db,
+            snapshot.project.id,
+            runtime,
+            model_input,
+            MartToYbtOutput,
+            confidentiality=_highest_confidentiality(
+                envelope.projection.confidentiality_levels
+            ),
+            retrieval_log_id=_first_retrieval_log_id(
+                envelope.trace.retrieval_log_ids
+            ),
+            context_complete=projection_context_complete(envelope.projection),
+            context_budget=projection_context_budget(envelope.projection),
+            allowed_citation_refs=projection_selected_fact_refs(envelope.projection),
+        )
+        output, execution_metadata = normalize_runtime_result(
+            model_result,
+            runtime,
+            context_complete=projection_context_complete(envelope.projection),
+            context_budget=projection_context_budget(envelope.projection),
+        )
+    else:
+        output, execution_metadata = skill_result
 
     # Context and the model execute without a task lock. Persist the attempt,
     # expire old ORM state, then open the short authoritative write boundary.
@@ -258,6 +263,7 @@ async def generate_mart_to_ybt_draft(
                 extra={
                     "output": output_trace.model_dump(mode="json"),
                     "execution_metadata": execution_metadata,
+                    "draft_hash": stable_hash(locked_mapping.ai_generated_content or ""),
                 },
             )
             result = locked_mapping
