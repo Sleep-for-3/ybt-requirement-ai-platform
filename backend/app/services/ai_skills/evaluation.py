@@ -149,9 +149,13 @@ def mandatory_assertions(envelope):
         if envelope.task_key == runtime.FIELD_RERANK_TASK:
             # The release gate must prove the new native validator rejects ids that are
             # well-formed but outside the supplied candidate whitelist.
-            known = sorted(item.id for item in envelope.facts if item.kind == "catalog_field")
-            numbers = [int(value.split(":")[1]) for value in known if value.split(":")[1].isdigit()] or [0]
-            unknown_candidate = f"catalog:{max(numbers) + 1}"
+            known = runtime.require_field_candidate_ids(envelope)
+            numbers = [int(value.partition(":")[2]) for value in known] or [0]
+            probe_number = max(numbers) + 1
+            unknown_candidate = f"catalog:{probe_number}"
+            while unknown_candidate in known:
+                probe_number += 1
+                unknown_candidate = f"catalog:{probe_number}"
             if known:
                 probe = [{**{"candidate_id": value, "score": 0.5, "rationale": "negative probe"},
                           **({"evidence_refs": [unknown_candidate]} if index == 0 else {})}
@@ -199,16 +203,22 @@ async def run_tests(db, principal, key, payload):
     db.flush()
     started = perf_counter()
     passed_count = 0
+    executed_count = 0
+    skipped_count = 0
     for case in cases:
         output = None
         assertions = {}
         error = None
+        stage = "input"
         try:
             envelope = SkillInputEnvelope.model_validate(case.input_json)
+            stage = "authorize"
             runtime.authorize_invocation(db, principal, envelope.scope)
             if envelope.scope.project_id != payload.project_id or not compatible_owner(version, envelope.scope):
                 control.fail(404, "resource_not_found")
+            stage = "compile"
             runtime.compile_input(db, definition, version, envelope)
+            stage = "execute"
             assertions = mandatory_assertions(envelope)
             if payload.mode in {"mock_model", "real_model"}:
                 output = await runtime.execute_resolved(db, envelope, definition, version)
@@ -229,13 +239,29 @@ async def run_tests(db, principal, key, payload):
         except Exception as exc:
             error = (exc.detail.get("error_code", "evaluation_failed") if isinstance(exc, HTTPException) and isinstance(exc.detail, dict)
                      else type(exc).__name__)
-        passed = error is None and bool(assertions) and all(assertions.values())
-        passed_count += int(passed)
+        # A case whose own input or contract cannot be honoured is a defect of the test data, not a
+        # skill outcome: record it as skipped so it stays visible without blocking the whole project
+        # scope (test cases cannot be deleted through the API). Everything from execution onwards is
+        # a genuine evaluation result and still fails the run.
+        case_defect = error is not None and stage in {"input", "compile"}
+        if case_defect:
+            skipped_count += 1
+            assertions = {**assertions, "case_defect": True}
+            passed = None
+        else:
+            executed_count += 1
+            passed = error is None and bool(assertions) and all(assertions.values())
+            passed_count += int(passed)
         db.add(AISkillTestResult(run_id=run.id, case_id=case.id,
                                 passed=None if payload.mode == "human_review" and passed else passed,
                                 assertions_json=assertions, output_json=output, error_code=error))
-    run.status = ("pending_review" if payload.mode == "human_review" else "passed") if passed_count == len(cases) else "failed"
-    run.metrics_json = {"total": len(cases), "passed": passed_count, "elapsed_ms": int((perf_counter() - started) * 1000),
+    if executed_count == 0:
+        run.status = "failed"
+    else:
+        run.status = (("pending_review" if payload.mode == "human_review" else "passed")
+                      if passed_count == executed_count else "failed")
+    run.metrics_json = {"total": len(cases), "executed": executed_count, "skipped": skipped_count,
+                        "passed": passed_count, "elapsed_ms": int((perf_counter() - started) * 1000),
                         "mode": payload.mode, "real_model_successes": passed_count if payload.mode == "real_model" else 0,
                         "cost": None, "cost_available": False}
     control.event(db, principal, version.definition_id, version, "test_run_completed", {"run_id": run.id, "mode": run.mode, "status": run.status})

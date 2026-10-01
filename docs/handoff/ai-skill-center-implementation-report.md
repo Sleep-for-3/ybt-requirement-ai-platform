@@ -336,3 +336,15 @@ API/Schema 和错误码；状态机与权限矩阵；范围绑定优先级；不
 - 浏览器（真实 HTTP + 隔离 SQLite + Mock，仅 loopback）：`docs/ux/acceptance/ai-skill-field-rerank-browser-20260930/results.json` 四项通过、errors=[]；覆盖“未点击不产生模型调用”“显式点击后才重排并显示固定 Skill 与 Mock 标签”“模型重排不写映射/推荐”“修改检索词废弃旧模型排序”。截图 `field-rerank.png` 已由主线程查看。
 - 未验证：真实模型重排质量与成本、PostgreSQL、业务专家质量评测；Mock 通过只证明流程与门禁。B3 仍为 in_progress，第二部分完整验收仍为 false。
 - 设计：`docs/design/ai-skill-b3-model-rerank.md`；工作包报告 `docs/handoff/dsh-B3-R1-result.md`。下一工作包为受控模型查询改写/依赖式多跳与条款比较，随后 B4/B5/B6。
+
+## PostgreSQL 数据恢复与天津演示重建检查点（2026-09-30）
+
+- 代码包未回退：`scripts/项目启停.ps1` SHA256 与源机一致（`C0272418…F604`）；第 149 行 `MissingCatchOrFinally` 已定位为本机代码页差异（ACP=gb2312 读取无 BOM 的 UTF-8 文件），同一字节流按 UTF-8 解析 **0 错误** → 非代码缺陷，文件未被修改。
+- 数据包 `dsh-postgres-data-20260930-v2` 的 SHA256SUMS **19/19 通过**；在本机便携 PostgreSQL **18.4**（仅 127.0.0.1:5432，locale Chinese (Simplified)_China.936）恢复为**全新库 `ybt_dsh_handoff_v2`**，迁移 `202609180039` → **`202609270044`**，**6 个项目 / 25 源用户 + 1 交接管理员**；第一次尝试的库 `ybt_dsh_handoff_20260930` 作为失败现场保留未删。
+- 执行方式透明：使用「加 UTF-8 BOM + 修正 1 行 UPDATE 结果校验（psql 命令标签导致误判）」的脚本副本；原脚本逐字节未改（SHA256 `4615F0AA…4D31`）。孤儿引用修复有审计 `restore-audit.csv`。
+- 文件预览实测：`stored_files` 24 行中 **4 行对象存在（HTTP 200）**、20 行缺失（404）；磁盘另有 5 个无数据库行的对象 → 预览功能正常，属交接包数据完整性差异。
+- 组件拓扑（分开判定）：**Redis + Celery Worker + Beat + 真实 FastEmbed Embedding 已实测通过**（`/health/ready` 的 redis/task_queue/embedding_provider = healthy；`POST /v1/embeddings` 返回 512 维；真实异步任务 `job 116` queued→completed）。**Milvus/etcd/MinIO 未恢复**（本机无 Docker、WSL 无发行版、进程未提权），故 `vector_store=disabled`、`semantic_index=disabled` → **完整组件拓扑未通过**。
+- 天津农商演示重建：项目 **ID 7**、批次 **ID 1**、数据架构 revision **2**、后台任务 **116**；落库 **18 张目录表**（14 ODS→layer_1、4 监管集市→layer_4）、**4 个固定脚本版本**（`version_no=1`、`parse_status=parsed`、`dialect=hive`）、**64 条跨 ODS→监管集市列级血缘边**（另 `reads_from` 15、`maps_code` 13）。
+- 记录在案的差异：源库项目 2 名称本来就是 12 个 `?`；上传时 ZIP 中文文件名在 multipart 丢 `.zip` 后缀（改用内容哈希一致的 ASCII 名副本）；PS 5.1 `Invoke-RestMethod` 未按 UTF-8 发送请求体导致中文写成 `?`（已用 UTF-8 字节体与定向 SQL 修复，并据此解释源库现象）。
+- 仍未验证：Milvus/向量检索、真实模型质量、服务器全库（项目 28 / 批次 17 / revision 10 未迁入）、PostgreSQL 生产形态。第二部分完整验收仍为 **false**。
+- 报告：`docs/handoff/dsh-pg-restore-and-tianjin-acceptance-20260930.md`。

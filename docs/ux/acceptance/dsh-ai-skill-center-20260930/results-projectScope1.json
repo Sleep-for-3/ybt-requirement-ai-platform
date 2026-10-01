@@ -1,0 +1,123 @@
+{
+  "generatedAt": "2026-09-30T17:15:42.175Z",
+  "projectId": 1,
+  "projectName": "增强验收测试项目",
+  "selects": [
+    {
+      "index": 0,
+      "currentValue": "1",
+      "options": [
+        "选择项目",
+        "检索链路验收项目-20261001-000747",
+        "天津农商银行智能监管平台",
+        "阿萨大啊",
+        "一表通产品数据智能演示",
+        "Synthetic semantic acceptance v2",
+        "Synthetic semantic acceptance",
+        "????????????",
+        "增强验收测试项目"
+      ]
+    },
+    {
+      "index": 1,
+      "currentValue": "project",
+      "options": [
+        "平台",
+        "机构",
+        "项目",
+        "任务"
+      ]
+    },
+    {
+      "index": 2,
+      "currentValue": "requirement_candidate_generation",
+      "options": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "index": 3,
+      "currentValue": "field_semantic_matching",
+      "options": [
+        "字段语义匹配（恢复环境验收）"
+      ]
+    },
+    {
+      "index": 4,
+      "currentValue": "",
+      "options": [
+        "请选择已发布版本",
+        "v2 · 项目 · 已绑定"
+      ]
+    },
+    {
+      "index": 5,
+      "currentValue": "3",
+      "options": [
+        "请选择模型",
+        "验收用 Mock 模型档 · mock/"
+      ]
+    },
+    {
+      "index": 6,
+      "currentValue": "deterministic",
+      "options": [
+        "确定性验证",
+        "Mock 测试",
+        "真实模型测试",
+        "回放",
+        "人工评审"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "name": "page_renders",
+      "ok": true,
+      "detail": "工作台 AI Skill 配置中心 范围配置 · 测试门禁 · 独立审批 先保存草稿与测试用例，再运行确定性及对应模型测"
+    },
+    {
+      "name": "scope_is_project1",
+      "ok": true,
+      "detail": "expect project #1 / 增强验收测试项目"
+    },
+    {
+      "name": "no_page_errors",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "published_version_offered_in_ui",
+      "ok": true,
+      "detail": "[\"选择项目\",\"检索链路验收项目-20261001-000747\",\"天津农商银行智能监管平台\",\"阿萨大啊\",\"一表通产品数据智能演示\",\"Synthetic semantic acceptance v2\",\"Synthetic semantic acceptance\",\"????????????\",\"增强验收测试项目\",\"平台\",\"机构\",\"项目\",\"任务\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"字段语义匹配（恢复环境验收）\",\"请选择已发布版本\",\"v2"
+    },
+    {
+      "name": "ui_shows_published_state_text",
+      "ok": true,
+      "detail": "已发布 present"
+    }
+  ],
+  "errors": [],
+  "ui": {
+    "url": "http://127.0.0.1:3000/ai-control/skills?projectId=1",
+    "text": "工作台 AI Skill 配置中心 范围配置 · 测试门禁 · 独立审批 先保存草稿与测试用例，再运行确定性及对应模型测试，通过后提交独立审批。发布后固定版本绑定到所选配置范围。查看兼容 Prompt 记录 配置范围 平台 机构 项目 任务 当前编辑项目配置，测试使用所选项目 #1 的固定用例。发布绑定到当前配置范围；项目采用上级版本需明确选择。 注册能力（平台管理员） 选择能力 字段语义匹配（恢复环境验收） 项目版本 新建草稿 v2 · 已发布 当前项目固定绑定 固定采用已发布版本 当前绑定版本记录 #2 可采用当前范围及可兼容上级范围的已发布版本。上级更新不会自动改变当前绑定。 采用版本 请选择已发布版本 v2 · 项目 · 已绑定 确认固定采用 v2 · 已发布 模型配置 请选择模型 验收用 Mock 模型档 · mock/ 系统提示词 输入模板 插入 subject 插入 facts 插入 policy_evidence 插入 gaps 必须保留 subject、facts、policy_evidence、gaps 四个变量。引用校验与禁用工具策略由服务端强制执行。 血缘上下文范围与预算 保存草稿 校验发布条件 停用新增绑定 恢复为新草稿 固定测试用例与运行 当前项目有 1 个用例。真实模型测试会调用所选模型服务；Mock 与回放不能代替真实模型结果。 添加固定用例（技术配置） 验证类型 确定性验证 Mock 测试 真实模型测试 回放 人工评审 运行所选测试 #6 · Mock 测试 · passed · 1/1 #5 · 确定性验证 · passed · 1/1"
+  },
+  "summary": {
+    "pass": 5,
+    "fail": 0
+  }
+}

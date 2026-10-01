@@ -473,20 +473,28 @@ def _vector_status(db: Session) -> dict[str, Any]:
     reachable: bool | None = None
     reachability_error: str | None = None
     if settings.vector_store_provider == "milvus":
-        parsed = urlsplit(settings.milvus_uri)
-        if parsed.hostname:
-            try:
-                with socket.create_connection(
-                    (parsed.hostname, parsed.port or 19530),
-                    timeout=settings.health_check_timeout_seconds,
-                ):
-                    reachable = True
-            except OSError:
-                reachable = False
-                reachability_error = "endpoint_unreachable"
+        lite_path = (getattr(settings, "milvus_lite_path", "") or "").strip()
+        if lite_path:
+            # The embedded Milvus Lite engine keeps its data in a local file and exposes no
+            # TCP endpoint, so a socket probe would always fail.  A configured Lite path is
+            # the reachability signal for that mode.
+            reachable = True
+            reachability_error = None
         else:
-            reachable = False
-            reachability_error = "invalid_endpoint"
+            parsed = urlsplit(settings.milvus_uri)
+            if parsed.hostname:
+                try:
+                    with socket.create_connection(
+                        (parsed.hostname, parsed.port or 19530),
+                        timeout=settings.health_check_timeout_seconds,
+                    ):
+                        reachable = True
+                except OSError:
+                    reachable = False
+                    reachability_error = "endpoint_unreachable"
+            else:
+                reachable = False
+                reachability_error = "invalid_endpoint"
     return {
         "provider": settings.vector_store_provider,
         "is_mock": settings.vector_store_provider == "mock",

@@ -82,6 +82,31 @@ def test_edge_explanation_is_scoped_to_the_selected_project_revision():
         assert response.status_code == 404
 
 
+def test_hanging_model_call_degrades_instead_of_hanging_forever(monkeypatch):
+    with _stack("AITIME") as (client, seeded_by_code):
+        seeded = seeded_by_code["AITIME"]
+        edge = _first_edge(client, seeded)
+        import asyncio
+
+        import app.services.lineage.explanation as service
+
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(30)
+
+        monkeypatch.setattr(service, "execute_runtime_chat", hang)
+        monkeypatch.setattr(service, "MODEL_CALL_TIMEOUT_SECONDS", 0.2)
+        response = client.post(
+            f"/api/projects/{seeded['project_id']}/lineage/edge-explanations",
+            json={"edge_id": edge["id"], "revision_id": seeded["revision_id"]},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["status"] == "degraded"
+        assert payload["ai"] is None
+        assert payload["facts"]
+        assert payload["execution_metadata"]["degraded_reason"] == "TimeoutError"
+
+
 def test_model_failure_degrades_without_losing_deterministic_facts(monkeypatch):
     with _stack("AIFAIL") as (client, seeded_by_code):
         seeded = seeded_by_code["AIFAIL"]

@@ -123,6 +123,13 @@ def _check_task_queue(settings: Settings) -> CheckResult:
 def _check_vector_store(settings: Settings) -> CheckResult:
     if settings.vector_store_provider == "mock":
         return _result("disabled", "External vector store is disabled.")
+    lite_path = (getattr(settings, "milvus_lite_path", "") or "").strip()
+    if lite_path:
+        # The embedded Milvus Lite engine stores its data in a local file and opens no TCP
+        # endpoint, so a socket probe can never succeed.  A configured Lite path is the
+        # reachability signal for that mode; the API process would fail loudly at startup if
+        # the file could not be opened.
+        return _result("healthy", "Embedded Milvus Lite store is configured.")
     parsed = urlparse(settings.milvus_uri)
     host = parsed.hostname
     port = parsed.port or 19530

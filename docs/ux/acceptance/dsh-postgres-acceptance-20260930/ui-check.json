@@ -1,0 +1,22 @@
+{
+  "projects": 6,
+  "users": 26,
+  "skillCenterStatus": 200,
+  "registeredSkills": 0,
+  "modelOptions": 1,
+  "projectNames": [
+    "阿萨大啊",
+    "一表通产品数据智能演示",
+    "Synthetic semantic acceptance v2",
+    "Synthetic semantic acceptance",
+    "????????????",
+    "增强验收测试项目"
+  ],
+  "checks": [
+    "ui_projects_page_shows_6_projects",
+    "ui_ai_skill_center_renders"
+  ],
+  "errors": [],
+  "aiSkillPageText": "工作台 AI Skill 配置中心 范围配置 · 测试门禁 · 独立审批 先保存草稿与测试用例，再运行确定性及对应模型测试，通过后提交独立审批。发布后固定版本绑定到所选配置范围。查看兼容 Prompt 记录 配置范围 平台 机构 项目 任务 当前编辑项目配置，测试使用所选项目 #6 的固定用例。发布绑定到当前配置范围；项目采用上级版本需明确选择。 尚未注册 Skill。请由平台管理员注册能力。 注册能力（平台管理员）",
+  "passed": true
+}

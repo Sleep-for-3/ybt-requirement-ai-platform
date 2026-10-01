@@ -86,9 +86,19 @@ def fallback_response(recall, *, error_code, provenance, model_metadata, snapsho
                        "model_metadata": model_metadata, **provenance}}
 
 
+UNRANKED_ORDINAL = 1 << 30
+
+
+def candidate_ordinal(candidate_id: str) -> int:
+    """Deterministic tie-break for ranking display; ids without the ``catalog:<n>`` shape sort last
+    instead of raising, so a malformed proposal is rejected by validation rather than by a crash."""
+    prefix, separator, suffix = candidate_id.partition(":")
+    return int(suffix) if separator and suffix.isdigit() else UNRANKED_ORDINAL
+
+
 def applied_response(recall, ranking, *, provenance, model_metadata):
     allowed = {item["candidate_id"]: item for item in recall["candidates"]}
-    ordered = sorted(ranking.ranking, key=lambda item: (-item.score, int(item.candidate_id.split(":")[1])))
+    ordered = sorted(ranking.ranking, key=lambda item: (-item.score, candidate_ordinal(item.candidate_id)))
     return {"context_hash": recall["context_hash"],
             "candidates": [rerank_payload(allowed[item.candidate_id], score=float(item.score),
                                           rationale=item.rationale, evidence_refs=item.evidence_refs,

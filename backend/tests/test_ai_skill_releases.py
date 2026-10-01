@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.models import AISkillVersion, AISkillScopeBinding, AISkillReleaseEvent, AIUserFeedback, ModelCallLog, InstitutionMembership, User, ModelProfile, PromptTemplateVersion
+from app.models import AISkillDefinition, AISkillTestCase, AISkillTestResult, AISkillVersion, AISkillScopeBinding, AISkillReleaseEvent, AIUserFeedback, ModelCallLog, InstitutionMembership, User, ModelProfile, PromptTemplateVersion
 from test_ai_skill_control import control_env, draft, ROOT
 from test_ai_skill_runtime import envelope
 
@@ -117,6 +117,54 @@ def test_failed_case_blocks_submit_and_mock_is_not_real(control_env):
     assert result["metrics"]["real_model_successes"] == 0
     assert client.post(ROOT + "/versions/1/submit", json={"expected_lock_version": 3, "test_project_id": scope["project_id"]}).status_code == 409
     assert client.post(ROOT + "/test-runs", json={"version": 1, "project_id": scope["project_id"], "mode": "real_model", "expected_lock_version": 3}).status_code == 422
+
+
+def _unusable_case(env):
+    """Store a case whose own input violates the envelope contract (a legacy/hand-edited row).
+
+    Test cases cannot be deleted through the API, so a contract-invalid row must stay visible
+    without blocking every later run of the project scope.
+    """
+    _, factory, _, scope, _ = env
+    with factory() as db:
+        definition = db.scalar(select(AISkillDefinition).where(AISkillDefinition.skill_key == "lineage_edge_explanation"))
+        case = AISkillTestCase(definition_id=definition.id, project_id=scope["project_id"], name="契约非法用例",
+                               input_json={"skill_key": "lineage_edge_explanation", "task_key": "lineage_edge_explanation",
+                                           "scope": scope, "subject_ref": "", "facts": [], "policy_evidence": [],
+                                           "gaps": [], "max_input_bytes": 64000},
+                               assertions_json={}, content_hash="contract-invalid", created_by=1)
+        db.add(case)
+        db.commit()
+        return case.id
+
+
+def test_contract_invalid_case_is_skipped_instead_of_blocking(control_env):
+    client, factory, _, scope, _ = control_env
+    item = prepare(control_env)
+    _unusable_case(control_env)
+    run = test_run(control_env, item, "deterministic", 1)
+    assert run["status"] == "passed", run
+    assert run["metrics"]["executed"] == 1
+    assert run["metrics"]["skipped"] == 1
+    model_run = test_run(control_env, item, "mock_model", 2)
+    assert model_run["status"] == "passed", model_run
+    assert model_run["metrics"]["executed"] == 1 and model_run["metrics"]["skipped"] == 1
+    with factory() as db:
+        skipped = db.scalar(select(AISkillTestResult).where(AISkillTestResult.run_id == run["id"],
+                                                           AISkillTestResult.passed.is_(None)))
+        assert skipped is not None and skipped.error_code == "ValidationError"
+        assert skipped.assertions_json["case_defect"] is True
+    submitted = client.post(ROOT + "/versions/1/submit", json={"expected_lock_version": 3, "test_project_id": scope["project_id"]})
+    assert submitted.status_code == 200, submitted.text
+
+
+def test_run_with_only_unusable_cases_fails(control_env):
+    item = draft(control_env)
+    _unusable_case(control_env)
+    run = test_run(control_env, item, "deterministic", 1)
+    assert run["status"] == "failed"
+    assert run["metrics"]["executed"] == 0
+    assert run["metrics"]["skipped"] == 1
 
 
 def test_reset_to_draft_invalidates_even_identical_content(control_env):

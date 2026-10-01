@@ -1,5 +1,6 @@
 import json
 import math
+import os
 from typing import Any
 
 from app.core.settings import get_settings
@@ -19,12 +20,34 @@ class MilvusVectorStore(VectorStore):
     ):
         settings = get_settings()
         if client is None:
+            lite_path = (settings.milvus_lite_path or "").strip()
+            uri = lite_path or settings.milvus_uri
+            # A local Milvus Lite file is a supported uri for MilvusClient, but pymilvus'
+            # legacy config validates MILVUS_URI (process environment or a discovered .env)
+            # as an http(s) URL and would otherwise win over the explicit local uri.  Blank
+            # it for the Lite engine only; plain server URIs keep the configuration as is.
+            previous_env = None
+            if lite_path:
+                previous_env = os.environ.get("MILVUS_URI")
+                os.environ["MILVUS_URI"] = ""
             try:
                 from pymilvus import MilvusClient
+                if lite_path:
+                    try:
+                        from pymilvus.settings import Config as MilvusLegacyConfig
+                        MilvusLegacyConfig.MILVUS_URI = ""
+                    except Exception:  # pragma: no cover - older/newer pymilvus layouts
+                        pass
             except ImportError as exc:
                 raise RuntimeError("Milvus provider requires optional pymilvus dependency") from exc
+            finally:
+                if lite_path:
+                    if previous_env is None:
+                        os.environ.pop("MILVUS_URI", None)
+                    else:
+                        os.environ["MILVUS_URI"] = previous_env
             client = MilvusClient(
-                uri=settings.milvus_uri,
+                uri=uri,
                 token=settings.milvus_token,
                 timeout=settings.milvus_connection_timeout_seconds,
             )

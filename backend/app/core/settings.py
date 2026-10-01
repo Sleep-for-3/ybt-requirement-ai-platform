@@ -118,6 +118,9 @@ class Settings(BaseSettings):
 
     vector_store_provider: str = "mock"
     milvus_uri: str = "http://localhost:19530"
+    # Optional local Milvus Lite database file.  When set, the adapter uses the embedded
+    # Lite engine on this file and MILVUS_URI only has to remain a valid placeholder.
+    milvus_lite_path: str = ""
     milvus_token: str = ""
     milvus_collection_prefix: str = "ybt_semantic"
     milvus_index_type: str = "AUTOINDEX"

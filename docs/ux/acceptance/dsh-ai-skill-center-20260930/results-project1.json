@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-09-30T17:14:50.062Z",
+  "project1Name": "增强验收测试项目",
+  "attempts": [
+    {
+      "label": "query_param_project_id",
+      "url": "http://127.0.0.1:3000/ai-control/skills?project_id=1",
+      "hasPublishedToken": true,
+      "hasVersionNo": false,
+      "hasSkill": true,
+      "snippet": "工作台 AI Skill 配置中心 范围配置 · 测试门禁 · 独立审批 先保存草稿与测试用例，再运行确定性及对应模型测试，通过后提交独立审批。发布后固定版本绑定到所选配置范围。查看兼容 Prompt 记录 配置范围 平台 机构 项目 任务 当前编辑项目配置，测试使用所选项目 #8 的固定用例。发布绑定到当前配置范围；项目采用上级版本需明确选择。 注册能力（平台管理员） 选择能力 字段语义匹配（恢复环境验收） 项目版本 新建草稿 当前范围暂无版本。 固定采用已发布版本 当前范围未固定绑定。 可采用当前范围及可兼容上级范围的已发布版本。上级更新不会自动改变当前绑定。 采用版本 请选择已发布版本 确认固定采用 新草稿 模型配置 请选择模型 验收用 Mock 模型档 · mock/ 系统提示词 输入模板 插入 subject 插入 facts 插入 policy_evidence 插入 gaps 必须保留 subject、facts、policy_evidence、gaps 四个变量。引用校验与禁用工具策略由服务端强制执行。 血缘上下文范围与预算 保存草稿 固定测试用例与运行 当前项目有 0"
+    }
+  ],
+  "errors": []
+}

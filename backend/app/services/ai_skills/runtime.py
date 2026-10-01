@@ -138,6 +138,29 @@ class CompiledInput:
     confidentiality: str
 
 
+def is_candidate_id(value: str) -> bool:
+    """True for the ``catalog:<n>`` shape the rerank candidate contract requires."""
+    prefix, separator, suffix = value.partition(":")
+    return prefix == "catalog" and separator == ":" and suffix.isdigit() and not suffix.startswith("0")
+
+
+def require_field_candidate_ids(envelope: SkillInputEnvelope, *, require_present: bool = False) -> list[str]:
+    """The ``catalog_field`` fact ids ARE the rerank whitelist, so they must satisfy the same
+    candidate-id contract the model output is validated against; otherwise no legal ranking could
+    ever reference them. Fail with a contract error instead of an incidental IndexError later.
+
+    ``require_present`` is used by the invocation path: an envelope without any candidate cannot be
+    satisfied by ``field_ranking_v1`` at all, so it is unusable input rather than a skill failure.
+    """
+    values = [item.id for item in envelope.facts if item.kind == "catalog_field"]
+    for value in values:
+        if not is_candidate_id(value):
+            fail(422, "field_candidate_id_invalid")
+    if require_present and not values:
+        fail(422, "field_candidates_required")
+    return values
+
+
 def compile_input(db, definition, version, envelope: SkillInputEnvelope) -> CompiledInput:
     if envelope.skill_key != definition.skill_key or envelope.task_key != definition.task_key:
         fail(422, "skill_task_mismatch")
@@ -151,6 +174,8 @@ def compile_input(db, definition, version, envelope: SkillInputEnvelope) -> Comp
         validate_requirement_output(RequirementCandidate(final_content=""), envelope)
     elif definition.task_key in MAPPING_TASKS:
         mapping_constraint(envelope)
+    if definition.task_key == FIELD_RERANK_TASK:
+        require_field_candidate_ids(envelope, require_present=True)
     validate_content(db, content)
     model = db.get(ModelProfile, content.model_profile_id)
     runtime = PromptRuntime(prompt_key=f"ai_skill:{definition.skill_key}", version=version.version_no,
@@ -171,9 +196,12 @@ def compile_input(db, definition, version, envelope: SkillInputEnvelope) -> Comp
     ranking = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
     confidentiality = max(levels, key=ranking.__getitem__)
     try:
-        material = prepare_model_input(runtime, material, levels)
-        runtime.system_prompt = prepare_model_input(runtime, runtime.system_prompt, ["internal"])
+        material = prepare_model_input(runtime, material, levels, db=db, project_id=envelope.scope.project_id)
+        runtime.system_prompt = prepare_model_input(runtime, runtime.system_prompt, ["internal"],
+                                                   db=db, project_id=envelope.scope.project_id)
     except ValueError:
+        # prepare_model_input already recorded the denied attempt when it had a session; keep the
+        # refusal visible either way.
         fail(409, "external_model_data_denied")
     # UTF-8 bytes bound token count conservatively; no provider tokenizer or
     # truncated contexts are needed to enforce this upper bound.

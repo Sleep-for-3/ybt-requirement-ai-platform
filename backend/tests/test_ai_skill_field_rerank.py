@@ -209,6 +209,15 @@ def test_cloud_profile_is_denied_before_any_content_leaves(control_env, monkeypa
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["error_code"] == "external_model_data_denied"
     assert log_count(factory) == before
+    # The refusal is data-egress control, so it must leave an audit trail (denied, with reason).
+    from sqlalchemy import select as sa_select
+
+    from app.models import AuditLog
+    with factory() as db:
+        denied = db.scalars(sa_select(AuditLog).where(AuditLog.action == "external_model_data_denied")).all()
+        assert len(denied) == 1
+        assert denied[0].result == "denied"
+        assert denied[0].after_summary_json["reason"] == "data_classification_policy"
     # The gate's stub is the same transport the endpoint would use: it must not be reached.
     assert len(gate_calls) == 1
 

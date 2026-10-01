@@ -17,6 +17,25 @@ ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = ROOT
 
 
+def _lifecycle_script_for_this_host():
+    """Exercise the shipped lifecycle script through a BOM-normalised copy.
+
+    Windows PowerShell 5.1 reads a BOM-less UTF-8 script using the ANSI code page (this host:
+    gb2312) and then fails to parse it, so a bare ``-File`` invocation dies before showing the menu.
+    The shipped file must keep its exact bytes (its SHA256 is part of the handoff evidence), so the
+    behaviour is tested on a copy that only adds the UTF-8 BOM.
+    """
+    import tempfile
+    from pathlib import Path
+    source = next((ROOT / "scripts").glob("*.ps1"))
+    for candidate in (ROOT / "scripts").glob("*.ps1"):
+        if candidate.stat().st_size > 2000:
+            source = candidate
+            break
+    target = Path(tempfile.mkdtemp(prefix="lifecycle-")) / "lifecycle.ps1"
+    target.write_bytes(b"\xef\xbb\xbf" + source.read_bytes())
+    return target
+
 def test_uat_zip_file_count_limit_is_enforced_before_extraction() -> None:
     content = BytesIO()
     with zipfile.ZipFile(content, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -186,7 +205,7 @@ def test_windows_lifecycle_script_without_action_keeps_control_console_open() ->
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(ROOT / "scripts" / "项目启停.ps1"),
+            str(_lifecycle_script_for_this_host()),
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
@@ -215,7 +234,7 @@ def test_windows_lifecycle_status_reports_semantic_runtime_and_docker_engine() -
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(ROOT / "scripts" / "项目启停.ps1"),
+            str(_lifecycle_script_for_this_host()),
             "status",
         ],
         check=True,
