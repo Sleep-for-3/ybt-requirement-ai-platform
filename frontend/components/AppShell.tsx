@@ -3,6 +3,7 @@
 import {
   Bell,
   BookOpenCheck,
+  Bot,
   BrainCircuit,
   Building2,
   ChartNoAxesCombined,
@@ -62,6 +63,7 @@ type NavGroup = { label: string; items: NavItem[] };
 const NAV_GROUPS: NavGroup[] = [
   { label: "核心任务", items: [
     { href: "/workspace", label: "需求文档", icon: FileSpreadsheet },
+    { href: "/agent", label: "智能体任务台", icon: Bot },
     { href: "/lineage/nebula", match: "/lineage", label: "数据血缘", icon: GitBranch, audience: "technical" },
     { href: "/resources", label: "资料与数据", icon: LibraryBig, children: [
       { href: "/resources/architecture", label: "数据架构与表归属", icon: Layers3, audience: "technical" },

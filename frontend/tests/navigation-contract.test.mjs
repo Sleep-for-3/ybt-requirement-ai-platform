@@ -63,6 +63,8 @@ test("named product roles receive menus only from backend capabilities and proje
 
 test("every production detail route has a deterministic business parent", () => {
   const routes = new Map([
+    // 智能体任务台是一级控制台页面：没有业务上级，面包屑停在“工作台”。
+    ["/agent", null],
     ["/datasources/8/catalog", "/datasources"],
     ["/deliverable-templates/3", "/deliverable-templates"],
     ["/deliverables/9", "/deliverables"],

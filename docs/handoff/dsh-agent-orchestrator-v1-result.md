@@ -169,6 +169,14 @@ Agent 工具 `compare_sql_versions`（第 16 个工具，risk=high、read_only�
 “过滤范围（WHERE/条件）发生变化：… ；可能改变该监管字段的统计口径或取值范围（interpretation，需 Evidence 与人工确认）”。
 **刻意不加入确定性主链路**：它本身需要人工确认，放进默认计划会额外增加网关；由 LLM 规划器或按场景计划按需启用。
 
+## 8.6 Phase 7：前端 Agent Workspace（`/agent`）
+
+- 页面：`frontend/app/agent/page.tsx`（智能体任务台）+ `frontend/app/agent/view-model.ts`（纯函数与快照类型）。
+- 导航：AppShell「核心任务」新增 `/agent`；`frontend/lib/navigation-contract.mjs` 补 section 标签；`tests/navigation-contract.test.mjs` 同步更新（改为一级控制台页面，无业务父级）。
+- 10 个区域全部具备：目标输入（带工具数与 16 工具注册表展开）、计划区（planner_source/版本/hash/降级原因）、Step Timeline（每步可展开：输入/工具/输出/证据引用/缺口码/耗时/状态/错误 + 每次 tool call 尝试）、Evidence（逐步计数 + 总覆盖率）、Gap（按 code 分组）、人工确认（4 种决策 + 可编辑 payload + 评论 + 关联 `review_task_id`）、Artifact、执行日志、任务控制（retry/resume/replan/cancel）+ 任务选择器 + 指标条。
+- 指标为 `null` 时显示“—”（绝不显示 0），并同时展示分母。
+- 轮询：任务非终态每 4s 刷新；任务列表 10s。
+- 测试：`node --test tests/agent-workspace.test.mjs` → 12 passed；`node --test tests/*.test.mjs` → 168 passed；`tsc --noEmit`、`eslint` 均 exit 0。
 ## 9. 测试报告
 
 | 套件 | 数量 | 覆盖 |
@@ -197,7 +205,7 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 .venv\Scripts\python.exe -m pytest tests/test_governance.py tests/test_product_integrity.py tests/test_coverage_metrics.py `
   tests/test_ai_skill_control.py tests/test_ai_skill_runtime.py tests/test_requirement_paths.py `
-  tests/test_performance_integrity.py -q          # → 137 passed（含 agent 套件）
+  tests/test_performance_integrity.py tests/test_migration_schema_freeze.py -q   # → 147 passed（含 agent 42）
 .venv\Scripts\python.exe -m pytest tests/test_ai_skill_field_candidates.py tests/test_ai_skill_field_rerank.py `
   tests/test_ai_skill_mapping.py tests/test_ai_skill_requirement.py tests/test_ai_skill_lineage_adapter.py -q  # → 119 passed（含 agent）
 ```
