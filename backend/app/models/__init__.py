@@ -1,4 +1,12 @@
 from app.models.ai_skill import AISkillDefinition, AISkillVersion, AISkillScopeBinding, AISkillReleaseEvent, AISkillTestCase, AISkillTestRun, AISkillTestResult
+from app.models.agent import (
+    AgentArtifact,
+    AgentHumanDecision,
+    AgentPlan,
+    AgentStep,
+    AgentTask,
+    AgentToolCall,
+)
 from app.models.data_architecture import DataArchitecture, DataArchitectureRevision, CatalogClassification
 from app.models.batch_import import ResourceImportBatch, ResourceImportItem
 from app.models.requirement import (
@@ -109,6 +117,12 @@ from app.models.analytics import MetricSnapshot, ReportingCycle
 from app.models.requirement_snapshot import StructuredRequirementSnapshot
 
 __all__ = [
+    "AgentArtifact",
+    "AgentHumanDecision",
+    "AgentPlan",
+    "AgentStep",
+    "AgentTask",
+    "AgentToolCall",
     "ResourceImportBatch",
     "ResourceImportItem",
     "DataArchitecture",
