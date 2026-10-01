@@ -6,6 +6,7 @@ cannot call an unregistered capability even if a model asks for one.
 """
 from app.services.agent.tools import ai_skill_tools  # noqa: F401  (import registers the tools)
 from app.services.agent.tools import builtin  # noqa: F401  (import registers the tools)
+from app.services.agent.tools import decision_cases  # noqa: F401  (import registers the tools)
 from app.services.agent.tools.registry import (  # noqa: F401
     AgentToolSpec,
     ToolContext,
