@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 
 from app.models import (
     AgentArtifact,
@@ -1147,6 +1147,27 @@ def _latest_review_task(db, task: AgentTask, step: AgentStep) -> ReviewTask | No
         return None
     return db.scalar(select(ReviewTask).where(ReviewTask.workflow_instance_id == task.review_instance_id)
                      .order_by(ReviewTask.id.desc()))
+
+
+def _actor_project_role(db, task: AgentTask, principal: Principal) -> str | None:
+    membership = db.scalar(select(ProjectMembership).where(
+        ProjectMembership.project_id == task.project_id,
+        ProjectMembership.user_id == principal.user_id,
+    ))
+    return membership.project_role if membership is not None else None
+
+
+def _actor_review_task(db, task: AgentTask, principal: Principal) -> ReviewTask | None:
+    """The pending review task this actor may act on (by assignment or by its own role)."""
+
+    if task.review_instance_id is None:
+        return None
+    return db.scalar(select(ReviewTask).where(
+        ReviewTask.workflow_instance_id == task.review_instance_id,
+        ReviewTask.status == "pending",
+        or_(ReviewTask.assignee_user_id == principal.user_id,
+            ReviewTask.assignee_role == _actor_project_role(db, task, principal)),
+    ).order_by(ReviewTask.id))
 CASE_DECISION_TYPES: dict[str, str] = {
     "prepare_field_candidate": "field_mapping_decision",
     "generate_mapping_draft": "field_mapping_decision",
@@ -1239,14 +1260,25 @@ def decide(
             "required": sorted(gate_permissions),
         })
 
-    review_task = _latest_review_task(db, task, step)
+    review_task = _actor_review_task(db, task, principal) or _latest_review_task(db, task, step)
     if review_task is None:
         raise HTTPException(status_code=409, detail={"error_code": "human_gate_missing"})
     if claim and review_task.assignee_user_id != principal.user_id:
         claim_task(db, review_task, principal)
     mapped = DECISION_TO_REVIEW_STATUS[decision]
-    if review_task.status not in {"approved", "rejected", "returned"}:
-        decide_task(db, review_task, principal, mapped, comment)
+    gate_policy_now = _gate_policy_for(db, step)
+    dual_pending = []
+    if gate_policy_now.mode == "all":
+        dual_pending = [item for item in _sibling_gate_tasks(db, task, step)
+                        if item.id != review_task.id and item.status != "approved"]
+    if dual_pending:
+        # Partial dual approval: record it here and keep the workflow instance active for
+        # the remaining role (the final approval goes through the canonical decide_task).
+        if review_task.status not in {"approved", "rejected", "returned"}:
+            review_task.status = "approved"
+            review_task.completed_at = _now()
+    elif review_task.status not in {"approved", "rejected", "returned"}:
+        decide_task(db, review_task, principal, DECISION_TO_REVIEW_STATUS[decision], comment)
     review_decision = db.scalar(select(ReviewDecision).where(
         ReviewDecision.review_task_id == review_task.id).order_by(ReviewDecision.id.desc()))
 

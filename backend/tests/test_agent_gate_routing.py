@@ -160,16 +160,10 @@ def test_a_dual_approval_gate_waits_for_both_roles(scope):
     assert len(remaining) == 1
     runtime.decide(db, scope["biz_principal"], task, step, sm.DECISION_APPROVE, comment="业务确认")
     db.refresh(step)
-    # Both reviewers recorded their approval. The gate still refuses to complete on its own
-    # while the second task's bookkeeping settles, which is the safe failure mode: mode=all
-    # never proceeds on a single approval. Automatic completion of the pair is a follow-up
-    # (see the Phase 7 limitation in the handoff record).
-    assert step.status in {sm.STEP_WAITING_HUMAN, sm.STEP_COMPLETED}
+    assert step.status == sm.STEP_COMPLETED, "both roles approved, so the gate completes"
     approvals = [item for item in db.query(ReviewTask).filter_by(
         workflow_instance_id=task.review_instance_id).all() if item.status == "approved"]
-    assert len(approvals) >= 1
-    if step.status == sm.STEP_WAITING_HUMAN:
-        assert task.status == sm.TASK_WAITING_HUMAN, "an unapproved dual gate keeps the task paused"
+    assert len(approvals) == 2
 
 
 def test_an_any_approval_gate_closes_the_other_tasks(scope):
