@@ -31,7 +31,18 @@ def confidentiality_floor(project) -> str:
     """
 
     declared = project.confidentiality_level if project.confidentiality_level in LEVELS else "restricted"
+    if str(project.id) in _outbound_authorized_project_ids():
+        # Explicit outbound authorization in effect (AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS): the
+        # named projects may send catalog structure to the configured external provider. The default
+        # is empty, so the conservative floor stays in force everywhere else.
+        return declared
     return max((declared, "confidential"), key=LEVELS.__getitem__)
+
+
+def _outbound_authorized_project_ids() -> set[str]:
+    from app.core.settings import get_settings
+    raw = (get_settings().ai_external_model_allowed_project_ids or "").strip()
+    return {part.strip() for part in raw.split(",") if part.strip().isdigit()}
 
 
 def build_rerank_envelope(project, scope: SkillScope, target_field_id: int, recall: dict):

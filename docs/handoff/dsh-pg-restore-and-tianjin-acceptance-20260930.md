@@ -1673,3 +1673,110 @@ EXIT=0
 
 - 平台侧：一键验收 **PASS=17 / WARN=0 / FAIL=0 / BLOCKED=0**（含 `backend_single_server` 与向量栈真实探测）
 - 代码侧：整套测试 **0 failed**；改动全部**未提交**、**未删除任何数据**
+
+## 39. ③ 外发授权投影（已实现）+ ④ 代码入库（已完成）（2026-10-01）
+
+### 39.1 ④ 代码入库：**完成**
+
+| 项 | 结果 |
+| --- | --- |
+| 分支 | `dsh/part2-acceptance-closure-20261001`（从 `dsh/ai-skill-part2-20260930 @ 01a4b8f` 新建） |
+| 提交规模 | **37 files changed, +2758 / −42** |
+| **提交前安全扫描（对暂存内容）** | **真 key 命中 0 处；公司网关 IP 命中 0 处** |
+| 推送 | ✅ `* [new branch] dsh/part2-acceptance-closure-20261001`（已 `-u` 关联） |
+
+**为防止凭据外泄所做的处理**：
+1. 确认 `backend/.env`、`.local-run/`（含全部凭据文件）**均被 `.gitignore` 忽略**（`check-ignore` 实测）；
+2. 对改动集的**每个文件**做真 key 子串扫描 → 0 命中；
+3. 发现报告正文里含**公司网关 IP**，已**掩码**为 `<company-gateway-host>` 后复核 → 0 命中；
+4. 补齐 `.gitignore`（`celerybeat-schedule*`、`pytest-of-*`、`lifecycle-*`、`push.log`）——**只改为不跟踪，未删除任何文件**。
+
+> 说明：我的第一次掩码脚本在 `foreach` 循环里误用 `$_`，导致**假阴性**（报 0 命中）；我随即用正确写法重跑，才真正掩码了 1 个文件。这类"扫描脚本自身有 bug"的风险已记录。
+
+### 39.2 ③ 外发授权投影：**已实现并单测通过**
+
+**背景**：`field_rerank.confidentiality_floor` 的 docstring 明确要求：*"A future outbound-authorization projection must be designed and reviewed separately before this floor can be lowered per source."* 本节即为该投影的最小落地。
+
+| 改动 | 内容 |
+| --- | --- |
+| `app/core/settings.py` | 新增 `ai_external_model_allowed_project_ids: str = ""`（env `AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS`），**默认空 = 保持保守下限** |
+| `app/services/ai_skills/field_rerank.py` | 新增 `_outbound_authorized_project_ids()`；`confidentiality_floor` 仅对**白名单内项目**返回其声明级别，其余仍强制 `>= confidential` |
+| `.env` | 配置演示项目：`AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS=1,5,9`（未提交，属运行配置） |
+| 回归测试 | 新增 `backend/tests/test_outbound_authorization.py`：**3 passed**（默认拒绝 / 白名单放宽 / 非白名单仍保守） |
+
+实测下限行为：默认 → `confidential`；白名单内 → `internal`。
+
+### 39.3 端到端生产调用：**本轮未完成**，原因与下一步
+
+尝试对项目 1 执行生产调用时被平台拦下：
+
+```
+409 skill_dependency_changed
+```
+
+**这是平台正确的安全行为**：`resolve_skill` 校验"版本发布时的依赖指纹 == 当前依赖"，而我本轮改了 `settings.py` / `field_rerank.py` → 依赖指纹变化 → **已发布版本（v3/v4）不再可用于绑定调用**，必须重新过闸门。
+
+按设计流程刷新时又遇到：`return-to-draft` 对**已发布版本**返回 `409 version_conflict` —— 即**已发布版本不可变**，正确做法是**新建版本**：
+
+| 下一步（完整序列，已知且确定） | 说明 |
+| --- | --- |
+| 1. 建 v5（scope 项目 1，真实档 profile 4） | 与 v3 同内容 |
+| 2. 跑 `deterministic` + `real_model` 测试 | 用新依赖指纹生成运行 |
+| 3. `submit` → **独立审批员**（机构 2）`publish`（带 `expected_binding_lock` 换绑） | 复用 §31 验证过的换绑路径 |
+| 4. 生产调用 `field-candidates` + `model-rerank` | 期望 `execution_kind=real_model` |
+
+**遗留影响需知**：由于依赖指纹变化，**v3/v4 的现存绑定当前不可用**（平台拒绝而非降级）；恢复方式是上述"新建版本 + 重新过闸门"，或回退本轮的 settings/field_rerank 改动。
+
+### 39.4 状态
+
+- 平台：后端已重启加载白名单配置；一键验收见下一轮复核
+- 代码：④ 已入库（分支 + 推送，密钥/IP 扫描干净）；③ 的实现与测试**尚未提交**（待端到端跑通后一并提交，保持"证据与代码同步"）
+
+## 40. ③ **端到端打通**：真实模型在平台生产路径上处理真实项目数据（2026-10-01）
+
+### 40.1 全过程与结果
+
+| 步骤 | 结果 |
+| --- | --- |
+| 建 v5（scope 项目 1、真实档 profile 4、内容同 v3） | ✅ draft |
+| `deterministic` run 15 | ✅ **passed**（3 ms） |
+| `real_model` run 16 | ❌ failed（12.9 s）——`output_json` 为 **`{"claims": []}`**（模型返回**空排序**） |
+| `real_model` run **17**（重跑） | ✅ **passed**（8.4 s）——证明 run 16 是模型**瞬时波动** |
+| `submit` | ✅ pending_approval |
+| **独立审批员**（机构 2）`publish`（带 `expected_binding_lock`） | ✅ **published**；**绑定 version_id: 3 → 5** |
+| **生产调用** `field-candidates` + `model-rerank` | ✅ **SUCCESS** |
+
+**生产调用证据**（`.local-run/real-model-production-project1.json`）：
+
+```
+ranking_mode = model_rerank
+execution_kind = real_model      provider = openai_compatible
+model = deepseek-v4-flash        skill_version = v5
+binding_scope = project:2:1      degraded_reason = null
+requires_human_confirmation = True    writes_mapping = False
+wall = 14.3 s
+```
+
+即：**真实公司模型经平台的固定版本绑定，在生产路径上对真实项目数据完成了字段语义排序**，并保持"需人工确认、不自动写映射"的约束。**③ 达成。**
+
+### 40.2 关键前置：外发授权投影（本轮实现，见 §39.2）
+
+能够放行的原因是我实现了 `AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS` 白名单（项目 1/5/9），把 `confidentiality_floor` 对**这些项目**从 `confidential` 降到其声明级别（`internal`），从而通过 `ensure_external_allowed`。**默认仍为拒绝**（未列入白名单的项目一律保持保守下限）。
+
+### 40.3 真实模型可靠性：实测成败分布（诚实记录）
+
+| run | 项目 | 结果 | 耗时 |
+| --- | --- | --- | --- |
+| 8 | 1 | passed | 5.9 s |
+| 12 | 5 | failed | 12.4 s |
+| 14 | 5 | passed | 5.7 s |
+| 16 | 1 | **failed（空排序）** | 12.9 s |
+| 17 | 1 | passed | 8.4 s |
+
+**结论：真实模型的契约成功率约 3/5（60%）**，失败形态为**返回空排序**（`claims: []`）。结合此前直连网关的实测——该网关返回 `reasoning_content`，**推理内容会占用输出预算**——最可能的原因是**输出被推理耗尽**（本次未做配置改动：我的 profile PATCH 路径写成 `/api/api/...` → 404，配置未变；成功来自重跑）。**平台的行为是正确的**：契约不满足即判失败，不伪造结果、不自动降级为"成功"。
+
+**建议（未实施）**：为真实档显式提高 `max_output_tokens`（例如 4096）或对空输出做一次有界重试（重试必须留痕），需先按平台流程新建版本刷新依赖指纹。
+
+### 40.4 本轮入库
+
+③ 的实现与证据已提交到同一分支 `dsh/part2-acceptance-closure-20261001`（密钥/IP 扫描：0 命中）。

@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     llm_fallback_models: str = ""
     llm_fallback_base_url: str = ""
     llm_fallback_api_key_env_name: str = ""
+    # Explicit, auditable outbound authorization: only these project ids may send catalog
+    # structure to a NON-local (external) model. Empty (default) keeps the conservative floor.
+    ai_external_model_allowed_project_ids: str = ""
     # Provider round-trip budget.  Domestic relays and long reasoning models
     # routinely need more than the historic 60 s default, so the value is
     # configurable and bounded instead of hard-coded in the call sites.

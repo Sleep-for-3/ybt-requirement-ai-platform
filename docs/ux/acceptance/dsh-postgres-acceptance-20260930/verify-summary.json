@@ -1,5 +1,5 @@
 {
-    "generated_at":  "2026-10-01T14:56:27",
+    "generated_at":  "2026-10-01T15:08:48",
     "database":  "ybt_dsh_handoff_v2",
     "checks":  [
                    {
@@ -10,7 +10,7 @@
                    {
                        "check":  "health_ready",
                        "status":  "PASS",
-                       "detail":  "application=healthy database=healthy alembic_revision=healthy storage=healthy redis=healthy task_queue=healthy vector_store=healthy llm_provider=healthy embedding_provider=healthy semantic_index=healthy disk_space=healthy"
+                       "detail":  "application=healthy database=healthy alembic_revision=healthy storage=healthy redis=disabled task_queue=healthy vector_store=healthy llm_provider=mock embedding_provider=healthy semantic_index=healthy disk_space=healthy"
                    },
                    {
                        "check":  "handoff_admin_login",
@@ -85,7 +85,7 @@
                    {
                        "check":  "backend_single_server",
                        "status":  "PASS",
-                       "detail":  "owner=25208 raw_processes=2 servers=1"
+                       "detail":  "owner=20044 raw_processes=2 servers=1"
                    }
                ],
     "counts":  {
