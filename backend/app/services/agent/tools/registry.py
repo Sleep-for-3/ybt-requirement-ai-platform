@@ -62,6 +62,9 @@ class AgentToolSpec:
     evidence_contract: dict[str, Any]
     audit_fields: tuple[str, ...]
     handler: Callable[["ToolContext"], Any] = field(compare=False, repr=False)
+    # Which role(s) must approve the gate this tool opens (system policy, never the model).
+    review_policy: dict[str, Any] | None = None
+    handler: Callable[["ToolContext"], Any] = field(compare=False, repr=False)
     version: str = "1.0"
     # ``True`` when the tool needs the task's subject target field resolved first.
     requires_target_field: bool = False
@@ -214,6 +217,11 @@ def validate_spec(spec: AgentToolSpec) -> list[str]:
     if len(spec.description.strip()) < 8:
         errors.append("description must explain the governed capability")
     errors.extend(_schema_errors(spec.input_schema, label="input_schema"))
+    from app.services.agent.gate_policy import validate_review_policy
+
+    errors.extend(validate_review_policy(spec.review_policy))
+    if spec.review_policy and not spec.requires_human_confirmation:
+        errors.append("review_policy requires requires_human_confirmation")
     errors.extend(_schema_errors(spec.output_schema, label="output_schema"))
     if not spec.required_permissions:
         errors.append("required_permissions must declare at least one project permission")

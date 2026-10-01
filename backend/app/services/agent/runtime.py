@@ -32,6 +32,7 @@ from app.models import (
     AgentToolCall,
     BackgroundJob,
     Project,
+    ProjectMembership,
     ReviewDecision,
     ReviewTask,
 )
@@ -54,6 +55,7 @@ from app.services.agent.planner import (
     validate_plan_patch,
 )
 from app.services.agent.observation import observation_digest, observation_state
+from app.services.agent.gate_policy import GatePolicy, permission_for_role, resolve_gate_policy
 from app.services.agent.tools.registry import (
     ToolContext,
     ToolExecutionError,
@@ -977,12 +979,33 @@ def _open_human_gate(db, task: AgentTask, step: AgentStep, project: Project, gat
     ).order_by(ReviewTask.id.desc()))
     if review_task is None:
         raise HTTPException(status_code=409, detail={"error_code": "human_gate_creation_failed"})
+    spec_policy = None
+    try:
+        spec_policy = require_tool(step.tool_key).review_policy
+    except Exception:  # noqa: BLE001 - an unknown tool never blocks gate creation
+        spec_policy = None
+    policy = resolve_gate_policy(gate_key=step.human_gate_key, tool_policy=spec_policy)
+    primary_role, extra_roles = _roles_with_members(db, task.project_id, policy.roles)
+    if primary_role is None:
+        # The project staffs none of the routed roles: keep the gate decidable by its owner.
+        primary_role, extra_roles = "project_manager", ()
+        policy = GatePolicy(mode="single", roles=(primary_role,),
+                            source=f"{policy.source}:unstaffed_fallback")
+    review_task.assignee_role = primary_role
+    if primary_role != "project_manager" or extra_roles:
+        # Role-routed gates are claimed by role, not pinned to the task creator.
+        review_task.assignee_user_id = None
+    # The permission follows the routed role, so the routed role can actually act on its gate.
+    step.input_json = {**(step.input_json or {}), "required_permission": permission_for_role(primary_role)}
+    extra_tasks = _create_role_gate_tasks(db, instance.id, review_task, extra_roles)
     step.review_task_id = review_task.id
     task.review_instance_id = instance.id
     task.result_summary_json = {
         **(task.result_summary_json or {}),
         "pending_gate": {
             "step_key": step.step_key, "gate_key": step.human_gate_key,
+            "review_policy": policy.as_dict(),
+            "review_task_ids": [review_task.id, *[item.id for item in extra_tasks]],
             "title": gate.get("title"), "required_permission": gate.get("required_permission") or DEFAULT_GATE_PERMISSION,
             "summary": redact_summary(gate.get("summary") or {}),
             "review_task_id": review_task.id,
@@ -993,6 +1016,55 @@ def _open_human_gate(db, task: AgentTask, step: AgentStep, project: Project, gat
         actor_user_id=None, institution_id=task.institution_id, project_id=task.project_id,
         after={"task_id": task.id, "step_key": step.step_key, "review_task_id": review_task.id},
     )
+
+
+def _create_role_gate_tasks(db, workflow_instance_id: int, primary: ReviewTask,
+                            extra_roles: tuple[str, ...]) -> list[ReviewTask]:
+    """Dual/any approval needs one review task per role (system policy, not the model)."""
+
+    created: list[ReviewTask] = []
+    for role in extra_roles:
+        task = ReviewTask(
+            project_id=primary.project_id, workflow_instance_id=workflow_instance_id,
+            step_key=primary.step_key, task_type=primary.task_type, target_type=primary.target_type,
+            target_id=primary.target_id, assignee_role=role, status="pending",
+        )
+        db.add(task)
+        created.append(task)
+    if created:
+        db.flush()
+    return created
+
+
+def _roles_with_members(db, project_id: int, roles: tuple[str, ...]) -> tuple[str | None, tuple[str, ...]]:
+    """Only route a gate to roles the project actually staffs (never dead-lock a gate)."""
+
+    available = set(db.scalars(select(ProjectMembership.project_role).where(
+        ProjectMembership.project_id == project_id,
+        ProjectMembership.project_role.in_(list(roles)),
+        ProjectMembership.status == "active",
+    )).all())
+    ordered = [role for role in roles if role in available]
+    if not ordered:
+        return None, ()
+    return ordered[0], tuple(ordered[1:])
+
+
+def _gate_policy_for(db, step: AgentStep) -> GatePolicy:
+    try:
+        tool_policy = require_tool(step.tool_key).review_policy
+    except Exception:  # noqa: BLE001
+        tool_policy = None
+    return resolve_gate_policy(gate_key=step.human_gate_key, tool_policy=tool_policy)
+
+
+def _sibling_gate_tasks(db, task: AgentTask, step: AgentStep) -> list[ReviewTask]:
+    if task.review_instance_id is None:
+        return []
+    return list(db.scalars(select(ReviewTask).where(
+        ReviewTask.workflow_instance_id == task.review_instance_id,
+        ReviewTask.step_key == "human_confirmation",
+    ).order_by(ReviewTask.id)).all())
 
 
 def _replan_after_failure(db, task: AgentTask, step: AgentStep, code: str) -> bool:
@@ -1157,7 +1229,15 @@ def decide(
             })
     if chosen_field is not None:
         _apply_subject_choice(db, task, chosen_field, principal)
-    PermissionService(db, principal).require_project_permission(task.project_id, gate_permission)
+    # A routed gate accepts any of its role permissions (the task-level role check still
+    # applies inside decide_task), so dual approval works for both reviewer roles.
+    gate_permissions = set(_gate_policy_for(db, step).permissions) | {gate_permission}
+    granted = set(PermissionService(db, principal).effective_project_permissions(task.project_id))
+    if not (gate_permissions & granted):
+        raise HTTPException(status_code=403, detail={
+            "error_code": "gate_permission_missing",
+            "required": sorted(gate_permissions),
+        })
 
     review_task = _latest_review_task(db, task, step)
     if review_task is None:
@@ -1184,6 +1264,26 @@ def decide(
             summary = dict(step.output_summary_json or {})
             summary["edited_payload"] = redact_summary(edited_payload)
             step.output_summary_json = summary
+        policy = _gate_policy_for(db, step)
+        siblings = _sibling_gate_tasks(db, task, step) if policy.mode in {"all", "any"} else []
+        waiting = [item for item in siblings
+                   if item.id != review_task.id and item.status != "approved"]
+        keep_open = policy.mode == "all" and bool(waiting)
+        if keep_open:
+            # Dual approval: this role approved, the gate stays open for the others.
+            record_audit(
+                db, action="agent_gate_partial_approval", resource_type="agent_step", resource_id=step.id,
+                actor_user_id=principal.user_id, institution_id=task.institution_id,
+                project_id=task.project_id,
+                after={"gate_key": step.human_gate_key, "policy": policy.as_dict(),
+                       "pending_role_tasks": [item.id for item in waiting]},
+            )
+            db.commit()
+            return task_snapshot(db, task)
+        if policy.mode == "any":
+            for item in waiting:
+                item.status = "cancelled"
+                item.completed_at = _now()
         _transition_step(step, sm.STEP_COMPLETED)
         call = db.scalar(select(AgentToolCall).where(AgentToolCall.step_id == step.id)
                          .order_by(AgentToolCall.id.desc()))
