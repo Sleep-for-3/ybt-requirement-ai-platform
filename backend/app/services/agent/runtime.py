@@ -35,6 +35,7 @@ from app.models import (
     ReviewDecision,
     ReviewTask,
 )
+from app.services.agent import dependencies as deps
 from app.services.agent import state_machine as sm
 from app.services.agent.planner import (
     PlanDraft,
@@ -44,6 +45,7 @@ from app.services.agent.planner import (
     plan_hash,
     resolve_subject,
     validate_plan_draft,
+    MAX_PLAN_STEPS,
 )
 from app.services.agent.tools.registry import (
     ToolContext,
@@ -278,7 +280,8 @@ def materialize_plan(
         db.add(AgentStep(
             task_id=task.id, plan_id=plan.id, step_key=step.step_key, order_index=index, tool_key=step.tool_key,
             reason=step.reason, status=sm.STEP_PENDING, required=step.required,
-            depends_on_json=list(step.depends_on), input_json=tool_input,
+            depends_on_json=list(step.depends_on),
+            optional_depends_on_json=list(step.optional_depends_on), input_json=tool_input,
             input_hash=stable_hash(tool_input),
             idempotency_key=stable_hash({
                 "task": task.id, "step": step.step_key, "tool": step.tool_key, "input": tool_input,
@@ -330,29 +333,94 @@ def _next_runnable_step(db, task: AgentTask) -> AgentStep | None:
     latest: dict[str, AgentStep] = {}
     for step in steps:
         latest[step.step_key] = step
+    states = {key: value.status for key, value in latest.items()}
     done_keys = {step.step_key for step in steps if step.status == sm.STEP_COMPLETED}
     for step in steps:
-        if step.status != latest[step.step_key].status or step is not latest[step.step_key]:
+        if step is not latest[step.step_key]:
             continue
         if step.status in sm.STEP_TERMINAL or step.status == sm.STEP_WAITING_HUMAN:
             continue
         if step.step_key in done_keys:
             continue
-        dependencies = list(step.depends_on_json or [])
-        states = [(latest.get(key).status if latest.get(key) else None) for key in dependencies]
-        if any(state is None for state in states):
+        evaluation = deps.evaluate_dependencies(
+            step.depends_on_json or [], step.optional_depends_on_json or [], states,
+        )
+        if evaluation.disposition == deps.WAIT:
             continue
-        if dependencies and not any(state == sm.STEP_COMPLETED for state in states):
-            _transition_step(step, sm.STEP_RUNNING)
-            _transition_step(step, sm.STEP_SKIPPED)
-            step.error_code = "dependency_not_satisfied"
-            _step_gap(step, "dependency_not_satisfied", "依赖步骤没有产生可用结果，该步骤按缺口跳过。")
-            if step.required:
-                task.result_summary_json = {**(task.result_summary_json or {}), "incomplete": True}
+        if evaluation.disposition == deps.PAUSE:
+            return None
+        if evaluation.disposition in {deps.BLOCK, deps.SKIP}:
+            _record_dependency_outcome(db, task, step, evaluation)
+            continue
+        if evaluation.optional_missing:
+            _store_dependency_evaluation(step, evaluation)
+            _step_gap(step, deps.OPTIONAL_DEPENDENCY_MISSING,
+                      deps.optional_gap_message(evaluation.optional_missing))
             db.commit()
-            continue
         return step
     return None
+
+
+def _store_dependency_evaluation(step: AgentStep, evaluation: deps.DependencyEvaluation) -> None:
+    summary = dict(step.output_summary_json or {})
+    summary["dependency_evaluation"] = evaluation.as_dict()
+    step.output_summary_json = summary
+
+
+def _record_dependency_outcome(db, task: AgentTask, step: AgentStep,
+                               evaluation: deps.DependencyEvaluation) -> None:
+    """A dependency failed or was skipped: block/replan or skip with an explicit gap."""
+
+    _store_dependency_evaluation(step, evaluation)
+    if evaluation.disposition == deps.BLOCK:
+        _transition_step(step, sm.STEP_BLOCKED)
+        step.error_code = deps.DEPENDENCY_FAILED
+        detail = "、".join([*evaluation.failed_required, *evaluation.blocked_required]) or "未知"
+        step.error_message = f"必需依赖步骤未成功：{detail}"[:2000]
+        _step_gap(step, deps.DEPENDENCY_FAILED, f"必需依赖步骤未成功（{detail}），当前步骤不能按成功路径执行。")
+    else:
+        _transition_step(step, sm.STEP_SKIPPED)
+        step.error_code = deps.DEPENDENCY_GAP
+        detail = "、".join(evaluation.skipped_required) or "未知"
+        step.error_message = f"必需依赖步骤被跳过：{detail}"[:2000]
+        _step_gap(step, deps.DEPENDENCY_GAP, f"必需依赖步骤被跳过（{detail}），不能当作成功。")
+        if step.required:
+            task.result_summary_json = {**(task.result_summary_json or {}), "incomplete": True,
+                                        "incomplete_reason": deps.DEPENDENCY_GAP}
+    db.commit()
+
+def _settle_dependent_steps(db, task: AgentTask) -> int:
+    """Record block/skip dispositions for steps that can never run on this path.
+
+    The run itself still stops (nothing new is executed), but every step downstream
+    of a blocked/failed step gets an explicit blocked or skipped state plus a gap
+    and its dependency evaluation, instead of staying silently ``pending``.
+    """
+
+    settled = 0
+    for _ in range(MAX_PLAN_STEPS + 1):
+        steps = list(db.scalars(select(AgentStep).where(AgentStep.task_id == task.id)
+                                .order_by(AgentStep.order_index, AgentStep.id)).all())
+        latest: dict[str, AgentStep] = {}
+        for step in steps:
+            latest[step.step_key] = step
+        states = {key: value.status for key, value in latest.items()}
+        changed = False
+        for step in steps:
+            if step is not latest[step.step_key] or step.status in sm.STEP_TERMINAL \
+                    or step.status == sm.STEP_WAITING_HUMAN:
+                continue
+            evaluation = deps.evaluate_dependencies(
+                step.depends_on_json or [], step.optional_depends_on_json or [], states,
+            )
+            if evaluation.disposition in {deps.BLOCK, deps.SKIP}:
+                _record_dependency_outcome(db, task, step, evaluation)
+                states[step.step_key] = step.status
+                settled += 1
+                changed = True
+        if not changed:
+            break
+    return settled
 
 
 def _job_cancelled(db, job: BackgroundJob | None) -> bool:
@@ -415,6 +483,8 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
         if outcome in {"waiting_human", "blocked", "failed"}:
             step_key = step.step_key
             task = db.get(AgentTask, task.id)
+            if outcome in {"blocked", "failed"}:
+                _settle_dependent_steps(db, task)
             _refresh_task_status(db, task)
             db.commit()
             return {
@@ -611,7 +681,9 @@ def _record_success(db, task: AgentTask, step: AgentStep, call: AgentToolCall, r
     step.output_summary_json = summary
     step.evidence_refs_json = sorted({*result.evidence_refs})[:500]
     step.evidence_count = len(facts) + len(policy)
-    step.gap_codes_json = sorted({*[str(item.get("code")) for item in result.gaps if item.get("code")]})
+    # Union, never replace: dependency gaps recorded before execution must survive the call.
+    step.gap_codes_json = sorted({*(step.gap_codes_json or []),
+                                  *[str(item.get("code")) for item in result.gaps if item.get("code")]})
     call.status = "completed"
     call.output_summary_json = redact_summary({
         "status": result.status, "output": result.output, "gap_codes": step.gap_codes_json,
@@ -1008,7 +1080,9 @@ def task_snapshot(db, task: AgentTask) -> dict[str, Any]:
         step_payloads.append({
             "id": step.id, "step_key": step.step_key, "plan_id": step.plan_id, "order_index": step.order_index,
             "tool_key": step.tool_key, "reason": step.reason, "status": step.status, "required": step.required,
-            "depends_on": step.depends_on_json, "attempt_count": step.attempt_count,
+            "depends_on": step.depends_on_json, "optional_depends_on": step.optional_depends_on_json,
+            "dependency_evaluation": summary.get("dependency_evaluation"),
+            "attempt_count": step.attempt_count,
             "evidence_count": step.evidence_count, "evidence_refs": step.evidence_refs_json,
             "gap_codes": step.gap_codes_json, "summary": summary.get("summary"),
             # Grounded claims/comparisons are the point of the console: expose them bounded.

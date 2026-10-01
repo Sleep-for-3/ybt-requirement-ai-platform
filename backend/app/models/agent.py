@@ -97,6 +97,8 @@ class AgentStep(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
     required: Mapped[bool] = mapped_column(Boolean, default=True)
     depends_on_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    # Dependencies whose absence degrades the step (gap) instead of blocking it.
+    optional_depends_on_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     input_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     input_hash: Mapped[str | None] = mapped_column(String(64))
     output_summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)

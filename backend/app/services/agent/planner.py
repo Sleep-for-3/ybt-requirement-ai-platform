@@ -48,6 +48,8 @@ class PlannedStep(ContractModel):
     tool_key: Key
     reason: str = Field(min_length=1, max_length=2000)
     depends_on: list[str] = Field(default_factory=list, max_length=MAX_PLAN_STEPS)
+    # Optional dependencies: their absence degrades the step with a gap, not a block.
+    optional_depends_on: list[str] = Field(default_factory=list, max_length=MAX_PLAN_STEPS)
     required: bool = True
     input: dict[str, Any] = Field(default_factory=dict)
 
@@ -64,9 +66,14 @@ class PlanDraft(ContractModel):
         for step in self.steps:
             if step.step_key in seen:
                 raise ValueError(f"duplicate step_key: {step.step_key}")
-            unknown = [item for item in step.depends_on if item not in seen]
+            unknown = [item for item in [*step.depends_on, *step.optional_depends_on] if item not in seen]
             if unknown:
                 raise ValueError(f"{step.step_key} depends on non-earlier steps: {unknown}")
+            overlap = set(step.depends_on) & set(step.optional_depends_on)
+            if overlap:
+                raise ValueError(
+                    f"{step.step_key} declares a dependency as both required and optional: {sorted(overlap)}"
+                )
             seen.add(step.step_key)
         return self
 
