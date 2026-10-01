@@ -7,10 +7,12 @@ import { FormEvent, useState } from "react";
 
 import {
   DECISION_VALUES, GOVERNANCE_BANNER, METRIC_LABELS, STEP_STATUS_LABELS, TASK_STATUS_LABELS,
-  decisionPayload, evidenceCoverage, formatMetric, groupGapsByCode, isTaskTerminal, nextActionableStep,
-  statusTone, stepInputJson, summarizeToolCalls,
+  adaptivePlanTimeline, caseMemoryView, classifyStepEvidence, decisionPayload, evidenceCoverage, formatMetric,
+  groupGapsByCode, isHistoricalCaseStep, isStepDegraded, isTaskTerminal, nextActionableStep, planSourceLabel,
+  planSourceTone, scenarioRoutingView, sqlChangeView, statusTone, stepDegradedCodes, stepDisplayTone,
+  stepInputJson, stepStatusLabel, subjectChoicePayload, subjectResolutionView, summarizeToolCalls,
   type AgentDecisionValue, type AgentMetrics, type AgentPlan, type AgentSnapshot, type AgentStep,
-  type AgentTask, type AgentTaskRow, type AgentToolDescriptor, type StatusTone
+  type AgentTask, type AgentTaskRow, type AgentToolDescriptor, type EvidenceBucket, type StatusTone
 } from "@/app/agent/view-model";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
@@ -24,7 +26,10 @@ const CHIP = "flex flex-wrap items-center gap-2";
 const ALERT = "rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-xs text-coral-700";
 const ACTIONABLE = ["cancel", "retry", "replan", "resume"] as const;
 type TaskAction = (typeof ACTIONABLE)[number];
-
+/** 观察后自动重规划使用独立的紫罗兰配色，与模型规划（蓝）、规则规划（灰）区分。 */
+const PLAN_SOURCE_CLASS: Record<string, string> = { observe_replan: "badge border-violet-200 bg-violet-50 text-violet-700" };
+const CANDIDATE_ON = "w-full rounded-lg border border-pine-300 bg-pine-50 px-3 py-2 text-left";
+const CANDIDATE_OFF = "w-full rounded-lg border border-line bg-white px-3 py-2 text-left hover:bg-mist/70";
 const counts = (value?: Record<string, number | null> | null) => value || {};
 const totalSteps = (value?: Record<string, number | null> | null) =>
   ["completed", "pending", "failed", "waiting_human", "skipped"].reduce((sum, key) => sum + Number(value?.[key] || 0), 0);
@@ -48,6 +53,17 @@ const objectJson = (value: unknown) =>
 function Badge({ status }: { status: string }) {
   const label = TASK_STATUS_LABELS[status] || STEP_STATUS_LABELS[status] || status;
   return <span aria-label={`状态：${label}`} className={TONE_CLASS[statusTone(status)]}>{label}</span>;
+}
+/** 降级步骤（已完成/已跳过）必须显示为警告色，绝不渲染为成功。 */
+function StepBadge({ step }: { step: AgentStep }) {
+  const label = stepStatusLabel(step);
+  return <span aria-label={`状态：${label}`} className={TONE_CLASS[stepDisplayTone(step)]}>{label}</span>;
+}
+/** 规划来源徽标：fallback 永远是危险色，不会被当成 AI 成功。 */
+function PlanSourceBadge({ source }: { source: string | null | undefined }) {
+  const key = String(source || "");
+  const className = PLAN_SOURCE_CLASS[key] || TONE_CLASS[planSourceTone(key)];
+  return <span className={className}>{planSourceLabel(key)}</span>;
 }
 function Section({ title, meta, children }: { title: string; meta?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -239,9 +255,14 @@ export default function AgentWorkspacePage() {
         ) : null}
         {detail ? (
           <>
+            <ScenarioPanel scenarioKey={detail.task.scenario_key} summary={detail.task.result_summary} />
+            <SubjectPanel busy={action.isPending} onSubmit={(body, stepId) => action.mutateAsync({ path: `/agent/tasks/${detail.task.id}/steps/${stepId}/decision`, body })} steps={detail.steps} summary={detail.task.result_summary} />
+            <AdaptivePlanPanel plan={detail.plan} summary={detail.task.result_summary} />
             <PlanPanel plan={detail.plan} />
             <StepTimeline snapshot={detail} />
             <EvidencePanel snapshot={detail} />
+            <CaseMemoryPanel steps={detail.steps || []} />
+            <SqlChangePanel steps={detail.steps || []} />
             <GapPanel gaps={detail.gaps || []} />
             <ArtifactPanel artifacts={detail.artifacts || []} />
             <Section title="执行日志" meta={`工具调用 ${logSummary.total} 次 · 成功 ${logSummary.completed} · 失败 ${logSummary.failed} · 降级 ${logSummary.degraded} · 平均耗时 ${logSummary.averageDurationMs} ms · 证据 ${logSummary.evidenceCount}`}>
@@ -367,16 +388,28 @@ function PlanPanel({ plan }: { plan: AgentPlan }) {
     return <Section title="执行计划"><p className="text-sm text-slate-500">尚未生成计划版本；规划失败会体现在任务错误里，不会伪造计划。</p></Section>;
   }
   const steps = plan.steps || [];
+  const attempts = plan.planner_attempts ?? null;
+  const validationErrors = plan.validation_errors || [];
+  const degraded = planSourceTone(plan.planner_source) === "danger" || Boolean(plan.degraded_reason);
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2 className="text-sm font-semibold text-ink">执行计划 v{plan.version_no}</h2>
-        <p className="mt-1 text-xs text-slate-500">规划来源 {plan.planner_source} · 计划状态 {plan.status} · 步骤 {steps.length} 个 · 哈希 {plan.plan_hash || "—"}</p>
+        <div className={CHIP}>
+          <h2 className="text-sm font-semibold text-ink">执行计划 v{plan.version_no}</h2>
+          <PlanSourceBadge source={plan.planner_source} />
+          {degraded ? <span className="badge-danger">降级计划：不是 AI 成功</span> : null}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">规划来源 {planSourceLabel(plan.planner_source)} · 计划状态 {plan.status} · 步骤 {steps.length} 个 · 规划尝试 {attempts ?? "—"} · 哈希 {plan.plan_hash || "—"}</p>
       </div>
       {plan.degraded_reason ? (
         <p className="border-b border-line bg-gold-50 px-5 py-2.5 text-xs text-gold-700" role="note">
           规划降级原因：{plan.degraded_reason}（已回退确定性计划，未采用模型输出）
         </p>
+      ) : null}
+      {validationErrors.length ? (
+        <div className="border-b border-line bg-coral-50 px-5 py-2.5 text-xs text-coral-700" role="alert">
+          规划校验失败（模型输出已被拒绝，未采用）：{validationErrors.join("；")}
+        </div>
       ) : null}
       <ol>
         {steps.map((item, index) => (
@@ -412,20 +445,26 @@ function StepTimeline({ snapshot }: { snapshot: AgentSnapshot }) {
             <span className="font-mono text-xs text-slate-400">{String((step.order_index ?? 0) + 1).padStart(2, "0")}</span>
             <span className="font-medium text-ink">{step.step_key}</span>
             <span className="badge-neutral font-mono">{step.tool_key}</span>
-            <Badge status={step.status} />
+            <StepBadge step={step} />
             {step.required === false ? <span className="badge-neutral">可选</span> : null}
             {step.requires_human_confirmation ? <span className="badge-warning">需人工确认</span> : null}
+            {isStepDegraded(step) ? <span className="badge-warning">降级：{stepDegradedCodes(step).join("、")}</span> : null}
             <span className="text-xs text-slate-500">尝试 {step.attempt_count ?? 0} · 证据 {step.evidence_count ?? 0} · 工具调用 {step.tool_calls?.length ?? 0}</span>
             <span className="ml-auto text-xs text-slate-400">{durationText(step.started_at, step.finished_at)}</span>
           </summary>
           <div className="space-y-3 border-t border-line bg-mist/40 px-5 py-4">
             <DList items={[
-              ["工具", step.tool_key], ["状态", <Badge key="s" status={step.status} />],
+              ["工具", step.tool_key], ["状态", <StepBadge key="s" step={step} />],
               ["耗时", durationText(step.started_at, step.finished_at)], ["尝试次数", step.attempt_count ?? 0],
               ["证据引用", `${step.evidence_refs?.length ?? 0} 个`], ["缺口代码", step.gap_codes?.length ? step.gap_codes.join("、") : "—"],
               ["依赖", step.depends_on?.length ? step.depends_on.join(" → ") : "—"],
               ["人工网关", `${step.human_gate_key || "—"}${step.review_task_id ? ` · #${step.review_task_id}` : ""}`]
             ]} />
+            {isStepDegraded(step) ? (
+              <p className={ALERT} role="alert">
+                该步骤发生降级（{stepDegradedCodes(step).join("、")}）：输出不得当作成功结论使用。
+              </p>
+            ) : null}
             <KV label="输入（计划声明）">
               <pre className="max-h-40 overflow-auto rounded-lg bg-white p-2 font-mono text-[11px] text-slate-600">{stepInputJson(snapshot.plan, step.step_key)}</pre>
             </KV>
@@ -469,25 +508,52 @@ function StepTimeline({ snapshot }: { snapshot: AgentSnapshot }) {
 
 function EvidencePanel({ snapshot }: { snapshot: AgentSnapshot }) {
   const steps = snapshot.steps || [];
-  const withEvidence = steps.filter((step) => (step.evidence_count ?? 0) > 0);
-  const executed = steps.filter((step) => (step.attempt_count ?? 0) > 0);
+  const classified = steps
+    .map((step) => ({ step, buckets: classifyStepEvidence(step) }))
+    .filter((entry) => entry.buckets.hasAny || (entry.step.evidence_count ?? 0) > 0);
   return (
-    <Section title="证据" meta={`任务级证据 ${snapshot.task.counts?.evidence ?? 0} 条 · 步骤覆盖 ${withEvidence.length}/${executed.length} · 覆盖率 ${(evidenceCoverage(snapshot) * 100).toFixed(1)}%`}>
-      <div className="space-y-2">
-        {withEvidence.length ? withEvidence.map((step) => (
-          <div className={`${CARD} text-sm`} key={step.id}>
-            <div className={CHIP}>
-              <span className="font-medium text-ink">{step.step_key}</span>
-              <span className="badge-info">{step.evidence_count ?? 0} 条证据</span>
-              <span className="text-xs text-slate-500">
-                {step.evidence_refs?.length ?? 0} 个引用 · 事实 {step.fact_count ?? 0} · 条款 {step.policy_evidence_count ?? 0}
-              </span>
+    <Section title="证据（按类型分类）" meta={`任务级证据 ${snapshot.task.counts?.evidence ?? 0} 条 · 已分类步骤 ${classified.length}/${steps.length} · 覆盖率 ${(evidenceCoverage(snapshot) * 100).toFixed(1)}%`}>
+      {classified.length ? (
+        <div className="space-y-3">
+          {classified.map(({ step, buckets }) => (
+            <div className={`${CARD} text-sm`} key={step.id}>
+              <div className={CHIP}>
+                <span className="font-medium text-ink">{step.step_key}</span>
+                <StepBadge step={step} />
+                <span className="badge-info">{step.evidence_count ?? 0} 条证据</span>
+                <span className="text-xs text-slate-500">
+                  {step.evidence_refs?.length ?? 0} 个引用 · 事实 {step.fact_count ?? 0} · 条款 {step.policy_evidence_count ?? 0} · 分类合计 {buckets.total}
+                </span>
+              </div>
+              {step.evidence_refs?.length ? <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{preview(step.evidence_refs, 260)}</p> : null}
+              <EvidenceBucketList buckets={buckets.buckets.filter((bucket) => bucket.count > 0)} />
             </div>
-            {step.evidence_refs?.length ? <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{preview(step.evidence_refs, 260)}</p> : null}
-          </div>
-        )) : <p className="text-sm text-slate-500">暂无证据：AI 结论尚无依据，不得当作事实使用。</p>}
-      </div>
+          ))}
+        </div>
+      ) : <p className="text-sm text-slate-500">暂无证据：AI 结论尚无依据，不得当作事实使用。</p>}
     </Section>
+  );
+}
+
+function EvidenceBucketList({ buckets }: { buckets: EvidenceBucket[] }) {
+  if (!buckets.length) return <p className="mt-2 text-xs text-slate-400">该步骤没有可分类的证据或主张。</p>;
+  return (
+    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      {buckets.map((bucket) => (
+        <div className="rounded-lg border border-line bg-mist/40 px-3 py-2" key={bucket.key}>
+          <div className={CHIP}>
+            <span className="text-xs font-medium text-slate-700">{bucket.label}</span>
+            <span className="badge-neutral">{bucket.count}</span>
+            {bucket.requiresHumanConfirmation ? <span className="badge-warning">需人工确认</span> : null}
+          </div>
+          {bucket.items.length ? (
+            <ul className="mt-1 space-y-1 text-xs text-slate-600">
+              {bucket.items.map((item, index) => <li className="break-all" key={`${bucket.key}-${index}`}>{item}</li>)}
+            </ul>
+          ) : <p className="mt-1 text-xs text-slate-400">后端只返回计数，暂无明细。</p>}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -539,6 +605,303 @@ function ArtifactPanel({ artifacts }: { artifacts: AgentSnapshot["artifacts"] })
           ))}
         </div>
       ) : <p className="text-sm text-slate-500">尚无交付物候选。</p>}
+    </Section>
+  );
+}
+
+function ScenarioPanel({ summary, scenarioKey }: {
+  summary: Record<string, unknown> | null | undefined;
+  scenarioKey?: string | null;
+}) {
+  const view = scenarioRoutingView(summary?.scenario_routing);
+  return (
+    <Section title="场景识别" meta={view.present ? `场景 ${view.scenarioKey}` : "后端未返回场景识别结果"}>
+      {view.badges.length ? (
+        <div className={CHIP}>
+          {view.badges.map((badge) => <span className={TONE_CLASS[badge.tone]} key={badge.key}>{badge.label}</span>)}
+        </div>
+      ) : null}
+      <div className="mt-3">
+        <DList items={[
+          ["识别场景", view.present ? `${view.label}（${view.scenarioKey}）` : "—"],
+          ["置信度", view.confidence === null ? "—" : view.confidence.toFixed(4)],
+          ["识别来源", <span className={TONE_CLASS[view.sourceTone]} key="source">{view.sourceLabel}</span>],
+          ["任务记录场景", scenarioKey || "—"]
+        ]} />
+      </div>
+      {view.rationale ? <p className="mt-3 text-xs text-slate-600">识别理由：{view.rationale}</p> : null}
+      {view.alternatives.length ? (
+        <div className="mt-3">
+          <div className="text-xs font-medium text-slate-500">候选场景（未被采用，仅供人工判断）</div>
+          <ul className="mt-1 space-y-1 text-xs text-slate-600">
+            {view.alternatives.map((item) => (
+              <li className="font-mono" key={item.scenarioKey}>
+                {item.scenarioKey} · 得分 {item.score === null ? "—" : item.score}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {view.requiresClarification ? (
+        <p className={`mt-3 ${ALERT}`} role="alert">场景识别要求人工澄清：请先确认场景，再依赖后续结论。</p>
+      ) : null}
+      {!view.present ? (
+        <p className="mt-3 text-xs text-slate-500">后端未返回 scenario_routing：不得据此推断场景，也不得把缺失当作规则识别。</p>
+      ) : null}
+    </Section>
+  );
+}
+
+function SubjectPanel({ summary, steps, busy, onSubmit }: {
+  summary: Record<string, unknown> | null | undefined;
+  steps?: AgentStep[] | null;
+  busy: boolean;
+  onSubmit: (body: Record<string, unknown>, stepId: number) => Promise<unknown>;
+}) {
+  const view = subjectResolutionView(summary, steps);
+  const [picked, setPicked] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  async function confirmSubject() {
+    setError("");
+    setNotice("");
+    if (picked === null) {
+      setError("请先人工点选一个候选字段，系统不会自动选择分析对象。");
+      return;
+    }
+    if (view.clarifyStepId === null) {
+      setError("当前任务没有可提交的 clarify_subject 步骤。");
+      return;
+    }
+    try {
+      await onSubmit(subjectChoicePayload(picked), view.clarifyStepId);
+      setPicked(null);
+      setNotice("已提交人工选择的分析对象，后端将按该字段重建计划。");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "提交失败，请稍后重试。");
+    }
+  }
+
+  const tableId = view.subject?.targetTableId;
+  return (
+    <Section
+      title="分析对象（主体解析）"
+      meta={view.needsSelection ? "存在多个候选：必须人工确认后才能继续" : "主体由后端确定性解析，人工可在澄清步骤介入"}
+    >
+      <DList items={[
+        ["分析对象", view.subjectLabel],
+        ["字段编码", view.subject?.targetFieldCode || "—"],
+        ["目标表", tableId === null || tableId === undefined ? "—" : `#${tableId}`],
+        ["解析状态", view.label],
+        ["置信度", view.confidence === null ? "—" : view.confidence.toFixed(4)],
+        ["匹配方式", view.subject?.matchedOn || "—"]
+      ]} />
+      {view.rationale ? <p className="mt-3 text-xs text-slate-600">解析说明：{view.rationale}</p> : null}
+      {view.requirement ? <p className="mt-2 text-xs text-gold-700">人工要求：{view.requirement}</p> : null}
+      {view.needsSelection ? (
+        <div className="mt-3 space-y-2">
+          <p className={ALERT} role="alert">主体解析未唯一确定：请人工确认分析对象。候选永远不会被自动选中。</p>
+          {view.candidates.length ? (
+            <ul className="space-y-1">
+              {view.candidates.map((candidate) => {
+                const selected = picked !== null && candidate.targetFieldId === picked;
+                return (
+                  <li key={`${candidate.targetFieldId ?? "none"}-${candidate.targetFieldCode}`}>
+                    <button
+                      aria-pressed={selected}
+                      className={selected ? CANDIDATE_ON : CANDIDATE_OFF}
+                      disabled={busy || !candidate.selectable}
+                      onClick={() => setPicked(candidate.targetFieldId)}
+                      type="button"
+                    >
+                      <span className={CHIP}>
+                        <span className="font-medium text-ink">{candidate.targetFieldName || candidate.targetFieldCode || "未命名字段"}</span>
+                        {candidate.targetFieldCode ? <span className="badge-neutral font-mono">{candidate.targetFieldCode}</span> : null}
+                        <span className="badge-info">得分 {candidate.score === null ? "—" : candidate.score}</span>
+                        <span className="text-xs text-slate-500">
+                          匹配 {candidate.matchedOn || "—"}{candidate.matchedToken ? ` · ${candidate.matchedToken}` : ""}
+                        </span>
+                        {candidate.selectable ? null : <span className="badge-danger">缺少字段 ID，不可选</span>}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : <p className="text-xs text-slate-500">后端未返回候选字段，无法在此确认分析对象。</p>}
+          <div className={CHIP}>
+            <button className="button-primary" disabled={busy || picked === null || !view.canConfirm} onClick={() => void confirmSubject()} type="button">
+              <Check size={15} />确认分析对象
+            </button>
+            <span className="text-xs text-slate-500">
+              {view.clarifyStepId === null
+                ? "当前任务没有等待确认的 clarify_subject 步骤。"
+                : `提交到 ${view.clarifyStepKey} · 状态 ${view.clarifyStepStatus || "—"}`}
+            </span>
+          </div>
+          {error ? <p className={`${ALERT} text-sm`} role="alert">{error}</p> : null}
+          {notice ? <p className="text-sm text-pine-700" role="status">{notice}</p> : null}
+        </div>
+      ) : view.present ? null : (
+        <p className="mt-3 text-xs text-slate-500">后端未返回主体解析结果：不得假设已解析出分析对象。</p>
+      )}
+    </Section>
+  );
+}
+
+function AdaptivePlanPanel({ plan, summary }: {
+  plan: AgentPlan;
+  summary: Record<string, unknown> | null | undefined;
+}) {
+  const timeline = adaptivePlanTimeline(plan, summary?.observations);
+  const adaptive = summary?.adaptive === true;
+  return (
+    <Section title="自适应规划" meta={adaptive ? `观察-重规划已启用 · 观察 ${timeline.observationCount} 次` : "本任务未启用自适应规划"}>
+      <DList items={[
+        ["初始计划版本", timeline.initialVersion === null ? "—" : `v${timeline.initialVersion}`],
+        ["当前计划版本", timeline.currentVersion === null ? "—" : `v${timeline.currentVersion}`],
+        ["规划来源", <PlanSourceBadge key="src" source={timeline.plannerSource} />],
+        ["规划尝试次数", timeline.plannerAttempts === null ? "—" : String(timeline.plannerAttempts)],
+        ["是否重规划", timeline.revised ? "是（计划版本已提升）" : "否"],
+        ["降级状态", timeline.degraded ? (timeline.degradedReason || "规划降级") : "未降级"]
+      ]} />
+      {timeline.validationErrors.length ? (
+        <div className={`mt-3 ${ALERT}`} role="alert">
+          规划校验失败（模型输出已被拒绝，未采用）：
+          <ul className="mt-1 list-inside list-disc">
+            {timeline.validationErrors.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+          </ul>
+        </div>
+      ) : null}
+      <div className="mt-4">
+        <div className="text-xs font-medium text-slate-500">为什么重新规划（后端观察记录，最多 3 条）</div>
+        {timeline.observations.length ? (
+          <ol className="mt-2 space-y-2">
+            {timeline.observations.map((item, index) => (
+              <li className={`${CARD} bg-white`} key={`${item.planVersion}-${index}`}>
+                <div className={CHIP}>
+                  <span className="badge-neutral">第 {index + 1} 次观察</span>
+                  <span className="badge-info">计划 {item.planVersion === null ? "—" : `v${item.planVersion}`}</span>
+                  <span className={item.applied ? "badge-success" : "badge-warning"}>{item.applied ? "已应用计划变更" : "未应用计划变更"}</span>
+                  <span className="badge-neutral">操作 {item.opsCount} 项</span>
+                  {item.degraded ? <span className="badge-danger">观察降级：{item.degraded}</span> : null}
+                  {item.at ? <span className="text-xs text-slate-400">{dateText(item.at)}</span> : null}
+                </div>
+                <p className="mt-1 text-xs text-slate-600">{item.rationale || "后端未记录理由"}</p>
+                {item.codes.length ? <p className="mt-1 font-mono text-[11px] text-slate-500">代码 {item.codes.join("、")}</p> : null}
+                {item.gaps.length ? (
+                  <ul className="mt-1 space-y-1 text-xs text-slate-600">
+                    {item.gaps.map((gap, gapIndex) => (
+                      <li key={`${gap.code}-${gapIndex}`}>
+                        <span className="font-mono text-slate-400">{gap.stepKey || "—"}</span> · <span className="font-mono">{gap.code || "unknown"}</span>：{gap.message || "无说明"}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        ) : <p className="mt-1 text-xs text-slate-500">没有观察记录：计划没有被自动调整过。</p>}
+      </div>
+    </Section>
+  );
+}
+
+function CaseMemoryPanel({ steps }: { steps: AgentStep[] }) {
+  const rows = steps.filter((step) => isHistoricalCaseStep(step));
+  if (!rows.length) return null;
+  return (
+    <Section title="决策记忆（历史人工决策）" meta={`${rows.length} 个检索步骤 · 历史经验只能作为参考`}>
+      <div className="space-y-2">
+        {rows.map((step) => {
+          const view = caseMemoryView(step);
+          return (
+            <div className={`${CARD} text-sm`} key={step.id}>
+              <div className={CHIP}>
+                <span className="font-medium text-ink">{step.step_key}</span>
+                <StepBadge step={step} />
+                <span className="badge-info">{view.caseCount} 条案例</span>
+                <span className="badge-neutral">{view.sourceLabel}</span>
+                {view.adopted ? <span className="badge-success">已采纳（经过人工确认）</span> : null}
+                {view.skipped ? <span className="badge-warning">未采纳：步骤被跳过</span> : null}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                来源类型 {view.sourceLabel}（{view.sourceType}）· 永远不是监管依据
+                {view.decisionTypes.length ? ` · 决策类型 ${view.decisionTypes.join("、")}` : ""}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">{view.advisoryNote}</p>
+              {view.sourceConflict ? (
+                <p className={`mt-1 ${ALERT}`} role="alert">
+                  后端把该案例标为 {view.declaredSource}；界面仍按“历史人工决策”展示，绝不当作监管依据。
+                </p>
+              ) : null}
+              {view.gapMessage ? (
+                <p className={`mt-1 ${ALERT}`} role="alert">缺口 {view.gapCodes.join("、") || "—"}：{view.gapMessage}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
+function SqlChangePanel({ steps }: { steps: AgentStep[] }) {
+  const rows = steps.map((step) => ({ step, view: sqlChangeView(step) })).filter((row) => row.view.isSqlStep);
+  if (!rows.length) return null;
+  return (
+    <Section title="SQL 变更（interpretation）" meta={`${rows.length} 个 SQL 步骤 · 变更项与口径影响均需人工确认`}>
+      <div className="space-y-3">
+        {rows.map(({ step, view }) => (
+          <div className={CARD} key={step.id}>
+            <div className={CHIP}>
+              <span className="font-medium text-ink">{step.step_key}</span>
+              <span className="badge-neutral font-mono">{step.tool_key}</span>
+              <StepBadge step={step} />
+              <span className="badge-info">{view.changeCount} 项变更</span>
+              {view.severity ? <span className="badge-warning">严重度 {view.severity}</span> : null}
+              {view.caliberAffectingCount > 0 ? <span className="badge-danger">可能影响口径 {view.caliberAffectingCount} 项</span> : null}
+              {view.degraded ? <span className="badge-warning">降级：{view.degradedCodes.join("、")}</span> : null}
+            </div>
+            {view.baselineMissing ? (
+              <p className={`mt-2 ${ALERT}`} role="alert">缺少可比对的 SQL 基线（sql_baseline_missing）：该步骤按缺口跳过，不得当作“无变更”。</p>
+            ) : null}
+            {view.hasBaseline ? (
+              <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                <KV label="变更前 SQL"><pre className="max-h-32 overflow-auto rounded-lg bg-mist p-2 font-mono text-[11px] text-slate-600">{view.oldSql}</pre></KV>
+                <KV label="变更后 SQL"><pre className="max-h-32 overflow-auto rounded-lg bg-mist p-2 font-mono text-[11px] text-slate-600">{view.newSql}</pre></KV>
+              </div>
+            ) : null}
+            {view.changes.length ? (
+              <ul className="mt-2 space-y-2">
+                {view.changes.map((change, index) => (
+                  <li className="rounded-lg border border-line bg-white px-3 py-2" key={`${change.category}-${index}`}>
+                    <div className={CHIP}>
+                      <span className="badge-neutral font-mono">{change.category || "unclassified"}</span>
+                      <span className="text-xs font-medium text-slate-700">{change.label}</span>
+                      {change.severity ? <span className="badge-warning">严重度 {change.severity}</span> : null}
+                      {change.affectsCaliber ? <span className="badge-danger">可能影响口径</span> : null}
+                      {change.requiresHumanConfirmation ? <span className="badge-warning">interpretation · 需人工确认</span> : null}
+                    </div>
+                    <div className="mt-1 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-500">变更前</div>
+                        <pre className="mt-1 max-h-24 overflow-auto rounded bg-mist p-2 font-mono text-[11px]">{change.missingBefore ? "（后端未提供 before）" : change.before || "（空）"}</pre>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-500">变更后</div>
+                        <pre className="mt-1 max-h-24 overflow-auto rounded bg-mist p-2 font-mono text-[11px]">{change.missingAfter ? "（后端未提供 after）" : change.after || "（空）"}</pre>
+                      </div>
+                    </div>
+                    {change.statement || change.detail ? <p className="mt-1 text-xs text-slate-500">{change.statement || change.detail}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-2 text-xs text-slate-500">没有可展示的变更项：后端未返回 items，或该步骤被降级跳过。</p>}
+          </div>
+        ))}
+      </div>
     </Section>
   );
 }
