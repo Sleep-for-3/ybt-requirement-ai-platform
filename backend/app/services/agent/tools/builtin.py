@@ -105,11 +105,13 @@ def _search_regulatory_knowledge(ctx: ToolContext) -> ToolResult:
         clause, clause_gap = policy_clause_evidence(hit, scope=scope, confidentiality=confidentiality)
         if clause is not None:
             policy.append(clause.model_dump(mode="json"))
-        elif clause_gap is not None:
+            continue
+        if clause_gap is not None:
             gaps.append(clause_gap.model_dump(mode="json"))
-            non_normative = knowledge_evidence(hit, scope=scope, confidentiality=confidentiality)
-            if non_normative is not None:
-                facts.append(non_normative.model_dump(mode="json"))
+        # Everything non-normative is still recorded, but only as a fact.
+        non_normative = knowledge_evidence(hit, scope=scope, confidentiality=confidentiality)
+        if non_normative is not None:
+            facts.append(non_normative.model_dump(mode="json"))
 
     if not policy:
         rows = list(ctx.db.scalars(select(RegulatoryKnowledgeItem).where(
@@ -358,7 +360,8 @@ def _analyze_lineage_impact(ctx: ToolContext) -> ToolResult:
         )
     resolved = resolve_semantic_impact(
         ctx.db, project_id=ctx.project_id, source_field_ids=source_field_ids,
-        mart_field_ids=mart_field_ids, target_field_ids=target_field_ids, mapping_entity_ids=[],
+            mart_field_ids=mart_field_ids, target_field_ids=target_field_ids,
+            mapping_entity_ids={},
     )
     facts.append(evidence(
         evidence_id=f"semantic_impact:{stable_hash({'s': source_field_ids, 'm': mart_field_ids, 't': target_field_ids})[:16]}",
@@ -408,11 +411,23 @@ def _inspect_sql_rule(ctx: ToolContext) -> ToolResult:
         statements = [statement]
     else:
         if not isinstance(script_file_id, int):
-            return ToolResult(
-                status="skipped",
-                gaps=[gap("sql_scope_missing", "当前任务没有绑定脚本或 SQL 语句，实现检查按缺口跳过。").model_dump(mode="json")],
-                output={"statement_count": 0, "statements": []},
-            )
+            # Deterministic discovery: the script that declares the subject field as its
+            # logical target, else the project's first script. Never a guess about intent.
+            subject = (ctx.step.input_json or {}).get("subject") or {}
+            code = str(subject.get("target_field_code") or "")
+            candidates = select(ScriptFile).where(ScriptFile.project_id == ctx.project_id)
+            discovered = None
+            if code:
+                discovered = ctx.db.scalar(candidates.where(ScriptFile.logical_target_name == code)
+                                          .order_by(ScriptFile.id))
+            discovered = discovered or ctx.db.scalar(candidates.order_by(ScriptFile.id))
+            if discovered is None:
+                return ToolResult(
+                    status="skipped",
+                    gaps=[gap("sql_scope_missing", "当前项目没有可检查的脚本，实现检查按缺口跳过。").model_dump(mode="json")],
+                    output={"statement_count": 0, "statements": []},
+                )
+            script_file_id = int(discovered.id)
         script = ctx.db.get(ScriptFile, script_file_id)
         if script is None or script.project_id != ctx.project_id:
             raise ToolExecutionError("script_not_found", "脚本不存在或不属于当前项目。")
@@ -747,6 +762,7 @@ def register_builtin_tools() -> None:
                 "root_entity_id": {"type": "integer"},
                 "direction": {"type": "string", "enum": ["upstream", "downstream", "both"]},
                 "depth": {"type": "integer"},
+                "target_field_id": {"type": "integer"},
             },
             "additionalProperties": False,
         },

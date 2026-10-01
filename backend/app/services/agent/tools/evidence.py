@@ -17,6 +17,7 @@ from typing import Any
 
 from app.models import AgentTask, Project
 from app.schemas.ai_skill import EvidenceSource, SkillEvidence, SkillGap, SkillScope
+from app.services.requirement_policy_comparison import NORMATIVE_CATEGORIES
 
 CLAUSE_LOCATOR_PATTERN = re.compile(r"第[^\s]{1,20}条|\b\d+(?:\.\d+)+\b")
 CONFIDENTIALITY_LEVELS = ("public", "internal", "confidential", "restricted")
@@ -89,6 +90,11 @@ def policy_clause_evidence(
 ) -> tuple[SkillEvidence | None, SkillGap | None]:
     """Turn a retrieval hit into governed policy evidence, or explain why not."""
 
+    # Same normative-source rule the requirement and lineage paths already use: a
+    # data-item definition, business material or model answer can never become a
+    # regulatory basis just because its text looks clause-shaped.
+    if hit.get("source_category") not in NORMATIVE_CATEGORIES:
+        return None, None
     unit_id = hit.get("knowledge_unit_id") or hit.get("chunk_id")
     document_version_id = hit.get("document_version_id")
     if unit_id is None or document_version_id is None:

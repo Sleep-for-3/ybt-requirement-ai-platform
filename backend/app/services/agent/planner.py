@@ -206,7 +206,10 @@ def deterministic_plan(objective: str, *, scenario_key: str, subject: dict[str, 
                 # No subject: keep the step but let the runtime skip it with a gap.
                 required = False
             else:
-                tool_input.setdefault("target_field_id", subject["target_field_id"])
+                # The registry is the contract: only inject what the tool declares, and
+                # keep the subject in the persisted input for handlers that read it.
+                if "target_field_id" in (spec.input_schema.get("properties") or {}):
+                    tool_input.setdefault("target_field_id", subject["target_field_id"])
         steps.append(PlannedStep(
             step_key=raw["step_key"],
             tool_key=raw["tool_key"],

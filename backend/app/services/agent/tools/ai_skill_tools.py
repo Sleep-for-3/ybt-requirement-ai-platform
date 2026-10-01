@@ -394,6 +394,30 @@ def _top_candidate_id(ctx: ToolContext) -> str:
     return scored[0][1]
 
 
+def _default_mapping_id(ctx: ToolContext) -> int | None:
+    """The scenario mapping already registered for the subject target field."""
+
+    from app.models import ScenarioBusinessMapping
+
+    target_field_id = ctx.tool_input.get("target_field_id")
+    if not isinstance(target_field_id, int) or isinstance(target_field_id, bool):
+        target_field_id = (ctx.step.input_json or {}).get("subject", {}).get("target_field_id")
+    if not isinstance(target_field_id, int) or isinstance(target_field_id, bool):
+        return None
+    query = select(ScenarioBusinessMapping).where(
+        ScenarioBusinessMapping.project_id == ctx.project_id,
+        ScenarioBusinessMapping.target_field_id == target_field_id,
+    )
+    scenario_id = ctx.tool_input.get("scenario_id")
+    if isinstance(scenario_id, int) and not isinstance(scenario_id, bool):
+        specific = ctx.db.scalar(query.where(ScenarioBusinessMapping.scenario_id == scenario_id)
+                                 .order_by(ScenarioBusinessMapping.id))
+        if specific is not None:
+            return int(specific.id)
+    row = ctx.db.scalar(query.order_by(ScenarioBusinessMapping.id))
+    return int(row.id) if row is not None else None
+
+
 def _default_scenario_id(ctx: ToolContext) -> int | None:
     """Scenario already mapped to the subject field, else the project's first enabled one."""
 
@@ -428,14 +452,22 @@ def _prepare_field_candidate(ctx: ToolContext) -> ToolResult:
         if candidate_id:
             defaults.append("candidate_defaulted_to_top_rank")
     if not candidate_id:
-        raise ToolExecutionError("candidate_required", "召回/重排步骤没有产生可用候选，无法准备候选。")
+        return ToolResult(
+            status="skipped",
+            gaps=[gap("candidate_not_available", "召回/重排步骤没有产生可用候选，候选准备按缺口跳过。").model_dump(mode="json")],
+            output={"writes_mapping": False},
+        )
     scenario_id = ctx.tool_input.get("scenario_id")
     if isinstance(scenario_id, bool) or not isinstance(scenario_id, int) or scenario_id <= 0:
         scenario_id = _default_scenario_id(ctx)
         if scenario_id:
             defaults.append("scenario_defaulted_to_project_scope")
-    if not isinstance(scenario_id, int) or scenario_id <= 0:
-        raise ToolExecutionError("scenario_required", "当前项目没有可用业务场景，无法准备候选。")
+    if not isinstance(scenario_id, int) or isinstance(scenario_id, bool) or scenario_id <= 0:
+        return ToolResult(
+            status="skipped",
+            gaps=[gap("scenario_not_available", "当前项目没有可用业务场景，候选准备按缺口跳过。").model_dump(mode="json")],
+            output={"writes_mapping": False},
+        )
 
     context_hash = ctx.tool_input.get("context_hash")
     if not isinstance(context_hash, str) or not context_hash.strip():
@@ -523,7 +555,14 @@ def _generate_mapping_draft(ctx: ToolContext) -> ToolResult:
     confidentiality = confidentiality_of(ctx.project)
     mapping_id = ctx.tool_input.get("scenario_business_mapping_id")
     if isinstance(mapping_id, bool) or not isinstance(mapping_id, int) or mapping_id <= 0:
-        raise ToolExecutionError("mapping_required", "生成业务草稿需要正整数 scenario_business_mapping_id。")
+        # Deterministic discovery: the scenario mapping registered for the subject field.
+        mapping_id = _default_mapping_id(ctx)
+    if isinstance(mapping_id, bool) or not isinstance(mapping_id, int) or mapping_id <= 0:
+        return ToolResult(
+            status="skipped",
+            gaps=[gap("mapping_not_available", "当前目标字段没有已登记的场景映射，映射草稿按缺口跳过。").model_dump(mode="json")],
+            output={"writes_mapping": False},
+        )
     as_of = _parse_as_of(ctx.tool_input.get("as_of"))
 
     try:
@@ -1188,7 +1227,7 @@ def register_ai_skill_tools() -> None:
                 "context_hash": {"type": "string"},
                 "query": {"type": "string"},
             },
-            "required": ["target_field_id", "candidate_id"],
+            "required": ["target_field_id"],
             "additionalProperties": False,
         },
         output_schema={
@@ -1224,7 +1263,7 @@ def register_ai_skill_tools() -> None:
                 "scenario_business_mapping_id": {"type": "integer"},
                 "as_of": {"type": "string"},
             },
-            "required": ["scenario_business_mapping_id"],
+            "required": [],
             "additionalProperties": False,
         },
         output_schema={

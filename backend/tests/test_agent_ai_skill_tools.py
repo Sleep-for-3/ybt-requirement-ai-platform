@@ -232,9 +232,15 @@ def test_illegal_inputs_are_rejected_by_validate_input():
     ]
 
     prepare_schema = registry.get_tool("prepare_field_candidate").input_schema
-    assert registry.validate_input(prepare_schema, {"target_field_id": 1}) == [
-        "missing required input: candidate_id"
+    # candidate_id/scenario_id are discovered deterministically by the handler, so the
+    # only hard requirement is the subject field; a wrong type is still rejected.
+    assert registry.validate_input(prepare_schema, {"target_field_id": 1}) == []
+    assert registry.validate_input(prepare_schema, {"target_field_id": 1, "candidate_id": 3}) == [
+        "input candidate_id must be a string"
     ]
+
+    mapping_schema = registry.get_tool("generate_mapping_draft").input_schema
+    assert registry.validate_input(mapping_schema, {}) == []
 
     document_schema = registry.get_tool("generate_requirement_document").input_schema
     assert registry.validate_input(document_schema, {"requirement_id": "abc"}) == [
