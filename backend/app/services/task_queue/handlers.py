@@ -22,7 +22,7 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
     from app.services.uat.execution import uat_run_job_handler
     from app.services.requirement_generation_worker import requirement_generation_handler
     from app.services.metadata.batch_import import batch_import_handler
-
+    from app.services.agent.runtime import run_agent_task
     handlers: dict[str, JobHandler] = {
         "resource_batch_import": batch_import_handler,
         "requirement_generation": requirement_generation_handler,
@@ -43,5 +43,6 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
         "deliverable_generate_field_items": _deliverable_generate_handler,
         "deliverable_render_excel": _deliverable_render_handler,
         "uat_run_execute": uat_run_job_handler,
+        "agent_task_run": run_agent_task,
     }
     return handlers.get(job_type)

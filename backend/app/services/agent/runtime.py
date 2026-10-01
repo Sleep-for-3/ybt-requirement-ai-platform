@@ -293,7 +293,8 @@ def materialize_plan(
     return plan
 
 
-def submit_task(db, project: Project, principal: Principal, task: AgentTask) -> BackgroundJob:
+def submit_task(db, project: Project, principal: Principal, task: AgentTask,
+                *, resume_token: str | None = None) -> BackgroundJob:
     from app.services.task_queue.idempotency import semantic_idempotency_key
 
     # Defence in depth: running a task is a governed action even if a future caller
@@ -303,7 +304,9 @@ def submit_task(db, project: Project, principal: Principal, task: AgentTask) -> 
         db, job_type=AGENT_JOB_TYPE, institution_id=project.institution_id, project_id=project.id,
         created_by=int(principal.user_id or 0),
         idempotency_key=semantic_idempotency_key(
-            job_type=AGENT_JOB_TYPE, payload={"agent_task_id": task.id, "plan_version": task.plan_version}),
+            job_type=AGENT_JOB_TYPE,
+            payload={"agent_task_id": task.id, "plan_version": task.plan_version,
+                     **({"resume": resume_token} if resume_token else {})}),
         payload_summary={"agent_task_id": task.id, "plan_version": task.plan_version, "objective": task.objective[:200]},
         handler=run_agent_task,
     )
@@ -895,9 +898,12 @@ def resume_task(db, principal: Principal, task: AgentTask, *, job: BackgroundJob
     queue = get_task_queue()
     if job is not None and hasattr(queue, "execute_existing"):
         queue.execute_existing(db, job, run_agent_task)
-    else:  # celery: enqueue a new attempt instead of executing in-process
+    else:  # celery: enqueue a distinct continuation instead of executing in-process
         project = db.get(Project, task.project_id)
-        submit_task(db, project, principal, task)
+        latest_decision = db.scalar(select(func.max(AgentHumanDecision.id)).where(
+            AgentHumanDecision.task_id == task.id)) or 0
+        submit_task(db, project, principal, task,
+                    resume_token=f"decision:{latest_decision}:plan:{task.plan_version}")
     db.refresh(task)
     return {"task_status": task.status, "resumed": True}
 
