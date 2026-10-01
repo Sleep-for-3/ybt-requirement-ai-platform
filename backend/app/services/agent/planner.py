@@ -13,6 +13,7 @@ the deterministic scenario plan is used instead, with the reason recorded.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import Field, model_validator
@@ -20,7 +21,12 @@ from sqlalchemy import or_, select
 
 from app.models import Project, TargetField
 from app.schemas.ai_skill import ContractModel, Key
-from app.services.agent.tools.registry import RISK_LEVELS, registered_tools, validate_input
+from app.services.agent.tools.registry import (
+    RISK_LEVELS,
+    registered_tools,
+    tools_visible_for_permissions,
+    validate_input,
+)
 from app.services.auth.permission_service import ALL_PROJECT_PERMISSIONS
 from app.services.llm.execution_metadata import stable_hash
 from app.services.llm.prompt_runtime import execute_runtime_chat_with_metadata, get_prompt_runtime
@@ -61,6 +67,95 @@ class PlannedStep(ContractModel):
     optional_depends_on: list[str] = Field(default_factory=list, max_length=MAX_PLAN_STEPS)
     required: bool = True
     input: dict[str, Any] = Field(default_factory=dict)
+
+
+PATCH_OPS: tuple[str, ...] = ("add_step", "update_step", "drop_step", "mark_gap", "request_human_gate")
+MAX_PATCH_OPS = 8
+# Only steps that never started may be touched by a patch.
+PATCHABLE_STATUS = "pending"
+
+
+class PlanPatchOp(ContractModel):
+    """One planner-proposed mutation of the *unexecuted* part of the active plan."""
+
+    op: str = Field(min_length=1, max_length=40)
+    step_key: str | None = Field(default=None, max_length=100)
+    tool_key: str | None = Field(default=None, max_length=100)
+    reason: str = Field(min_length=1, max_length=2000)
+    depends_on: list[str] = Field(default_factory=list, max_length=MAX_PLAN_STEPS)
+    optional_depends_on: list[str] = Field(default_factory=list, max_length=MAX_PLAN_STEPS)
+    required: bool = True
+    input: dict[str, Any] = Field(default_factory=dict)
+    gap_code: str | None = Field(default=None, max_length=80)
+    gate_key: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def check_op(self) -> "PlanPatchOp":
+        if self.op not in PATCH_OPS:
+            raise ValueError(f"unknown patch op {self.op}")
+        if self.op in {"update_step", "drop_step", "mark_gap"} and not self.step_key:
+            raise ValueError(f"{self.op} requires step_key")
+        if self.op in {"add_step", "request_human_gate"} and not self.tool_key:
+            raise ValueError(f"{self.op} requires tool_key")
+        if self.op == "mark_gap" and not self.gap_code:
+            raise ValueError("mark_gap requires gap_code")
+        return self
+
+
+class PlanPatch(ContractModel):
+    """A bounded planner revision of a running plan (Observe -> Replan)."""
+
+    rationale: str = Field(min_length=1, max_length=2000)
+    ops: list[PlanPatchOp] = Field(default_factory=list, max_length=MAX_PATCH_OPS)
+
+
+def validate_plan_patch(
+    patch: PlanPatch,
+    *,
+    statuses: dict[str, str],
+    required_by_key: dict[str, bool],
+    step_keys: list[str],
+) -> list[PlanValidationIssue]:
+    """A patch may only touch steps that have not started, and may never remove a required step.
+
+    Completed steps, failed/blocked steps and open human gates are immutable: the model
+    may add work, retune pending work, mark a gap or ask for a human, nothing else.
+    """
+
+    issues: list[PlanValidationIssue] = []
+    already_ran = {key for key, status in statuses.items() if status != PATCHABLE_STATUS}
+    known = set(step_keys)
+    for op in patch.ops:
+        if op.op == "update_step":
+            if op.step_key in already_ran:
+                issues.append(PlanValidationIssue(
+                    code="patch_step_immutable", step_key=op.step_key, repairable=False,
+                    message=f"{op.step_key} already started and cannot be changed by a patch"))
+            elif op.step_key not in known:
+                issues.append(PlanValidationIssue(
+                    code="patch_unknown_step", step_key=op.step_key,
+                    message=f"{op.step_key} is not part of the active plan"))
+        elif op.op == "drop_step":
+            if op.step_key in already_ran:
+                issues.append(PlanValidationIssue(
+                    code="patch_step_immutable", step_key=op.step_key, repairable=False,
+                    message=f"{op.step_key} already started and cannot be dropped"))
+            elif required_by_key.get(op.step_key or "", True):
+                issues.append(PlanValidationIssue(
+                    code="patch_required_step_drop", step_key=op.step_key, repairable=False,
+                    message=f"{op.step_key} is required; only optional unexecuted steps may be dropped"))
+        elif op.op in {"add_step", "request_human_gate"}:
+            if op.step_key and op.step_key in known:
+                issues.append(PlanValidationIssue(
+                    code="patch_duplicate_step", step_key=op.step_key,
+                    message=f"{op.step_key} already exists in the plan"))
+            unknown = [key for key in [*op.depends_on, *op.optional_depends_on]
+                       if key not in known and key != op.step_key]
+            if unknown:
+                issues.append(PlanValidationIssue(
+                    code="patch_dependency_unknown", step_key=op.step_key,
+                    message=f"{op.step_key} depends on steps outside the active plan: {unknown}"))
+    return issues
 
 
 class PlanDraft(ContractModel):
@@ -546,6 +641,66 @@ async def plan_with_llm(
         if any(not issue.repairable for issue in issues):
             break
     return None, metadata, "planner_plan_invalid"
+
+
+OBSERVATION_PROMPT_KEY = "agent_observation"
+OBSERVATION_PROMPT = (
+    "[AGENT_OBSERVER_V1] 你是受约束的银行分析智能体观察器。根据结构化执行状态，判断是否需要调整**尚未执行**的计划：\n"
+    "允许：新增后续步骤(add_step)、调整未执行步骤参数/顺序(update_step)、删除未执行的**可选**步骤(drop_step)、"
+    "记录缺口(mark_gap)、请求人工确认(request_human_gate)。\n"
+    "禁止：修改已完成/失败/等待人工的步骤、伪造证据、删除必需步骤、使用清单外的工具、绕过人工确认。\n"
+    "若无必要调整，返回 {\"rationale\": \"...\", \"ops\": []}。只输出 JSON。"
+)
+
+
+async def plan_patch_with_llm(
+    db, project: Project, *, state: dict[str, Any], digest: str,
+    confidentiality: str = "internal",
+    permitted: frozenset[str] | None = None,
+) -> tuple[PlanPatch | None, dict[str, Any], str | None]:
+    """Ask the model whether the unexecuted plan should change, then validate the patch."""
+
+    runtime = get_prompt_runtime(db, OBSERVATION_PROMPT_KEY)
+    runtime.system_prompt = OBSERVATION_PROMPT + "\n" + (runtime.system_prompt or "")
+    runtime.user_template = "{observation}"
+    tools = registered_tools()
+    if permitted is not None:
+        allowed = {item["tool_key"] for item in tools_visible_for_permissions(permitted)}
+        tools = {key: spec for key, spec in tools.items() if key in allowed}
+    catalog = "\n".join(f"- {key}: {spec.display_name}｜risk={spec.risk_level}"
+                        for key, spec in sorted(tools.items()))
+    request = (
+        f"可调用工具（只能从中选择 tool_key）：\n{catalog}\n\n"
+        f"当前结构化状态（JSON）：\n{json.dumps(state, ensure_ascii=False)}\n\n"
+        f"状态摘要：\n{digest}\n\n"
+        "请输出 JSON：{\"rationale\": 字符串, \"ops\": [{\"op\": \"add_step|update_step|drop_step|mark_gap|request_human_gate\", "
+        "\"step_key\": 字符串|null, \"tool_key\": 字符串|null, \"reason\": 字符串, \"depends_on\": [], "
+        "\"optional_depends_on\": [], \"required\": bool, \"input\": {}, \"gap_code\": 字符串|null, "
+        "\"gate_key\": 字符串|null}]}。"
+    )
+    try:
+        output, metadata = await execute_runtime_chat_with_metadata(
+            db, project.id, runtime, request, PlanPatch, confidentiality=confidentiality, interactive=True,
+        )
+    except Exception as exc:
+        return None, {"observer_error": type(exc).__name__}, "observation_model_unavailable"
+    try:
+        patch = PlanPatch.model_validate(output)
+    except Exception as exc:
+        return None, {**metadata, "observer_error": type(exc).__name__}, "observation_output_invalid"
+    statuses = {step["step_key"]: step["status"] for step in state.get("completed_steps") or []}
+    required_by_key = {step["step_key"]: bool(step.get("required", True))
+                       for step in state.get("completed_steps") or []}
+    pending_keys = list((state.get("remaining_budget") or {}).get("pending_step_keys") or [])
+    step_keys = [*statuses, *pending_keys]
+    for key in pending_keys:
+        statuses.setdefault(key, PATCHABLE_STATUS)
+    issues = validate_plan_patch(patch, statuses=statuses, required_by_key=required_by_key,
+                                 step_keys=step_keys)
+    if issues:
+        return None, {**metadata, "plan_patch_errors": [issue.message for issue in issues][:10],
+                      "plan_patch_codes": sorted({issue.code for issue in issues})}, "observation_patch_invalid"
+    return patch, metadata, None
 
 def plan_hash(draft: PlanDraft) -> str:
     return stable_hash(draft.model_dump(mode="json"))

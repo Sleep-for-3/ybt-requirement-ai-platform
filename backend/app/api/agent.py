@@ -62,6 +62,7 @@ def create_agent_task(
     project = PermissionService(db, principal).require_project_permission(project_id, runtime.RUN_PERMISSION)
     task = runtime.create_task(
         db, principal, project, payload.objective, scenario_key=payload.scenario_key,
+        adaptive=payload.adaptive,
         use_llm_planner=payload.use_llm_planner, max_retries=payload.max_retries,
     )
     if payload.auto_start:

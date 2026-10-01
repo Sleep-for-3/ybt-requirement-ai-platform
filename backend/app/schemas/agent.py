@@ -13,7 +13,10 @@ class AgentTaskCreate(BaseModel):
 
     objective: str = Field(min_length=4, max_length=2000)
     scenario_key: str | None = Field(default=None, max_length=100)
-    use_llm_planner: bool = False
+    # V2: the workspace prefers the model planner; the runtime falls back to the governed
+    # deterministic plan (planner_source="fallback") if the model is unavailable or invalid.
+    use_llm_planner: bool = True
+    adaptive: bool = True
     auto_start: bool = True
     max_retries: int = Field(default=3, ge=0, le=5)
 

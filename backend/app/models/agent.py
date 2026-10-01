@@ -45,6 +45,8 @@ class AgentTask(Base, TimestampMixin):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     replanning_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    # Adaptive planning: allow the observer to revise the unexecuted plan while running.
+    adaptive: Mapped[bool] = mapped_column(Boolean, default=True)
     evidence_count: Mapped[int] = mapped_column(Integer, default=0)
     artifact_count: Mapped[int] = mapped_column(Integer, default=0)
     model_metadata_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)

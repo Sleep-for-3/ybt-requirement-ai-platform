@@ -48,8 +48,11 @@ from app.services.agent.planner import (
     scenario_requires_subject,
     validate_plan_draft,
     SUBJECT_CLARIFICATION_GATE,
+    MAX_PATCH_OPS,
     MAX_PLAN_STEPS,
+    validate_plan_patch,
 )
+from app.services.agent.observation import observation_digest, observation_state
 from app.services.agent.tools.registry import (
     ToolContext,
     ToolExecutionError,
@@ -201,6 +204,7 @@ def create_task(
     scenario_key: str | None = None,
     use_llm_planner: bool = False,
     max_retries: int = 3,
+    adaptive: bool = True,
 ) -> AgentTask:
     text = (objective or "").strip()
     if len(text) < 4:
@@ -487,7 +491,132 @@ def _settle_dependent_steps(db, task: AgentTask) -> int:
         if not changed:
             break
     return settled
+MAX_OBSERVATIONS_PER_TASK = 3
 
+
+def apply_plan_patch(db, task: AgentTask, patch) -> AgentPlan | None:
+    """Apply a validated planner patch to the *unexecuted* part of the active plan.
+
+    Completed steps and applied human decisions are never touched: the new plan version
+    keeps them and the runtime skips already-completed step keys.
+    """
+
+    active = db.scalar(select(AgentPlan).where(AgentPlan.task_id == task.id, AgentPlan.status == "active")
+                       .order_by(AgentPlan.version_no.desc()))
+    if active is None:
+        return None
+    if int(task.replanning_count or 0) >= MAX_REPLANS_PER_TASK:
+        raise HTTPException(status_code=409, detail={"error_code": "replan_limit_reached"})
+    steps = list(db.scalars(select(AgentStep).where(AgentStep.task_id == task.id)
+                            .order_by(AgentStep.order_index, AgentStep.id)).all())
+    latest = {step.step_key: step for step in steps}
+    statuses = {key: value.status for key, value in latest.items()}
+    required_by_key = {key: bool(value.required) for key, value in latest.items()}
+    issues = validate_plan_patch(patch, statuses=statuses, required_by_key=required_by_key,
+                                 step_keys=list(latest))
+    if issues:
+        raise HTTPException(status_code=422, detail={"error_code": "plan_patch_invalid",
+                                                    "errors": [issue.message for issue in issues][:5]})
+
+    planned = {}
+    for item in active.steps_json or []:
+        step = PlannedStep.model_validate(item)
+        planned[step.step_key] = step
+    gaps_added: list[dict[str, str]] = []
+    for op in patch.ops:
+        if op.op == "update_step" and op.step_key in planned:
+            current = planned[op.step_key]
+            planned[op.step_key] = current.model_copy(update={
+                "input": {**current.input, **op.input} if op.input else current.input,
+                "depends_on": list(op.depends_on) or list(current.depends_on),
+                "optional_depends_on": list(op.optional_depends_on) or list(current.optional_depends_on),
+                "reason": op.reason,
+            })
+        elif op.op == "drop_step":
+            planned.pop(op.step_key or "", None)
+        elif op.op in {"add_step", "request_human_gate"}:
+            key = op.step_key or f"added_{len(planned) + 1}"
+            tool_key = op.tool_key if op.op == "add_step" else "request_human_confirmation"
+            extra = {"gate_key": op.gate_key} if op.op == "request_human_gate" else {}
+            planned[key] = PlannedStep(
+                step_key=key, tool_key=str(tool_key), reason=op.reason,
+                depends_on=list(op.depends_on), optional_depends_on=list(op.optional_depends_on),
+                required=True if op.op == "request_human_gate" else op.required,
+                input={**op.input, **extra},
+            )
+        elif op.op == "mark_gap":
+            gaps_added.append({"step_key": op.step_key or "", "code": op.gap_code or "planner_marked_gap",
+                               "message": op.reason})
+    # Dropping a step must not leave a dangling dependency behind.
+    for key in list(planned):
+        if any(dep not in planned for dep in planned[key].depends_on):
+            planned.pop(key, None)
+    if not planned:
+        raise HTTPException(status_code=422, detail={"error_code": "plan_patch_empty_plan"})
+
+    draft = PlanDraft(objective=task.objective, scenario_key=task.scenario_key,
+                      subject=(task.result_summary_json or {}).get("subject") or {},
+                      steps=list(planned.values()))
+    plan = materialize_plan(db, task, draft, planner_source="observe_replan", created_by=task.created_by)
+    summary = dict(task.result_summary_json or {})
+    observations = list(summary.get("observations") or [])
+    observations.append({
+        "plan_version": plan.version_no, "rationale": patch.rationale, "applied": True,
+        "ops": [op.model_dump(mode="json") for op in patch.ops][:MAX_PATCH_OPS],
+        "gaps": gaps_added, "at": _now().isoformat(),
+    })
+    summary["observations"] = observations[-MAX_OBSERVATIONS_PER_TASK:]
+    task.result_summary_json = summary
+    task.replanning_count = int(task.replanning_count or 0) + 1
+    record_audit(db, action="agent_observe_replan", resource_type="agent_task", resource_id=task.id,
+                 actor_user_id=task.created_by, institution_id=task.institution_id,
+                 project_id=task.project_id,
+                 after={"plan_version": plan.version_no, "ops": len(patch.ops),
+                        "rationale": patch.rationale[:200]})
+    db.commit()
+    return plan
+
+
+def record_observation(db, task: AgentTask, *, applied: bool, rationale: str,
+                       degraded: str | None = None, codes: list[str] | None = None) -> None:
+    summary = dict(task.result_summary_json or {})
+    observations = list(summary.get("observations") or [])
+    observations.append({"plan_version": int(task.plan_version or 1), "applied": applied,
+                         "rationale": (rationale or "")[:500], "degraded": degraded,
+                         "codes": list(codes or [])[:6], "at": _now().isoformat()})
+    summary["observations"] = observations[-MAX_OBSERVATIONS_PER_TASK:]
+    task.result_summary_json = summary
+    db.commit()
+
+
+async def _maybe_observe(db, task: AgentTask, project: Project, actor: Principal,
+                         step: AgentStep) -> bool:
+    """Observe -> Replan: let the model revise the unexecuted plan, bounded and validated."""
+
+    if not bool(getattr(task, "adaptive", False)) or step.status != sm.STEP_COMPLETED:
+        return False
+    summary = dict(task.result_summary_json or {})
+    if len(summary.get("observations") or []) >= MAX_OBSERVATIONS_PER_TASK:
+        return False
+    if int(task.replanning_count or 0) >= MAX_REPLANS_PER_TASK:
+        return False
+    permissions = frozenset(PermissionService(db, actor).effective_project_permissions(task.project_id))
+    state = observation_state(db, task, permitted=permissions)
+    digest = observation_digest(state)
+    from app.services.agent.planner import plan_patch_with_llm
+
+    patch, metadata, degraded = await plan_patch_with_llm(
+        db, project, state=state, digest=digest,
+        confidentiality=_project_confidentiality(project), permitted=permissions,
+    )
+    if patch is None or not patch.ops:
+        record_observation(db, task, applied=False,
+                           rationale=(patch.rationale if patch else ""),
+                           degraded=degraded,
+                           codes=list((metadata or {}).get("plan_patch_codes") or []))
+        return False
+    plan = apply_plan_patch(db, task, patch)
+    return plan is not None
 
 def _job_cancelled(db, job: BackgroundJob | None) -> bool:
     if job is None:
@@ -546,6 +675,15 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
             break
         outcome = await _execute_step(db, task, project, actor, step)
         executed += 1
+        if outcome == "completed" and getattr(task, "adaptive", False):
+            # Observe -> Replan: the observer may revise the unexecuted plan between steps.
+            task = db.get(AgentTask, task.id)
+            try:
+                if await _maybe_observe(db, task, project, actor, step):
+                    continue
+            except HTTPException:
+                db.rollback()
+                task = db.get(AgentTask, task.id)
         if outcome in {"waiting_human", "blocked", "failed"}:
             step_key = step.step_key
             task = db.get(AgentTask, task.id)
