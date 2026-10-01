@@ -1,7 +1,7 @@
 # Banking Semantic Agent V2 — 开发与验收记录
 
 分支：`dsh/banking-semantic-agent-v2`（基于 `dsh/agent-orchestrator-v1 @ fb04b81`）
-状态：**进行中**（Phase 1–2 完成；Phase 3 主体完成，Adaptive Observe→Replan 待续；Phase 9 指标已完成）
+状态：**进行中**（Phase 1–4、6、9 已完成，Phase 3 全部完成；待做 5/7/8/10/11）
 
 本文件按阶段持续更新：完成阶段 / 架构 / 新增模型 / 新增 API / Tool Registry / Scenario /
 Evaluation / Test Results / Live Acceptance / Git Commit / 已知限制 / 下一阶段。
@@ -15,10 +15,10 @@ Evaluation / Test Results / Live Acceptance / Git Commit / 已知限制 / 下一
 | 2.1 | 修复多依赖执行语义（ALL required） | ✅ 完成 | `3c1c6e5` |
 | 2.2 | 严格 Plan Validation（+一次自我修复+确定性回退） | ✅ 完成 | `d5326a6` |
 | 3a | Subject Resolution V2 + Scenario Router + 4 Scenario 计划 + 人工澄清网关 | ✅ 完成 | `5631092` |
-| 3b | Adaptive Observe→Replan（结构化状态 + 计划补丁） | ⏳ 进行中 | |
-| 4 | Decision / Case Memory + search_decision_cases | ⏳ | |
-| 5 | SQL Change Event Agent（semantic_hash + 去重 + 自动 Task） | ⏳ | |
-| 6 | SQL Semantic Diff V2（semantic_fact + interpretation） | ⏳ | |
+| 3b | Adaptive Observe→Replan（结构化状态 + 计划补丁 + 运行时观察点） | ✅ 完成 | `713f590` `2d572ad` |
+| 4 | Decision / Case Memory + 人工反馈闭环 | ✅ 完成（search_decision_cases 工具待接） | `7316675` `2c51777` |
+| 5 | SQL Change Event Agent（semantic_hash + 去重 + 自动 Task） | ⏳ |
+| 6 | SQL Semantic Diff V2（semantic_fact + interpretation，29/39 族可检） | ✅ 完成 | `b489ddb` |
 | 7 | Role-based Human Gate（review_policy: single/all/any） | ⏳ | |
 | 8 | 真实模型 Skill 链路与降级可见性 | ⏳ | |
 | 9 | Agent Evaluation V2 指标（21 项，无分母返回 null） | ✅ 完成 | `7a0c76e` |
@@ -113,6 +113,34 @@ alternatives / requires_clarification`；Stage B 校验模型分类结果（未�
 replan 成功率、证据精度、条款引用准确率、历史案例使用/采纳率、人工编辑/驳回率、SQL 语义召回/误报率、
 影响传播准确率、任务完成率/未完成率、交付物采纳率等）。每项指标都有独立分母；
 **无分母或缺少标注基准时返回 null 并给出 `metric_notes` 原因**，并提供 `METRIC_LABELS` 中文名。
+
+### Phase 3b — Adaptive Observe → Replan（`713f590` `2d572ad`）
+
+- **结构化观察状态**（`app/services/agent/observation.py`）：目标/场景/主体解析/已完成步骤摘要/证据按类型汇总
+  与覆盖率/缺口/未决问题/按权限过滤的可用工具/已生效人工决策/剩余预算；`observation_digest` 带硬性字符上限，
+  整篇文档或整段 SQL 永不进模型上下文（测试用 40 个额外步骤验证上限）。
+- **计划补丁契约**（`planner.PlanPatch`）：仅 5 种操作（add_step / update_step / drop_step / mark_gap /
+  request_human_gate），最多 8 条；**只能改未执行步骤**，已完成/失败/阻断/等待人工步骤不可变，
+  必需步骤不可删除，删除步骤会连带下游，新增工具必须过完整注册表治理契约。
+- **运行时观察点**：每个成功步骤后最多观察 3 次（受重规划预算约束），模型补丁先校验再落库；
+  非法/模型不可用则记录原因并继续当前计划；新计划版本 `planner_source=observe_replan`，
+  已执行行保持不变，理由/操作/标记缺口写入任务摘要（有界）并记审计。
+- **默认启用**：`AgentTask.adaptive`（迁移 `202610020049`）与 API schema 默认 LLM Planner + 自适应；
+  运行时仍保留受治理的确定性回退。
+- 测试：`tests/test_agent_observation.py`（6）+ `tests/test_agent_adaptive_replan.py`（8）。
+
+### Phase 4 — Decision / Case Memory + 人工反馈闭环（`7316675` `2c51777`）
+
+- `decision_cases` 表（迁移 `202610020048`）记录 field_mapping / policy_interpretation / requirement /
+  sql_impact / source_selection 决策，含证据引用、监管引用、关联 mapping/requirement/script、审批人、
+  `confidence_source`、生效区间与状态。
+- **硬规则**：只能来自人工批准（approve / edit_and_approve）或正式审核结论；模型建议（llm_suggestion 等）
+  一律拒绝；reject / request_reanalysis 不撰写案例；重复记录幂等。
+- `search_decision_cases` 为确定性检索，命中一律标 `source_type=historical_decision`，**永不是
+  policy_requirement**；`case_is_regulatory_basis()` 恒为 False（历史经验只能辅助排序/理由，不能当监管依据）。
+- **闭环**：`decide()` 在批准后把该步骤的决策写入案例记忆（confidence_source=human_decision，
+  带上人工编辑内容、证据引用、主体与场景）；拒绝不写；记忆写入失败只记审计，绝不影响治理决策。
+- 测试：`tests/test_agent_case_memory.py`（14）+ `tests/test_agent_case_loop.py`（3）。
 
 ## 4. 测试与回归（最新）
 
