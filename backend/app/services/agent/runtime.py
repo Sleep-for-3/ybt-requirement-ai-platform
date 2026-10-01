@@ -46,6 +46,7 @@ from app.services.agent.planner import (
     prepend_clarification,
     resolve_subject,
     scenario_requires_subject,
+    route_scenario,
     validate_plan_draft,
     SUBJECT_CLARIFICATION_GATE,
     MAX_PATCH_OPS,
@@ -209,7 +210,8 @@ def create_task(
     text = (objective or "").strip()
     if len(text) < 4:
         raise HTTPException(status_code=422, detail={"error_code": "objective_too_short"})
-    scenario = scenario_key or detect_scenario(text)
+    routing = route_scenario(text)
+    scenario = scenario_key or routing.scenario_key
     from app.services.agent.subject import resolve_subject_v2
 
     resolution = resolve_subject_v2(db, project, text)
@@ -224,7 +226,8 @@ def create_task(
         plan_version=1,
         max_retries=max_retries,
         created_by=int(principal.user_id or 0),
-        result_summary_json={"subject": subject, "subject_resolution": resolution.as_dict()},
+        result_summary_json={"subject": subject, "subject_resolution": resolution.as_dict(),
+                             "scenario_routing": routing.as_dict(), "adaptive": bool(adaptive)},
     )
     db.add(task)
     db.flush()
@@ -1391,6 +1394,7 @@ def task_snapshot(db, task: AgentTask) -> dict[str, Any]:
                 "evidence": task.evidence_count, "artifacts": task.artifact_count,
             },
             "retry_count": task.retry_count, "replanning_count": task.replanning_count,
+            "adaptive": bool(getattr(task, "adaptive", False)),
             "model_metadata": task.model_metadata_json, "result_summary": task.result_summary_json,
             "error_code": task.error_code, "error_message": task.error_message,
             "created_by": task.created_by,
