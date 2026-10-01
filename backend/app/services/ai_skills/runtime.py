@@ -28,7 +28,7 @@ SAFETY_PROMPT = "[AI_SKILL_GROUNDED_V1] Return only fields declared by the respo
 REQUIREMENT_SAFETY_PROMPT = "[AI_SKILL_REQUIREMENT_V1] Return a candidate using only the fixed requirement context, physical references, evidence unit IDs and script rule IDs. All content remains an unadopted suggestion."
 MAPPING_SAFETY_PROMPT = "[AI_SKILL_MAPPING_V1] Return only a draft candidate in the response schema. Cite exact Context fact IDs. Do not invent physical sources or executable SQL, alter human decisions, or treat regulatory field definitions and retrieved excerpts as verified policy clauses."
 FIELD_RERANK_TASK = "field_semantic_matching"
-FIELD_RERANK_SAFETY_PROMPT = "[AI_SKILL_FIELD_RERANK_V1] Return a ranking of exactly the catalog field candidates supplied as facts, each exactly once. Never invent, drop, duplicate or rename a candidate id, and cite only supplied ids in evidence_refs. score is a bounded 0-1 rank value, not a business probability. No tools, SQL, datasource access, candidate selection or adoption."
+FIELD_RERANK_SAFETY_PROMPT = "[AI_SKILL_FIELD_RERANK_V1] Return a ranking of exactly the catalog field candidates supplied as facts, each exactly once. An empty ranking is invalid output: if a candidate looks irrelevant or unsupported, still return it exactly once with a low score and a brief rationale. Never invent, drop, duplicate or rename a candidate id, and cite only supplied ids in evidence_refs. score is a bounded 0-1 rank value, not a business probability. No tools, SQL, datasource access, candidate selection or adoption."
 
 
 class GroundedOutput(ContractModel):

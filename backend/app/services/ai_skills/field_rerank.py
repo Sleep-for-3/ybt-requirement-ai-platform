@@ -18,6 +18,11 @@ RERANK_MAX_INPUT_BYTES = 32000
 LEVELS = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
 FALLBACK_MESSAGE = "未获得通过校验的模型重排结果，以下仍为确定性召回排序；本次不代表模型成功。"
 APPLIED_MESSAGE = "已按固定发布 Skill 的模型输出重排；分数为排序值而非业务置信度，选择、探查与采用仍需人工完成。"
+
+
+# One bounded retry for an explicitly invalid model response; the attempt count is always reported.
+MAX_RERANK_ATTEMPTS = 2
+RETRYABLE_MODEL_FAILURES = {"invalid_model_response"}
 _VALUE_FIELDS = ("database_name", "schema_name", "table_name", "column_name", "column_comment",
                  "table_comment", "data_type", "nullable", "source_version")
 
@@ -150,17 +155,30 @@ async def rerank_fields(db, principal, payload):
                                  model_metadata=None, snapshot_recheck="unchanged")
     if blocked:
         fail(409, blocked)
+    def _parse_ranking(payload):
+        body = payload.get("candidate")
+        if not isinstance(body, dict):
+            return None
+        try:
+            parsed = FieldRankingCandidate(ranking=body.get("ranking") or [])
+            validate_field_ranking(parsed, envelope)
+            return parsed
+        except Exception:
+            return None
+
     result = await execute_resolved(db, envelope, definition, version, binding)
     model_metadata = dict(result.get("execution_metadata") or {})
-    ranking = None
-    candidate = result.get("candidate")
-    if isinstance(candidate, dict):
-        try:
-            parsed = FieldRankingCandidate(ranking=candidate.get("ranking") or [])
-            validate_field_ranking(parsed, envelope)
-            ranking = parsed
-        except Exception:
-            ranking = None
+    ranking = _parse_ranking(result)
+    attempts = 1
+    # Bounded, audited retry for the one observed failure mode: the provider answers HTTP 200 with
+    # an empty/invalid ranking (invalid_model_response). One extra attempt only, never on policy
+    # denials or provider outages, and the attempt count is reported in the response metadata.
+    while ranking is None and attempts < MAX_RERANK_ATTEMPTS and model_metadata.get("degraded_reason") in RETRYABLE_MODEL_FAILURES:
+        result = await execute_resolved(db, envelope, definition, version, binding)
+        model_metadata = dict(result.get("execution_metadata") or {})
+        ranking = _parse_ranking(result)
+        attempts += 1
+    model_metadata["rerank_attempts"] = attempts
     failure_code = None if ranking is not None else (model_metadata.get("degraded_reason") or "model_output_unavailable")
     # Post-call recheck: a revoked permission still raises, and it wins over any model output.
     recheck = recall_fields(db, principal, payload.input)

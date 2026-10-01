@@ -1780,3 +1780,154 @@ wall = 14.3 s
 ### 40.4 本轮入库
 
 ③ 的实现与证据已提交到同一分支 `dsh/part2-acceptance-closure-20261001`（密钥/IP 扫描：0 命中）。
+
+## 41. 四项确认事项全部执行完毕（2026-10-01）
+
+### 41.1 ① 整套回归：**0 失败**（最新树）
+
+```
+$ .venv\Scripts\python.exe -m pytest tests/ -q
+1140 passed, 9 warnings in 852.95s (0:14:12)      EXIT=0
+```
+
+环境：`AUTH_MODE=optional`、`LLM_PROVIDER=mock`、`TASK_QUEUE_PROVIDER=inline`（且 `.env` 中已启用 `AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS=1,5,9`）。日志：`.local-run/pytest-full-after-allowlist.log`。
+说明：本次是**包含生产代码改动（settings / field_rerank）+ 白名单生效**的完整回归，0 失败 —— 闭合了上一轮"改动后未跑整套"的缺口。
+
+### 41.2 ② PR：**已创建**
+
+**PR #9** → https://github.com/Sleep-for-3/ybt-requirement-ai-platform/pull/9
+（head `dsh/part2-acceptance-closure-20261001` → base `main`；HTTP 201）
+
+### 41.3 ③ 密钥安全：复扫结论
+
+| 扫描范围 | 结果 |
+| --- | --- |
+| 工作区 1286 个文本文件（排除 `.git`/`node_modules`/`.venv`/`.next`/`.local-run`） | **真 key 命中 1 处 = `backend\.env`**（按设计存放，且经 `check-ignore` 确认**被 gitignore**），其余 **0 命中** |
+| `docs/` 内文档 | **公司网关 IP 命中 0 处**（已掩码为 `<company-gateway-host>`） |
+| 每次提交前（3 次提交）对**暂存内容**扫描 | 真 key 0 命中、网关 IP 0 命中 |
+
+> 说明：密钥**轮换**只能在你的网关侧执行，我无法代做；本机除被忽略的 `backend/.env` 外没有任何副本，仓库与文档均干净。
+
+### 41.4 ④ 真实模型可靠性：**已量化测量**
+
+| 观测 | 结果 |
+| --- | --- |
+| v6（新建版本）连跑 3 次 `real_model` | **3/3 passed**（13.1s / 12.8s / 11.2s） |
+| 累计（run 8/12/14/16/17 + 本次 3 次） | **6/8 ≈ 75%** |
+| 失败形态 | `claims: []`（**空排序**），非契约理解错误 |
+| 可能原因 | 网关返回 `reasoning_content`，**推理内容占用输出预算**（此前直连实测过） |
+
+**未实施（有意）的改进**：提高该档 `max_output_tokens`。
+未实施原因有二：
+1. 该端点 OpenAPI 只声明 `patch`，而 **Windows PowerShell 5.1 的 `-Method Patch` 被服务端判为 405**（工具限制），需要改用 node/curl 发送；
+2. 更重要：**当前证据不足以支持"必须调大预算"**——最近 3/3 全过，失败是**瞬时空排序**；盲目调大既可能无效，也会**再次改变模型指纹**导致已发布版本（v5，生产路径正在用）失效，需再走一遍新版本 + 独立审批发布。
+   因此我把它列为**待测量项**：先用 node 施加配置 → 建新版本 → 前后各跑 N 次对比 → 有显著性差异才保留（否则回退）。**不谎称已改进**。
+
+### 41.5 当前状态
+
+- 平台验收：见本次输出（`backend_single_server` 等 17 项）
+- 生产路径：绑定仍指向 v5（真实档），**profile 未被改动 → 指纹未再变化**，生产调用保持可用
+- 分支：3 次提交 + PR #9；`v6` 为测试期遗留草稿版本（未发布，保留不删）
+
+## 42. 真实模型可靠性改进：测量 → **按判据回退**（2026-10-01）
+
+### 42.1 改进尝试与 A/B 测量
+
+| 项 | 内容 |
+| --- | --- |
+| 改动 | 模型档 4 的 `max_output_tokens`：**2048 → 4096**（经 node `fetch` PATCH，PS 5.1 的 `-Method Patch` 会被判 405） |
+| 动机 | 该网关返回 `reasoning_content`，推理可能占用输出预算 → 提高上限以留头寸 |
+| 基线（2048，v6 连跑 3 次） | **3/3 passed**，耗时 **13.1 / 12.8 / 11.2 s** |
+| 新预算（4096，v7 连跑 3 次） | **3/3 passed**，耗时 **16.9 / 15.3 / 20.8 s** |
+
+**结论：两组成功率均为 3/3（天花板效应，无差异），而延迟明显变差（约 +40%）。**
+
+按我事先写下的判据（"有显著差异才保留，否则回退"）：**已回退到 2048**（实测复核 `max_output_tokens=2048` ✓）。**不谎称该改动带来改进。**
+
+> token 字段观测：改动前最近 5 次 `completion_tokens` ≈ 8.4k–13.6k，改动后 ≈ 3.4k–4.4k；**该字段语义我未能确认**（与 `max_output_tokens` 的关系不明），因此不对其做解释。
+
+### 42.2 失败形态的精确证据（本轮抓到的关键证据）
+
+生产调用的一次降级被完整捕获：
+
+| 观测 | 值 |
+| --- | --- |
+| `model_call_logs` id=**456** | `error_type=**invalid_model_response**`、`http_status=200`、`status=failed`（16:48:44） |
+| 同一请求的响应 | `ranking_mode=**deterministic_recall**`、`execution_kind=deterministic`、`rerank.status=failed` |
+| 紧接的重放 id=**457** | `success`（16:49:09）；生产调用 **`model_rerank` / `real_model` / `rerank.status=applied`，11.2 s** |
+
+即：**真实模型偶发返回"HTTP 200 但内容无效"（空排序）**；平台的两种处理都正确——
+- **测试运行**：判 `real_model` failed（不伪造通过）；
+- **生产调用**：**显式降级**为确定性召回并保留错误码与 `requires_human_confirmation=true`、`writes_mapping=false`。
+
+### 42.3 本轮附带完成的链路维护
+
+因模型档配置变更会改变**依赖指纹**，期间完成了两次版本刷新，最终状态：
+
+| 项 | 结果 |
+| --- | --- |
+| v8（回退后指纹）`deterministic` / `real_model` | ✅ **均 passed**（run 24 / 25） |
+| submit → **独立审批员发布** | ✅ published |
+| 绑定 | **version_id = 8** |
+| 生产调用（重放） | ✅ `model_rerank` / **`real_model`** / 11.2 s |
+
+### 42.4 针对该失败模式的**下一步改进**（未实施，需你确认范围）
+
+`invalid_model_response`（HTTP 200 + 无效内容）**不应**靠"猜"来修。可选：
+
+1. **有界重试该错误类别**：在 LLM 服务里把 `invalid_model_response` 纳入可重试集合（该档已有 `retry_count=2`，但显然未覆盖此类，或重试后仍为空）——需改代码 + 测试 + 整套回归；
+2. **提示层收紧**：在 Skill 的系统提示里显式要求"必须输出至少 1 个候选的排序，否则输出 `gaps`"，降低空产出概率；
+3. **接受现状**：平台已能**如实失败/如实降级**，对监管场景而言"不伪造"比"提高成功率"更重要。
+
+我倾向 **1 + 2 组合**，但都属于行为变更，需你点头后按"改动 + 测试 + 整套回归 + 版本刷新发布"的完整流程执行。
+
+### 42.5 状态
+
+- 平台验收：**PASS=17 / WARN=0 / FAIL=0 / BLOCKED=0**
+- 模型档：恢复原配置（2048 / 60s / retry=2）
+- 绑定：v8（真实档），生产路径实测可用
+- 遗留：v6、v7 为测试期未发布草稿版本（保留不删）
+
+## 43. 针对 `invalid_model_response` 的改进：**1+2 已实施**（2026-10-01）
+
+### 43.1 改动 1 —— **有界、可审计的重试**（Skill 层）
+
+**为什么放在 Skill 层而不是共享 LLM 客户端**：`LLMResponseError`（无效/空响应）是在**解析层**抛出的，而共享客户端的重试循环只管 HTTP 层（`RETRYABLE_STATUS_CODES`）；把"输出语义"的重试塞进共享客户端会扩大爆炸半径。Skill 层才知道"排序不能为空"这一语义，落点更小、更准确。
+
+| 项 | 内容 |
+| --- | --- |
+| 位置 | `backend/app/services/ai_skills/field_rerank.py` |
+| 常量 | `MAX_RERANK_ATTEMPTS = 2`（**至多 1 次追加尝试**）；`RETRYABLE_MODEL_FAILURES = {"invalid_model_response"}` |
+| 触发条件 | **仅**当 `degraded_reason == "invalid_model_response"` —— 即**只重试观测到的那个失败类别**；超时/网络/外发拒绝/策略拒绝**一律不重试** |
+| 留痕 | 每次响应都带 `execution_metadata.rerank_attempts`（成功与降级路径都带） |
+| 失败后行为 | 仍如实降级（`fallback_response`），**不伪造成功** |
+
+### 43.2 改动 2 —— **提示词收紧**（消除空排序的诱因）
+
+`FIELD_RERANK_SAFETY_PROMPT` 增加显式条款：
+
+> “An empty ranking is invalid output: if a candidate looks irrelevant or unsupported, still return it exactly once with a low score and a brief rationale.”
+
+（即：宁可给低分也要返回，不得返回空排序）
+
+### 43.3 验证
+
+| 验证 | 结果 |
+| --- | --- |
+| 新增守护测试 | `tests/test_field_rerank_retry_policy.py`：提示词条款 + 重试上界/类别约束（**2 项**） |
+| 相关子集 | `test_field_rerank_retry_policy + test_ai_skill_field_rerank + test_ai_skill_candidate_id_robustness + test_outbound_authorization` → **35 passed** |
+| **整套回归** | **1142 passed / 0 failed**（949.47 s；日志 `.local-run/pytest-full-retry-policy.log`） |
+| 后端已加载新代码 | 重启后 `/health/live`=200 |
+| 新版本 v9 | `deterministic` run 26 **passed**、`real_model` run 27 **passed** → 独立审批发布 → **绑定 version_id = 9** |
+| **生产调用 ×3** | 全部 `ranking_mode=model_rerank` / `execution_kind=real_model` / `rerank.status=applied` / **`rerank_attempts=1`**（9.4 / 13.9 / 13.8 s） |
+
+**诚实边界**：这 3 次生产调用都**一次成功**，因此**重试分支尚未在真实环境被触发**；其触发条件由单元守护测试约束，一旦触发会在响应里显示 `rerank_attempts=2`。**我不声称"已验证重试在线上救回一次失败"**——那需要等到真的再次出现 `invalid_model_response`。
+
+### 43.4 本轮改动清单（已提交）
+
+| 文件 | 改动 |
+| --- | --- |
+| `backend/app/services/ai_skills/field_rerank.py` | 有界重试 + `rerank_attempts` 留痕 |
+| `backend/app/services/ai_skills/runtime.py` | `FIELD_RERANK_SAFETY_PROMPT` 禁止空排序 |
+| `backend/tests/test_field_rerank_retry_policy.py` | 新增 2 项守护测试 |
+| `docs/handoff/dsh-pg-restore-and-tianjin-acceptance-20260930.md` | §41–§43 |
