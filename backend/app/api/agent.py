@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AgentStep, AgentTask
-from app.schemas.agent import AgentDecisionRequest, AgentReplanRequest, AgentTaskCreate
+from app.schemas.agent import (
+    AgentDecisionRequest,
+    AgentReplanRequest,
+    AgentSqlChangeRequest,
+    AgentTaskCreate,
+)
+from app.services.agent import sql_change_events
 from app.services.agent import runtime
 from app.services.agent.observability import agent_metrics
 from app.services.agent.tools.registry import registered_tools, tools_visible_for_permissions
@@ -36,7 +42,24 @@ def _step_or_404(db: Session, task_id: int, step_id: int) -> AgentStep:
         raise HTTPException(status_code=404, detail="Agent step not found")
     return step
 
+@router.post("/projects/{project_id}/agent/sql-change-events", status_code=status.HTTP_202_ACCEPTED)
+def trigger_sql_change_event(
+    project_id: int,
+    payload: AgentSqlChangeRequest,
+    principal: RealPrincipal,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Detect a semantic SQL change and open exactly one impact-analysis task.
 
+    Idempotent: the same (script, old version, new version, semantic hash) returns the
+    existing task instead of creating a second one. Safe to call after every import.
+    """
+
+    project = PermissionService(db, principal).require_project_permission(project_id, runtime.RUN_PERMISSION)
+    return sql_change_events.trigger_sql_change_agent(
+        db, project, principal, script_file_id=payload.script_file_id,
+        new_version_id=payload.new_version_id, auto_start=payload.auto_start,
+    )
 @router.get("/agent/tools")
 def list_agent_tools(
     principal: RealPrincipal,

@@ -34,3 +34,11 @@ class AgentReplanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason_code: str = Field(default="manual_replan", max_length=100)
+
+
+class AgentSqlChangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    script_file_id: int
+    new_version_id: int | None = None
+    auto_start: bool = True

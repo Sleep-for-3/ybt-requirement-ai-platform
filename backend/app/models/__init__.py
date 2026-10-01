@@ -8,6 +8,7 @@ from app.models.agent import (
     AgentToolCall,
 )
 from app.models.decision_case import DecisionCase
+from app.models.sql_change_event import SqlChangeEvent
 from app.models.data_architecture import DataArchitecture, DataArchitectureRevision, CatalogClassification
 from app.models.batch_import import ResourceImportBatch, ResourceImportItem
 from app.models.requirement import (
@@ -125,6 +126,7 @@ __all__ = [
     "AgentTask",
     "AgentToolCall",
     "DecisionCase",
+    "SqlChangeEvent",
     "ResourceImportBatch",
     "ResourceImportItem",
     "DataArchitecture",

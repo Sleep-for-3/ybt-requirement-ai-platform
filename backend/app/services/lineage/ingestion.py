@@ -269,7 +269,35 @@ class ScriptIngestionService:
             revision_id = revision_result.revision.id
         self.db.commit() if commit else self.db.flush()
         self.db.refresh(version)
+        self._maybe_trigger_change_agent(project, script_file, version, actor_id, commit)
         return IngestionResult(script_file, version, stored_file, False, self._node_count(version.id), self._edge_count(version.id), change_set, impact, categories, revision_id)
+
+    def _maybe_trigger_change_agent(self, project, script_file, version, actor_id, commit: bool) -> None:
+        """Open an agent impact-analysis task when an ingested SQL version changed semantics.
+
+        Detection is semantic-hash based, so a formatting/comment-only re-import does
+        nothing, and the change-event row makes repeated imports idempotent. Best
+        effort: ingestion itself must never fail because of the agent side.
+        """
+
+        if not commit or script_file.file_type != "sql":
+            return
+        try:
+            import logging
+
+            from app.services.agent import sql_change_events
+            from app.services.auth.dependencies import Principal
+
+            user = self.db.get(User, actor_id) if actor_id else None
+            if user is None:
+                return
+            principal = Principal(user.id, user.username, user.display_name)
+            sql_change_events.trigger_sql_change_agent(
+                self.db, project, principal, script_file_id=script_file.id, new_version_id=version.id,
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the change for a later retry
+            self.db.rollback()
+            logging.getLogger(__name__).warning("sql change agent trigger skipped: %s", type(exc).__name__)
 
     def _persist_shell(self, project: Project, script_file: ScriptFile, version: ScriptFileVersion, content: str) -> None:
         result = parse_shell_dependencies(content)
