@@ -438,6 +438,28 @@ def _next_runnable_step(db, task: AgentTask) -> AgentStep | None:
     return None
 
 
+def _model_execution(result: ToolResult) -> dict[str, Any]:
+    """Did a model actually run for this step, or did it take a governed degraded path?"""
+
+    metadata = dict(result.model_metadata or {})
+    degraded = str(result.degraded_path or "") or None
+    model_name = metadata.get("model_name") or metadata.get("model")
+    if not model_name:
+        for gap in result.gaps:
+            if str(gap.get("code") or "") in {"skill_binding_missing", "model_unavailable",
+                                               "llm_unavailable", "model_not_configured"}:
+                degraded = degraded or str(gap.get("code"))
+    executed = bool(model_name) and degraded is None
+    return {
+        "executed": executed,
+        "model_name": model_name,
+        "provider": metadata.get("provider") or metadata.get("provider_type"),
+        "prompt_version": metadata.get("prompt_version"),
+        "degraded_path": None if executed else degraded,
+        "reason": None if executed else (degraded or "deterministic_path"),
+    }
+
+
 def _store_dependency_evaluation(step: AgentStep, evaluation: deps.DependencyEvaluation) -> None:
     summary = dict(step.output_summary_json or {})
     summary["dependency_evaluation"] = evaluation.as_dict()
@@ -917,6 +939,9 @@ def _record_success(db, task: AgentTask, step: AgentStep, call: AgentToolCall, r
         "policy_comparisons": result.policy_comparisons[:100],
         "artifacts": [item.get("artifact_type") for item in result.artifacts],
         "carry": redact_summary(result.step_output),
+        # Explicit model-execution accounting: a degraded step must never look like a model
+        # success (the workspace and the evaluation both rely on this distinction).
+        "model_execution": _model_execution(result),
     })
     if result.model_metadata:
         summary["model_metadata"] = redact_summary(result.model_metadata)
@@ -1532,7 +1557,9 @@ def task_snapshot(db, task: AgentTask) -> dict[str, Any]:
             "fact_count": len(summary.get("facts") or []),
             "policy_evidence_count": len(summary.get("policy_evidence") or []),
             "edited_payload": summary.get("edited_payload"),
-            "model_metadata": summary.get("model_metadata"), "requires_human_confirmation": step.requires_human_confirmation,
+            "model_metadata": summary.get("model_metadata"),
+            "model_execution": summary.get("model_execution"),
+            "requires_human_confirmation": step.requires_human_confirmation,
             "human_gate_key": step.human_gate_key, "review_task_id": step.review_task_id,
             "error_code": step.error_code, "error_message": step.error_message,
             "started_at": step.started_at.isoformat() if step.started_at else None,
