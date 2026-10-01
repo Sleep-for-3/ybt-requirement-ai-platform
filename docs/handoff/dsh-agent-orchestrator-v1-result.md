@@ -155,6 +155,18 @@ python agent-live-acceptance.py      # 合成数据 + 登录 + REST 全链路 + 
 - **人工拒绝后重规划**：`POST /api/agent/tasks/{id}/replan` → `runtime.replan_task()`（重置失败/阻断步骤为 pending 后重排后续步骤）；`request_reanalysis` 决策同样把步骤退回 pending 并记录 `human_reanalysis_requested`。
 - **取消**：`test_cancel_skips_pending_steps` → 未执行步骤按 `task_cancelled` 跳过，任务 cancelled。
 
+### 8.1 现场（HTTP）人工拒绝 + 重规划记录
+
+命令：`python agent-live-rejection.py`（原始记录 `.local-run/agent-live-rejection.json`）
+
+| 步骤 | 结果 |
+|---|---|
+| 创建任务 | 202，task #3 |
+| 停在首个网关 | `compare_policy`，`review_task_id` 已关联 |
+| 人工拒绝（带原因） | 200 → 任务 **blocked**、步骤 **blocked**、`error_code=human_rejected`、缺口入账、`AgentHumanDecision(decision=reject)` |
+| 重规划 | 200 → `plan_version: 1 → 2`，`replanning_count=1` |
+| 重规划后继续 | 任务回到 **waiting_human**（新计划重新执行并在下一个网关暂停，而不是自动放行） |
+
 ## 8.5 Phase 9：SQL 语义差异（同步增强，不阻塞主链路）
 
 `app/services/lineage/sql_semantic_diff.py` 建立在既有 `compare_sql_versions` 之上（它已经是 AST/语义级：解析两版 SQL 的血缘边并比对 WHERE/JOIN/聚合/CASE/来源字段，不是文本 diff），再做一层**非权威投影**：把变化类别翻成业务语言、标出可能影响口径的类别，并要求人工确认。
