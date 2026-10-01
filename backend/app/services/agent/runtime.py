@@ -1072,7 +1072,54 @@ def _latest_review_task(db, task: AgentTask, step: AgentStep) -> ReviewTask | No
         return None
     return db.scalar(select(ReviewTask).where(ReviewTask.workflow_instance_id == task.review_instance_id)
                      .order_by(ReviewTask.id.desc()))
+CASE_DECISION_TYPES: dict[str, str] = {
+    "prepare_field_candidate": "field_mapping_decision",
+    "generate_mapping_draft": "field_mapping_decision",
+    "recall_field_candidates": "source_selection_decision",
+    "rerank_field_candidates": "source_selection_decision",
+    "compare_policy_and_implementation": "policy_interpretation_decision",
+    "compare_sql_versions": "sql_impact_decision",
+    "generate_requirement_candidate": "requirement_decision",
+    "generate_requirement_document": "requirement_decision",
+    "request_human_confirmation": "requirement_decision",
+}
 
+
+def _record_case_memory(db, task: AgentTask, step: AgentStep, decision: str,
+                        record: AgentHumanDecision, principal: Principal) -> None:
+    """Feed an approving human decision into case memory (best effort, never fatal)."""
+
+    if decision not in {sm.DECISION_APPROVE, sm.DECISION_EDIT_AND_APPROVE}:
+        return
+    decision_type = CASE_DECISION_TYPES.get(step.tool_key)
+    if decision_type is None:
+        return
+    from app.services.agent import case_memory
+
+    subject = (task.result_summary_json or {}).get("subject") or {}
+    try:
+        case_memory.record_decision_case(
+            db, task=task, step=step, decision_record=record,
+            decision_type=decision_type,
+            decision=(record.edited_payload_json or {}).get("decision_text")
+            or f"{step.step_key}: {decision}",
+            rationale=record.comment,
+            subject_type="target_field" if subject.get("target_field_id") else None,
+            subject_id=subject.get("target_field_id"),
+            evidence_refs=list(step.evidence_refs_json or []),
+            approved_by=int(principal.user_id or 0),
+            confidence_source="human_decision",
+            scenario_key=task.scenario_key,
+        )
+    except Exception:  # noqa: BLE001 - memory must never break the governed decision
+        db.rollback()
+        record_audit(
+            db, action="agent_case_memory_skipped", resource_type="agent_step", resource_id=step.id,
+            actor_user_id=principal.user_id, institution_id=task.institution_id, project_id=task.project_id,
+            after={"decision": decision, "tool_key": step.tool_key,
+                   "reason": "case_memory_refused"},
+        )
+        db.commit()
 
 def decide(
     db,
@@ -1175,6 +1222,9 @@ def decide(
                "review_decision_id": record.review_decision_id},
     )
     db.commit()
+    # Closed learning loop: only an approving human decision (never a model suggestion)
+    # becomes enterprise case memory. A memory failure must never break the decision.
+    _record_case_memory(db, task, step, decision, record, principal)
 
     job = db.get(BackgroundJob, task.background_job_id) if task.background_job_id else None
     if decision == sm.DECISION_REJECT:
