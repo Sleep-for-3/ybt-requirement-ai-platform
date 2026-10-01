@@ -134,6 +134,13 @@ def broken_mock(mutation):
     return BrokenMock
 
 
+@pytest.fixture(autouse=True)
+def _default_outbound_policy(monkeypatch):
+    """These tests assert the conservative default, so pin the outbound allowlist to empty: the
+    ambient backend/.env may authorize demo projects, which must not change the policy under test."""
+    from app.core.settings import get_settings
+    monkeypatch.setattr(get_settings(), "ai_external_model_allowed_project_ids", "", raising=False)
+
 def test_explicit_mock_rerank_keeps_the_whitelist_and_writes_no_business_state(control_env):
     query, _ = seeded(control_env)
     client, factory, _, _, _ = control_env
