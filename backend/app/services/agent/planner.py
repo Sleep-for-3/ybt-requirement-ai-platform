@@ -20,7 +20,8 @@ from sqlalchemy import or_, select
 
 from app.models import Project, TargetField
 from app.schemas.ai_skill import ContractModel, Key
-from app.services.agent.tools.registry import registered_tools
+from app.services.agent.tools.registry import RISK_LEVELS, registered_tools, validate_input
+from app.services.auth.permission_service import ALL_PROJECT_PERMISSIONS
 from app.services.llm.execution_metadata import stable_hash
 from app.services.llm.prompt_runtime import execute_runtime_chat_with_metadata, get_prompt_runtime
 from app.services.metadata.catalog_service import like_pattern
@@ -86,19 +87,155 @@ def detect_scenario(objective: str) -> str:
     return DEFAULT_SCENARIO
 
 
-def validate_plan_draft(draft: PlanDraft) -> list[str]:
+class PlanValidationIssue(ContractModel):
+    """One reason a plan was rejected before it could touch the database."""
+
+    code: Key
+    message: str = Field(min_length=1, max_length=500)
+    step_key: str | None = Field(default=None, max_length=100)
+    repairable: bool = True
+
+
+# Capabilities the planner may never request, whatever a tool schema declares.
+FORBIDDEN_PLANNER_INPUT_KEYS: frozenset[str] = frozenset({
+    "command", "shell", "cmd", "bash", "powershell", "script", "exec", "execute",
+    "run_sql", "sql_execute", "execute_sql", "raw_sql_execute", "ddl", "drop", "delete",
+    "url", "http", "https", "endpoint", "request", "fetch_url", "webhook",
+    "register_tool", "unregister_tool", "tool_spec", "handler", "dynamic_tool",
+    "risk_level", "required_permissions", "permissions", "requires_human_confirmation",
+    "human_gate", "skip_human_gate", "evidence_contract", "skip_evidence", "bypass_audit",
+})
+MAX_REASON_CHARS = 2000
+
+
+def validate_plan_draft_detailed(
+    draft: PlanDraft,
+    *,
+    permitted: frozenset[str] | None = None,
+) -> list[PlanValidationIssue]:
+    """Validate a plan against the registry and the governance contract.
+
+    Runs **before** the plan is persisted, so a planner mistake fails at planning
+    time instead of surfacing as ``tool_input_invalid`` in the middle of a run.
+    """
+
+    issues: list[PlanValidationIssue] = []
+    specs = registered_tools()
+    if not draft.steps:
+        return [PlanValidationIssue(code="plan_empty", message="plan must contain at least one step")]
+    if len(draft.steps) > MAX_PLAN_STEPS:
+        issues.append(PlanValidationIssue(
+            code="plan_too_long",
+            message=f"plan has {len(draft.steps)} steps, limit is {MAX_PLAN_STEPS}",
+        ))
+
+    seen: set[str] = set()
+    for index, step in enumerate(draft.steps):
+        spec = specs.get(step.tool_key)
+        if step.step_key in seen:
+            issues.append(PlanValidationIssue(code="duplicate_step_key", step_key=step.step_key,
+                                              message=f"duplicate step_key {step.step_key}"))
+        for key in [*step.depends_on, *step.optional_depends_on]:
+            if key not in seen:
+                issues.append(PlanValidationIssue(
+                    code="dependency_not_earlier", step_key=step.step_key,
+                    message=f"{step.step_key} depends on {key} which is not an earlier step",
+                ))
+        if spec is None:
+            issues.append(PlanValidationIssue(code="unknown_tool", step_key=step.step_key,
+                                              message=f"unregistered tool_key {step.tool_key}"))
+            seen.add(step.step_key)
+            continue
+
+        # 2-4: the tool's own input contract (required keys, unknown keys, types).
+        for message in validate_input(spec.input_schema, step.input):
+            issues.append(PlanValidationIssue(code="tool_input_invalid", step_key=step.step_key,
+                                              message=f"{step.step_key}: {message}"))
+        # 15-19: no shell / raw SQL execution / HTTP / dynamic registration / evidence bypass.
+        forbidden = sorted({str(key) for key in step.input if str(key).strip().lower() in FORBIDDEN_PLANNER_INPUT_KEYS})
+        if forbidden:
+            issues.append(PlanValidationIssue(
+                code="forbidden_planner_input", step_key=step.step_key, repairable=True,
+                message=(f"{step.step_key}: planner may not pass {forbidden}; those capabilities "
+                         "are owned by the runtime and the registry"),
+            ))
+        # 12-14: the planner cannot lower a tool's contract. Risk level, permissions and the
+        # human gate are read from the registry at materialization time, so the only thing to
+        # reject here is an attempt to smuggle them through the tool input.
+        if spec.risk_level == "low" and spec.requires_human_confirmation:
+            issues.append(PlanValidationIssue(
+                code="tool_gate_contract_invalid", step_key=step.step_key,
+                message=f"{step.step_key}: gated tool {spec.tool_key} must not be low risk",
+            ))
+        # 9: a tool that needs the subject must actually receive it.
+        if spec.requires_target_field and step.required:
+            resolved = step.input.get("target_field_id") or (draft.subject or {}).get("target_field_id")
+            if not resolved:
+                issues.append(PlanValidationIssue(
+                    code="target_field_unresolved", step_key=step.step_key,
+                    message=(f"{step.step_key}: {spec.tool_key} requires a target field but the plan "
+                             "resolves none"),
+                ))
+        # 10-11: the tool's permission and risk contracts must themselves be lawful.
+        unknown_permissions = sorted(spec.required_permissions - ALL_PROJECT_PERMISSIONS)
+        if unknown_permissions:
+            issues.append(PlanValidationIssue(
+                code="tool_permission_contract_invalid", step_key=step.step_key,
+                message=f"{step.step_key}: unknown permissions {unknown_permissions}",
+            ))
+        if spec.risk_level not in RISK_LEVELS:
+            issues.append(PlanValidationIssue(
+                code="tool_risk_contract_invalid", step_key=step.step_key,
+                message=f"{step.step_key}: invalid risk level {spec.risk_level}",
+            ))
+        if permitted is not None:
+            missing = sorted(spec.required_permissions - permitted)
+            if missing:
+                issues.append(PlanValidationIssue(
+                    code="permission_not_granted", step_key=step.step_key,
+                    message=f"{step.step_key}: actor lacks {missing} for {spec.tool_key}",
+                ))
+        if len(step.reason) > MAX_REASON_CHARS:
+            issues.append(PlanValidationIssue(code="reason_too_long", step_key=step.step_key,
+                                              message=f"{step.step_key}: reason is too long"))
+        seen.add(step.step_key)
+
+    issues.extend(_dependency_cycle_issues(draft))
+    return issues
+
+
+def _dependency_cycle_issues(draft: PlanDraft) -> list[PlanValidationIssue]:
+    """Explicit cycle guard (forward-only deps already prevent it; defence in depth)."""
+
+    graph = {step.step_key: [key for key in [*step.depends_on, *step.optional_depends_on]
+                             if any(other.step_key == key for other in draft.steps)]
+             for step in draft.steps}
+    visiting: set[str] = set()
+    done: set[str] = set()
+    issues: list[PlanValidationIssue] = []
+
+    def walk(node: str) -> None:
+        if node in done:
+            return
+        if node in visiting:
+            issues.append(PlanValidationIssue(code="dependency_cycle", step_key=node,
+                                              message=f"dependency cycle involving {node}", repairable=False))
+            return
+        visiting.add(node)
+        for neighbour in graph.get(node, []):
+            walk(neighbour)
+        visiting.discard(node)
+        done.add(node)
+
+    for key in graph:
+        walk(key)
+    return issues
+
+
+def validate_plan_draft(draft: PlanDraft, *, permitted: frozenset[str] | None = None) -> list[str]:
     """Registry + governance validation applied to any plan, LLM or deterministic."""
 
-    errors: list[str] = []
-    specs = registered_tools()
-    for step in draft.steps:
-        spec = specs.get(step.tool_key)
-        if spec is None:
-            errors.append(f"{step.step_key}: unregistered tool_key {step.tool_key}")
-            continue
-    if not draft.steps:
-        errors.append("plan must contain at least one step")
-    return errors
+    return [issue.message for issue in validate_plan_draft_detailed(draft, permitted=permitted)]
 
 
 def resolve_subject(db, project: Project, objective: str) -> dict[str, Any]:
@@ -200,32 +337,42 @@ DETERMINISTIC_PLANS: dict[str, list[dict[str, Any]]] = {
 def deterministic_plan(objective: str, *, scenario_key: str, subject: dict[str, Any]) -> PlanDraft:
     template = DETERMINISTIC_PLANS.get(scenario_key) or DETERMINISTIC_PLANS[DEFAULT_SCENARIO]
     steps: list[PlannedStep] = []
-    for index, raw in enumerate(template, start=1):
+    kept: set[str] = set()
+    specs = registered_tools()
+    for raw in template:
+        spec = specs.get(raw["tool_key"])
+        if spec is None:
+            continue
         depends_on = list(raw.get("depends_on", []))
+        optional_depends_on = [key for key in raw.get("optional_depends_on", []) if key in kept]
         required = bool(raw.get("required", True))
         tool_input = dict(raw.get("input", {}))
-        base_input = {"query": objective}
-        spec = registered_tools().get(raw["tool_key"])
-        if spec is not None and "query" in (spec.input_schema.get("properties") or {}):
-            tool_input = {**base_input, **tool_input}
-        if spec is not None and spec.requires_target_field:
-            if not subject.get("target_field_id"):
-                # No subject: keep the step but let the runtime skip it with a gap.
-                required = False
-            else:
-                # The registry is the contract: only inject what the tool declares, and
-                # keep the subject in the persisted input for handlers that read it.
-                if "target_field_id" in (spec.input_schema.get("properties") or {}):
-                    tool_input.setdefault("target_field_id", subject["target_field_id"])
+        if spec.requires_target_field and not subject.get("target_field_id"):
+            # Without a subject the tool cannot satisfy its own input contract; planning a
+            # doomed call would only surface as tool_input_invalid mid-run. Drop it and
+            # let the run record the missing subject as a gap instead.
+            continue
+        if any(key not in kept for key in depends_on):
+            # A prerequisite was dropped, so this step cannot run on this plan either.
+            continue
+        if "query" in (spec.input_schema.get("properties") or {}):
+            tool_input = {"query": objective, **tool_input}
+        if spec.requires_target_field:
+            # The registry is the contract: only inject what the tool declares, and keep
+            # the subject in the persisted input for handlers that read it.
+            if "target_field_id" in (spec.input_schema.get("properties") or {}):
+                tool_input.setdefault("target_field_id", subject["target_field_id"])
         steps.append(PlannedStep(
             step_key=raw["step_key"],
             tool_key=raw["tool_key"],
             reason=raw["reason"],
             depends_on=depends_on,
+            optional_depends_on=optional_depends_on,
             required=required,
             input=tool_input,
         ))
-        assert index <= MAX_PLAN_STEPS
+        kept.add(raw["step_key"])
+        assert len(steps) <= MAX_PLAN_STEPS
     return PlanDraft(objective=objective, scenario_key=scenario_key, subject=subject, steps=steps)
 
 
@@ -248,30 +395,59 @@ def plan_input_text(draft_objective: str, scenario_key: str, subject: dict[str, 
 async def plan_with_llm(
     db, project: Project, *, objective: str, scenario_key: str, subject: dict[str, Any],
     confidentiality: str = "internal",
+    permitted: frozenset[str] | None = None,
+    max_attempts: int = 2,
 ) -> tuple[PlanDraft | None, dict[str, Any], str | None]:
-    """Ask the model for a plan, then validate it. Never trusts the raw output."""
+    """Ask the model for a plan, validate it, allow one self-repair, then give up.
+
+    The model never sees its plan accepted unchecked: the draft must pass the full
+    registry + governance contract. A rejected plan is sent back **once** with the
+    validation errors so the planner can repair itself; a second failure returns
+    ``None`` so the caller falls back to the governed deterministic plan and keeps
+    the raw errors for the audit record.
+    """
 
     runtime = get_prompt_runtime(db, PLANNER_PROMPT_KEY)
     runtime.system_prompt = PLANNER_SAFETY_PROMPT + "\n" + (runtime.system_prompt or "")
     runtime.user_template = "{plan_request}"
-    input_text = plan_input_text(objective, scenario_key, subject, registered_tools())
-    try:
-        output, metadata = await execute_runtime_chat_with_metadata(
-            db, project.id, runtime, input_text, PlanDraft,
-            confidentiality=confidentiality, interactive=True,
-        )
-    except Exception as exc:
-        return None, {"planner_error": type(exc).__name__}, "planner_model_unavailable"
-    try:
-        draft = PlanDraft.model_validate({**output, "objective": objective, "scenario_key": scenario_key, "subject": subject})
-    except Exception:
-        return None, metadata, "planner_output_invalid"
-    errors = validate_plan_draft(draft)
-    if errors:
-        metadata = {**metadata, "plan_validation_errors": errors[:5]}
-        return None, metadata, "planner_plan_invalid"
-    return draft, metadata, None
-
+    base_input = plan_input_text(objective, scenario_key, subject, registered_tools())
+    metadata: dict[str, Any] = {}
+    errors: list[str] = []
+    for attempt in range(1, max(1, max_attempts) + 1):
+        input_text = base_input
+        if errors:
+            input_text = (
+                base_input
+                + "\n\n上一次计划未通过系统校验，请修正后重新输出完整 JSON。校验错误：\n"
+                + "\n".join(f"- {item}" for item in errors[:10])
+            )
+        try:
+            output, metadata = await execute_runtime_chat_with_metadata(
+                db, project.id, runtime, input_text, PlanDraft,
+                confidentiality=confidentiality, interactive=True,
+            )
+        except Exception as exc:
+            return None, {**metadata, "planner_error": type(exc).__name__, "planner_attempts": attempt}, \
+                "planner_model_unavailable"
+        try:
+            draft = PlanDraft.model_validate(
+                {**output, "objective": objective, "scenario_key": scenario_key, "subject": subject})
+        except Exception as exc:
+            errors = [f"planner_output_invalid: {type(exc).__name__}"]
+            metadata = {**metadata, "planner_attempts": attempt, "plan_validation_errors": errors}
+            continue
+        issues = validate_plan_draft_detailed(draft, permitted=permitted)
+        metadata = {
+            **metadata, "planner_attempts": attempt,
+            "plan_validation_errors": [issue.message for issue in issues][:10],
+            "plan_validation_codes": sorted({issue.code for issue in issues}),
+        }
+        if not issues:
+            return draft, metadata, None
+        errors = [issue.message for issue in issues]
+        if any(not issue.repairable for issue in issues):
+            break
+    return None, metadata, "planner_plan_invalid"
 
 def plan_hash(draft: PlanDraft) -> str:
     return stable_hash(draft.model_dump(mode="json"))

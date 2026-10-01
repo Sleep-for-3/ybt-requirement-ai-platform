@@ -73,6 +73,9 @@ class AgentPlan(Base, TimestampMixin):
     steps_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     plan_hash: Mapped[str | None] = mapped_column(String(64))
     degraded_reason: Mapped[str | None] = mapped_column(String(100))
+    # Raw planner validation errors kept for audit + the workspace, even after fallback.
+    validation_errors_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    planner_attempts: Mapped[int] = mapped_column(Integer, default=1)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     superseded_by: Mapped[int | None] = mapped_column(ForeignKey("agent_plans.id"))
 

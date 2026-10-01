@@ -170,13 +170,14 @@ def _refresh_task_status(db, task: AgentTask) -> None:
 # --------------------------------------------------------------------------------------
 # Task creation and plan materialization
 # --------------------------------------------------------------------------------------
-def _run_llm_plan(db, project: Project, objective: str, scenario_key: str, subject: dict[str, Any]):
+def _run_llm_plan(db, project: Project, objective: str, scenario_key: str, subject: dict[str, Any],
+                  permitted: frozenset[str] | None = None):
     from app.services.agent.planner import plan_with_llm
 
     try:
         return asyncio.run(plan_with_llm(
             db, project, objective=objective, scenario_key=scenario_key, subject=subject,
-            confidentiality=_project_confidentiality(project),
+            confidentiality=_project_confidentiality(project), permitted=permitted,
         ))
     except RuntimeError:  # already inside a running loop: keep the deterministic plan
         return None, {"planner_error": "event_loop_running"}, "planner_event_loop_unavailable"
@@ -220,15 +221,25 @@ def create_task(
 
     draft = deterministic_plan(text, scenario_key=scenario, subject=subject)
     planner_source, degraded_reason = "deterministic", None
+    validation_errors: list[str] = []
+    planner_attempts = 1
     if use_llm_planner:
-        llm_draft, metadata, degraded = _run_llm_plan(db, project, text, scenario, subject)
-        task.model_metadata_json = redact_summary(metadata or {})
-        if llm_draft is not None and not validate_plan_draft(llm_draft):
+        permitted = frozenset(PermissionService(db, principal).effective_project_permissions(project.id))
+        llm_draft, metadata, degraded = _run_llm_plan(db, project, text, scenario, subject, permitted)
+        metadata = metadata or {}
+        task.model_metadata_json = redact_summary(metadata)
+        planner_attempts = int(metadata.get("planner_attempts") or 1)
+        if llm_draft is not None:
             draft, planner_source = llm_draft, "llm"
         else:
+            # The model's plan failed validation (after its one self-repair): keep the
+            # governed deterministic plan and record why, never as a successful plan.
+            planner_source = "fallback"
             degraded_reason = degraded or "planner_output_rejected"
+            validation_errors = [str(item) for item in (metadata.get("plan_validation_errors") or [])]
     materialize_plan(db, task, draft, planner_source=planner_source, degraded_reason=degraded_reason,
-                     created_by=task.created_by)
+                     created_by=task.created_by, validation_errors=validation_errors,
+                     planner_attempts=planner_attempts)
     record_audit(
         db, action="create", resource_type="agent_task", resource_id=task.id,
         actor_user_id=principal.user_id, institution_id=task.institution_id, project_id=task.project_id,
@@ -248,6 +259,8 @@ def materialize_plan(
     planner_source: str,
     degraded_reason: str | None = None,
     created_by: int | None = None,
+    validation_errors: list[str] | None = None,
+    planner_attempts: int = 1,
 ) -> AgentPlan:
     errors = validate_plan_draft(draft)
     if errors:
@@ -256,7 +269,11 @@ def materialize_plan(
     plan = AgentPlan(
         task_id=task.id, version_no=version, status="active", planner_source=planner_source,
         objective=draft.objective, steps_json=[step.model_dump(mode="json") for step in draft.steps],
-        plan_hash=plan_hash(draft), degraded_reason=degraded_reason, created_by=created_by or task.created_by,
+        plan_hash=plan_hash(draft),
+        degraded_reason=(degraded_reason or None)[:100] if degraded_reason else None,
+        validation_errors_json=list(validation_errors or [])[:50],
+        planner_attempts=max(1, int(planner_attempts or 1)),
+        created_by=created_by or task.created_by,
     )
     db.add(plan)
     db.flush()
@@ -1125,6 +1142,8 @@ def task_snapshot(db, task: AgentTask) -> dict[str, Any]:
         "plan": ({
             "id": plan.id, "version_no": plan.version_no, "status": plan.status,
             "planner_source": plan.planner_source, "degraded_reason": plan.degraded_reason,
+            "planner_attempts": plan.planner_attempts,
+            "validation_errors": plan.validation_errors_json,
             "plan_hash": plan.plan_hash, "steps": plan.steps_json,
         } if plan else None),
         "steps": step_payloads,
