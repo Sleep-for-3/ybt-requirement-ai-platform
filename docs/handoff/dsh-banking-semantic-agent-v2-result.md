@@ -1,7 +1,7 @@
 # Banking Semantic Agent V2 — 开发与验收记录
 
 分支：`dsh/banking-semantic-agent-v2`（基于 `dsh/agent-orchestrator-v1 @ fb04b81`）
-状态：**进行中**（Phase 1–4、6、9 已完成，Phase 3 全部完成；待做 5/7/8/10/11）
+状态：**进行中**（Phase 1–7、9、10 已完成；待做 8、11 与前端浏览器验收）
 
 本文件按阶段持续更新：完成阶段 / 架构 / 新增模型 / 新增 API / Tool Registry / Scenario /
 Evaluation / Test Results / Live Acceptance / Git Commit / 已知限制 / 下一阶段。
@@ -16,13 +16,13 @@ Evaluation / Test Results / Live Acceptance / Git Commit / 已知限制 / 下一
 | 2.2 | 严格 Plan Validation（+一次自我修复+确定性回退） | ✅ 完成 | `d5326a6` |
 | 3a | Subject Resolution V2 + Scenario Router + 4 Scenario 计划 + 人工澄清网关 | ✅ 完成 | `5631092` |
 | 3b | Adaptive Observe→Replan（结构化状态 + 计划补丁 + 运行时观察点） | ✅ 完成 | `713f590` `2d572ad` |
-| 4 | Decision / Case Memory + 人工反馈闭环 | ✅ 完成（search_decision_cases 工具待接） | `7316675` `2c51777` |
-| 5 | SQL Change Event Agent（semantic_hash + 去重 + 自动 Task） | ⏳ |
-| 6 | SQL Semantic Diff V2（semantic_fact + interpretation，29/39 族可检） | ✅ 完成 | `b489ddb` |
-| 7 | Role-based Human Gate（review_policy: single/all/any） | ⏳ | |
-| 8 | 真实模型 Skill 链路与降级可见性 | ⏳ | |
+| 4 | Decision / Case Memory + 人工反馈闭环 + `search_decision_cases` 工具 | ✅ 完成 | `7316675` `2c51777` `4c66b3d` |
+| 5 | SQL Change Event Agent（semantic_hash + 去重 + 自动 Task + 导入触发 + API） | ✅ 完成 | `9778b69` |
+| 6 | SQL Semantic Diff V2（semantic_fact + interpretation，29/39 族可检，10 族显式标注不支持） | ✅ 完成 | `b489ddb` |
+| 7 | Role-based Human Gate（review_policy single/all/any + 权限跟随角色 + 双人批准） | ✅ 完成 | `b805b83` `2ebb264` |
+| 8 | 真实模型 Skill 链路与降级可见性 | ⏳ |
 | 9 | Agent Evaluation V2 指标（21 项，无分母返回 null） | ✅ 完成 | `7a0c76e` |
-| 10 | Agent Workspace V2 + 前端验收 | ⏳ | |
+| 10 | Agent Workspace V2（Scenario/Subject/Adaptive/证据六分类/Decision Memory/SQL Change） | ✅ 代码完成（构建通过；浏览器验收待做） | `e24e072` |
 | 11 | 并发/重启/幂等/事务边界/Context Budget | ⏳ | |
 
 ## 2. 架构（V2 增量，不推倒 V1）
@@ -140,7 +140,30 @@ replan 成功率、证据精度、条款引用准确率、历史案例使用/采
   policy_requirement**；`case_is_regulatory_basis()` 恒为 False（历史经验只能辅助排序/理由，不能当监管依据）。
 - **闭环**：`decide()` 在批准后把该步骤的决策写入案例记忆（confidence_source=human_decision，
   带上人工编辑内容、证据引用、主体与场景）；拒绝不写；记忆写入失败只记审计，绝不影响治理决策。
-- 测试：`tests/test_agent_case_memory.py`（14）+ `tests/test_agent_case_loop.py`（3）。
+- 测试：`tests/test_agent_case_memory.py`（14）+ `tests/test_agent_case_loop.py`（3）+ `tests/test_agent_decision_case_tool.py`（4）。
+
+### Phase 5 — SQL Change Event Agent（`9778b69`）
+
+- `semantic_hash`：解析版本血缘（源→目标 + 过滤/关联/聚合/代码映射）后哈希，**空格/注释/格式化永不触发**。
+- `detect_sql_change` 返回版本对/严重度/类别/目标；无语义变化返回 None，不建事件不建任务。
+- `sql_change_events`（迁移 `202610020050`）以 `(project, script, old_version, new_version, semantic_hash)` 唯一约束为幂等锚点：重复导入返回既有事件与任务；并发触发输掉竞争时复用既有事件。
+- 触发：脚本导入成功后调用（commit 模式、best-effort、异常只记 warning）；另提供 `POST /api/projects/{id}/agent/sql-change-events`。
+- 测试：`tests/test_agent_sql_change_events.py`（6）。
+
+### Phase 7 — Role-based Human Gate（`b805b83` `2ebb264`）
+
+- `gate_policy.py`：gate key → `review_policy`（`single`/`any`/`all`），角色校验基于项目角色目录；`sql_impact_review` 为技术+业务**双人批准**。
+- **权限跟随角色**（technical.review / business.review / final.review），否则被路由角色无权审批（实测发现）。
+- 只路由到项目真实有成员的角色；无成员时回退 owner 并记录 `unstaffed_fallback`，网关不会死锁。
+- 多角色策略每个角色一个审核任务；**未全部批准前网关绝不完成**；`any` 首次批准后关闭其余任务；双批准最终由规范 `decide_task` 关闭工作流实例。
+- 工具可声明 `review_policy`，注册时校验。
+- 测试：`tests/test_agent_gate_routing.py`（6，含双批准完成与 any 关闭其余任务）。
+
+### Phase 10 — Agent Workspace V2（`e24e072`）
+
+- 新增 Scenario（降级标识）、Subject（ambiguous 候选手选 → 澄清网关）、Adaptive（planner_source 五态 + validation_errors + observations 时间线）、证据六分类（interpretation 标“需人工确认”）、Decision Memory、SQL Change（before→after / category / 仅 affects_caliber 标口径影响）面板；降级 gap code 一律 warning。
+- 测试：`frontend/tests/agent-workspace-v2.test.mjs`（30）+ 既有 21；`tsc --noEmit`、`eslint` 均 exit 0；`next build` exit 0。
+- **未完成**：构建产物尚未切入运行目录，未做浏览器渲染验收。
 
 ## 4. 测试与回归（最新）
 
