@@ -1,0 +1,24 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "draft_saved",
+    "deterministic_and_mock_passed",
+    "independent_publish_and_binding",
+    "auxiliary_context_enabled_with_explicit_missing_history",
+    "real_lineage_skill_four_layers",
+    "feedback_exact_input_regression",
+    "restore_new_draft_keeps_old_binding"
+  ],
+  "errors": [],
+  "screenshots": [
+    "pending-approval.png",
+    "published.png",
+    "lineage-layers.png",
+    "feedback-regression.png",
+    "restored-draft.png"
+  ],
+  "passed": true
+}

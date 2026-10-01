@@ -9,6 +9,7 @@ from app.models import (
     BusinessSystem,
     CandidateSourceRecommendation,
     ColumnProfileSnapshot,
+    ColumnProfileTask,
     DataSource,
     MappingEvidenceReference,
     MartToYbtMapping,
@@ -166,6 +167,8 @@ def select_recommendation(db: Session, recommendation_id: int) -> tuple[Candidat
     recommendation = db.get(CandidateSourceRecommendation, recommendation_id)
     if recommendation is None:
         raise ValueError("Source recommendation not found")
+    from app.services.ai_skills.candidate_preparation import validate_prepared_catalog
+    validate_prepared_catalog(db, recommendation)
     lineage = db.scalar(select(ScenarioTechnicalLineage).where(
         ScenarioTechnicalLineage.target_field_id == recommendation.target_field_id,
         ScenarioTechnicalLineage.scenario_id == recommendation.scenario_id,
@@ -210,6 +213,24 @@ def adopt_recommendation(db: Session, recommendation_id: int) -> tuple[Candidate
         raise ValueError("Source recommendation not found")
     if not recommendation.selected_flag:
         raise ValueError("Source recommendation must be selected before adoption")
+    from app.services.ai_skills.candidate_preparation import validate_prepared_catalog
+    validate_prepared_catalog(db, recommendation)
+    if recommendation.catalog_column_id is not None:
+        task = db.scalar(select(ColumnProfileTask).where(
+            ColumnProfileTask.source_recommendation_id == recommendation.id,
+            ColumnProfileTask.project_id == recommendation.project_id,
+            ColumnProfileTask.target_field_id == recommendation.target_field_id,
+            ColumnProfileTask.scenario_id == recommendation.scenario_id,
+            ColumnProfileTask.catalog_column_id == recommendation.catalog_column_id,
+            ColumnProfileTask.datasource_id == recommendation.datasource_id).order_by(ColumnProfileTask.id.desc()))
+        snapshot = db.scalar(select(ColumnProfileSnapshot).where(
+            ColumnProfileSnapshot.profile_task_id == task.id,
+            ColumnProfileSnapshot.project_id == recommendation.project_id,
+            ColumnProfileSnapshot.catalog_column_id == recommendation.catalog_column_id,
+            ColumnProfileSnapshot.datasource_id == recommendation.datasource_id)) if task else None
+        if (task is None or task.status not in {"completed", "partially_completed"} or task.finished_at is None
+                or snapshot is None or snapshot.total_count is None):
+            raise ValueError("采用目录候选前须完成该候选的安全探查，并取得有效统计记录")
     lineage = db.scalar(select(ScenarioTechnicalLineage).where(
         ScenarioTechnicalLineage.target_field_id == recommendation.target_field_id,
         ScenarioTechnicalLineage.scenario_id == recommendation.scenario_id,

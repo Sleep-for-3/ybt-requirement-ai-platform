@@ -1,0 +1,17 @@
+{
+  "backend": "full mounted FastAPI app; isolated named in-memory SQLite; real HTTP responses",
+  "provider": "built-in deterministic mock; protocol and recovery evidence only",
+  "fields": 8,
+  "sections": 2,
+  "totalItems": 16,
+  "completedItems": 16,
+  "reviewedCandidates": 2,
+  "adoptedInSingleRevision": true,
+  "historyUnchanged": true,
+  "otherRequirementUnchanged": true,
+  "limitations": [
+    "No real-model quality conclusion.",
+    "Not PostgreSQL concurrency evidence.",
+    "Formal review and delivery are not covered."
+  ]
+}

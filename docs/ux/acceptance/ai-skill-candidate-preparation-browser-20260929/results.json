@@ -1,0 +1,16 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "none",
+  "checks": [
+    "prepare_in_browser_preserves_mapping_and_requires_explicit_selection",
+    "selected_candidate_cannot_bypass_server_profile_gate"
+  ],
+  "errors": [],
+  "screenshots": [
+    "failure.png"
+  ],
+  "passed": false,
+  "error": "page.waitForFunction: Timeout 30000ms exceeded."
+}

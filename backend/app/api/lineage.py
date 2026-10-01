@@ -1271,6 +1271,6 @@ async def lineage_edge_explanation(
 ) -> dict:
     PermissionService(db, principal).require_project_permission(project_id, "lineage.view")
     try:
-        return await explain_lineage_edge(db, project_id, payload)
+        return await explain_lineage_edge(db, project_id, payload, principal=principal)
     except LineageExplanationNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

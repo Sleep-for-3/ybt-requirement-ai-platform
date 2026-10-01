@@ -94,6 +94,10 @@ def test_named_profile_api_key_loads_from_backend_dotenv_regardless_of_cwd(monke
 @pytest.mark.asyncio
 async def test_real_provider_without_key_fails_without_mock_fallback(monkeypatch) -> None:
     monkeypatch.delenv("MISSING_LLM_KEY", raising=False)
+    # Hermetic on purpose: the ambient settings may carry a real key (this machine has a company key
+    # in backend/.env), which would let the call reach the network instead of failing on config.
+    from app.core.settings import get_settings
+    monkeypatch.setattr(get_settings(), "llm_api_key", "", raising=False)
     service = get_llm_service(
         provider="openai_compatible",
         base_url="https://provider.example.com/v1",

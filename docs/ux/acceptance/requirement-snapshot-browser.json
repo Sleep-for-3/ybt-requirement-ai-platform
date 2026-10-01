@@ -1,0 +1,15 @@
+{
+  "scopeRestored": true,
+  "backgroundRestored": true,
+  "gapVisible": true,
+  "documentAndQuestionsUseScopeGaps": true,
+  "resourceSelectionSaved": true,
+  "saveContext": true,
+  "staleRejected": true,
+  "downloadRequested": true,
+  "viewerActionsHidden": true,
+  "lateGenerationResponseDiscarded": true,
+  "limitations": [
+    "Intercepted synthetic API; not real generation or rendered Excel acceptance."
+  ]
+}

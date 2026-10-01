@@ -21,5 +21,5 @@ export function aiContextPresentation(metadata) {
   }
   return metadata.context_complete
     ? { complete: true, label: "上下文完整" }
-    : { complete: false, label: "上下文被截断，结论不完整" };
+    : { complete: false, label: metadata.runtime_mode === "skill" ? "存在证据缺口，结论不完整" : "上下文被截断，结论不完整" };
 }

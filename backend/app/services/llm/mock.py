@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from typing import Any
 
 from app.services.llm.base import LLMService, ModelCallMetadata, StructuredResponse
@@ -14,6 +15,26 @@ class MockLLMService(LLMService):
         )
 
     async def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        if system_prompt.startswith("[AI_SKILL_FIELD_RERANK_V1]"):
+            # Synthetic, whitelist-only ordering.  This proves the flow and the output
+            # contract; it is not evidence of ranking quality in any way.
+            ids = list(dict.fromkeys(re.findall(r"catalog:[1-9][0-9]*", user_prompt)))
+            return {"claims": [], "gaps": [{"code": "mock_model", "message": "Mock 仅生成覆盖白名单的合成排序，排序质量仍需真实模型与人工核验。"}],
+                    "candidate": {"ranking": [{"candidate_id": candidate, "score": round(1.0 - index * 0.01, 6),
+                                                "rationale": "Mock 合成排序位置，非业务置信度，待人工核验。", "evidence_refs": [candidate]}
+                                               for index, candidate in enumerate(reversed(ids))]}}
+        if system_prompt.startswith("[AI_SKILL_DOCUMENT_V1]"):
+            return {"candidate": {}, "gaps": [{"code": "mock_model", "message": "Mock 仅验证文档辅助流程，未生成业务正文。"}]}
+        if system_prompt.startswith("[AI_SKILL_MAPPING_V1]"):
+            return {"claims": [], "gaps": [{"code": "mock_model", "message": "Mock 仅验证 Mapping 草稿流程"}],
+                    "candidate": {"final_content_draft": "Mock 合成映射草稿，业务规则与物理来源需人工核验。",
+                                  "confidence_level": "low", "open_questions": ["请核验实际来源和加工规则。"]}}
+        if system_prompt.startswith("[AI_SKILL_REQUIREMENT_V1]"):
+            return {"claims": [], "gaps": [{"code": "mock_model", "message": "Mock 仅验证候选流程，业务内容待人工核验"}],
+                    "candidate": {"final_content": "Mock 合成候选，不作为真实监管口径。",
+                                  "gaps": ["Mock 未生成可采纳业务结论"]}}
+        if system_prompt.startswith("[AI_SKILL_GROUNDED_V1]"):
+            return {"claims": [], "gaps": [{"code": "mock_model", "message": "Mock 仅验证流程，业务结论待真实模型和人工核验"}]}
         if "connection test" in system_prompt.lower():
             return {"status": "ok", "message": "连接成功"}
         if "需求字段候选" in system_prompt:

@@ -1,21 +1,22 @@
 """Durable scoped generation. Candidate writes are fenced by per-item leases."""
 import asyncio
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 import logging
-from typing import Literal
 from uuid import uuid4
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_, select, update
 
 from app.models import RequirementGenerationInput, RequirementGenerationItem, KnowledgeDocument
 from app.services.auth.permission_service import PermissionService
 from app.services.mapping.generator_context import recover_queued_actor
-from app.services.mapping.requirement_input import validate_physical_references
 from app.services.requirement_scope import content_digest
+from app.services.requirement_candidate_contract import (
+    PhysicalReference, PolicyComparisonCandidate, RequirementCandidate, check_candidate_compliance,
+    project_candidate_context,
+)
+from app.services.ai_skills.requirement_adapter import generate_if_bound
 from app.services.llm.execution_metadata import build_execution_metadata
 from app.services.llm.prompt_runtime import (
     execute_runtime_chat_with_metadata as _execute_runtime_chat_with_metadata,
@@ -31,34 +32,6 @@ logger = logging.getLogger("app.requirement_generation")
 async def execute_runtime_chat(*args, **kwargs):
     """Keep the legacy monkeypatch seam while the runtime returns metadata."""
     return await _execute_runtime_chat_with_metadata(*args, **kwargs)
-
-
-class PhysicalReference(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["source", "mart"]
-    table_id: int
-    field_id: int
-
-
-class PolicyComparisonCandidate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    unit_id: int = Field(gt=0)
-    rule_ids: list[str] = Field(min_length=1, max_length=100)
-    status: Literal["matched", "conflict", "pending"]
-    explanation: str = Field(min_length=1, max_length=5000)
-    difference: str = Field(default="", max_length=5000)
-
-
-class RequirementCandidate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    business_definition: str = Field(default="", max_length=20000)
-    processing_logic: str = Field(default="", max_length=20000)
-    final_content: str = Field(max_length=20000)
-    physical_references: list[PhysicalReference] = Field(default_factory=list, max_length=100)
-    evidence_unit_ids: list[int] = Field(default_factory=list, max_length=100)
-    script_rule_ids: list[str] = Field(default_factory=list, max_length=100)
-    policy_comparisons: list[PolicyComparisonCandidate] = Field(default_factory=list, max_length=100)
-    gaps: list[str] = Field(default_factory=list, max_length=100)
 
 
 def blocked_reason_code(exc: HTTPException) -> str:
@@ -92,13 +65,17 @@ def authorize_input(db, row, actor):
 
 
 def generate_candidate(db, row, item, project):
+    try:
+        context = project_candidate_context(row.input_json, item.field_id, item.section)
+    except ValueError as exc:
+        raise HTTPException(409, "生成任务字段或章节不在固定输入范围内") from exc
+    skill_candidate = generate_if_bound(db, row, item, project)
+    if skill_candidate is not None:
+        return skill_candidate
     runtime = get_prompt_runtime(db, "requirement_field_candidate")
     budget = runtime.config.get("requirement_max_input_bytes", DEFAULT_REQUIREMENT_MAX_INPUT_BYTES)
     if not isinstance(budget, int) or isinstance(budget, bool) or not 1 <= budget <= 64000:
         raise HTTPException(422, "模型尚未配置经过核验的需求输入预算")
-    context = deepcopy(row.input_json)
-    context["fields"] = [field for field in context["fields"] if field["target"]["id"] == item.field_id]
-    context["section"] = item.section
     prompt = json.dumps(context, ensure_ascii=False, sort_keys=True)
     if len(prompt.encode("utf-8")) > budget:
         raise HTTPException(422, "完整输入超过模型预算，不进行截断")
@@ -107,42 +84,61 @@ def generate_candidate(db, row, item, project):
     levels = [project.confidentiality_level or "internal"] + [unit["confidentiality_level"] for unit in context["evidence"]]
     prompt = prepare_model_input(runtime, prompt, levels, db=db, project_id=project.id)
     used_bytes = len(prompt.encode("utf-8"))
-    result = asyncio.run(execute_runtime_chat(
-        db,
-        project.id,
-        runtime,
-        prompt,
-        RequirementCandidate,
-        confidentiality=project.confidentiality_level or "internal",
-        context_complete=True,
-        context_budget={"unit": "bytes", "limit": budget, "used": used_bytes, "complete": True},
-    ))
-    if isinstance(result, tuple):
-        output, execution_metadata = result
-    else:
-        output = result
-        execution_metadata = build_execution_metadata(
+
+    # Agent Self-Correction Loop (Up to 2 iterations with critic feedback)
+    max_attempts = 2
+    last_violations = []
+    candidate = None
+    execution_metadata = None
+
+    for attempt in range(1, max_attempts + 1):
+        # Server correction text is still model input. Recheck each attempt;
+        # otherwise the second call can exceed the frozen limit and log the
+        # first call's byte count even though a larger prompt was sent.
+        used_bytes = len(prompt.encode("utf-8"))
+        if used_bytes > budget:
+            raise HTTPException(422, "纠错后的完整输入超过模型预算，不进行截断")
+        result = asyncio.run(execute_runtime_chat(
+            db,
+            project.id,
             runtime,
-            context_hash=None,
+            prompt,
+            RequirementCandidate,
+            confidentiality=project.confidentiality_level or "internal",
             context_complete=True,
             context_budget={"unit": "bytes", "limit": budget, "used": used_bytes, "complete": True},
-            output=output,
-        )
-    candidate = RequirementCandidate.model_validate(output).model_dump()
-    validate_physical_references(context, candidate["physical_references"])
+        ))
+        if isinstance(result, tuple):
+            output, execution_metadata = result
+        else:
+            output = result
+            execution_metadata = build_execution_metadata(
+                runtime,
+                context_hash=None,
+                context_complete=True,
+                context_budget={"unit": "bytes", "limit": budget, "used": used_bytes, "complete": True},
+                output=output,
+            )
+        candidate = RequirementCandidate.model_validate(output).model_dump()
+        violations = check_candidate_compliance(context, candidate)
+        if not violations:
+            execution_metadata["self_correction_attempts"] = attempt
+            break
+
+        last_violations = violations
+        if attempt < max_attempts:
+            logger.info("Agent self-correction triggered for item %s: %s", item.id, violations)
+            feedback = (
+                f"\n\n[自我反思纠错反馈 - 校验失败]: " + "; ".join(violations) +
+                "。请反思并更正：不得引用范围外ID或未提供的物理字段，无法确认时留空并记入gaps。"
+            )
+            prompt = prompt + feedback
+
+    if violations:
+        raise HTTPException(422, violations[0])
+
     evidence_ids = {unit["unit_id"] for unit in context["evidence"]}
-    if not set(candidate["evidence_unit_ids"]) <= evidence_ids:
-        raise HTTPException(422, "候选引用了范围外证据")
     rule_ids = {rule["rule_id"] for rule in context.get("script_basis", {}).get("rules", [])}
-    if not set(candidate["script_rule_ids"]) <= rule_ids:
-        raise HTTPException(422, "候选引用了范围外脚本规则")
-    from app.services.requirement_policy_comparison import NORMATIVE_CATEGORIES
-    normative_ids = {u["unit_id"] for u in context["evidence"] if u.get("source_category") in NORMATIVE_CATEGORIES}
-    for comparison in candidate["policy_comparisons"]:
-        if comparison["unit_id"] not in normative_ids or not set(comparison["rule_ids"]) <= rule_ids:
-            raise HTTPException(422, "AI 对照引用了范围外规则或非制度资料")
-        if comparison["status"] == "conflict" and not comparison["difference"].strip():
-            raise HTTPException(422, "AI 冲突对照缺少差异说明")
     if rule_ids and not candidate["script_rule_ids"]:
         candidate["gaps"].append("AI 解释尚未引用固定脚本规则，需核验解释与事实的一致性")
     if not evidence_ids:

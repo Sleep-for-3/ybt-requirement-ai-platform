@@ -220,8 +220,7 @@ def record_model_call(
         output_summary = f"输出字段 {','.join(sorted(str(key) for key in output)[:20])}; 字符数 {len(str(output))}"
     else:
         output_summary = redact_content(str(output))[:300]
-    db.add(
-        ModelCallLog(
+    log = ModelCallLog(
             project_id=project_id,
             model_profile_id=runtime.model_profile_id,
             retrieval_log_id=retrieval_log_id,
@@ -231,6 +230,8 @@ def record_model_call(
             model_name=metadata.model if metadata else runtime.model_name,
             skill_key=execution_metadata.get("skill_key"),
             skill_version=execution_metadata.get("skill_version"),
+            skill_version_id=execution_metadata.get("skill_version_id"),
+            input_contract_version=execution_metadata.get("input_contract_version"),
             execution_kind=execution_metadata.get("execution_kind"),
             request_hash=request_hash,
             context_hash=execution_metadata.get("context_hash") or request_hash,
@@ -251,8 +252,9 @@ def record_model_call(
             error_type=error_type,
             http_status=http_status if http_status is not None else (metadata.http_status if metadata else None),
             error_detail=sanitize_provider_error_detail(error_detail),
-        )
     )
+    db.add(log)
+    return log
 
 
 async def execute_runtime_chat_with_metadata(

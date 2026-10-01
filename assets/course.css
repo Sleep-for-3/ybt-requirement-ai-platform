@@ -1,0 +1,52 @@
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6b76;
+  --paper: #fbfaf7;
+  --panel: #ffffff;
+  --line: #dfe4e7;
+  --accent: #135f5a;
+  --accent-soft: #e8f3f1;
+  --warn: #8a4b08;
+  --warn-soft: #fff3df;
+  --code: #f1f4f5;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font: 16px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+main { width: min(900px, calc(100% - 32px)); margin: 44px auto 80px; }
+header { border-bottom: 1px solid var(--line); padding-bottom: 24px; margin-bottom: 28px; }
+h1 { margin: 0 0 8px; font-size: clamp(30px, 5vw, 48px); line-height: 1.12; letter-spacing: -.03em; }
+h2 { margin: 38px 0 12px; font-size: 24px; }
+h3 { margin: 24px 0 8px; font-size: 18px; }
+p { margin: 8px 0 14px; }
+a { color: var(--accent); }
+code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+code { background: var(--code); padding: 2px 5px; border-radius: 4px; }
+pre { overflow: auto; background: #17202a; color: #f7faf9; padding: 18px; border-radius: 10px; line-height: 1.55; }
+.eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.lede { color: var(--muted); font-size: 19px; max-width: 720px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 17px; }
+.card h3 { margin-top: 0; }
+.callout { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 14px 16px; margin: 18px 0; }
+.warning { border-left-color: var(--warn); background: var(--warn-soft); }
+.path { font-size: 14px; overflow-wrap: anywhere; }
+.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 18px 0; }
+.node { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 11px; }
+.arrow { color: var(--muted); }
+details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+summary { cursor: pointer; font-weight: 650; }
+.checklist li { margin: 8px 0; }
+footer { margin-top: 48px; border-top: 1px solid var(--line); padding-top: 20px; color: var(--muted); }
+@media print {
+  body { background: white; font-size: 11pt; }
+  main { width: 100%; margin: 0; }
+  a { color: black; text-decoration: none; }
+  .card, details { break-inside: avoid; }
+}

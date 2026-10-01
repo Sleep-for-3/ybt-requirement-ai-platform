@@ -127,9 +127,10 @@ def test_scope_edit_preserves_manual_comparison_and_new_basis_invalidates_it(sna
     assert load_revision(db, project.id, req.id, 3).content_json["policy_comparisons"] == saved
 
 
-def test_model_comparison_is_separate_and_regeneration_keeps_human_conflict(snapshot_api, monkeypatch):
+@pytest.mark.parametrize("execution_path", ["legacy", "skill"])
+def test_model_comparison_is_separate_and_regeneration_keeps_human_conflict(snapshot_api, monkeypatch, execution_path):
     from app.services.task_queue.inline import InlineTaskQueue
-    client, db, project, field, req, _ = snapshot_api
+    client, db, project, field, req, membership = snapshot_api
     base, unit, _, view, _ = setup_comparison(snapshot_api)
     assert client.post(base + "/policy-comparison", json=decision(view, unit.id)).status_code == 201
     saved = deepcopy(load_revision(db, project.id, req.id, 3).content_json)
@@ -138,6 +139,31 @@ def test_model_comparison_is_separate_and_regeneration_keeps_human_conflict(snap
             "policy_comparisons": [{"unit_id": unit.id, "rule_ids": [view["rules"][0]["rule_id"]],
                 "status": "matched", "explanation": "仅供验证的模型判断，不覆盖人工冲突结论", "difference": ""}]}
     monkeypatch.setattr("app.services.requirement_generation_worker.execute_runtime_chat", fake_model)
+    if execution_path == "skill":
+        from app.models import AISkillDefinition, AISkillVersion, AISkillScopeBinding, ModelProfile
+        from app.schemas.ai_skill import SkillScope
+        from app.schemas.ai_skill_control import SkillContent
+        from app.services.ai_skills import runtime
+        from app.services.ai_skills.control import scope_key
+        from app.services.ai_skills.evaluation import dependencies
+        from app.services.llm.execution_metadata import stable_hash
+        profile = ModelProfile(profile_name="policy-synthetic", provider_type="mock", enabled=True, local_only=True, max_context_tokens=64000)
+        definition = AISkillDefinition(skill_key="requirement_candidate_generation", task_key="requirement_candidate_generation", display_name="需求候选", created_by=membership.user_id)
+        db.add_all([profile, definition]); db.flush()
+        scope = SkillScope(scope_type="project", project_id=project.id, institution_id=project.institution_id)
+        content = SkillContent(system_prompt="固定版本制度对照候选", model_profile_id=profile.id, output_schema_key="requirement_candidate_v1").model_dump(mode="json")
+        skill = AISkillVersion(definition_id=definition.id, version_no=1, **scope.model_dump(), scope_key=scope_key(scope), content_json=content, content_hash=stable_hash(content), created_by=membership.user_id, edited_by=membership.user_id)
+        db.add(skill); db.flush()
+        skill.release_dependency_hash = dependencies(db, skill)
+        skill.status = "published"; skill.published_at = datetime.now(timezone.utc)
+        db.add(AISkillScopeBinding(definition_id=definition.id, version_id=skill.id, **scope.model_dump(), scope_key=scope_key(scope), updated_by=membership.user_id))
+        db.commit()
+        class SyntheticModel:
+            last_call = None
+            async def chat_structured(self, system, prompt, schema):
+                return schema(candidate=await fake_model())
+        monkeypatch.setattr(runtime, "get_runtime_llm_service", lambda *args, **kwargs: SyntheticModel())
+        monkeypatch.setattr("app.services.requirement_generation_worker.execute_runtime_chat", lambda *args, **kwargs: pytest.fail("Bound Skill must not use Legacy"))
     monkeypatch.setattr("app.services.task_queue.factory.get_task_queue", lambda: InlineTaskQueue())
     response = client.post(base + "/generation-runs", json={"expected_content_version": 3,
         "field_ids": [field.id], "sections": ["lineage"], "idempotency_key": "policy-mock-run"})
@@ -145,6 +171,26 @@ def test_model_comparison_is_separate_and_regeneration_keeps_human_conflict(snap
     result = client.get(base + "/policy-comparison?content_version=3").json()
     assert result["ai_suggestions"][0]["comparisons"][0]["status"] == "matched"
     assert result["decisions"][str(unit.id)]["status"] == "conflict"
+    assert load_revision(db, project.id, req.id, 3).content_json == saved
+    # Provenance readers must never return prompts or full regression inputs.
+    from sqlalchemy import select
+    from app.models import RequirementGenerationItem
+    from app.services.requirement_scope import content_digest
+    item = db.scalar(select(RequirementGenerationItem).where(RequirementGenerationItem.id == result["ai_suggestions"][0]["item_id"]))
+    candidate = deepcopy(item.candidate_json)
+    candidate["execution_metadata"] = {**candidate.get("execution_metadata", {}),
+        "system_prompt": "SECRET_PROMPT", "regression_input": {"secret": "SECRET_INPUT"},
+        "config": {"api_key": "SECRET_KEY"}}
+    item.candidate_json = candidate
+    item.candidate_hash = content_digest(candidate)
+    db.commit()
+    public = client.get(base + "/policy-comparison?content_version=3")
+    assert public.status_code == 200 and "SECRET" not in public.text
+    metadata = public.json()["ai_suggestions"][0]["execution_metadata"]
+    assert metadata["runtime_mode"] == execution_path
+    assert metadata["execution_kind"] == "mock_model"
+    if execution_path == "skill":
+        assert metadata["skill_version_id"] == skill.id and metadata["run_id"] > 0
     assert load_revision(db, project.id, req.id, 3).content_json == saved
     # A historical content view must not acquire candidates generated later.
     assert client.get(base + "/policy-comparison?content_version=2").json()["ai_suggestions"] == []

@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-30",
+  "python": "3.12.4",
+  "os": "Windows",
+  "node_observed": "v24.15.0",
+  "npm_observed": "8.6.0",
+  "git_head": "3e94e5495a4faefa4e1b66aa23286e76cde91a3f",
+  "python_packages_current_interpreter": {
+    "fastapi": "0.139.0",
+    "sqlalchemy": "2.0.51",
+    "pydantic": "2.13.4",
+    "pydantic-settings": "2.14.2",
+    "alembic": "1.18.5",
+    "pytest": "8.4.2",
+    "pytest-asyncio": "0.26.0",
+    "httpx": "0.28.1",
+    "uvicorn": "0.50.2",
+    "fastembed": null,
+    "pymilvus": null,
+    "psycopg": "3.3.4",
+    "celery": "5.6.3",
+    "redis": "6.4.0",
+    "sqlglot": "27.29.0"
+  },
+  "frontend_versions_from_lockfile": {
+    "next": "14.2.35",
+    "react": "18.3.1",
+    "typescript": "5.9.3",
+    "playwright": "1.63.0",
+    "@playwright/test": "1.63.0"
+  },
+  "dockerfile_versions": {
+    "python": "3.12-slim",
+    "node": "20-alpine"
+  },
+  "notes": [
+    "Reference inventory, not a complete dependency lock or OS image.",
+    "No environment variable values, credentials, production databases or personal agent configs included.",
+    "Current source includes modified and untracked files beyond git_head."
+  ],
+  "handoff_target": {
+    "os": "Windows",
+    "agent": "DeepSeek Harness (dsh)",
+    "installed_version": null,
+    "connection_verified": false
+  }
+}

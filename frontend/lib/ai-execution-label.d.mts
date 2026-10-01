@@ -20,6 +20,7 @@ export function aiExecutionPresentation(
 
 export function aiContextPresentation(
   metadata?: {
+    runtime_mode?: string | null;
     execution_kind?: string | null;
     provider?: string | null;
     context_complete?: boolean | null;

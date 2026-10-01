@@ -56,8 +56,8 @@ def test_invented_claim_is_not_grounded(db_session, monkeypatch, claim):
     monkeypatch.setattr(grounded, "evidence_runtime", lambda runtime: runtime)
     monkeypatch.setattr(grounded, "prepare_model_input", lambda *a, **k: "synthetic evidence")
     async def invented(*a, **k):
-        return {"answer": claim, "confidence_level": "high", "supported_claims": [claim]}
-    monkeypatch.setattr(grounded, "execute_runtime_chat", invented)
+        return {"answer": claim, "confidence_level": "high", "supported_claims": [claim]}, {}
+    monkeypatch.setattr(grounded, "execute_runtime_chat_with_metadata", invented)
     answer = asyncio.run(grounded.grounded_answer(db_session, 1, "question"))
     assert answer["answer_status"] == "needs_confirmation"
     assert answer["confidence_level"] == "low"
@@ -90,9 +90,9 @@ def test_field_model_contract(db_session, resources, monkeypatch, failure):
         if failure == "provider":
             raise RuntimeError("internal exception must stay private")
         if failure == "empty":
-            return {"claims": []}
-        return {"claims": [{"citation_id": "missing" if failure == "missing_citation" else f"catalog_column-{resources.column.id}", "text": "INVENTED.TABLE"}]}
-    monkeypatch.setattr(fields, "execute_runtime_chat", reply)
+            return {"claims": []}, {}
+        return {"claims": [{"citation_id": "missing" if failure == "missing_citation" else f"catalog_column-{resources.column.id}", "text": "INVENTED.TABLE"}]}, {}
+    monkeypatch.setattr(fields, "execute_runtime_chat_with_metadata", reply)
     result = asyncio.run(fields.data_field_answer(db_session, resources.project.id, "CERT_TYPE",
         target_field_id=resources.target.id, scenario_id=resources.scenario.id, retrieval_mode="keyword_only"))
     assert result["citations"] and result["sections"]["source_paths"]
@@ -106,7 +106,7 @@ def test_field_model_contract(db_session, resources, monkeypatch, failure):
 def test_empty_field_evidence_never_invokes_model(db_session, resources, monkeypatch):
     async def unexpected(*args, **kwargs):
         pytest.fail("No-evidence answer must not call the model")
-    monkeypatch.setattr(fields, "execute_runtime_chat", unexpected)
+    monkeypatch.setattr(fields, "execute_runtime_chat_with_metadata", unexpected)
     result = asyncio.run(fields.data_field_answer(db_session, resources.other.id, "ZXQ_999", retrieval_mode="keyword_only"))
     assert not result["citations"]
     assert result["answer_status"] == "needs_confirmation" and result["open_questions"]

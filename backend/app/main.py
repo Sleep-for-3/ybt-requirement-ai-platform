@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api import (
     admin,
     ai_runtime,
+    ai_skills,
     auth,
     governance,
     global_search,
@@ -206,6 +207,8 @@ app.include_router(project_readiness.router, prefix=settings.api_prefix)
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(admin.router, prefix=settings.api_prefix)
 app.include_router(ai_runtime.router, prefix=settings.api_prefix)
+app.include_router(ai_skills.router, prefix=settings.api_prefix)
+app.include_router(ai_skills.runs_router, prefix=settings.api_prefix)
 app.include_router(governance.router, prefix=settings.api_prefix)
 app.include_router(review_tasks.router, prefix=settings.api_prefix)
 app.include_router(notifications.router, prefix=settings.api_prefix)

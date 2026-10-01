@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="6.212" timestamp="2026-09-29T08:08:38.475932+08:00" hostname="LAPTOP-1CLFROQ1"><testcase classname="tests.test_ai_skill_binding_options" name="test_binding_options_show_only_published_metadata_and_recheck_dependencies" time="0.762" /><testcase classname="tests.test_ai_skill_binding_options" name="test_parent_option_is_explicitly_adopted_and_does_not_expose_foreign_scope" time="0.373"><failure message="AssertionError: assert 404 == 403&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code&#10; +    where &lt;Response [404 Not Found]&gt; = post(('/ai-skills/lineage_edge_explanation' + '/bindings'), json={'scope': {'institution_id': 2, 'project_id': 1, 'scope_type': 'project'}, 'version': 1})&#10; +      where post = &lt;starlette.testclient.TestClient object at 0x00000218BE88C140&gt;.post">control_env = (&lt;starlette.testclient.TestClient object at 0x00000218BE88C140&gt;, sessionmaker(class_='Session', bind=Engine(sqlite://)..., {'institution_id': 2, 'project_id': 1, 'scope_type': 'project'}, {'model_profile_id': 1, 'system_prompt': '只根据证据解释'})
+
+    def test_parent_option_is_explicitly_adopted_and_does_not_expose_foreign_scope(control_env):
+        client, _, login, scope, content = control_env
+        parent = {"scope_type": "institution", "institution_id": scope["institution_id"]}
+        login("platform")
+        version = client.post(ROOT + "/versions", json={"scope": parent, "content": content}).json()
+        from test_ai_skill_runtime import envelope
+        assert client.post(ROOT + "/test-cases", json={"name": "parent", "input": envelope(scope).model_dump(mode="json")}).status_code == 201
+        for mode, lock in (("deterministic", 1), ("mock_model", 2)):
+            assert client.post(ROOT + "/test-runs", json={"version": version["version_no"], "project_id": scope["project_id"], "mode": mode, "expected_lock_version": lock}).status_code == 201
+        assert client.post(ROOT + "/versions/1/submit", json={"expected_lock_version": 3, "test_project_id": scope["project_id"]}).status_code == 200
+        assert publish(control_env).status_code == 200
+        login("manager")
+        options = client.get(ROOT + "/binding-options", params=scope).json()
+        assert len(options) == 1 and options[0]["scope_type"] == "institution"
+        assert client.get(ROOT + "/bindings", params=scope).json() is None
+&gt;       assert client.post(ROOT + "/bindings", json={"scope": scope, "version": 1}).status_code == 403
+E       AssertionError: assert 404 == 403
+E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
+E        +    where &lt;Response [404 Not Found]&gt; = post(('/ai-skills/lineage_edge_explanation' + '/bindings'), json={'scope': {'institution_id': 2, 'project_id': 1, 'scope_type': 'project'}, 'version': 1})
+E        +      where post = &lt;starlette.testclient.TestClient object at 0x00000218BE88C140&gt;.post
+
+tests\test_ai_skill_binding_options.py:41: AssertionError</failure></testcase></testsuite></testsuites>

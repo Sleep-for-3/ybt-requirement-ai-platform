@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>鹈鹕骑自行车</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: #b9efff;
+      font-family: system-ui, sans-serif;
+    }
+    .scene {
+      width: min(100vw, 1100px);
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      border-radius: 24px;
+      box-shadow: 0 18px 55px #288eae55;
+      background: #b9efff;
+    }
+    svg { display: block; width: 100%; height: 100%; }
+    .bob { transform-box: fill-box; transform-origin: center; animation: bob 1.2s ease-in-out infinite; }
+    .pedal-arm { transform-box: fill-box; transform-origin: 50% 88%; animation: pedal 1.25s linear infinite; }
+    .wheel { transform-box: fill-box; transform-origin: center; animation: spin 1.25s linear infinite; }
+    .wing { transform-box: fill-box; transform-origin: 100% 80%; animation: wing 1.2s ease-in-out infinite; }
+    .bill { transform-box: fill-box; transform-origin: 0 50%; animation: bill 1.3s ease-in-out infinite; }
+    .pig { animation: float 3.5s ease-in-out infinite; }
+    .pig:nth-child(2) { animation-delay: -.9s; }
+    .pig:nth-child(3) { animation-delay: -1.7s; }
+    .pig:nth-child(4) { animation-delay: -2.5s; }
+    @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    @keyframes pedal { to { transform: rotate(360deg); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes wing { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(-8deg); } }
+    @keyframes bill { 0%,65%,100% { transform: rotate(0); } 72%,82% { transform: rotate(5deg); } }
+    @keyframes float { 0%,100% { transform: translate(0, 8px) rotate(-3deg); } 50% { transform: translate(10px, -13px) rotate(5deg); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; } }
+  </style>
+</head>
+<body>
+  <main class="scene" aria-label="一只鹈鹕骑着彩色自行车，猪头在天空中飞舞的循环动画">
+    <svg viewBox="0 0 1100 688" role="img" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#92e7ff"/><stop offset="1" stop-color="#e4fbff"/></linearGradient>
+        <linearGradient id="road" x2="0" y2="1"><stop stop-color="#ffd65d"/><stop offset="1" stop-color="#ffb449"/></linearGradient>
+        <filter id="soft"><feGaussianBlur stdDeviation="13"/></filter>
+      </defs>
+      <rect width="1100" height="688" fill="url(#sky)"/>
+      <circle cx="910" cy="124" r="70" fill="#fff3a8" opacity=".8"/>
+      <g fill="#fff" opacity=".75">
+        <path d="M95 135c18-30 61-27 70 4 29-18 67 2 63 34H63c-5-22 10-37 32-38z"/>
+        <path d="M745 192c17-28 56-25 66 3 28-16 58 3 56 30H716c-4-18 9-31 29-33z"/>
+      </g>
+      <g class="pig" transform="translate(174 90) rotate(-12)">
+        <path d="M0 12q23-28 47 0q-9 24-24 28Q5 35 0 12z" fill="#ff9bb1" stroke="#a84d73" stroke-width="5"/>
+        <path d="M8 0l4-14 10 13M33-1l11-10-1 17" fill="#ff9bb1" stroke="#a84d73" stroke-width="5" stroke-linejoin="round"/>
+        <circle cx="16" cy="18" r="3"/><circle cx="32" cy="18" r="3"/><path d="M18 29q6 5 12 0" fill="none" stroke="#a84d73" stroke-width="3"/>
+      </g>
+      <g class="pig" transform="translate(840 72) rotate(14) scale(.78)">
+        <path d="M0 12q23-28 47 0q-9 24-24 28Q5 35 0 12z" fill="#ff9bb1" stroke="#a84d73" stroke-width="5"/>
+        <path d="M8 0l4-14 10 13M33-1l11-10-1 17" fill="#ff9bb1" stroke="#a84d73" stroke-width="5" stroke-linejoin="round"/>
+        <circle cx="16" cy="18" r="3"/><circle cx="32" cy="18" r="3"/><path d="M18 29q6 5 12 0" fill="none" stroke="#a84d73" stroke-width="3"/>
+      </g>
+      <g class="pig" transform="translate(937 250) rotate(-8) scale(.58)">
+        <path d="M0 12q23-28 47 0q-9 24-24 28Q5 35 0 12z" fill="#ff9bb1" stroke="#a84d73" stroke-width="5"/>
+        <path d="M8 0l4-14 10 13M33-1l11-10-1 17" fill="#ff9bb1" stroke="#a84d73" stroke-width="5"/>
+        <circle cx="16" cy="18" r="3"/><circle cx="32" cy="18" r="3"/><path d="M18 29q6 5 12 0" fill="none" stroke="#a84d73" stroke-width="3"/>
+      </g>
+      <path d="M0 516q260-92 550 0t550 0v172H0z" fill="#8bd36b"/>
+      <path d="M0 565q250-60 550 0t550 0v123H0z" fill="url(#road)"/>
+      <path d="M55 636h105m70 0h105m70 0h105m70 0h105m70 0h105m70 0h105" stroke="#fff4aa" stroke-width="12" stroke-linecap="round" opacity=".85"/>
+      <ellipse cx="552" cy="583" rx="270" ry="27" fill="#2e91a1" opacity=".18" filter="url(#soft)"/>
+      <!-- bicycle -->
+      <g stroke="#ed4f58" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <g class="wheel" stroke="#ef5965" stroke-width="8"><circle cx="380" cy="560" r="74"/><path d="M380 486v148M306 560h148M328 508l104 104M432 508L328 612" stroke="#fff" stroke-width="4" opacity=".8"/></g>
+        <g class="wheel" stroke="#ef5965" stroke-width="8"><circle cx="748" cy="560" r="74"/><path d="M748 486v148M674 560h148M696 508l104 104M800 508L696 612" stroke="#fff" stroke-width="4" opacity=".8"/></g>
+        <path d="M380 560l125-100 65 100H380l125-100 62 100 86-108h90" stroke="#4c63d9"/>
+        <path d="M570 560l-65-100m65 100h58l32-108" stroke="#4c63d9"/>
+        <path d="M694 452h54l23-16" stroke="#4c63d9"/>
+        <path d="M484 456h-45" stroke="#4c63d9"/>
+        <path d="M505 460l-19-36" stroke="#4c63d9"/>
+      </g>
+      <circle cx="570" cy="560" r="15" fill="#ffcf47" stroke="#b46d28" stroke-width="5"/>
+      <g class="pedal-arm" stroke="#b46d28" stroke-width="6" stroke-linecap="round"><path d="M570 560l36 28"/><path d="M606 588h28"/><path d="M570 560l-32-25"/><path d="M538 535h-28"/></g>
+      <!-- pelican -->
+      <g class="bob" transform="translate(0 2)">
+        <path d="M486 456q-22-89 21-154 50-73 127-25 49 31 51 112l-20 91z" fill="#f5f2e7" stroke="#293d52" stroke-width="8"/>
+        <path d="M515 445q-11-75 31-126 31-37 69-21 31 14 28 75l-20 79z" fill="#a7d5e0" opacity=".95"/>
+        <path d="M601 252q-8-73 44-98 59-28 100 25 20 27 9 68l-41 58z" fill="#f8f4e6" stroke="#293d52" stroke-width="8"/>
+        <path class="bill" d="M655 215q77-17 154 25 33 18 7 45-67 27-163-4z" fill="#ff9e37" stroke="#293d52" stroke-width="8"/>
+        <path d="M668 267q65 3 122 11" stroke="#cf5d27" stroke-width="6" fill="none"/>
+        <circle cx="714" cy="197" r="11" fill="#293d52"/><circle cx="718" cy="193" r="4" fill="#fff"/>
+        <path class="wing" d="M520 321q-91 48-107 115 63 5 133-39z" fill="#e5edf0" stroke="#293d52" stroke-width="8"/>
+        <path d="M552 430l-21 103q-3 17 13 25l33-3 17-118z" fill="#f5f2e7" stroke="#293d52" stroke-width="8"/>
+        <path d="M590 430l18 107q2 17 20 20l31-10-22-120z" fill="#f5f2e7" stroke="#293d52" stroke-width="8"/>
+        <path d="M526 551q-18 5-35 19 18 15 49 2M628 556q17 2 38 14-13 17-45 8" fill="#ff9e37" stroke="#293d52" stroke-width="7" stroke-linecap="round"/>
+      </g>
+      <g fill="#fff" opacity=".9"><circle cx="83" cy="463" r="6"/><circle cx="105" cy="449" r="3"/><circle cx="970" cy="437" r="5"/></g>
+    </svg>
+  </main>
+</body>
+</html>

@@ -1,0 +1,44 @@
+{
+  "actualFrontend": true,
+  "apiTransport": "real",
+  "realModel": false,
+  "executedAt": "2026-09-20T11:37:27.123Z",
+  "checks": {
+    "promptReadOnly": true,
+    "missingPolicyBasisVisible": true,
+    "executionLabelVisible": true,
+    "feedbackToRegressionVisible": true
+  },
+  "screenshots": {
+    "promptReadOnly": "C:\\Users\\李儒伟\\Documents\\智能分析智能体平台\\docs\\ux\\acceptance\\ai-p0-browser-real-api-20260920\\prompt-readonly.png",
+    "lineageExplanation": "C:\\Users\\李儒伟\\Documents\\智能分析智能体平台\\docs\\ux\\acceptance\\ai-p0-browser-real-api-20260920\\lineage-explanation.png",
+    "feedbackRegression": "C:\\Users\\李儒伟\\Documents\\智能分析智能体平台\\docs\\ux\\acceptance\\ai-p0-browser-real-api-20260920\\feedback-regression.png"
+  },
+  "pageErrors": [],
+  "explanationPanelCount": 1,
+  "explanationPanels": [
+    {
+      "text": "关系业务解释“客户统一标识”由“客户统一标识”经过字段取值关系形成。业务语言速览目标字段“客户统一标识”的取值或影响关系来自“MART.REG_P0.CUSTOMER_ID”。该关系按“字段取值关系”传递到“EAST_P0.CUSTOMER_ID”。由已解析事实确定性生成，不调用模型。模型业务解释来源未标记候选 · 未",
+      "left": 1048,
+      "top": 267,
+      "width": 380,
+      "height": 433,
+      "visible": true
+    }
+  ],
+  "executionLabelDetails": [
+    {
+      "text": "来源未标记",
+      "title": "缺少运行元数据，不能判定是否调用真实模型",
+      "width": 66,
+      "height": 19,
+      "visible": true,
+      "unobscured": true
+    }
+  ],
+  "executionLabelCandidates": [
+    "来源未标记"
+  ],
+  "executionLabel": "来源未标记",
+  "passed": true
+}

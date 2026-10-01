@@ -1,0 +1,8 @@
+模拟账户口径说明
+
+- 所有客户、账户和机构均为虚构。
+- CUSTOMER_NO 来源于 DEMO_CORE.DEMO_ACCOUNT_INFO.CUSTOMER_ID。
+- ACCOUNT_NO 来源于 DEMO_CORE.DEMO_ACCOUNT_INFO.ACCOUNT_ID。
+- BALANCE 取报送日终余额，对应 END_OF_DAY_BALANCE。
+- STATUS_CODE 使用 A、F、C 三种模拟状态。
+- 所有数据仅用于本地技术验证。

@@ -26,6 +26,15 @@ from app.services.requirement_delivery import freeze_draft, load_frozen_draft, s
 
 router = APIRouter(tags=["requirements"])
 
+
+@router.post("/projects/{project_id}/requirements/{requirement_id}/revisions/{content_version}/document-assistance")
+async def document_assistance(project_id: int, requirement_id: int, content_version: int,
+                              principal: RealPrincipal, db: Session = Depends(get_db)):
+    from app.services.ai_skills.document_context import assist_document
+    result = await assist_document(db, principal, project_id, requirement_id, content_version)
+    db.commit()
+    return result
+
 from app.services.requirement_generation import PrepareGenerationInput, prepare_input, input_summary
 from app.services.requirement_script_basis import ScriptSelection, ConfirmScriptBasis
 from app.services.requirement_policy_comparison import ConfirmPolicyComparison
@@ -75,7 +84,9 @@ def open_requirement_recheck(project_id: int, requirement_id: int, payload: Rech
     from app.services.requirement_recheck import create_recheck, recheck_view
     requirement = lock_requirement(db, project_id, requirement_id)
     row = create_recheck(db, requirement, payload.expected_content_version, payload.change_hash, principal.user_id)
-    return recheck_view(db, row)
+    response = recheck_view(db, row)
+    db.commit()
+    return response
 
 
 def recheck_or_404(db, project_id, requirement_id, recheck_id):

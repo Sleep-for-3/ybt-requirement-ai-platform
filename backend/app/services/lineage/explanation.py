@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Literal
@@ -332,21 +333,30 @@ def _sanitize_output(output: dict[str, Any], fact_ids: set[str], regulatory_evid
     }
 
 
+MODEL_CALL_TIMEOUT_SECONDS = 60.0
+
+
 def _degraded_reason(exc: Exception) -> str:
     error_type = getattr(exc, "error_type", type(exc).__name__)
     if error_type == "external_model_data_denied":
         return "当前数据分类策略不允许发送到该模型，已保留脚本事实。"
     if error_type == "configuration_error":
         return "模型配置尚未完成，已保留脚本事实，可由管理员配置后重试。"
+    if error_type in {"TimeoutError", "asyncio.TimeoutError"}:
+        return "模型响应超时，已保留脚本事实，可稍后重试。"
     return "模型暂时不可用，已保留脚本事实，可稍后重试。"
 
 
-async def explain_lineage_edge(db, project_id: int, request: LineageEdgeExplanationRequest) -> dict[str, Any]:
+async def explain_lineage_edge(db, project_id: int, request: LineageEdgeExplanationRequest, *, principal=None) -> dict[str, Any]:
     edge_key = str(request.edge_id)
     if not edge_key or len(edge_key) > 500:
         raise LineageExplanationNotFound("血缘关系编号无效")
     context = build_lineage_edge_context(db, project_id, edge_key, request.revision_id)
     deterministic = deterministic_explanation(context)
+    from app.services.ai_skills.lineage_adapter import explain_if_bound
+    skill_result = await explain_if_bound(db, principal, project_id, request, context, deterministic)
+    if skill_result is not None:
+        return skill_result
     factual = {"edge_id": edge_key, "revision_id": request.revision_id, "facts": context["facts"]}
     knowledge = _knowledge_evidence(db, project_id, context)
     fact_ids = {item["id"] for item in context["facts"]} | {item["citation_id"] for item in knowledge}
@@ -373,14 +383,17 @@ async def explain_lineage_edge(db, project_id: int, request: LineageEdgeExplanat
     levels = [project.confidentiality_level or "internal" if project else "internal"] + [item.get("confidentiality_level") or "internal" for item in knowledge]
     try:
         model_input = prepare_model_input(runtime, model_input, levels, db=db, project_id=project_id)
-        output, execution_metadata = await execute_runtime_chat(
-            db,
-            project_id,
-            runtime,
-            model_input,
-            LineageEdgeExplanationOutput,
-            confidentiality=max(levels, key=lambda level: {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}.get(level, 1)),
-            interactive=True,
+        output, execution_metadata = await asyncio.wait_for(
+            execute_runtime_chat(
+                db,
+                project_id,
+                runtime,
+                model_input,
+                LineageEdgeExplanationOutput,
+                confidentiality=max(levels, key=lambda level: {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}.get(level, 1)),
+                interactive=True,
+            ),
+            timeout=MODEL_CALL_TIMEOUT_SECONDS,
         )
         db.commit()
         return {

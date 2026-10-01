@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { FieldWorkspaceRecord, SaveState } from "@/components/requirement-workspace/types";
 import { apiPut } from "@/lib/api";
+import { MappingGenerationProvenance } from "@/components/MappingGenerationProvenance";
 import { isMappingLocked, mappingStatusLabel, mappingStatusTone } from "@/lib/workspace-view-model.mjs";
 
 export function SelectedFieldEditor({
@@ -119,6 +120,10 @@ export function SelectedFieldEditor({
           status={record.lineage?.tech_confirm_status || "未维护"}
         />
       </div>
+      {detailReady && <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        {record.business && <div><p className="mb-1 text-xs font-semibold">业务草稿来源</p><MappingGenerationProvenance mappingType="scenario_business" mappingId={record.business.id} draftText={record.business.ai_generated_content}/></div>}
+        {record.lineage && <div><p className="mb-1 text-xs font-semibold">技术草稿来源</p><MappingGenerationProvenance mappingType="scenario_technical" mappingId={record.lineage.id} draftText={record.lineage.ai_generated_content}/></div>}
+      </div>}
       <div className="mt-3 flex justify-end">
         <button className="button-primary" disabled={saveState === "saving" || (businessLocked && technicalLocked) || (!record.business && !record.lineage)} onClick={() => void save()} type="button"><Save size={15} />保存人工最终内容</button>
       </div>

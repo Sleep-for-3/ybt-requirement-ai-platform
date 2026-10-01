@@ -1,0 +1,19 @@
+{
+  "realHTTP": true,
+  "realModel": false,
+  "fixtureAuth": true,
+  "provider": "mock",
+  "checks": [
+    "requirement_skill_tested_and_independently_published",
+    "browser_generation_keeps_document_unchanged",
+    "candidate_shows_skill_mock_and_run_provenance",
+    "human_adoption_creates_pending_revision",
+    "historical_revision_unchanged"
+  ],
+  "errors": [],
+  "screenshots": [
+    "candidate-provenance.png",
+    "adopted-pending-review.png"
+  ],
+  "passed": true
+}

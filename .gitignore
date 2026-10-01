@@ -36,3 +36,8 @@ npm-debug.log*
 *.pid
 .DS_Store
 Thumbs.db
+# runtime artefacts observed 2026-10-01 (kept on disk, deliberately untracked)
+/backend/celerybeat-schedule*
+/backend/pytest-of-*/
+/backend/lifecycle-*/
+/docs/evaluation/**/push.log

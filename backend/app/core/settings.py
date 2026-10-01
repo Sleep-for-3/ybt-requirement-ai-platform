@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     llm_fallback_models: str = ""
     llm_fallback_base_url: str = ""
     llm_fallback_api_key_env_name: str = ""
+    # Explicit, auditable outbound authorization: only these project ids may send catalog
+    # structure to a NON-local (external) model. Empty (default) keeps the conservative floor.
+    ai_external_model_allowed_project_ids: str = ""
     # Provider round-trip budget.  Domestic relays and long reasoning models
     # routinely need more than the historic 60 s default, so the value is
     # configurable and bounded instead of hard-coded in the call sites.
@@ -118,6 +121,9 @@ class Settings(BaseSettings):
 
     vector_store_provider: str = "mock"
     milvus_uri: str = "http://localhost:19530"
+    # Optional local Milvus Lite database file.  When set, the adapter uses the embedded
+    # Lite engine on this file and MILVUS_URI only has to remain a valid placeholder.
+    milvus_lite_path: str = ""
     milvus_token: str = ""
     milvus_collection_prefix: str = "ybt_semantic"
     milvus_index_type: str = "AUTOINDEX"

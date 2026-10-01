@@ -56,6 +56,7 @@ export function DocumentPreview({
   evidenceForSelected,
   questions,
   detailReady,
+  editorDirty,
   onAdoptBusiness,
   onAdoptTechnical,
   onEditorDirtyChange,
@@ -88,6 +89,7 @@ export function DocumentPreview({
   evidenceForSelected: number;
   questions: PendingQuestion[];
   detailReady: boolean;
+  editorDirty?: boolean;
   onAdoptBusiness: () => void;
   onAdoptTechnical: () => void;
   onEditorDirtyChange: (dirty: boolean) => void;
@@ -154,6 +156,13 @@ export function DocumentPreview({
               onSaved={onEditorSaved}
               record={selected}
             />}</div> : null}
+            {!requirementId && selected && detailReady && <section aria-label="当前跨层映射入口" className="mt-3 flex flex-wrap gap-3 text-xs">
+              {editorDirty ? <p>先保存当前字段的人工编辑，再打开跨层映射。</p> : <>
+              {selected.martMappings.map(mapping => <Link key={`mart:${mapping.id}`} className="text-teal-800 underline"
+                href={`/mapping-drafts/mart_to_ybt/${mapping.id}`}>核验集市到一表通映射 #{mapping.id}</Link>)}
+              {Array.from(new Set(selected.martMappings.flatMap(mapping => mapping.mart_field_id ? (sourceMappings[mapping.mart_field_id] || []).map(row => row.id) : []))).map(id =>
+                <Link key={`source:${id}`} className="text-teal-800 underline" href={`/mapping-drafts/source_to_mart/${id}`}>核验源到集市映射 #{id}</Link>)}</>}
+            </section>}
             {activeTab === "document" ? <>
             <SectionTitle number="1" title="需求背景与范围" />
             <p className="whitespace-pre-wrap text-xs leading-6 text-slate-600">{requirementId ? requirementBackground || "业务背景待补充" : table.description || "整体背景待补充；字段定义不替代需求背景。"}</p>

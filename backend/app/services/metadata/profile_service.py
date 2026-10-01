@@ -14,6 +14,8 @@ def run_column_profile(db:Session,column:CatalogColumn,request,created_by=None):
     if recommendation is None or not recommendation.selected_flag:raise ValueError("Source recommendation must be selected before profiling")
     if recommendation.catalog_column_id!=column.id:raise ValueError("Selected recommendation does not reference this catalog column")
     if recommendation.target_field_id!=request.target_field_id or recommendation.scenario_id!=request.scenario_id:raise ValueError("Selected recommendation belongs to another field or scenario")
+    from app.services.ai_skills.candidate_preparation import validate_prepared_catalog
+    validate_prepared_catalog(db, recommendation)
     datasource=db.get(DataSource,column.datasource_id);ensure_readonly_datasource(datasource)
     metrics=list(dict.fromkeys(request.metrics));invalid=set(metrics)-VALID_METRICS
     if invalid:raise ValueError(f"Unsupported profile metrics: {', '.join(sorted(invalid))}")

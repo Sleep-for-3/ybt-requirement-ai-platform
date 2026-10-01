@@ -1,0 +1,6 @@
+page.waitForFunction: Timeout 30000ms exceeded.
+    at C:\Users\李儒伟\Documents\智能分析智能体平台\frontend\tests\ai-skill-candidate-preparation.browser.acceptance.mjs:66:14 {
+  log: [],
+  name: 'TimeoutError'
+}
+{"realHTTP":true,"realModel":false,"fixtureAuth":true,"provider":"none","checks":["prepare_in_browser_preserves_mapping_and_requires_explicit_selection","selected_candidate_cannot_bypass_server_profile_gate"],"errors":[],"screenshots":["failure.png"],"passed":false,"error":"page.waitForFunction: Timeout 30000ms exceeded."}

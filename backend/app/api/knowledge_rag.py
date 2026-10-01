@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models import (AIUserFeedback,EmbeddingIndexVersion,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelCallLog,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
 from app.core.settings import get_settings
-from app.services.auth.dependencies import CurrentPrincipal
+from app.services.auth.dependencies import CurrentPrincipal, RealPrincipal
+from app.services.retrieval.planned_search import PlannedSearchRequest, planned_search
 from app.services.auth.permission_service import PermissionService
 from app.services.rag import grounded_answer
 from app.services.knowledge_evidence import mode_knowledge_types
@@ -213,6 +214,15 @@ def unit(unit_id:int,project_id:int,db:Session=Depends(get_db)):
     item=db.get(KnowledgeUnit,unit_id)
     if not item or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"Knowledge unit not found")
     return _unit(item)
+@router.post("/projects/{project_id}/knowledge/planned-search")
+def search_with_plan(project_id: int, payload: PlannedSearchRequest, principal: RealPrincipal, db: Session = Depends(get_db)):
+    result = planned_search(db, principal, project_id, payload)
+    record_audit(db, action="knowledge_planned_search", resource_type="retrieval_log",
+        resource_id=result["retrieval_log_id"], actor_user_id=principal.user_id, project_id=project_id,
+        after={"round_count": len(result["rounds"]), "result_count": len(result["items"]), "execution_kind": "deterministic"})
+    db.commit()
+    return result
+
 @router.post("/projects/{project_id}/knowledge/hybrid-search")
 def hybrid_search(project_id:int,payload:SearchRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     try:
@@ -390,6 +400,10 @@ def prompt_versions(principal:CurrentPrincipal,db:Session=Depends(get_db)):
 def _csv(value):return [item.strip() for item in (value or "").replace("，",",").split(",") if item.strip()]
 def _row(item):return {key:value for key,value in item.__dict__.items() if not key.startswith("_")}
 def _prompt_version(item):
+    if item.skill_version_id is not None:
+        return {**_row(item), "runtime_binding": {"editable": False, "activation": "explicit_skill_scope_binding",
+            "system_prompt": "skill_configuration_snapshot", "user_prompt_template": "rendered_by_skill_runtime",
+            "note": "已发布 Skill 的不可变兼容快照；实际生效范围由 Skill 绑定决定。"}}
     return {
         **_row(item),
         "runtime_binding": {

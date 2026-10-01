@@ -1,0 +1,25 @@
+{
+  "environment": "Windows, headless Chromium, Next development build, isolated intercepted synthetic API",
+  "small": {
+    "loadMs": 240,
+    "tables": 4,
+    "fields": 32,
+    "edges": 18,
+    "focus": true,
+    "edgeDetails": true,
+    "collapseReanchors": true
+  },
+  "large": {
+    "loadMs": 914,
+    "focusMs": 488,
+    "tables": 20,
+    "fields": 200,
+    "edges": 182
+  },
+  "returnLinkContext": true,
+  "limitations": [
+    "Synthetic API validates rendering and interactions, not backend lineage semantics or real generation quality.",
+    "Timing includes automation polling; not a repeatable performance benchmark.",
+    "No manual visual sign-off yet; screenshots require review."
+  ]
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>企业 AI 工程术语速查</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Reference 0001 · Print friendly</div>
+    <h1>企业 AI 工程术语速查</h1>
+    <p class="lede">每个术语只记“是什么 + 一表通落点 + 一个误区”。</p>
+  </header>
+  <section class="grid">
+    <article class="card"><h3>Token</h3><p>模型处理和计费的文本片段。项目应记录 usage；误区：一个汉字必等于一个 Token。</p></article>
+    <article class="card"><h3>Context Window</h3><p>单次输入输出容量。项目用 Top-K证据控制；误区：长上下文等于可靠知识库。</p></article>
+    <article class="card"><h3>Embedding</h3><p>文本的稠密向量表示。项目用于语义召回；误区：能替代精确字段匹配。</p></article>
+    <article class="card"><h3>Structured Output</h3><p>符合JSON Schema的输出。项目应加Pydantic；误区：合法JSON等于业务正确。</p></article>
+    <article class="card"><h3>Tool Calling</h3><p>模型提出调用，应用执行。项目可封装目录/血缘工具；误区：模型直接拥有函数权限。</p></article>
+    <article class="card"><h3>RAG</h3><p>检索外部证据后生成。项目保留citation；误区：RAG就是向量库。</p></article>
+    <article class="card"><h3>BM25</h3><p>基于词项的稀疏检索。适合字段代码；误区：任意关键词加权都叫BM25。</p></article>
+    <article class="card"><h3>Rerank</h3><p>对候选做二阶段精排。项目当前是规则融合；误区：把融合分数叫cross-encoder。</p></article>
+    <article class="card"><h3>Agent</h3><p>围绕目标动态选工具并更新状态。字段取证可Agent化；误区：一次LLM调用就是Agent。</p></article>
+    <article class="card"><h3>Workflow</h3><p>预定义步骤和状态。审核/UAT适合；误区：所有流程都交给Agent更先进。</p></article>
+    <article class="card"><h3>Groundedness</h3><p>claim是否由证据支持。项目需claim-citation；误区：有引用就一定grounded。</p></article>
+    <article class="card"><h3>HITL</h3><p>关键节点人工审核。项目final_content必须人工采用；误区：HITL只是最后点确认。</p></article>
+  </section>
+  <footer>
+    <p>主资料：<a href="../AI_AGENT_LEARNING_PATH/01-LLM基础.md">LLM基础</a> · <a href="../AI_AGENT_LEARNING_PATH/03-RAG完整体系.md">RAG</a> · <a href="../AI_AGENT_LEARNING_PATH/04-Agent开发.md">Agent</a></p>
+  </footer>
+</main>
+</body>
+</html>

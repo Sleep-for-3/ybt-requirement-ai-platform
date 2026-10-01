@@ -6,6 +6,7 @@ import dagre from "@dagrejs/dagre";
 import { RefreshCw, Sparkles, X } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import {ClassificationSummary, Classification} from "@/components/CatalogClassification";
+import { SkillEvidenceLayers, type SkillResult } from "@/components/SkillEvidenceLayers";
 import { apiPost } from "@/lib/api";
 import { aiContextPresentation, aiExecutionPresentation } from "@/lib/ai-execution-label.mjs";
 import { generationBlockMessage } from "@/lib/generation-block.mjs";
@@ -18,7 +19,7 @@ export type Relation = { id:string; source_node_id:string; target_node_id:string
   code_mapping_rule?:string; aggregation_rule?:string; evidence_refs:Record<string,unknown>[]; rules:Record<string,unknown> };
 type ExplanationClaim={text:string;fact_ids:string[]};
 type ExplanatoryEvidence={citation_id:string;label:string;quoted_content?:string;href?:string;source_file_name?:string;source_page_no?:number;source_heading?:string};
-type EdgeExplanationResponse={edge_id:string;revision_id:number|null;status:"ready"|"degraded";facts:{id:string;kind:string;label:string;value:string}[];
+type EdgeExplanationResponse={edge_id:string;revision_id:number|null;status:"ready"|"degraded";skill_result?:SkillResult;regression_input?:unknown;facts:{id:string;kind:string;label:string;value:unknown}[];
   deterministic:{summary:string;steps:string[];relation_label:string};
   ai:null|{business_summary:string;plain_language_steps:ExplanationClaim[];regulatory_interpretation:string;regulatory_status:"grounded"|"missing_basis"|"conflict"|"needs_confirmation";
     regulatory_evidence_ids:string[];risks:ExplanationClaim[];open_questions:string[];confidence_level:"low"|"medium"|"high";unsupported_claim_count:number};
@@ -53,7 +54,7 @@ function EdgeDetails({edge,source,target,projectId,revisionId,cache,onClose}:{ed
  const quick=explainLineageEdgeInBusinessLanguage(edge,source,target);const cacheKey=`${projectId}:${revisionId??"live"}:${edge.id}`;
  const [attempt,setAttempt]=useState(0);const [state,setState]=useState<{status:"loading"|"ready"|"degraded"|"error"|"unavailable";data?:EdgeExplanationResponse;message?:string}>(()=>cache.has(cacheKey)?{status:cache.get(cacheKey)!.status,data:cache.get(cacheKey)}:{status:"loading"});
  useEffect(()=>{
-  const cached=cache.get(cacheKey);if(cached){setState({status:cached.status,data:cached});return;}
+  const cached=cache.get(cacheKey);if(cached && attempt===0){setState({status:cached.status,data:cached});return;}
    if(revisionId===null&&!/^\d+$/.test(String(edge.id))){setState({status:"unavailable",message:"当前关系来自人工业务映射，没有固定脚本版本，不能生成可追溯的模型解释。"});return;}
   let alive=true;setState({status:"loading"});
    apiPost<EdgeExplanationResponse>(`/projects/${projectId}/lineage/edge-explanations`,{edge_id:edge.id,revision_id:revisionId}).then(result=>{if(!alive)return;cache.set(cacheKey,result);setState({status:result.status,data:result});}).catch(error=>{if(alive)setState({status:"error",message:generationBlockMessage(error)||"模型解释生成失败，脚本事实仍可查看。"});});
@@ -70,6 +71,8 @@ function EdgeDetails({edge,source,target,projectId,revisionId,cache,onClose}:{ed
    {result?<div className="mt-3 space-y-3 text-xs"><p className="leading-5 text-slate-800">{result.business_summary}</p>{result.plain_language_steps.length?<ul className="space-y-1.5 text-slate-700">{result.plain_language_steps.map((claim,i)=><li key={`${i}:${claim.text}`} className="rounded bg-slate-50 px-2 py-1.5">{claim.text}</li>)}</ul>:null}<div className={`rounded border p-3 ${regulatoryTone(result.regulatory_status)}`}><p className="font-semibold">{REGULATORY_LABELS[result.regulatory_status]}</p><p className="mt-1 leading-5">{result.regulatory_interpretation}</p>{state.data?.regulatory_evidence.length?<div className="mt-2 space-y-1">{state.data.regulatory_evidence.map(item=><a key={item.citation_id} className="block underline underline-offset-2" href={item.href||"#"} target="_blank" rel="noreferrer">{item.label}{item.source_heading?` · ${item.source_heading}`:""}</a>)}</div>:null}</div>{result.risks.length?<div><p className="font-semibold text-slate-600">风险与限制</p><ul className="mt-1 space-y-1 text-slate-700">{result.risks.map((risk,i)=><li key={`${i}:${risk.text}`}>· {risk.text}</li>)}</ul></div>:null}{result.open_questions.length?<div><p className="font-semibold text-slate-600">待人工确认</p><ul className="mt-1 space-y-1 text-slate-700">{result.open_questions.map(question=><li key={question}>· {question}</li>)}</ul></div>:null}{result.unsupported_claim_count?<p className="text-amber-800">有 {result.unsupported_claim_count} 条模型结论未通过事实引用校验，已隐藏。</p>:null}<p className="text-[10px] text-slate-500">{execution.label} · {state.data?.model.provider}/{state.data?.model.model||"默认模型"} · 提示词 v{state.data?.model.prompt_version} · {context.label} · {state.data?.disclaimer}</p></div>:null}
   </section>
   <details className="mt-4 border-t border-slate-200 pt-3"><summary className="cursor-pointer text-xs font-semibold text-slate-600">技术证据与原始表达式</summary><dl className="mt-3 space-y-3 text-xs">{lineageTechnicalFacts(edge).map(([labelValue,value])=><div key={labelValue}><dt className="text-slate-500">{labelValue}</dt><dd className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-slate-700">{value||"未登记"}</dd></div>)}<div><dt className="text-slate-500">血缘版本</dt><dd className="mt-1">{revisionId?`固定版本 ID ${revisionId}`:"当前业务映射，无脚本 revision"}</dd></div><div><dt className="text-slate-500">证据</dt>{edge.evidence_refs.length?edge.evidence_refs.map((item,index)=><dd key={index} className="mt-2 rounded bg-slate-50 p-2">{String(item.source_name||item.title||item.type||"绑定依据")}{item.version_no?` · v${item.version_no}`:""}{item.quoted_content?<p className="mt-1 whitespace-pre-wrap">{String(item.quoted_content)}</p>:null}</dd>):<dd className="mt-1">尚未绑定证据</dd>}</div></dl></details>
+  {state.data?.skill_result && <SkillEvidenceLayers key={state.data.skill_result.execution_metadata.run_id} result={state.data.skill_result} projectId={projectId} revisionId={revisionId} regressionInput={state.data.regression_input}/>}
+  {state.data && <button className="mt-3 text-xs font-semibold text-pine-700" onClick={()=>{cache.delete(cacheKey);setAttempt(value=>value+1);}}>按当前绑定重新生成</button>}
  </aside>;
 }
 function reachable(root:string,edges:Relation[],direction:string){

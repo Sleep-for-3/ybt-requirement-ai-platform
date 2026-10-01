@@ -18,6 +18,7 @@ const LONG_RUNNING_PATH_PATTERNS = [
   /\/reindex$/,
   /\/sync$/,
   /\/evaluations\/runs$/,
+  /\/ai-skills\/[^/]+\/test-runs$/,
   /\/runs$/,
   /\/execute$/,
   /\/render$/,

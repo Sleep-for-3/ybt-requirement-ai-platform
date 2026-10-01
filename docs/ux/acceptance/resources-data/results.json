@@ -1,0 +1,16 @@
+{
+  "environment": "Synthetic in-memory full backend, fake extractive model, real Next and installed Chromium",
+  "checks": [
+    "regulatory question / evidence / block highlight / Escape close",
+    "template row detail / two versions / diff / review / activation / apply audit",
+    "knowledge candidate remains inactive / review / atomic activation / current R2 citation",
+    "data field catalog/source/mapping/lineage sections / entity detail",
+    "unknown field has gaps and no invented source",
+    "XLSX grid / DOCX blocks / PDF Blob and original link / keyboard tabs / version reading / Blob cleanup / list query restoration / resources parent",
+    "scan OCR warning / forbidden project original returns generic 404",
+    "390px drawer bounds / keyboard close"
+  ],
+  "pdfLimitation": "Native PDF pixels are not verified by headless Chromium; Blob URL, original link and parsed evidence are verified.",
+  "requestCount": 186,
+  "unexpectedErrors": []
+}

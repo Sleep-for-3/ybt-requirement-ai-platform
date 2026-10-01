@@ -89,14 +89,18 @@ def _permission(method: str, path: str) -> str:
     if "/impacts" in path:
         return "impact.view" if method == "GET" else "impact.review"
     if "/knowledge" in path or "/documents" in path:
-        return "knowledge.search" if method == "GET" or path.endswith(("/search", "/ask")) else "knowledge.manage"
+        return "knowledge.search" if method == "GET" or path.endswith(("/search", "/ask", "/hybrid-search", "/planned-search")) else "knowledge.manage"
+    if "/catalog/columns/" in path and path.endswith("/profile"):
+        return "profile.request"
     if any(part in path for part in ["/datasources", "/metadata-", "/catalog"]):
         return "catalog.search" if method == "GET" or path.endswith("/search") else "catalog.manage"
     if "profile" in path:
         return "profile.request"
     if "scenario-business-mappings" in path or "business-mapping" in path or "scenario_business" in path:
+        if method == "GET": return "project.view"
         return "business.review" if path.endswith(("/confirm", "/reject")) else "business.edit"
     if "scenario-technical-lineages" in path or "technical-lineage" in path or "scenario_technical" in path:
+        if method == "GET": return "project.view"
         return "technical.review" if path.endswith(("/confirm", "/reject")) else "technical.edit"
     if "source-to-mart-mappings" in path or "mart-to-ybt-mappings" in path or "source_to_mart" in path or "mart_to_ybt" in path:
         return "technical.review" if path.endswith(("/approve", "/reject")) else "technical.edit"
