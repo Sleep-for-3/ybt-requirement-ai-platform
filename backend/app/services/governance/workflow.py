@@ -6,6 +6,7 @@ from sqlalchemy import func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AgentTask,
     ImpactAnalysis,
     DeliverablePackage,
     MartToYbtMapping,
@@ -77,6 +78,12 @@ DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
         {"step_key": "technical_review", "task_type": "review", "assignee_role": "technical_reviewer"},
         {"step_key": "final_review", "task_type": "review", "assignee_role": "final_reviewer"},
     ]),
+    # Agent 人工确认节点：Agent 只能暂停并交给人，不能自己确认监管结论。
+    # 采用 project_manager：该角色在 PROJECT_ROLE_PERMISSIONS 中同时持有
+    # task.manage 与全部 review 权限，Agent 再按每个 gate 的具体权限做二次校验。
+    "agent_human_confirmation": ("Agent 人工确认", [
+        {"step_key": "human_confirmation", "task_type": "review", "assignee_role": "project_manager"},
+    ]),
 }
 
 TARGET_MODELS = {
@@ -95,6 +102,7 @@ TARGET_MODELS = {
     "semantic_binding": SemanticBinding,
     "semantic_relation": SemanticRelation,
     "requirement_review_submission": RequirementReviewSubmission,
+    "agent_task": AgentTask,
 }
 
 SEMANTIC_TARGET_TYPES = {"semantic_concept", "semantic_concept_version", "semantic_binding", "semantic_relation"}

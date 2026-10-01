@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
     admin,
+    agent,
     ai_runtime,
     ai_skills,
     auth,
@@ -211,6 +212,9 @@ app.include_router(ai_skills.router, prefix=settings.api_prefix)
 app.include_router(ai_skills.runs_router, prefix=settings.api_prefix)
 app.include_router(governance.router, prefix=settings.api_prefix)
 app.include_router(review_tasks.router, prefix=settings.api_prefix)
+# Agent routes resolve the project from the task and re-check every tool's own
+# permissions per step, so they do not use the shared project guard.
+app.include_router(agent.router, prefix=settings.api_prefix)
 app.include_router(notifications.router, prefix=settings.api_prefix)
 app.include_router(jobs.router, prefix=settings.api_prefix)
 app.include_router(storage_files.router, prefix=settings.api_prefix)
