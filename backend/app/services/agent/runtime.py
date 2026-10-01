@@ -1011,6 +1011,12 @@ def task_snapshot(db, task: AgentTask) -> dict[str, Any]:
             "depends_on": step.depends_on_json, "attempt_count": step.attempt_count,
             "evidence_count": step.evidence_count, "evidence_refs": step.evidence_refs_json,
             "gap_codes": step.gap_codes_json, "summary": summary.get("summary"),
+            # Grounded claims/comparisons are the point of the console: expose them bounded.
+            "claims": (summary.get("claims") or [])[:50],
+            "policy_comparisons": (summary.get("policy_comparisons") or [])[:50],
+            "fact_count": len(summary.get("facts") or []),
+            "policy_evidence_count": len(summary.get("policy_evidence") or []),
+            "edited_payload": summary.get("edited_payload"),
             "model_metadata": summary.get("model_metadata"), "requires_human_confirmation": step.requires_human_confirmation,
             "human_gate_key": step.human_gate_key, "review_task_id": step.review_task_id,
             "error_code": step.error_code, "error_message": step.error_message,

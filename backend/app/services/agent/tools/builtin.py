@@ -9,7 +9,7 @@ import asyncio
 import json
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from app.models import (
     AgentStep,
@@ -42,10 +42,12 @@ from app.services.agent.tools.registry import (
 from app.services.auth.permission_service import PermissionService
 from app.services.lineage.path_resolver import LineagePathResolver, LineagePathNotFound
 from app.services.lineage.semantic_impact import resolve_semantic_impact
+from app.services.lineage.sql_semantic_diff import semantic_changes
 from app.services.llm.execution_metadata import stable_hash
 from app.services.metadata.catalog_service import like_pattern, search_catalog
 from app.services.retrieval.hybrid_retriever import HybridRetriever
 from app.schemas.ai_skill import (
+    SkillClaim,
     SkillEvidence,
     SkillInputEnvelope,
     SkillPolicyComparison,
@@ -710,6 +712,111 @@ def _compare_policy_and_implementation(ctx: ToolContext) -> ToolResult:
     )
 
 
+def _sql_version_text(db, script_file_id: int, version_no: int) -> tuple[str, int | None]:
+    """Concatenated normalized SQL of one script version (statement order)."""
+
+    version = db.scalar(select(ScriptFileVersion).where(
+        ScriptFileVersion.script_file_id == script_file_id,
+        ScriptFileVersion.version_no == version_no,
+    ))
+    if version is None:
+        return "", None
+    statements = list(db.scalars(select(SqlStatement).where(
+        SqlStatement.script_file_version_id == version.id,
+    ).order_by(SqlStatement.statement_index)).all())
+    return "\n".join(item.normalized_sql or "" for item in statements), version.id
+
+
+def _compare_sql_versions(ctx: ToolContext) -> ToolResult:
+    """Interpretation-level change candidates between two SQL versions.
+
+    Never a compliance conclusion: every change is an ``interpretation`` claim that
+    cites the SQL evidence and needs human confirmation.
+    """
+
+    _require(ctx, "lineage.view")
+    scope = project_scope(ctx.task)
+    confidentiality = confidentiality_of(ctx.project)
+    dialect = str(ctx.tool_input.get("dialect") or "")
+    old_sql = ctx.tool_input.get("old_sql")
+    new_sql = ctx.tool_input.get("new_sql")
+    source_id: int | None = None
+    script = None
+
+    if not (isinstance(old_sql, str) and isinstance(new_sql, str)):
+        script_file_id = ctx.tool_input.get("script_file_id")
+        if isinstance(script_file_id, int) and not isinstance(script_file_id, bool):
+            script = ctx.db.get(ScriptFile, script_file_id)
+        else:
+            subject = (ctx.step.input_json or {}).get("subject") or {}
+            code = str(subject.get("target_field_code") or "")
+            candidates = select(ScriptFile).where(ScriptFile.project_id == ctx.project_id)
+            if code:
+                script = ctx.db.scalar(candidates.where(ScriptFile.logical_target_name == code).order_by(ScriptFile.id))
+            script = script or ctx.db.scalar(candidates.order_by(ScriptFile.id))
+        if script is None or script.project_id != ctx.project_id:
+            return ToolResult(
+                status="skipped",
+                gaps=[gap("sql_scope_missing", "当前项目没有可对比的脚本，SQL 语义差异按缺口跳过。").model_dump(mode="json")],
+                output={"semantic_changed": False, "items": []},
+            )
+        current_no = int(script.current_version_no or 1)
+        previous_no = ctx.db.scalar(select(func.max(ScriptFileVersion.version_no)).where(
+            ScriptFileVersion.script_file_id == script.id,
+            ScriptFileVersion.version_no < current_no,
+        ))
+        new_sql, source_id = _sql_version_text(ctx.db, script.id, current_no)
+        if previous_no is None:
+            return ToolResult(
+                status="skipped",
+                gaps=[gap("sql_baseline_missing",
+                          f"脚本 {script.file_name} 没有上一版本可对比，语义差异按缺口跳过。").model_dump(mode="json")],
+                output={"semantic_changed": False, "items": []},
+            )
+        old_sql, _ = _sql_version_text(ctx.db, script.id, int(previous_no))
+
+    if not isinstance(old_sql, str) or not isinstance(new_sql, str) or not old_sql.strip() or not new_sql.strip():
+        return ToolResult(
+            status="skipped",
+            gaps=[gap("sql_baseline_missing", "缺少可比对的 SQL 旧/新版本内容，语义差异按缺口跳过。").model_dump(mode="json")],
+            output={"semantic_changed": False, "items": []},
+        )
+
+    diff = semantic_changes(old_sql, new_sql, dialect=dialect)
+    fact = evidence(
+        evidence_id=f"sql_diff:{stable_hash({'old': old_sql, 'new': new_sql})[:16]}",
+        kind="sql_semantic_diff",
+        value={"categories": diff["categories"], "severity": diff["severity"],
+               "items": diff["items"][:20]},
+        source_type="script_file_version",
+        source_id=source_id or (script.id if script is not None else 0),
+        source_version=stable_hash({"new": new_sql}),
+        locator=(f"script:{script.id}" if script is not None else "sql:inline"),
+        scope=scope,
+        confidentiality=confidentiality,
+    )
+    facts = [fact.model_dump(mode="json")]
+    claims = []
+    for item in diff["semantic_items"]:
+        claim = SkillClaim(claim_type="interpretation", text=item["statement"][:2000],
+                           fact_ids=[fact.id], requires_human_confirmation=True)
+        claims.append(claim.model_dump(mode="json"))
+    gaps = []
+    if not diff["semantic_changed"]:
+        gaps.append(gap("no_semantic_change", "两个版本的 SQL 在语义上无变化（仅格式或注释差异）。").model_dump(mode="json"))
+    return ToolResult(
+        facts=facts,
+        claims=claims,
+        gaps=gaps,
+        evidence_refs=[fact.id],
+        output={"semantic_changed": diff["semantic_changed"], "severity": diff["severity"],
+                "caliber_affecting_count": diff["caliber_affecting_count"],
+                "categories": diff["categories"], "item_count": len(diff["items"]),
+                "items": diff["items"][:20]},
+        step_output={"categories": diff["categories"]},
+    )
+
+
 def register_builtin_tools() -> None:
     register_tool(AgentToolSpec(
         tool_key="search_regulatory_knowledge",
@@ -903,6 +1010,33 @@ def register_builtin_tools() -> None:
         evidence_contract={"fact_kinds": [], "policy_kinds": [], "artifact_types": []},
         audit_fields=("comparison_count", "skill_key"),
         handler=_compare_policy_and_implementation,
+    ))
+    register_tool(AgentToolSpec(
+        tool_key="compare_sql_versions",
+        display_name="SQL 语义差异分析",
+        description="对比同一脚本两个版本的 SQL（WHERE/JOIN/聚合/CASE/来源字段等），输出需人工确认的口径影响候选；不做合规结论。",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "script_file_id": {"type": "integer"},
+                "old_sql": {"type": "string"},
+                "new_sql": {"type": "string"},
+                "dialect": {"type": "string"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object", "properties": {
+            "semantic_changed": {"type": "boolean"}, "item_count": {"type": "integer"}}},
+        required_permissions=frozenset({"lineage.view"}),
+        risk_level="high",
+        timeout_seconds=60,
+        retry_policy={"max_attempts": 1},
+        read_only=True,
+        requires_human_confirmation=True,
+        evidence_contract={"fact_kinds": ["sql_semantic_diff"], "policy_kinds": [], "artifact_types": []},
+        audit_fields=("script_file_id", "dialect"),
+        handler=_compare_sql_versions,
     ))
 
 
