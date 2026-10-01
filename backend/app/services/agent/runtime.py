@@ -419,6 +419,11 @@ def _next_runnable_step(db, task: AgentTask) -> AgentStep | None:
             continue
         if step.step_key in done_keys:
             continue
+        if step.status == sm.STEP_RUNNING and _completed_call(db, step) is not None:
+            # A previous run died after the tool call but before the status update: recover the
+            # step from the recorded call instead of running the same side effect twice.
+            _recover_interrupted_step(db, task, step)
+            continue
         evaluation = deps.evaluate_dependencies(
             step.depends_on_json or [], step.optional_depends_on_json or [], states,
         )
@@ -458,6 +463,31 @@ def _model_execution(result: ToolResult) -> dict[str, Any]:
         "degraded_path": None if executed else degraded,
         "reason": None if executed else (degraded or "deterministic_path"),
     }
+
+
+def _completed_call(db, step: AgentStep) -> AgentToolCall | None:
+    return db.scalar(select(AgentToolCall).where(
+        AgentToolCall.step_id == step.id, AgentToolCall.status == "completed",
+    ).order_by(AgentToolCall.id.desc()))
+
+
+def _recover_interrupted_step(db, task: AgentTask, step: AgentStep) -> None:
+    """Crash recovery: finish the step from its recorded tool call, never re-execute it."""
+
+    call = _completed_call(db, step)
+    if call is None:
+        return
+    _transition_step(step, sm.STEP_COMPLETED)
+    step.attempt_count = max(int(step.attempt_count or 0), int(call.attempt or 0))
+    summary = dict(step.output_summary_json or {})
+    summary["recovered_after_interruption"] = {"tool_call_id": call.id, "attempt": call.attempt}
+    step.output_summary_json = summary
+    record_audit(
+        db, action="agent_step_recovered", resource_type="agent_step", resource_id=step.id,
+        actor_user_id=task.created_by, institution_id=task.institution_id, project_id=task.project_id,
+        after={"step_key": step.step_key, "tool_call_id": call.id},
+    )
+    db.commit()
 
 
 def _store_dependency_evaluation(step: AgentStep, evaluation: deps.DependencyEvaluation) -> None:
