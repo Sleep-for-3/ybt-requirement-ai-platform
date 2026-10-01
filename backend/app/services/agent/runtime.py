@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
@@ -76,6 +76,8 @@ AGENT_JOB_TYPE = "agent_task_run"
 AGENT_HUMAN_WORKFLOW_KEY = "agent_human_confirmation"
 AGENT_TARGET_TYPE = "agent_task"
 MAX_REPLANS_PER_TASK = 3
+# How long one run may hold the task lease before another worker may take over.
+TASK_RUN_LEASE_SECONDS = 900
 RUN_PERMISSION = "task.manage"
 READ_PERMISSION = "project.view"
 DEFAULT_GATE_PERMISSION = "final.review"
@@ -646,8 +648,12 @@ def run_agent_task(db, job: BackgroundJob) -> dict:
     if task is None:
         return {"success_count": 0, "failed_count": 1, "error": "agent task not found for job"}
     actor = recover_queued_actor(db, job.created_by)
+    if not _claim_task_run(db, task.id):
+        # A duplicate consumer (second worker, retried job) must not execute steps again.
+        return {"success_count": 1, "failed_count": 0,
+                "task_status": db.get(AgentTask, task.id).status, "skipped": "run_lease_held"}
     try:
-        return asyncio.run(_run_task(db, task, actor, job))
+        result = asyncio.run(_run_task(db, task, actor, job))
     except HTTPException as exc:
         db.rollback()
         task = db.get(AgentTask, task.id)
@@ -655,7 +661,31 @@ def run_agent_task(db, job: BackgroundJob) -> dict:
         task.error_message = str(exc.detail)[:2000]
         _refresh_task_status(db, task)
         db.commit()
-        return {"success_count": 0, "failed_count": 1, "error": str(exc.detail)[:500]}
+        result = {"success_count": 0, "failed_count": 1, "error": str(exc.detail)[:500]}
+    _release_task_run(db, task.id)
+    return result
+
+
+def _claim_task_run(db, task_id: int) -> bool:
+    """Atomic single-runner lease: one task is advanced by at most one worker at a time."""
+
+    now = _now()
+    claimed = db.execute(
+        update(AgentTask).where(
+            AgentTask.id == task_id,
+            or_(AgentTask.run_lease_until.is_(None), AgentTask.run_lease_until < now),
+        ).values(run_lease_until=now + timedelta(seconds=TASK_RUN_LEASE_SECONDS))
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    db.commit()
+    return bool(claimed)
+
+
+def _release_task_run(db, task_id: int) -> None:
+    task = db.get(AgentTask, task_id)
+    if task is not None:
+        task.run_lease_until = None
+        db.commit()
 
 
 async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | None) -> dict:
