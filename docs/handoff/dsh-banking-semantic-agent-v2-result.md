@@ -1,7 +1,7 @@
 # Banking Semantic Agent V2 — 开发与验收记录
 
 分支：`dsh/banking-semantic-agent-v2`（基于 `dsh/agent-orchestrator-v1 @ fb04b81`）
-状态：**进行中**（Phase 1–7、9、10 已完成；待做 8、11 与前端浏览器验收）
+状态：**接近完成**（Phase 1–10 完成；Phase 11 的并发保证已完成，剩崩溃点/事务/Budget；待整体验收）
 
 本文件按阶段持续更新：完成阶段 / 架构 / 新增模型 / 新增 API / Tool Registry / Scenario /
 Evaluation / Test Results / Live Acceptance / Git Commit / 已知限制 / 下一阶段。
@@ -20,10 +20,10 @@ Evaluation / Test Results / Live Acceptance / Git Commit / 已知限制 / 下一
 | 5 | SQL Change Event Agent（semantic_hash + 去重 + 自动 Task + 导入触发 + API） | ✅ 完成 | `9778b69` |
 | 6 | SQL Semantic Diff V2（semantic_fact + interpretation，29/39 族可检，10 族显式标注不支持） | ✅ 完成 | `b489ddb` |
 | 7 | Role-based Human Gate（review_policy single/all/any + 权限跟随角色 + 双人批准） | ✅ 完成 | `b805b83` `2ebb264` |
-| 8 | 真实模型 Skill 链路与降级可见性 | ⏳ |
+| 8 | 真实模型执行可见性（每步 model_execution：executed/model_name/degraded_path/reason） | ✅ 完成（真实内网模型链路待环境验证） | `5bf2851` |
 | 9 | Agent Evaluation V2 指标（21 项，无分母返回 null） | ✅ 完成 | `7a0c76e` |
 | 10 | Agent Workspace V2（Scenario/Subject/Adaptive/证据六分类/Decision Memory/SQL Change） | ✅ 代码完成（构建通过；浏览器验收待做） | `e24e072` |
-| 11 | 并发/重启/幂等/事务边界/Context Budget | ⏳ | |
+| 11 | 单执行者租约（并发/重复消费者）已完成；崩溃点幂等/事务/Context Budget 待续 | 部分完成 | `e139fc9` |
 
 ## 2. 架构（V2 增量，不推倒 V1）
 
