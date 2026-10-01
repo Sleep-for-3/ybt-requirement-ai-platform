@@ -977,6 +977,10 @@ def register_builtin_tools() -> None:
                 "title": {"type": "string"},
                 "required_permission": {"type": "string"},
                 "summary": {"type": "object"},
+                # Subject clarification carries the ranked candidates a human must choose from.
+                "resolution_status": {"type": "string"},
+                "rationale": {"type": "string"},
+                "candidates": {"type": "array"},
             },
             "additionalProperties": False,
         },

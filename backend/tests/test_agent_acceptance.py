@@ -159,6 +159,13 @@ def test_project_without_a_governed_clause_cannot_produce_a_document(db_session)
                     project_status="active", confidentiality_level="internal")
     db_session.add(empty)
     db_session.flush()
+    from app.models import TargetField, TargetTable
+    table = TargetTable(project_id=empty.id, table_code="YBT_FT", table_name="福费廷报送表")
+    db_session.add(table)
+    db_session.flush()
+    db_session.add(TargetField(project_id=empty.id, target_table_id=table.id,
+                               field_code="FT_BAL", field_name="福费廷余额"))
+    db_session.flush()
     from app.models import ProjectMembership
     db_session.add(ProjectMembership(project_id=empty.id, user_id=ids["user_id"],
                                      project_role="project_manager", status="active"))
@@ -174,4 +181,46 @@ def test_project_without_a_governed_clause_cannot_produce_a_document(db_session)
     assert "requirement_document" not in _artifacts(db_session, task)
     gaps = runtime.task_snapshot(db_session, task)["gaps"]
     codes = {item.get("code") for item in gaps}
-    assert "missing_basis" in codes
+    # V2 dependency semantics: the comparison cannot run on evidence that was skipped, so the
+    # run is blocked by the missing basis or by the dependency gap that records it.
+    assert codes & {"missing_basis", "dependency_gap"}, codes
+    assert not any(step["policy_evidence_count"]
+                   for step in runtime.task_snapshot(db_session, task)["steps"]), \
+        "no project without a governed clause may report policy evidence"
+
+
+def test_an_unresolvable_subject_asks_a_human_instead_of_guessing(db_session) -> None:
+    """V2: an objective the agent cannot map to a field must become a clarification gate."""
+
+    ids = seed_agent_acceptance(db_session)
+    empty = Project(name="主体歧义验收项目", institution_id=ids["institution_id"],
+                    project_status="active", confidentiality_level="internal")
+    db_session.add(empty)
+    db_session.flush()
+    from app.models import ProjectMembership, TargetField, TargetTable
+    db_session.add(ProjectMembership(project_id=empty.id, user_id=ids["user_id"],
+                                     project_role="project_manager", status="active"))
+    table = TargetTable(project_id=empty.id, table_code="YBT_BAL", table_name="余额报送表")
+    db_session.add(table)
+    db_session.flush()
+    for code, name in (("ACCT_BAL", "账户余额"), ("LOAN_BAL", "贷款余额"), ("CREDIT_BAL", "授信余额")):
+        db_session.add(TargetField(project_id=empty.id, target_table_id=table.id,
+                                   field_code=code, field_name=name))
+    db_session.commit()
+    principal = Principal(ids["user_id"], ids["username"], "Agent 验收用户")
+
+    task = runtime.create_task(db_session, principal, empty, "分析余额字段")
+    job = runtime.submit_task(db_session, empty, principal, task)
+    runtime.run_agent_task(db_session, job)
+    db_session.refresh(task)
+
+    assert task.status == sm.TASK_WAITING_HUMAN, "an ambiguous subject must pause for a human"
+    summary = task.result_summary_json or {}
+    resolution = summary.get("subject_resolution") or {}
+    assert resolution.get("status") == "ambiguous"
+    assert summary.get("subject") == {}, "no field may be silently selected"
+    snapshot = runtime.task_snapshot(db_session, task)
+    gate = next(step for step in snapshot["steps"] if step["status"] == sm.STEP_WAITING_HUMAN)
+    assert gate["step_key"] == "clarify_subject"
+    candidates = {item["target_field_code"] for item in gate["input"]["candidates"]}
+    assert {"ACCT_BAL", "LOAN_BAL", "CREDIT_BAL"} <= candidates

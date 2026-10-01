@@ -43,8 +43,11 @@ from app.services.agent.planner import (
     detect_scenario,
     deterministic_plan,
     plan_hash,
+    prepend_clarification,
     resolve_subject,
+    scenario_requires_subject,
     validate_plan_draft,
+    SUBJECT_CLARIFICATION_GATE,
     MAX_PLAN_STEPS,
 )
 from app.services.agent.tools.registry import (
@@ -203,7 +206,10 @@ def create_task(
     if len(text) < 4:
         raise HTTPException(status_code=422, detail={"error_code": "objective_too_short"})
     scenario = scenario_key or detect_scenario(text)
-    subject = resolve_subject(db, project, text)
+    from app.services.agent.subject import resolve_subject_v2
+
+    resolution = resolve_subject_v2(db, project, text)
+    subject = dict(resolution.subject)
     task = AgentTask(
         institution_id=project.institution_id,
         project_id=project.id,
@@ -214,12 +220,15 @@ def create_task(
         plan_version=1,
         max_retries=max_retries,
         created_by=int(principal.user_id or 0),
-        result_summary_json={"subject": subject},
+        result_summary_json={"subject": subject, "subject_resolution": resolution.as_dict()},
     )
     db.add(task)
     db.flush()
 
     draft = deterministic_plan(text, scenario_key=scenario, subject=subject)
+    if not resolution.resolved and scenario_requires_subject(scenario):
+        # Never analyse a guessed field: ask the human which field the objective means.
+        draft = prepend_clarification(draft, resolution)
     planner_source, degraded_reason = "deterministic", None
     validation_errors: list[str] = []
     planner_attempts = 1
@@ -249,6 +258,46 @@ def create_task(
     db.commit()
     db.refresh(task)
     return task
+
+
+def _clarification_gate(step: AgentStep) -> bool:
+    return str((step.input_json or {}).get("gate_key") or "") == SUBJECT_CLARIFICATION_GATE
+
+
+def _chosen_target_field(db, task: AgentTask, payload: dict[str, Any] | None):
+    """Resolve the human's subject choice from a decision payload (id or code)."""
+
+    from app.models import TargetField
+
+    payload = payload or {}
+    field_id = payload.get("target_field_id")
+    field_code = payload.get("target_field_code")
+    query = select(TargetField).where(TargetField.project_id == task.project_id)
+    if isinstance(field_id, int) and not isinstance(field_id, bool):
+        return db.scalar(query.where(TargetField.id == field_id))
+    if isinstance(field_code, str) and field_code.strip():
+        return db.scalar(query.where(TargetField.field_code == field_code.strip()))
+    return None
+
+
+def _apply_subject_choice(db, task: AgentTask, field, principal: Principal) -> None:
+    """Persist the human-confirmed subject and let the plan be rebuilt for it."""
+
+    summary = dict(task.result_summary_json or {})
+    resolution = dict(summary.get("subject_resolution") or {})
+    resolution.update({
+        "status": "resolved",
+        "confidence": 1.0,
+        "rationale": f"人工选择分析对象：{field.field_name}（{field.field_code}）",
+        "selected_by": int(principal.user_id or 0),
+    })
+    summary["subject"] = {
+        "target_field_id": field.id, "target_field_code": field.field_code,
+        "target_field_name": field.field_name, "target_table_id": field.target_table_id,
+        "resolution": "human_clarified",
+    }
+    summary["subject_resolution"] = resolution
+    task.result_summary_json = summary
 
 
 def materialize_plan(
@@ -513,6 +562,9 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
                 "current_step": step_key,
             }
     task = db.get(AgentTask, task.id)
+    # Nothing is runnable any more: settle every step that can never run on this path so a
+    # task never lingers in `running` with unreachable pending steps.
+    _settle_dependent_steps(db, task)
     _refresh_task_status(db, task)
     paused = any(step.status == sm.STEP_WAITING_HUMAN for step in
                  db.scalars(select(AgentStep).where(AgentStep.task_id == task.id)).all())
@@ -905,6 +957,18 @@ def decide(
     if step.status != sm.STEP_WAITING_HUMAN:
         raise HTTPException(status_code=409, detail={"error_code": "step_not_waiting_human"})
     gate_permission = str((step.input_json or {}).get("required_permission") or DEFAULT_GATE_PERMISSION)
+    clarification = _clarification_gate(step)
+    chosen_field = None
+    if clarification and decision in {sm.DECISION_APPROVE, sm.DECISION_EDIT_AND_APPROVE}:
+        chosen_field = _chosen_target_field(db, task, edited_payload)
+        if chosen_field is None:
+            raise HTTPException(status_code=422, detail={
+                "error_code": "clarification_requires_choice",
+                "message": "请在 edited_payload 中给出 target_field_id 或 target_field_code。",
+                "candidates": (step.input_json or {}).get("candidates") or [],
+            })
+    if chosen_field is not None:
+        _apply_subject_choice(db, task, chosen_field, principal)
     PermissionService(db, principal).require_project_permission(task.project_id, gate_permission)
 
     review_task = _latest_review_task(db, task, step)
@@ -942,6 +1006,12 @@ def decide(
             artifact.status = "confirmed"
             artifact.confirmed_by = principal.user_id
             artifact.confirmed_at = _now()
+        if clarification:
+            # The human picked the subject: rebuild the plan for the chosen field and continue.
+            replan(db, task, reason_code="subject_clarified")
+            db.commit()
+            db.refresh(task)
+            return task_snapshot(db, task)
     elif decision == sm.DECISION_REJECT:
         _transition_step(step, sm.STEP_BLOCKED)
         step.error_code = "human_rejected"
@@ -1098,6 +1168,7 @@ def task_snapshot(db, task: AgentTask) -> dict[str, Any]:
             "id": step.id, "step_key": step.step_key, "plan_id": step.plan_id, "order_index": step.order_index,
             "tool_key": step.tool_key, "reason": step.reason, "status": step.status, "required": step.required,
             "depends_on": step.depends_on_json, "optional_depends_on": step.optional_depends_on_json,
+            "input": redact_summary(step.input_json or {}), "input_hash": step.input_hash,
             "dependency_evaluation": summary.get("dependency_evaluation"),
             "attempt_count": step.attempt_count,
             "evidence_count": step.evidence_count, "evidence_refs": step.evidence_refs_json,

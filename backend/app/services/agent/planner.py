@@ -34,6 +34,14 @@ PLANNER_SAFETY_PROMPT = (
 )
 MAX_PLAN_STEPS = 24
 
+from app.services.agent.scenarios import (  # noqa: E402  (kept below the constants on purpose)
+    SCENARIO_MAPPING_RESOLUTION,
+    SCENARIO_REQUIREMENT_GENERATION,
+    SCENARIO_SQL_CHANGE_IMPACT,
+    route_scenario,
+    scenario_requires_subject,
+)
+
 SCENARIO_REGULATORY_FIELD_ANALYSIS = "regulatory_field_analysis"
 DEFAULT_SCENARIO = SCENARIO_REGULATORY_FIELD_ANALYSIS
 
@@ -80,11 +88,9 @@ class PlanDraft(ContractModel):
 
 
 def detect_scenario(objective: str) -> str:
-    text = (objective or "").strip()
-    for scenario_key, keywords in SCENARIO_KEYWORDS.items():
-        if any(keyword in text for keyword in keywords):
-            return scenario_key
-    return DEFAULT_SCENARIO
+    """Scenario key for an objective (Stage A router; LLM classification is opt-in)."""
+
+    return route_scenario(objective).scenario_key
 
 
 class PlanValidationIssue(ContractModel):
@@ -232,6 +238,35 @@ def _dependency_cycle_issues(draft: PlanDraft) -> list[PlanValidationIssue]:
     return issues
 
 
+SUBJECT_CLARIFICATION_GATE = "subject_clarification"
+
+
+def clarification_step(resolution) -> PlannedStep:
+    """A real human gate that asks which target field the objective means."""
+
+    return PlannedStep(
+        step_key="clarify_subject", tool_key="request_human_confirmation",
+        reason="目标字段无法唯一确定，必须由人工确认分析对象后才能继续。",
+        depends_on=[], required=True,
+        input={
+            "gate_key": SUBJECT_CLARIFICATION_GATE,
+            "title": "确认分析对象（目标字段）",
+            "required_permission": "final.review",
+            "resolution_status": resolution.status,
+            "rationale": resolution.rationale,
+            "candidates": resolution.candidate_payload(),
+        },
+    )
+
+
+def prepend_clarification(draft: PlanDraft, resolution) -> PlanDraft:
+    """Put the clarification gate in front of an otherwise unusable plan."""
+
+    if any(step.step_key == "clarify_subject" for step in draft.steps):
+        return draft
+    return draft.model_copy(update={"steps": [clarification_step(resolution), *draft.steps]})
+
+
 def validate_plan_draft(draft: PlanDraft, *, permitted: frozenset[str] | None = None) -> list[str]:
     """Registry + governance validation applied to any plan, LLM or deterministic."""
 
@@ -331,7 +366,70 @@ DETERMINISTIC_PLANS: dict[str, list[dict[str, Any]]] = {
          "reason": "输出缺口、冲突与缺失依据清单，明确不确定项。",
          "depends_on": ["summarize_evidence"], "input": {}},
     ],
+    SCENARIO_SQL_CHANGE_IMPACT: [
+        {"step_key": "compare_versions", "tool_key": "compare_sql_versions",
+         "reason": "先判定脚本最近一次版本变化是否属于语义变化；非语义变化不应触发影响分析。",
+         "depends_on": [], "input": {}},
+        {"step_key": "inspect_sql", "tool_key": "inspect_sql_rule",
+         "reason": "读取当前版本的实现事实（过滤、聚合、关联）。",
+         "depends_on": ["compare_versions"], "input": {"limit": 5}},
+        {"step_key": "query_lineage", "tool_key": "get_lineage",
+         "reason": "取变更字段的血缘路径，确认影响链路。",
+         "depends_on": ["inspect_sql"], "input": {"direction": "both", "depth": 3}},
+        {"step_key": "analyze_impact", "tool_key": "analyze_lineage_impact",
+         "reason": "评估变更对下游语义绑定、概念与需求的影响范围。",
+         "depends_on": ["query_lineage"], "input": {}},
+        {"step_key": "search_metadata", "tool_key": "search_metadata",
+         "reason": "定位受影响的集市与目标字段元数据。",
+         "depends_on": ["analyze_impact"], "input": {"top_k": 20}},
+        {"step_key": "search_policy", "tool_key": "search_regulatory_knowledge",
+         "reason": "取该口径相关的监管条款依据。",
+         "depends_on": [], "input": {"top_k": 10, "retrieval_mode": "hybrid"}},
+        {"step_key": "compare_policy", "tool_key": "compare_policy_and_implementation",
+         "reason": "对比监管要求与变更后实现，输出待人工确认的口径影响结论。",
+         "depends_on": ["search_policy", "inspect_sql"], "input": {}},
+        {"step_key": "summarize_evidence", "tool_key": "summarize_evidence",
+         "reason": "汇总 SQL 变更影响证据。",
+         "depends_on": ["compare_policy", "search_metadata"], "input": {}},
+        {"step_key": "create_gap_report", "tool_key": "create_gap_report",
+         "reason": "输出影响分析缺口与需人工确认项。",
+         "depends_on": ["summarize_evidence"], "input": {}},
+    ],
+    SCENARIO_MAPPING_RESOLUTION: [
+        {"step_key": "search_metadata", "tool_key": "search_metadata",
+         "reason": "在数据目录中定位候选来源字段与目标字段元数据。",
+         "depends_on": [], "input": {"top_k": 20}},
+        {"step_key": "recall_candidates", "tool_key": "recall_field_candidates",
+         "reason": "召回该监管字段的候选来源字段。",
+         "depends_on": ["search_metadata"], "input": {}},
+        {"step_key": "rerank_candidates", "tool_key": "rerank_field_candidates",
+         "reason": "按语义重排候选来源字段，形成推荐顺序。",
+         "depends_on": ["recall_candidates"], "input": {"top_k": 10}},
+        {"step_key": "query_lineage", "tool_key": "get_lineage",
+         "reason": "确认已有血缘路径，避免推荐与既有实现冲突。",
+         "depends_on": ["search_metadata"], "input": {"direction": "upstream", "depth": 3}},
+        {"step_key": "inspect_sql", "tool_key": "inspect_sql_rule",
+         "reason": "读取当前 SQL 实现，确认字段实际取值来源。",
+         "depends_on": ["search_metadata"], "input": {"limit": 5}},
+        {"step_key": "prepare_mapping", "tool_key": "prepare_field_candidate",
+         "reason": "把最佳候选来源字段准备成待人工确认的映射建议（不写映射）。",
+         "depends_on": ["rerank_candidates", "inspect_sql"], "input": {}},
+        {"step_key": "confirm_mapping", "tool_key": "request_human_confirmation",
+         "reason": "映射建议必须人工确认后才可进入业务口径。",
+         "depends_on": ["prepare_mapping"],
+         "input": {"gate_key": "mapping_recommendation_adoption", "title": "确认字段映射建议",
+                   "required_permission": "final.review"}},
+        {"step_key": "summarize_evidence", "tool_key": "summarize_evidence",
+         "reason": "汇总映射候选证据与历史依据。",
+         "depends_on": ["confirm_mapping"], "input": {}},
+        {"step_key": "create_gap_report", "tool_key": "create_gap_report",
+         "reason": "输出映射缺口与冲突清单。",
+         "depends_on": ["summarize_evidence"], "input": {}},
+    ],
 }
+
+# 需求生成复用同一条受治理链路（含需求候选→人工确认→文档），保持单一事实源。
+DETERMINISTIC_PLANS[SCENARIO_REQUIREMENT_GENERATION] = DETERMINISTIC_PLANS[SCENARIO_REGULATORY_FIELD_ANALYSIS]
 
 
 def deterministic_plan(objective: str, *, scenario_key: str, subject: dict[str, Any]) -> PlanDraft:
