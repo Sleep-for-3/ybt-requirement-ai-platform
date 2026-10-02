@@ -738,6 +738,22 @@ def run_agent_task(db, job: BackgroundJob) -> dict:
         _refresh_task_status(db, task)
         db.commit()
         result = {"success_count": 0, "failed_count": 1, "error": str(exc.detail)[:500]}
+    except Exception as exc:  # noqa: BLE001
+        # A planner/model/validation failure must never leave the task running with the lease
+        # held: record the reason, settle the task, and let the lease be released below.
+        db.rollback()
+        task = db.get(AgentTask, task.id)
+        task.error_code = "agent_run_failed"
+        task.error_message = f"{type(exc).__name__}: {exc}"[:2000]
+        summary = dict(task.result_summary_json or {})
+        summary["halt_reason"] = {"code": "run_failed", "error_type": type(exc).__name__,
+                                 "message": str(exc)[:500]}
+        task.result_summary_json = summary
+        _settle_dependent_steps(db, task)
+        _refresh_task_status(db, task)
+        db.commit()
+        result = {"success_count": 0, "failed_count": 1,
+                  "error": f"{type(exc).__name__}: {exc}"[:500]}
     _release_task_run(db, task.id)
     return result
 
