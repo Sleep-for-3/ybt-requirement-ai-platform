@@ -205,7 +205,9 @@ def test_observer_patch_is_applied_during_the_run(monkeypatch, scope):
     assert statuses.get("s2") == sm.STEP_COMPLETED, "the observer's added step must run"
     plan = db.query(AgentPlan).filter_by(task_id=task.id).order_by(AgentPlan.version_no.desc()).first()
     assert plan.planner_source == "observe_replan"
-    assert (task.result_summary_json or {})["observations"][-1]["applied"] is True
+    observations = (task.result_summary_json or {})["observations"]
+    assert any(item.get("applied") for item in observations), "the applied patch must be recorded"
+    assert task.replanning_count >= 1, "a rejected patch must consume the replan budget"
 
 
 def test_non_adaptive_task_never_observes(monkeypatch, scope):

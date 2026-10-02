@@ -688,18 +688,29 @@ async def _maybe_observe(db, task: AgentTask, project: Project, actor: Principal
     digest = observation_digest(state)
     from app.services.agent.planner import plan_patch_with_llm
 
-    patch, metadata, degraded = await plan_patch_with_llm(
-        db, project, state=state, digest=digest,
-        confidentiality=_project_confidentiality(project), permitted=permissions,
-    )
-    if patch is None or not patch.ops:
+    try:
+        patch, metadata, degraded = await plan_patch_with_llm(
+            db, project, state=state, digest=digest,
+            confidentiality=_project_confidentiality(project), permitted=permissions,
+        )
+        if patch is None or not patch.ops:
+            record_observation(db, task, applied=False,
+                               rationale=(patch.rationale if patch else ""),
+                               degraded=degraded,
+                               codes=list((metadata or {}).get("plan_patch_codes") or []))
+            return False
+        plan = apply_plan_patch(db, task, patch)
+        return plan is not None
+    except Exception as exc:  # noqa: BLE001
+        # A rejected or unparsable patch must never abort the run, and it must consume budget:
+        # otherwise the model is asked again after every single subsequent step.
+        db.rollback()
+        task = db.get(AgentTask, task.id)
+        task.replanning_count = int(task.replanning_count or 0) + 1
         record_observation(db, task, applied=False,
-                           rationale=(patch.rationale if patch else ""),
-                           degraded=degraded,
-                           codes=list((metadata or {}).get("plan_patch_codes") or []))
+                           rationale=f"{type(exc).__name__}: {exc}"[:300],
+                           degraded="plan_patch_invalid", codes=["plan_patch_rejected"])
         return False
-    plan = apply_plan_patch(db, task, patch)
-    return plan is not None
 
 def _job_cancelled(db, job: BackgroundJob | None) -> bool:
     if job is None:

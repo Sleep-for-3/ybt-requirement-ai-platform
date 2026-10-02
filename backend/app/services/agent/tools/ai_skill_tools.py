@@ -48,6 +48,9 @@ from app.services.ai_skills.document_context import DocumentCandidate
 from app.services.ai_skills.field_candidates import recall_fields
 from app.services.ai_skills.field_rerank import rerank_fields
 from app.services.ai_skills.runtime import FIELD_RERANK_TASK, execute_skill, resolve_skill
+
+# Task keys the agent chain resolves through the skill registry when the plan omits one.
+REQUIREMENT_CANDIDATE_TASK = "requirement_candidate_generation"
 from app.services.auth.permission_service import PermissionService
 from app.services.llm.execution_metadata import stable_hash
 from app.services.mapping.generator_context import (
@@ -888,7 +891,9 @@ def _generate_requirement_candidate(ctx: ToolContext) -> ToolResult:
     _require(ctx, "deliverable.generate")
     scope = project_scope(ctx.task)
     confidentiality = confidentiality_of(ctx.project)
-    skill_key = _skill_key(ctx.tool_input.get("skill_key"))
+    # The published skill for this task is resolved through its binding; the plan may still
+    # override it explicitly, but an absent override must not skip the skill.
+    skill_key = _skill_key(ctx.tool_input.get("skill_key")) or REQUIREMENT_CANDIDATE_TASK
 
     facts, policy, contract_gaps, excluded = _collect_task_evidence(ctx)
     gaps: list[SkillGap] = list(contract_gaps)
