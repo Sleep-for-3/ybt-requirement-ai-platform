@@ -153,7 +153,14 @@ def _step_gap(step: AgentStep, code: str, message: str) -> None:
 
 
 def _refresh_task_status(db, task: AgentTask) -> None:
-    steps = list(db.scalars(select(AgentStep).where(AgentStep.task_id == task.id)).all())
+    rows = list(db.scalars(select(AgentStep).where(AgentStep.task_id == task.id)
+                          .order_by(AgentStep.id)).all())
+    # A replan adds new rows for the same step keys: only the newest row per key describes
+    # the live plan, otherwise a superseded row keeps the task from ever completing.
+    latest: dict[str, AgentStep] = {}
+    for row in rows:
+        latest[row.step_key] = row
+    steps = list(latest.values())
     statuses = [step.status for step in steps]
     derived = sm.derive_task_status(statuses)
     counts = sm.step_counts(statuses)
