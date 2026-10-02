@@ -142,3 +142,40 @@
 3. 跑完整 `regulatory_field_analysis` 并逐步校验 `model_execution.executed=true`（记录
    model_name/provider/skill_version/run_id/input hash/citations/latency/degraded_reason）；
 4. 补 4 组自主性场景与 Agent 级业务质量评测集。
+
+## 11. Round 5-6 —— 主链跑到第一个真实模型步骤（并修掉 3 个阻断缺陷）
+
+真实 15 步主链（project 11，task 7）实测轨迹：
+
+```
+search_policy completed → search_metadata completed(gap metadata_not_found)
+→ recall completed → rerank completed(executed=False, 只有 1 个候选)
+→ inspect_sql → query_lineage → analyze_impact → compare_policy ⛔ 人工 Gate
+→ （人工批准）prepare_mapping → generate_mapping_draft ✅ executed=True deepseek-v4-flash
+→ generate_requirement_candidate ⛔ Gate（此前 executed=False/ deterministic_draft）
+```
+
+**里程碑**：`generate_mapping_draft` 产生 Agent 链中**第一个 `model_execution.executed=true`**（model=deepseek-v4-flash，无 degraded）。
+
+**本轮前两个提交修掉的阻断缺陷**：
+
+1. `61094df`：运行失败（如 pydantic ValidationError）只捕获 HTTPException → 任务永久 `running`、
+   步骤永久 `pending`、**租约不释放**（后续全部 `skipped=run_lease_held`）。现在任何异常都记录
+   `error_code/agent_run_failed`、写 `halt_reason`、结算下游步骤、刷新状态并释放租约。
+2. `d722e37`（三处）：
+   - 观察器在被拒补丁（`s2 already exists in the plan`）上抛异常且**不计重规划预算** → 每完成一步就再问一次模型；
+     现在拒绝/不可解析的补丁记录 `plan_patch_invalid` 并计入 `MAX_REPLANS_PER_TASK`；
+   - Planner 安全提示词新增约束：`depends_on` 只能引用自己声明过的 step_key（就是模型编造
+     `search_metadata_by_code` 的根源）；
+   - `generate_requirement_candidate` 在计划未带 `skill_key` 时直接降级，**即使 Skill 已发布绑定**；
+     现在回退到 `requirement_candidate_generation` 任务键，由绑定决定是否模型型。
+
+回归：agent 全量 **189 passed**。
+
+## 12. 下一步（已验证可继续的具体动作）
+
+1. 直接重跑 task 7 的剩余步骤（先批准 mapping gate），验证 `generate_requirement_candidate` 是否变为
+   `executed=true`（skill v2 已发布+绑定，且工具已改为按任务键解析）；
+2. 向 project 11 补 ≥2 个目录候选，让 `rerank_candidates` 真正走模型（而不是 1 候选短路）；
+3. 建 `requirement_document_assistance` skill（同法）；
+4. 4 组自主性场景 + Agent 级业务质量评测集。
