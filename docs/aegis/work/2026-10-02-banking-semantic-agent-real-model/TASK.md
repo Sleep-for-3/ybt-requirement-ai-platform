@@ -104,3 +104,41 @@
 2. 查 `ModelCallLog` 看这次 18.8s 调用的**真实 provider 响应**，判定 `execution_kind` 为何不是 `real_model`
    （是模型调用失败、响应不合 schema，还是 prompt 输出为空）→ 修 Prompt/schema 后重跑评测 →
    `submit` → 独立用户 `publish` → 绑定 → `enqueue` 生成作业验真实模型候选。
+
+## 9. Round 4 —— 真实模型链路打通（关键里程碑）
+
+**根因（真凭实据）**：`ModelProfile 4` 的 `config_json.max_output_tokens=2048` + `max_context_tokens=8192`
+导致模型输出被截断：三次调用 completion_tokens = 4065 / 2392 / 2770 全超 2048 → `invalid_model_response`
+（`http_status=200`，即模型回了但 JSON 不完整）。
+修复：`max_output_tokens=4096`、`max_context_tokens=32768`、`timeout_seconds=120` → 预算 limit 从 5632 升到 **28160**。
+
+**发布门禁完整跑通（治理链路全部生效）**：
+
+- 要求**两个通过态运行**（内容 hash / 依赖 hash / 用例快照均须一致）：
+  - `RUN 33`：`deterministic`，`passed 4 / skipped 3`
+  - `RUN 32`：`real_model`，`passed 4`，**`real_model_successes: 4`**
+- `releases.submit` → `pending_approval`（第一次真正通过门禁）
+- `releases.publish` → **由另一用户完成审批**（`approved_by=26 dsh_handoff_admin_20260930`；
+  创建者是 1 `smoke_admin`，满足 `independent_approval_required` 约束）；`expected_binding_lock` 用于并发保护
+- 绑定 `project:5:11` 现指向已发布版本 11（`requirement_candidate_generation` v2）
+
+**真实模型产物证据**（`ModelCallLog`，持久化）：
+
+- 日志 473/474/475：`status=success`、`execution_kind=real_model`、`model_name=deepseek-v4-flash`、
+  `skill_version=v2`、latency 15.2s / 15.6s / **7.6s**、completion_tokens 3591 / 3553 / 1552
+- 模型产出的 claims 引用真实证据 id（`requirement-input:1`），无编造 policy 引用（`policy_clause_ids: []`），
+  证据不足时写入 gaps（`missing_basis` / `missing_business_definition` / `missing_physical_source`）
+- 用例断言：`schema / scope / budget / unknown_reference_rejected / native_unknown_reference_rejected /
+  model_output_valid / minimum_claims / required_gaps` 全 ✓
+
+**另：平台早就存在真实模型成功的 Skill 调用**：`scenario_business_mapping`（记 mapping 任务族）在 2026-10-02 00:49/01:03
+两次 `status=success`、`execution_kind=real_model`、latency 2.49s、带 citations —— 说明映射线已具备真实模型能力，
+不需重建（下一轮直接验证其在 Agent 主链中的 `executed=true` 即可）。
+
+## 10. 下一步
+
+1. 同法处理 `requirement_document_assistance`（prompt/schema/用例/评测/独立审批/发布/绑定）；
+2. 复验 `scenario_business_mapping` 等映射类 Skill 在 Agent 工具链中的真实模型执行；
+3. 跑完整 `regulatory_field_analysis` 并逐步校验 `model_execution.executed=true`（记录
+   model_name/provider/skill_version/run_id/input hash/citations/latency/degraded_reason）；
+4. 补 4 组自主性场景与 Agent 级业务质量评测集。
