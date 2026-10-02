@@ -39,8 +39,24 @@
 
 ## 3. 下一步（最小动作）
 
-确认 `compare_policy_and_implementation` 的 task_key，然后为 `requirement_candidate_generation` 建定义（含 IO schema 与 SafetyPrompt）并跑通一次真实模型调用（`model_execution.executed=true`）。
+## 3. 本轮真实进度（已落库到本机环境）
 
-## 4. 漂移判定
+- 定义 **2** `requirement_candidate_generation`（task_key 同）创建者 `smoke_admin`（平台管理员；定义一律平台级，需 platform admin）。
+- 版本 **10**（no 1，scope=project 11，`model_profile_id=4`，`output_schema_key=requirement_candidate_v1`）。
+- 测试用例 **5**；评测模式必须是 `mock_model|real_model|deterministic|replay|human_review`（本次 `real_model`）；
+  `run_tests` 从 ModelProfile 推导 `actual_mode`，与请求不符报 422。
+- 评测产生 2 条 `ValueError` → `releases.submit` 被 **`release_gate_failed`** 拦住（治理门禁生效）。
+- 直调 `runtime.execute_resolved` 定位真正原因：`compile_input` → `validate_requirement_output` 抛
+  `ValueError: one fixed requirement context is required`。契约：envelope 必须恰好 1 条 `kind="requirement_context"`
+  的 fact（value 为 dict；`project_id` 等于 scope.project_id；`fields` 恰好 1 项且含 `target.id`），且 `policy_evidence` 非空。
+- `resolve_skill` 要求已发布版本 + 绑定（draft 会 `skill_unavailable`）；但 `run_tests` 直接对 draft 版本执行。
 
-`continue` — 与目标一致（真实模型化主链），未新增 Agent 概念；无阻断状态。
+## 4. 下一步（最小动作）
+
+用平台 builder 为验收项目真实字段生成 `requirement_context` fact，重建测试用例 → 重跑 `real_model` 评测 →
+`releases.submit` → **另一用户** `releases.publish`（强制独立审批）→ 绑定 → 验 `model_execution.executed=true`。
+然后同法处理 `requirement_document_assistance`、`source_to_mart_mapping`、`mart_to_ybt_mapping`，并给制度对照加模型入口。
+
+## 5. 漂移判定
+
+`continue` — 与目标一致；无阻断。
