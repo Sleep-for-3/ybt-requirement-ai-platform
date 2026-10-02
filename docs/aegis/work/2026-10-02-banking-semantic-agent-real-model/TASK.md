@@ -58,5 +58,21 @@
 然后同法处理 `requirement_document_assistance`、`source_to_mart_mapping`、`mart_to_ybt_mapping`，并给制度对照加模型入口。
 
 ## 5. 漂移判定
-
 `continue` — 与目标一致；无阻断。
+
+## 6. 验收样数据现状（project 11）与播种计划
+
+实测：`institution=5`、`confidentiality=internal`、目标表 `4 YBT_FT 福费廷报送表`、目标字段 `22 FT_BAL 福费廷余额`；
+**项目内无 Requirement、无 RequirementGenerationInput**；全局 SourceField 有 186 条，但项目目录绑定极薄（重排召回只有 1 个候选）。
+
+播种计划（按依赖顺序，全部走平台服务而非裸插入，保留 revision/hash 不变量）：
+
+1. 为项目 11 建 **Requirement + Revison**（含字段 22），使 `RequirementGenerationInput` 可准备。
+2. 调 `requirement_generation.prepare_input(db, project_id, requirement_id, PrepareGenerationInput(
+   expected_content_version, field_ids=[22], sections=["business"], idempotency_key), principal)`（需 `business.edit`）→ 得 row+item。
+3. 用 `requirement_context.build_requirement_envelope(project, row, item)` 生成**合法 envelope**（含 1 条
+   `kind="requirement_context"` fact + policy_evidence）→ 作为 Skill 测试用例输入 → 重跑 `real_model` 评测。
+4. 目录侧补 ≥2 个候选来源字段（CatalogTable/CatalogField 绑定到项目），使 `rerank_field_candidates` 真正走模型。
+5. 依次完成 submit → 独立用户 publish → 绑定 → agent 工具验 `executed=true`。
+
+待确认的模型类名：项目目录字段模型不是 `CatalogField`（导入名不存在），下一步需先查 `app/models` 中目录字段/目录表的真实类名。
