@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -78,6 +79,14 @@ AGENT_TARGET_TYPE = "agent_task"
 MAX_REPLANS_PER_TASK = 3
 # How long one run may hold the task lease before another worker may take over.
 TASK_RUN_LEASE_SECONDS = 900
+# Context budget: what one step may persist (and therefore what any later planner prompt sees).
+MAX_FACTS_PER_STEP = 200
+MAX_POLICY_EVIDENCE_PER_STEP = 200
+MAX_CLAIMS_PER_STEP = 100
+MAX_COMPARISONS_PER_STEP = 100
+MAX_GAPS_PER_STEP = 200
+MAX_EVIDENCE_REFS_PER_STEP = 500
+MAX_CARRY_CHARS = 20000
 RUN_PERMISSION = "task.manage"
 READ_PERMISSION = "project.view"
 DEFAULT_GATE_PERMISSION = "final.review"
@@ -441,6 +450,21 @@ def _next_runnable_step(db, task: AgentTask) -> AgentStep | None:
             db.commit()
         return step
     return None
+
+
+def _bounded_payload(value: Any, limit: int = MAX_CARRY_CHARS) -> Any:
+    """Tool step output is carried to later tools, but never unbounded."""
+
+    if value is None:
+        return None
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return None
+    if len(encoded) <= limit:
+        return value
+    return {"truncated": True, "original_chars": len(encoded), "reason": "context_budget",
+            "preview": encoded[: max(0, limit - 200)]}
 
 
 def _model_execution(result: ToolResult) -> dict[str, Any]:
@@ -957,18 +981,20 @@ def _fail_step(db, step: AgentStep, *, code: str, message: str, status: str, gap
 
 def _record_success(db, task: AgentTask, step: AgentStep, call: AgentToolCall, result: ToolResult,
                     duration_ms: int) -> None:
-    facts = [item for item in result.facts]
-    policy = [item for item in result.policy_evidence]
+    # Context budget: hard, explicit quotas for what one step may persist (and therefore what
+    # any later prompt can ever see). Nothing here is unbounded.
+    facts = list(result.facts)[:MAX_FACTS_PER_STEP]
+    policy = list(result.policy_evidence)[:MAX_POLICY_EVIDENCE_PER_STEP]
     summary = dict(step.output_summary_json or {})
     summary.update({
         "summary": redact_summary(result.output),
-        "facts": facts[:200],
-        "policy_evidence": policy[:200],
-        "gaps": [*list(summary.get("gaps") or []), *result.gaps][:200],
-        "claims": result.claims[:100],
-        "policy_comparisons": result.policy_comparisons[:100],
+        "facts": facts,
+        "policy_evidence": policy,
+        "gaps": [*list(summary.get("gaps") or []), *result.gaps][:MAX_GAPS_PER_STEP],
+        "claims": result.claims[:MAX_CLAIMS_PER_STEP],
+        "policy_comparisons": result.policy_comparisons[:MAX_COMPARISONS_PER_STEP],
         "artifacts": [item.get("artifact_type") for item in result.artifacts],
-        "carry": redact_summary(result.step_output),
+        "carry": _bounded_payload(redact_summary(result.step_output)),
         # Explicit model-execution accounting: a degraded step must never look like a model
         # success (the workspace and the evaluation both rely on this distinction).
         "model_execution": _model_execution(result),
@@ -976,7 +1002,7 @@ def _record_success(db, task: AgentTask, step: AgentStep, call: AgentToolCall, r
     if result.model_metadata:
         summary["model_metadata"] = redact_summary(result.model_metadata)
     step.output_summary_json = summary
-    step.evidence_refs_json = sorted({*result.evidence_refs})[:500]
+    step.evidence_refs_json = sorted({*result.evidence_refs})[:MAX_EVIDENCE_REFS_PER_STEP]
     step.evidence_count = len(facts) + len(policy)
     # Union, never replace: dependency gaps recorded before execution must survive the call.
     step.gap_codes_json = sorted({*(step.gap_codes_json or []),
