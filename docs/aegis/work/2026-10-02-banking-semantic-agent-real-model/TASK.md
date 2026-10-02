@@ -76,3 +76,31 @@
 5. 依次完成 submit → 独立用户 publish → 绑定 → agent 工具验 `executed=true`。
 
 待确认的模型类名：项目目录字段模型不是 `CatalogField`（导入名不存在），下一步需先查 `app/models` 中目录字段/目录表的真实类名。
+
+## 7. Round 3 实际进展（已写入本机数据库）
+
+验收样数据已就位：**Requirement 1**（scope: target_table_id=4, scenario_id=17, field_ids=[22]）→
+**Revision 1**（content_version=1, hash 28c7bbd62bae）→ **RequirementGenerationInput 1**（hash 3110bc83a1f2）→
+**RequirementGenerationItem 1**（field 22, section business, pending）。
+关键发现：`initialize_content` 需要 `scope_json["scenario_id"]`（项目已有场景 17 `SECONDARY_MARKET_FORFAITING`）；
+`prepare_input` 返回 `(row, deduplicated)` 且**不创建 items**；items 由 `app/api/requirements.py:328` 创建、随后
+`enqueue(job_type="requirement_generation", handler=requirement_generation_handler)`；worker 对每个 item 调
+`generate_candidate`（那里才会走 Skill）。
+
+`requirement_context.build_requirement_envelope(project, row, item)` 已能产出**合法 envelope**：
+`facts=[(requirement_context, requirement-input:1)]`，`policy_evidence=0`，`gaps=[missing_basis]`。
+
+`real_model` 评测 RUN 29 结果（这是第一次真实模型链路评测）：
+
+- metrics：`total 4, executed 1, skipped 3, passed 0, elapsed_ms 18845, mode real_model, real_model_successes 0`
+- 断言：`schema/scope/budget/unknown_reference_rejected/native_unknown_reference_rejected` 全 ✓；
+  **`model_output_valid: False`**、`minimum_claims: False`（模型输出未被计为真实模型产物，claims 为空）
+- 其余 3 个用例 `case_defect: True`（早期错误 envelope 的用例，被正确归为用例缺陷而非模型失败）
+- `submit` 再次被 `release_gate_failed` 拦住（门禁正确）
+
+## 8. 下一步（两件具体事）
+
+1. 为项目挂接**固定监管知识条款**（policy_evidence），消除 `missing_basis`；
+2. 查 `ModelCallLog` 看这次 18.8s 调用的**真实 provider 响应**，判定 `execution_kind` 为何不是 `real_model`
+   （是模型调用失败、响应不合 schema，还是 prompt 输出为空）→ 修 Prompt/schema 后重跑评测 →
+   `submit` → 独立用户 `publish` → 绑定 → `enqueue` 生成作业验真实模型候选。
