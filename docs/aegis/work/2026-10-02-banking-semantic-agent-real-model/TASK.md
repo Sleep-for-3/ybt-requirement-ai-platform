@@ -179,3 +179,32 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 2. 向 project 11 补 ≥2 个目录候选，让 `rerank_candidates` 真正走模型（而不是 1 候选短路）；
 3. 建 `requirement_document_assistance` skill（同法）；
 4. 4 组自主性场景 + Agent 级业务质量评测集。
+
+## 13. Round 7 —— 全链 15/15 跑完（6 个 Gate 全部人工批准）
+
+新建 task 8 完整跑完（不再停滞）：15 个唯一步骤全部 `completed`，`plan_version=2 / replans=1`，`model_executed=1`。
+
+**真实模型调用证据（`ModelCallLog`，project 11）**：
+
+- `scenario_business_mapping`：2 次 `success`、`kind=real_model`、1.75s、token 912/957 → 映射草稿步骤
+  `generate_mapping_draft` **`model_execution.executed=true`，model=deepseek-v4-flash，degraded=None**
+- **`agent_observation`（Observe→Replan）真实模型执行：3 次成功**（3.6s / 8.1s / 16.6s，token 2984/4234/6090）
+  → 自适应重规划是**真的模型驱动**（task 8 的 `replans=1` 由此产生）；另有 1 次失败（19.1s / 8461 token）
+
+**本轮新发现的两个缺陷（待修）**：
+
+1. `generate_requirement_candidate`：gap 从 `skill_binding_missing` 变为 **`skill_execution_unavailable`** →
+   任务键回退修复生效（**绑定已找到**），但技能执行失败：最后 6 条调用日志里**没有**该技能调用记录，
+   说明失败发生在模型调用之前的阶段（compile_input / 上下文预算 / 绑定版本解析），需查具体异常。
+2. **任务完成后状态停在 `running`**：15 个步骤均 `completed`，但 task 8 仍为 `running`，
+   后续 4 轮运行均返回 `paused=False` 且无步骤可跑 → `_refresh_task_status` 未在所有步骤完成时把任务置为 completed。
+
+**另一确认**：`generate_requirement_document` 仍为 `skill_binding_missing`（该 Skill 本就未创建，符合预期）。
+
+## 14. 下一步
+
+1. 修缺陷 2（全部步骤完成 → 任务 completed）——最小、最先；
+2. 修缺陷 1（查 `skill_execution_unavailable` 真实异常）；
+3. 建 `requirement_document_assistance` skill；
+4. 补 ≥2 个目录候选让 rerank 走模型；
+5. 4 组自主性场景 + Agent 级业务质量评测集。
