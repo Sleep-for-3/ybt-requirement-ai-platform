@@ -39,6 +39,39 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
    CI/Docker 目前仍为 Node 20（本机为 Node 24，两者不可互相替代）。
 3. **前端 production browser 回归**：升级后必须覆盖登录/续期、项目切换、需求、语义目录、下载；尚未执行。
 
+### W01 安全公告逐项适用性处置（B01，已核实）
+
+核实方式：直接抓取官方安全发布页 `https://nextjs.org/blog/september-2026-security-release`（HTTP 200），
+并结合本仓库实际配置逐项判定。当前 `next 14.2.35`。
+
+| 公告 | 修复版本 | 本仓库是否适用 | 依据 |
+| --- | --- | --- | --- |
+| Windows 文件系统未认证 RCE（GHSA-p293-qw3h-jr36） | 15.5.24 / 16.3.3 | **适用（必修）** | 本机为 Windows 原生 `next start`，与审查一致 |
+| 镜像优化 SSRF（CVE-2026-94483） | 15.5.27 / 16.3.8 | 不适用 | `next.config.mjs` **未配置 `images.remotePatterns`** |
+| SSG/ISR 缓存投毒（CVE-2026-94543，Pages Router） | 同上 | 不适用 | **无 `pages/` 目录**，纯 App Router |
+| 根级 catch-all + SSG/ISR 缓存投毒（CVE-2026-94484） | 同上 | 不适用 | 无 `[]` 根级 catch-all，也**无任何 `[...slug]`** |
+| metadata 图片 dynamicParams 绕过（CVE-2026-94485） | 同上 | 不适用 | **无 `opengraph-image`/`twitter-image` 路由** |
+| `use cache` 缓存泄露与 Draft Mode 泄露（GHSA-h694…/CVE-2026-94544） | 同上 | 不适用 | **未启用 Cache Components / `useCache`** |
+| 开发服务器 MCP 端点信息泄露（CVE-2026-94486） | 同上 | 仅开发环境 | 仅 `next dev`；生产不提供该端点 |
+
+结论：**唯一适用项是 Windows RCE，必须通过升级修复**（或在不升级期间限制网络暴露）；其余公告在本仓库配置下不适用，
+且已逐项给出依据而非笼统忽略。升级目标版本按官方当前发布：**15.5.27（维护 LTS）或 16.3.8（活跃 LTS）**，
+不得只升到旧报告中的首个修复版本。
+
+**升级未执行的原因（如实记录）**：跨大版本迁移（15/16 需 React 19、异步请求 API），影响 22 个动态路由与全部页面，
+并需完整 production browser 回归（登录/续期、项目切换、需求、语义目录、下载）；本轮会话剩余预算不足以安全完成，
+强行半升会留下不可运行的前端（违背“稳定优先”与不留下破损工作的要求）。下一轮应在**隔离分支**按以下步骤执行：
+锁定 `next@15.5.27` + `eslint-config-next@15.5.27` + React 19 → `npm install` → `tsc`/`lint`/`test`/`build`
+→ production browser 回归 → 更新 `package-lock.json` → 重新审计（`npm audit --omit=dev`）→ 提交并记录。
+
+### 已完成：依赖与运行时基线（B17/供应链）
+
+- `backend/requirements.lock.txt`：96 个发行包精确锁定（含传递依赖）；`backend/requirements.sbom.json`：
+  96 个组件清单，缺许可元数据的记 `UNKNOWN` 而不猜测；`pip check` 无破损依赖。
+- CI 与容器：`node-version: "24"`、`node:24-alpine`（原 Node 20 已 EOL 且缺 harness 所需全局 WebSocket；
+  Node 24 已确认 `typeof WebSocket === "function"`）。
+- 验证：`tests/test_release_baseline.py` **5 passed**（锁定完整、覆盖顶层声明、含传递依赖、SBOM 可机读）。
+
 ### 前置风险（已记录）
 
 - npm 全依赖审计：1 critical、13 high、1 moderate；生产依赖：1 critical、2 high（审查证据 `npm-audit*.json`）。
