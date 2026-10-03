@@ -310,3 +310,33 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 3. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
 4. 建 `requirement_document_assistance` Skill；
 5. 15 步计划审查 + Agent 级业务质量评测集。
+
+## 21. Round 11 —— 两个缺口全关（自主性矩阵 7 passed / 0 xfail）
+
+### 缺口①：不是缺口，是测试错
+
+临时打印证实 `decide()` 的 `request_reanalysis` 分支**确实执行**（`step=waiting_human` 进、转移到 `STEP_PENDING`），
+但 `decide()` 尾部会调 `resume_task()` **立即重跑**；而“需人工确认”的步骤重跑后会**再次开闸门**，
+所以台账重建为 `waiting_human` —— 这是**正确行为**。
+测试改为断言真正的证据：工具**至少重跑 2 次**（`runs>=2`）、`attempt_count>=2`、新结果**重新受闸门约束**。
+（`2868f53`）
+
+### 缺口②：真缺口，已修
+
+`planner.py` 的 `SCENARIO_SQL_CHANGE_IMPACT` 模板原终止于影响结论，**没有** brief 要求的
+“语义变化 → impact → requirement/mapping recheck”链路。现已在 `compare_policy` 之后加入：
+
+- `recheck_mapping`（`generate_mapping_draft`，仅草稿）
+- `recheck_requirement`（`generate_requirement_candidate`，仅候选）
+- `summarize_evidence` 依赖两者
+
+两者都是**人工闸门后的草稿/候选生产者**，不会自动写正式映射或需求。原 xfail 测试转为正式断言并通过。（`356e688`）
+
+**回归：agent 全量 197 passed**（含自主性 7 项）。
+
+## 22. 下一步
+
+1. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
+2. 建 `requirement_document_assistance` Skill（同 6 步治理流程）；
+3. 15 步计划审查（固定/Observation 决定/可插入/optional）；
+4. Agent 级业务质量评测集（10 项）+ 最终自主性报告。
