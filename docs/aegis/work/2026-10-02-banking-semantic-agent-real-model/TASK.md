@@ -208,3 +208,27 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 3. 建 `requirement_document_assistance` skill；
 4. 补 ≥2 个目录候选让 rerank 走模型；
 5. 4 组自主性场景 + Agent 级业务质量评测集。
+
+## 15. Round 8-9 —— 需求候选首次真实调用模型
+
+`ba29757`：任务状态派生改为按 step_key 取最新行（重规划会为同一 step_key 追加新行，
+旧行的 pending 让任务永远停在 running）。真实数据验证：卡住的 task 8 `running → completed`（15 completed / 0 pending）。
+
+`b83adf1`：需求工具改为用平台 `build_requirement_envelope` 构造固定需求上下文，且**只合并非知识类事实**
+（Agent 自采的 `policy_clause` 无真实 `unit_id`，会被判 `invalid requirement evidence identity`）；
+修好“构建信封时加的 gap 进不了步骤摘要”（之前传错 list，真实原因永远看不到）；目标字段 id 改从步骤输入读。
+
+**真实验证**：`generate_requirement_candidate` 不再在模型调用前失败；`ModelCallLog 501` =
+`ai_skill:requirement_candidate_generation` v2、真实模型、23.2s、**12140 tokens**、`kind=degraded`、
+`model_output_unavailable` → **输出再次被 4096 上限截断**。已把 `ModelProfile 4` 的 `max_output_tokens` 提到 **8192**。
+
+**新发现（下一轮首要）**：task 14 的 `rerank_candidates` 硬失败 `binding_scope_invalid`。
+根因：`field_semantic_matching` 在 project 11 的绑定是 round 1 **手工直插**的，平台校验绑定结构/作用域时拒绝——
+于是重排从“无绑定→确定性降级”变成“绑定非法→硬失败”。应用平台服务（`releases.adopt`/`_set_binding` 或 skills API）重建。
+
+## 16. 下一步
+
+1. 用平台服务重建 `field_semantic_matching` 在 project 11 的绑定 + 补 ≥2 个目录候选；
+2. 重跑全链，确认 `rerank_candidates` 与 `generate_requirement_candidate` 均为 `executed=true`；
+3. 建 `requirement_document_assistance` skill；
+4. 4 组自主性场景 + Agent 级业务质量评测集。
