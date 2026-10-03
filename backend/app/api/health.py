@@ -12,6 +12,7 @@ from app.models import BackgroundJob
 from app.services.auth.dependencies import bearer_scheme, get_current_principal
 from app.services.auth.permission_service import PermissionService
 from app.services.health_checks import readiness_summary, run_health_checks
+from app.services.version_info import version_report
 
 
 router = APIRouter(tags=["health and observability"])
@@ -20,6 +21,13 @@ router = APIRouter(tags=["health and observability"])
 @router.get("/health/live")
 def live() -> dict[str, str]:
     return {"status": "healthy", "application": get_settings().app_name}
+
+
+@router.get("/version")
+def version(db: Session = Depends(get_db)) -> dict:
+    """B18: the release identity every component must agree on (no auth: contains no secrets)."""
+
+    return version_report(db)
 
 
 @router.get("/health/ready")

@@ -6,6 +6,7 @@ from app.models import BackgroundJob
 from app.services.lineage.monitoring import run_due_repository_monitors
 from app.services.task_queue.handlers import resolve_job_handler
 from app.services.task_queue.inline import InlineTaskQueue
+from app.services.version_info import version_report
 
 
 settings = get_settings()
@@ -27,6 +28,14 @@ def execute_background_job(job_id: int) -> None:
         if job is None or job.status == "cancelled":
             return
         InlineTaskQueue().execute_existing(db, job, resolve_job_handler(job.job_type))
+
+
+@celery_app.task(name="app.workers.version_report")
+def report_worker_version() -> dict:
+    """B18: worker/beat report the same release identity as the API."""
+
+    with SessionLocal() as db:
+        return version_report(db, component="worker")
 
 
 @celery_app.task(name="app.workers.poll_lineage_repositories")
