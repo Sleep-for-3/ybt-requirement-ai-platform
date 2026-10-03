@@ -457,3 +457,27 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 1. 项目 11 的 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
 2. Agent 级业务质量评测集（10 项）——可直接基于现有记录（模型执行率、回退率、replan 率、人工驳回率、交付物采纳率）；
 3. 最终报告（自主性/固定流程/真实模型/replan/human gate/交付物清单/剩余非 Agent 部分）。
+
+## 31. Round 16-17 —— 指标集与最终报告交付
+
+- `observability.py` 补齐 3 个缺失业务指标（模型执行率 / 确定性回退率 / 人工 reanalysis 率），
+  含标签与“无分母→null”说明；`tests/test_agent_business_metrics.py` 新增 2 例，并同步扩展 `test_agent_evaluation_v2.py` 的期望值。**agent 全量 204 passed**。
+- 真实项目指标（22 任务/17 终态）已写入报告 §7。
+- 最终报告交付：**`docs/handoff/dsh-banking-semantic-agent-v2-real-model-report.md`**（已提交 `3cc02e3`），
+  逐项回答 brief 的 10 个问题，并单列“仍非 Agent”项。
+
+## 32. 仅剩一项：模型重排真实执行（精确播种计划）
+
+实测项目 11 的可用数据：**CatalogTable=1、CatalogColumn=1、SourceTable=1、SourceField=1**
+（全局分别为 188/2850/46/186）→ `recall_fields` 只能返回 **1 个候选** → 重排短路为确定性（`deterministic_recall`）。
+
+要打通这一步，需要两件（均为数据/治理动作，非代码缺陷）：
+
+1. **补 ≥2 个候选来源**：为项目 11 的目录表新增 2~3 个 `CatalogColumn`（并关联 `SourceField`），
+   使召回返回多个候选，模型重排才有意义；
+2. **发布本项目作用域的 `field_semantic_matching` 版本**：平台已有现成构造器
+   `field_rerank.build_rerank_envelope(project, scope, target_field_id, recall) -> (envelope, block_code)`，
+   可直接用它做测试用例输入；然后走已被验证两次的 6 步治理流程（评测 deterministic + real_model →
+   独立审批 → 发布 → 绑定项目 11）。
+
+完成后重跑全链，预期 `model_executed = 4`。
