@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | 进行中 | `1782bac`（B23 契约） |
 | W02 机构熔断与令牌原子轮换 | B02/BA05, B05/BA04 | 已修复 / 已验证 | `16767d7`（B02）、见下（B05） |
-| W03 审核内容不可变 | B03/BA01 | 待开始 | — |
+| W03 审核内容与正式产物不可变 | B03/BA01 | 已修复 / 已验证 | 见下 |
 | W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 待开始 | — |
 | W05 后台任务幂等与恢复 | B07/BA06 | 待开始 | — |
 | W06 人工编辑与模型配置完整性 | B10–B13, B15–B16 | 待开始 | — |
@@ -97,3 +97,34 @@
 
 - 未验证跨主机/多副本部署下的时钟偏差影响（令牌 `expires_at` 由应用生成）。
 - 未实现 token family 级联撤销（当前为单令牌占用语义）。
+
+---
+
+## W03：审核内容与正式产物不可变（B03 / BA01）
+
+- **问题与行为**：双层口径（source-to-mart / mart-to-ybt）的普通 `PUT` 只在“本次请求主动改状态”时
+  阻止旧审核，修改 `final_content` 等内容时直接落库，**审核状态仍为 approved、版本未失效**
+  （审查复现：`http_status=200`、`mapping_status=approved`、`version_count=1`）。交付准备度也仅凭
+  `mapping_status == "approved"` 字符串放行，无法发现“批准后内容被改”。另发现 `_approve_mapping` 把
+  审批快照写作 `payload.final_content`（请求可选值，常为 `None`）而非实际被批准的内容。
+- **改动**：
+  - `double_layer_review.py` 新增统一生命周期守卫 `ensure_double_layer_mapping_writable()`：
+    双层审核进行中时**冻结内容写入与删除**；`approved` 内容**不得原地修改**，只能显式
+    `mapping_status="draft"` 开启新修订（旧批准快照保留在 `mapping_versions`）；仅状态/审核人变更
+    维持原行为。
+  - `mapping_rules.py`：两个双层 `PUT` 与两个 `DELETE` 接入同一守卫；显式开新修订时清除
+    `reviewed_by/reviewed_at`（批准失效）；`DELETE` 需先显式退回草稿。
+  - `_approve_mapping` 改为快照**实际批准内容**（`mapping.final_content`），使审批记录与内容绑定。
+  - `readiness_service.py`：`mappings_approved` 同时要求 `approved_mapping_is_current()`
+    （批准内容仍与最新版本快照一致），不再仅凭状态字符串放行。
+- **验证（SQLite / API 层）**：`tests/test_reviewed_content_immutability.py` 8 例（审批写入内容快照；
+  两层内容编辑均 409 `APPROVED_CONTENT_IMMUTABLE` 且内容未变；仅改状态仍可；显式开新修订后状态转
+  draft、审核人清空、旧批准快照保留、`approved_mapping_is_current` 转 False；送审期间内容写入与删除均
+  409；已批准映射需先退回草稿才能删除）。
+  回归：映射/交付/准备度/血缘/治理共 **109 passed**。
+  受影响的既有用例 `test_deliverables.py::test_readiness_requires_approved_double_layer_mappings`
+  的夹具已改为**真实审批形态**（状态 + 内容快照同时写入，与 `_approve_mapping` 一致），其原本验证的
+  “准备度需要双层映射批准”意图未变。
+- **业务证据**：AI 草稿与人工最终口径的区分保持不变；批准内容不可被普通编辑静默替换；旧批准版本可回读。
+- **发布与回滚**：无数据库迁移（复用既有 `mapping_versions` 表）；回滚只需回退提交。
+- **已知限制**：送审与编辑的**真实 PostgreSQL 并发实测**尚未执行（预留到 W10 与真实依赖一起验收）。

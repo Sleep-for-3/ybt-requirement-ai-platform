@@ -22,7 +22,11 @@ from app.services.auth.dependencies import CurrentPrincipal
 from app.schemas.mapping_adoption import MappingDraftAdoption
 from app.services.llm.execution_metadata import stable_hash
 from app.services.auth.permission_service import PermissionService
-from app.services.governance.double_layer_review import MappingGenerationNotEditable, ensure_double_layer_mapping_editable
+from app.services.governance.double_layer_review import (
+    MappingGenerationNotEditable,
+    ensure_double_layer_mapping_editable,
+    ensure_double_layer_mapping_writable,
+)
 from app.services.mapping.generator_context import (
     GenerationActorError,
     GenerationBlockedError,
@@ -66,6 +70,34 @@ def _generation_governance_http_error(exc: MappingGenerationNotEditable) -> HTTP
     )
 
 
+def _guard_double_layer_write(db: Session, mapping_type: str, mapping, updates: dict) -> bool:
+    """Shared lifecycle guard for every double-layer content write (B03 / BA01).
+
+    Returns True when the caller explicitly re-opened a new draft revision, so the approval
+    fields must be invalidated before the new content is written.
+    """
+
+    try:
+        return ensure_double_layer_mapping_writable(db, mapping_type, mapping, updates=updates)
+    except MappingGenerationNotEditable as exc:
+        raise _generation_governance_http_error(exc) from exc
+
+
+def _guard_double_layer_delete(db: Session, mapping_type: str, mapping) -> None:
+    try:
+        ensure_double_layer_mapping_writable(db, mapping_type, mapping, deleting=True)
+    except MappingGenerationNotEditable as exc:
+        raise _generation_governance_http_error(exc) from exc
+
+
+def _invalidate_approval(mapping) -> None:
+    """Opening a new revision clears the previous approval; the approved snapshot stays in
+    mapping_versions so the old approved content remains readable."""
+
+    mapping.reviewed_by = None
+    mapping.reviewed_at = None
+
+
 @router.post("/mart-fields/{mart_field_id}/source-to-mart-mappings", response_model=SourceToMartMappingRead)
 def create_source_to_mart_mapping(mart_field_id: int, payload: SourceToMartMappingCreate, db: Session = Depends(get_db)) -> SourceToMartMapping:
     mart_field = _get_mart_field_or_404(db, mart_field_id)
@@ -94,6 +126,8 @@ def update_source_to_mart_mapping(mapping_id: int, payload: SourceToMartMappingU
     if updates.get("mapping_status") in {"approved", "rejected"}:
         _reject_legacy_review(db, mapping.project_id)
     _validate_status(updates.get("mapping_status"))
+    if _guard_double_layer_write(db, "source_to_mart", mapping, updates):
+        _invalidate_approval(mapping)
     _apply_updates(mapping, updates)
     db.commit()
     db.refresh(mapping)
@@ -103,6 +137,7 @@ def update_source_to_mart_mapping(mapping_id: int, payload: SourceToMartMappingU
 @router.delete("/source-to-mart-mappings/{mapping_id}")
 def delete_source_to_mart_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     mapping = _get_source_to_mart_or_404(db, mapping_id)
+    _guard_double_layer_delete(db, "source_to_mart", mapping)
     _delete_mapping_dependencies(db, "source_to_mart", mapping_id)
     db.delete(mapping)
     db.commit()
@@ -235,6 +270,8 @@ def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate,
         mart_field = _get_mart_field_or_404(db, updates["mart_field_id"])
         if mart_field.project_id != mapping.project_id:
             raise HTTPException(status_code=400, detail="Mart field belongs to another project")
+    if _guard_double_layer_write(db, "mart_to_ybt", mapping, updates):
+        _invalidate_approval(mapping)
     _apply_updates(mapping, updates)
     db.commit()
     db.refresh(mapping)
@@ -244,6 +281,7 @@ def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate,
 @router.delete("/mart-to-ybt-mappings/{mapping_id}")
 def delete_mart_to_ybt_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    _guard_double_layer_delete(db, "mart_to_ybt", mapping)
     _delete_mapping_dependencies(db, "mart_to_ybt", mapping_id)
     db.delete(mapping)
     db.commit()
@@ -399,7 +437,10 @@ def _approve_mapping(db: Session, mapping_type: str, mapping: SourceToMartMappin
         mapping_type,
         mapping,
         MappingVersionCreate(
-            content_snapshot=payload.final_content,
+            # Bind the approval to the content actually approved, not to the optional request
+            # value (B03): recording payload.final_content=None would leave the approval with no
+            # content to verify against.
+            content_snapshot=mapping.final_content,
             change_note=payload.change_note or "审核通过自动保存版本",
             created_by=payload.reviewed_by,
         ),

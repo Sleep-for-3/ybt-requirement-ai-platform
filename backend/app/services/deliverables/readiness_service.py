@@ -15,6 +15,7 @@ from app.models import (
     TargetField,
     TargetTable,
 )
+from app.services.governance.double_layer_review import approved_mapping_is_current
 
 
 EVIDENCE_DIMENSIONS = (
@@ -75,7 +76,15 @@ def field_readiness(db, target_field_id: int) -> dict:
     )
     mappings_present = bool(mart_to_ybt) and bool(source_to_mart)
     mappings_complete = mappings_present and all(item.final_content for item in mart_to_ybt + source_to_mart)
-    mappings_approved = mappings_complete and all(item.mapping_status == "approved" for item in mart_to_ybt + source_to_mart)
+    # B03: the approved flag alone is not enough - the approved content must still match the
+    # newest saved version snapshot, so a later content edit cannot keep readiness green.
+    mappings_approved = mappings_complete and all(
+        item.mapping_status == "approved" and approved_mapping_is_current(db, "mart_to_ybt", item)
+        for item in mart_to_ybt
+    ) and all(
+        item.mapping_status == "approved" and approved_mapping_is_current(db, "source_to_mart", item)
+        for item in source_to_mart
+    )
 
     evidence = list(db.scalars(select(DeliverableEvidenceItem).where(
         DeliverableEvidenceItem.project_id == project_id,

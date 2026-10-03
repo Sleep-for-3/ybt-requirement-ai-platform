@@ -23,6 +23,7 @@ from app.models import (
     DeliverablePackage,
     LineageEdge,
     LineageNode,
+    MappingVersion,
     MartField,
     MartTable,
     MartToYbtMapping,
@@ -532,8 +533,17 @@ def test_readiness_requires_approved_double_layer_mappings() -> None:
         assert {reason["code"] for reason in readiness["blocking_reasons"]} == {"mapping_review_pending"}
 
         with factory() as db:
-            db.get(SourceToMartMapping, source_id).mapping_status = "approved"
-            db.get(MartToYbtMapping, ybt_id).mapping_status = "approved"
+            # A realistic approval: the status and the approved-content snapshot are written
+            # together, exactly as _approve_mapping does (B03). Setting only the status would
+            # leave readiness unable to verify that the approved content is still current.
+            source_row = db.get(SourceToMartMapping, source_id)
+            ybt_row = db.get(MartToYbtMapping, ybt_id)
+            for mapping_type, row in (("source_to_mart", source_row), ("mart_to_ybt", ybt_row)):
+                row.mapping_status = "approved"
+                db.add(MappingVersion(
+                    project_id=row.project_id, mapping_type=mapping_type, mapping_id=row.id,
+                    version_no=1, content_snapshot=row.final_content, change_note="审核通过自动保存版本",
+                ))
             db.commit()
         assert client.get(f"/api/target-fields/{field['id']}/delivery-readiness").json()["status"] == "approved"
 
