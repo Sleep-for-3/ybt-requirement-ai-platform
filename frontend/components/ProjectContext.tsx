@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { usePathname, useRouter } from "next/navigation";
 
 import { Project, apiGet } from "@/lib/api";
+import { confirmLeave } from "@/hooks/useUnsavedChanges";
 
 type ProjectContextValue = {
   projects: Project[];
@@ -69,6 +70,9 @@ export function ProjectSelector({ className = "w-56" }: { className?: string }) 
   const router = useRouter();
 
   function changeProject(nextProjectId: number | null) {
+    // B11: switching project discards page-local editor state, so ask before leaving when an
+    // editor holds unsaved work. Cancelling keeps the current project (the select is controlled).
+    if (!confirmLeave()) return;
     // Make the project identity durable in a deep link without discarding
     // page-owned filters, pagination or tab state already held in the URL.
     const next = new URLSearchParams(window.location.search);
