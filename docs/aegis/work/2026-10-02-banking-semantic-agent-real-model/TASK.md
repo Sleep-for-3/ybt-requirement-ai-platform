@@ -367,3 +367,32 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 1. 按上述 1-3 修文档工具 → 重跑全链确认 `generate_requirement_document` 为 `executed=true`；
 2. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
 3. 15 步计划审查 + Agent 级业务质量评测集。
+
+## 25. Round 13 —— 文档步骤已接到真实模型；剩余为内容型校验
+
+`fix: the document step resolves its skill and the fixed revision context`（已推送）：
+文档工具按任务键回退 + 改用平台 `build_document_envelope` + gaps 去重。
+
+**验证**：`generate_requirement_document` 从 `skill_binding_missing`（根本不调用）变为
+**真实调用模型**：`ModelCallLog 525` = `requirement_document_assistance` v1、21.0s、prompt/completion 3357/4874。
+
+**剩余失败的真正原因（有对比证据）**：
+
+| 调用 | 结果 | completion | budget used | output |
+|---|---|---|---|---|
+| 518（评测 `RUN 37`） | ✅ success | 7697 | 5957 B | 5407 字符 |
+| 525（Agent 步骤） | ❌ `ValueError` | 4874 | **5957 B（完全相同）** | 4416 字符 |
+
+信封完全相同（budget used 一致）→ 不是信封问题，也不是截断（4874 ≪ 8192）；是**内容型校验**：
+`validate_document_output` 判定“段落引用超出固定修订”。即模型这次生成了不合规引用，
+而评测那次恰好合规——**提示词约束不够严**。
+
+**修法（下轮）**：文档 Skill v2 提示词中**枚举允许的固定引用 id**（当前 facts 为
+`revision:1:requirement` / `revision:1:fields` / `revision:1:gaps`），并明确“只能引用这三个 id”；
+因内容变更需重新评测（deterministic + real_model）并由**另一用户**重新发布（依赖/内容冻结规则）。
+
+## 26. 下一步
+
+1. 收紧文档 Skill 提示词 → v2 重评测 + 独立发布 → 确认第三个 `executed=true`；
+2. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
+3. 15 步计划审查 + Agent 级业务质量评测集 + 最终报告。
