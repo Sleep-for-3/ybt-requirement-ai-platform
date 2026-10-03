@@ -1,0 +1,12 @@
+export function registerDirty(ownerId: string, isDirty: boolean): () => void;
+export function clearOwner(ownerId: string): void;
+export function resetForTests(): void;
+export function hasUnsavedChanges(): boolean;
+export function dirtyOwners(): string[];
+export const UNSAVED_MESSAGE: string;
+export function leaveDecision(): "allow" | "confirm";
+export function beforeUnloadReturnValue(): string | undefined;
+export function draftKey(scope: string): string;
+export function saveDraft(storage: Storage, scope: string, payload: unknown): boolean;
+export function readDraft(storage: Storage, scope: string): { savedAt?: string; payload: unknown } | null;
+export function clearDraft(storage: Storage, scope: string): boolean;
