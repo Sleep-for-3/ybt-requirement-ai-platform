@@ -18,6 +18,7 @@ import { EvidenceDrawer } from "@/components/requirement-workspace/EvidenceDrawe
 import { RequirementInputPanel } from "@/components/requirement-workspace/RequirementInputPanel";
 import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
 import { useJobPolling } from "@/hooks/useJobPolling";
+import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import {
   BackgroundJobSummary,
   MappingEvidence,
@@ -58,6 +59,11 @@ export function RequirementWorkspace() {
   const [businessJobSeed, setBusinessJobSeed] = useState<BackgroundJobSummary | null>(null);
   const [technicalJobSeed, setTechnicalJobSeed] = useState<BackgroundJobSummary | null>(null);
   const [activeTab, setActiveTab] = useState<"structured" | "lineage" | "evidence" | "questions" | "document">("structured");
+  // B11: register the workspace's own dirty flags with the shared registry so the tab-level
+  // guard (refresh/close) and other navigation paths can see them, in addition to the local
+  // per-handler confirms below that already protect field/table/scenario switches.
+  useUnsavedChanges(`requirement-editor:${projectId ?? "none"}:${requirement?.id ?? "new"}`, editorDirty);
+  useUnsavedChanges(`requirement-scope:${projectId ?? "none"}:${tableId ?? "none"}:${scenarioId ?? "none"}`, scopeDirty);
   const generationContext = `${projectId}:${tableId}:${scenarioId}:${fieldId}:${requirement?.id || "new"}:${requirement?.version || 0}`;
   const generationContextRef = useRef(generationContext);
   generationContextRef.current = generationContext;
@@ -203,6 +209,16 @@ export function RequirementWorkspace() {
     });
   }
 
+  function selectRequirement(next: RequirementScope | null) {
+    // B11: switching the selected requirement discards the current field edits and the
+    // unsaved scope edits, so it must go through the same guard as table/scenario switches.
+    if (scopeDirty && !window.confirm("需求说明尚未保存，确定放弃并切换？")) return;
+    guardUnsaved(() => {
+      if (next?.id !== requirement?.id) setScopeDirty(false);
+      setRequirement(next);
+    });
+  }
+
   async function generateDrafts() {
     if (!projectId || !selectedField || !scenarioId) return;
     if (scopeDirty) { setError("请先保存需求说明。"); return; }
@@ -300,7 +316,7 @@ export function RequirementWorkspace() {
               {inputPanelOpen ? "收起" : "展开"}
             </button>
           </div>
-          <RequirementScopePanel key={`${projectId}:${tableId}:${scenarioId}`} projectId={projectId} tableId={tableId} scenarioId={scenarioId} fields={fields} onSelect={setRequirement} onDirty={setScopeDirty} contentVersion={scopedDocument.data?.revision?.content_version} />
+          <RequirementScopePanel key={`${projectId}:${tableId}:${scenarioId}`} projectId={projectId} tableId={tableId} scenarioId={scenarioId} fields={fields} onSelect={selectRequirement} onDirty={setScopeDirty} contentVersion={scopedDocument.data?.revision?.content_version} />
           {requirement ? <RequirementScriptPanel key={`scripts:${projectId}:${requirement.id}:${scopedDocument.data?.revision?.content_version||0}`} projectId={projectId}
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
             fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
