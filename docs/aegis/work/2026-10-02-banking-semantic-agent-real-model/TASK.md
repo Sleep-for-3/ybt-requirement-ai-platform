@@ -340,3 +340,30 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 2. 建 `requirement_document_assistance` Skill（同 6 步治理流程）；
 3. 15 步计划审查（固定/Observation 决定/可插入/optional）；
 4. Agent 级业务质量评测集（10 项）+ 最终自主性报告。
+
+## 23. Round 12 —— 文档 Skill 已发布（第三个模型型能力就位）
+
+`requirement_document_assistance` 已走完完整 6 步治理流程：
+
+- 定义 **3**（task_key 同）；版本 **13**（project 11 作用域，`document_assistance_v1`，model_profile 4）
+- 测试用例 **12**；envelope 由平台构造器 `build_document_envelope(db, principal, project_id, requirement_id, content_version)` 生成
+  （注意：它返回 **tuple**，需从中取 `SkillInputEnvelope`；facts 为 `requirement_revision_section` ×3）
+- `RUN 36` deterministic **passed 1**；`RUN 37` real_model **passed 1，`real_model_successes: 1`**
+- submit → pending_approval → **独立审批人（user 26）发布**；绑定 5 → v13
+
+**但 Agent 路径仍未用上**：task 19 中 `generate_requirement_document` 仍为
+`executed=False / deterministic_draft / gaps=[skill_binding_missing ×2]`。
+与之前需求工具**完全同类**的缺口，而需求工具已验证过修法：
+
+1. 文档工具仍直接读 `ctx.tool_input.get("skill_key")`，**未按任务键回退**（需加 `DOCUMENT_TASK = "requirement_document_assistance"` 回退）；
+2. 文档工具应改用平台的 `build_document_envelope` 构造固定修订上下文，而不是自建信封（否则会像需求工具一样报契约错误）；
+3. 合并 gaps 时应用 `_dedupe_gaps`。
+
+**当前真实模型步骤 = 2**（`generate_mapping_draft`、`generate_requirement_candidate`），调用日志 518/521 均真实成功；
+文档步骤待上述 1-3 修完后复验。
+
+## 24. 下一步
+
+1. 按上述 1-3 修文档工具 → 重跑全链确认 `generate_requirement_document` 为 `executed=true`；
+2. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
+3. 15 步计划审查 + Agent 级业务质量评测集。
