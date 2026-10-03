@@ -277,3 +277,36 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 2. 建 `requirement_document_assistance` Skill（同 6 步流程）；
 3. 4 组自主性场景 + Agent 级业务质量评测集；
 4. 15 步计划审查（固定/Observation 决定/可插入/optional）。
+
+## 19. Round 10 —— 目标第⑤项：4 组自主性场景（`5dd4887`）
+
+`tests/test_agent_autonomy_scenarios.py`：**5 passed / 2 xfailed**（xfail = 有证据的真实缺口，修复后会 XPASS）。
+
+| 场景 | 结果 | 关键证据 |
+|---|---|---|
+| ① 信息不足→主动补查 | ✅ | 观察器拿到结构化状态；补丁生成 `observe_replan` 版本；**补丁新增步骤在同一轮内确实执行** |
+| ② 冲突→人工 Gate→reanalysis | ⚠️ 缺口 | 冲突停在闸门、决策进台账；但 **`request_reanalysis` 后台账仍为 `['waiting_human']`** |
+| ③ Skill 失败→retry→带标签降级 | ✅ | 恰好重试 2 次、步骤 failed/skipped、**绝不报 `executed`**、任务不变 completed |
+| ④ SQL 语义变化→impact→recheck | ⚠️ 缺口 | 任务保留 `change_context`、impact 计划可落地；**场景模板无 requirement/mapping recheck 步骤** |
+
+### 缺口① 的精确矛盾（下轮首查）
+
+`runtime.decide()` 在 1487 行附近**已有** `request_reanalysis` 分支：
+`_transition_step(step, STEP_PENDING)` + 清 `review_task_id` + 步骤 gap `human_reanalysis_requested` + artifacts `superseded`。
+但实测决策后台账里 `compare` 步骤仍为 `waiting_human`（且只有一个行）——说明该分支**不可达**或转移被回退。
+下轮用一次针对性 trace（在 `decide()` 打印 decision 与各分支入口）定位：可能是 approve 分支的某个早返回（如 `keep_open`、`clarification`）
+在 decision 判断之前就命中，或 `decide_task(..., "returned")` 提前返回。
+
+### 缺口② 的修法
+
+在 `planner` 的 `sql_change_impact` 计划模板末尾加入 recheck 步骤（复用 `prepare_mapping` / `generate_mapping_draft` /
+`generate_requirement_candidate`），使“自动 impact → requirement/mapping recheck”成立；需同时更新
+`test_agent_sql_change_events.py` 中对该场景步数的断言。
+
+## 20. 下一步（顺序）
+
+1. 定位并修复缺口①（人工 reanalysis 必须真正启动重分析）；
+2. 修缺口②（SQL 变更→requirement/mapping recheck）；
+3. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
+4. 建 `requirement_document_assistance` Skill；
+5. 15 步计划审查 + Agent 级业务质量评测集。
