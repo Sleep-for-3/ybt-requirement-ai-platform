@@ -396,3 +396,41 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 1. 收紧文档 Skill 提示词 → v2 重评测 + 独立发布 → 确认第三个 `executed=true`；
 2. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
 3. 15 步计划审查 + Agent 级业务质量评测集 + 最终报告。
+
+## 27. Round 14 —— 文档 Skill v2 发布，第三个 `executed=true` ✅
+
+### v2 提示词收紧（真正的问题不是断言，而是引用约束）
+
+对比日志 525（Agent，失败）/ 518（评测，成功）后确定：信封完全相同、未截断，是**内容型校验**——
+模型生成了超出固定修订的段落引用。v2 提示词改为：
+**枚举允许的引用形制**（`revision:<版本>:requirement|fields|gaps` 与 policy_evidence 中的条款标识）、
+要求逐字复制不得构造、段落≤2 且每段≤100 字。
+
+### 治理流程（第二次完整走通）
+
+- 版本 **14**（v2，内容同结构、仅 system_prompt 变更，schema 仍 `document_assistance_v1`）
+- 测试用例 **13**（断言改为 `minimum_claims=0`——文档任务的产物是 **candidate 段落**，
+  强行要求 claims 是我原来断言写得不对；保留了 mandatory 断言：schema/scope/budget/引用守门）
+- `RUN 40` deterministic **passed 2**；`RUN 41` real_model **passed 2，`real_model_successes: 2`**
+  （两条均 `model_output_valid: True`）
+- submit → pending_approval → **独立审批人（user 26）发布**；绑定 → v14
+
+### Agent 链路验证
+
+`SUMMARY: unique_steps=15 model_executed=3`
+
+| 步骤 | executed | 证据 |
+|---|---|---|
+| `generate_mapping_draft` | ✅ | `scenario_business_mapping` real_model |
+| `generate_requirement_candidate` | ✅ | `requirement_candidate_generation` v3（日志 530） |
+| **`generate_requirement_document`** | ✅ | `requirement_document_assistance` **v2**（日志 531：24.8s） |
+| `rerank_candidates` | ❌ | 需为项目 11 发布本项目 `field_semantic_matching` 版本 + ≥2 候选 |
+
+注意：文档步骤仍如实附带 `draft_only` / `missing_basis` / `missing_source_and_mapping` 缺口——
+模型产物是草案且证据不足，**没有被伪装成已完成**。
+
+## 28. 下一步
+
+1. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`（最后一个模型步骤）；
+2. 15 步计划审查（固定/Observation 决定/可插入/optional）；
+3. Agent 级业务质量评测集（10 项，含模型执行率/回退率）+ 最终自主性与交付物报告。
