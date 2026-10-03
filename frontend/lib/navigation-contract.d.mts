@@ -1,9 +1,11 @@
-export type NavigationAudience = "technical" | "admin" | "cockpit";
+export type NavigationAudience = "technical" | "admin" | "cockpit" | "uat" | "audit";
 
 export type NavigationAccess = {
   isAdmin: boolean;
   canViewCockpit: boolean;
   isTechnical: boolean;
+  canViewUat: boolean;
+  canViewAudit: boolean;
 };
 
 export type NavigationAuth = {

@@ -83,10 +83,10 @@ const SECONDARY_NAV: NavItem[] = [
   { href: "/evaluations", label: "生成评测", icon: ChartNoAxesCombined, audience: "admin" },
   { href: "/tasks", label: "安全查询", icon: Workflow, audience: "technical" },
   { href: "/deliverable-templates", label: "交付模板", icon: FileSpreadsheet, audience: "admin" },
-  { href: "/uat", label: "验收管理", icon: ShieldCheck, audience: "admin" },
+  { href: "/uat", label: "验收管理", icon: ShieldCheck, audience: "uat" },
   { href: "/notifications", label: "通知", icon: Bell },
   { href: "/jobs", label: "后台任务", icon: History, audience: "technical" },
-  { href: "/audit", label: "审计", icon: ScrollText, audience: "admin" },
+  { href: "/audit", label: "审计", icon: ScrollText, audience: "audit" },
   { href: "/admin", label: "系统配置", icon: Settings2, audience: "admin" }
 ];
 

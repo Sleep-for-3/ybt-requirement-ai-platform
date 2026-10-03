@@ -293,7 +293,7 @@ export function RequirementWorkspace() {
         </div>
         <div className="grid min-w-0 items-start gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
           <div className={inputPanelOpen ? "min-w-0" : "hidden lg:block"}>
-          <div className="mb-2 flex items-center justify-between lg:hidden">
+          <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600">分析范围与资产</span>
             <button aria-expanded={inputPanelOpen} className="button-secondary h-8 px-2.5 text-xs" onClick={() => setInputPanelOpen((open) => !open)} type="button">
               {inputPanelOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}

@@ -65,10 +65,14 @@ export function navigationAccessForProject(auth, projectId) {
   const permissions = projectId
     ? auth?.effective_project_permissions?.[String(projectId)] || []
     : [];
+  const permissionSet = new Set(permissions);
   return {
     isAdmin: Boolean(auth?.capabilities?.can_view_admin),
     canViewCockpit: Boolean(auth?.capabilities?.can_view_institution_cockpit),
-    isTechnical: permissions.some((permission) => TECHNICAL_PERMISSIONS.has(permission))
+    isTechnical: permissions.some((permission) => TECHNICAL_PERMISSIONS.has(permission)),
+    // B16: UAT and audit are business capabilities, not administrator capabilities.
+    canViewUat: permissionSet.has("uat.view") || permissionSet.has("uat.manage") || permissionSet.has("uat.execute"),
+    canViewAudit: permissionSet.has("audit.read")
   };
 }
 
@@ -76,6 +80,8 @@ export function canViewNavigationAudience(audience, access) {
   if (!audience) return true;
   if (audience === "admin") return access.isAdmin;
   if (audience === "cockpit") return access.canViewCockpit;
+  if (audience === "uat") return access.isAdmin || Boolean(access.canViewUat);
+  if (audience === "audit") return access.isAdmin || Boolean(access.canViewAudit);
   return access.isTechnical;
 }
 
