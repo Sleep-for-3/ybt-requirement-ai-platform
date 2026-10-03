@@ -73,7 +73,19 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 **尚未执行（如实标记）**：升级后的 **production browser 回归**（登录/续期、项目切换、需求、语义目录、下载）
 未在本机跑（**无 Playwright 浏览器、仓库也无 e2e 用例**，已在记录中如实标记）；
 **运行实例仍服务 Next 14 构建**，需经批准的 `npm ci` + 重新构建 + 重启，按发布/回滚步骤执行。
-剩余 2 个 high 与 2 个 moderate 告警需逐项做适用性判定（后续）。
+### 剩余告警逐项处置（升级后）
+
+升级后用 `npm audit` 实测（生产依赖）并从 **critical 1 → 0**；随后处置剩余项：
+
+| 包 | 级别 | 处置 | 依据 |
+| --- | --- | --- | --- |
+| nanoid | high | **已修复** | 传递依赖（postcss 链）；用 `overrides: {"nanoid": "^3.3.19"}` 强制修复版；生产审计 high 2→1 |
+| postcss | high | **不适用于运行时（待 next 16 清除）** | 告警为**构建期**：CSS Stringify 未转义 `</style>` 的 XSS、以及攻击者可控 `sourceMappingURL` 的任意文件读取；本仓库构建只处理自己的 Tailwind/`globals.css`，**无攻击者可控 CSS 输入**。官方修复仅随 `next@16.3.8`（major） |
+| next（经 postcss） | moderate | **同上** | 同一 postcss 链；随 `next@16.3.8` 一并清除 |
+| 开发依赖（tailwind/eslint 链等） | high | **开发期，不入生产** | `--omit=dev` 后不计入生产依赖；修复需 tailwind 4 / eslint-config-next 大版本，单独评估 |
+
+备注：注册表镜像未实现 audit 端点，`npm audit fix` 无法执行，故用显式 `overrides` 锁定修复版；
+`npm audit` 结果来自官方 registry。
 
 **已完成的替代验证（升级后构建真实运行冒烟）**：在隔离副本以 `NEXT_DIST_DIR` 隔离目录、
 备用端口 3100 启动 **Next 15.5.27 生产构建**（`next start`，就绪 317ms），逐路由探测：
