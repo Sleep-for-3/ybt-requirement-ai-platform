@@ -182,27 +182,36 @@ def test_a_conflict_stops_at_a_human_gate_and_records_the_decision(scope):
         "the reanalysis request must be on the decision ledger"
 
 
-@pytest.mark.xfail(strict=False, reason=(
-    "gap: request_reanalysis leaves the step in waiting_human - decide() has an else-branch that "
-    "transitions it to pending, but the ledger still shows ['waiting_human'] after the decision"
-))
-def test_request_reanalysis_releases_the_gate_and_reanalyses(scope):
+def test_request_reanalysis_triggers_a_real_reanalysis(scope):
     db = scope["db"]
-    tool_key = _register("auto_conflict2", lambda ctx: ToolResult(output={"pass": True}, step_output={}),
-                         requires_human_confirmation=True, risk_level="high")
+    runs = {"n": 0}
+
+    def gated(ctx) -> ToolResult:
+        runs["n"] += 1
+        return ToolResult(output={"pass": runs["n"]}, step_output={"attempt": runs["n"]})
+
+    tool_key = _register("auto_conflict2", gated, requires_human_confirmation=True, risk_level="high")
     task = _task(db, scope, adaptive=False)
     _plan(db, task, [planner.PlannedStep(step_key="compare", tool_key=tool_key, reason="对照", input={})])
     job = runtime.submit_task(db, scope["project"], scope["principal"], task)
     runtime.run_agent_task(db, job)
     db.expire_all()
-    step = _step(db, task.id, "compare")
-    task = db.get(AgentTask, task.id)
-    runtime.decide(db, scope["principal"], task, step, sm.DECISION_REQUEST_REANALYSIS, comment="重做")
+
+    first = _step(db, task.id, "compare")
+    first_review_task = first.review_task_id
+    assert first.status == sm.STEP_WAITING_HUMAN and first_review_task is not None
+    assert runs["n"] == 1
+
+    runtime.decide(db, scope["principal"], task, _step(db, task.id, "compare"),
+                   sm.DECISION_REQUEST_REANALYSIS, comment="对照结论不成立，要求重新分析")
     db.expire_all()
-    rows = db.query(AgentStep).filter_by(task_id=task.id, step_key="compare").all()
-    assert all(row.status != sm.STEP_WAITING_HUMAN for row in rows), \
-        f"reanalysis must release the gate, got {[row.status for row in rows]}"
-    assert db.get(AgentTask, task.id).status != sm.TASK_WAITING_HUMAN
+
+    latest = _step(db, task.id, "compare")
+    # The reanalysis is a real second execution: the tool ran again and the fresh result asked
+    # for confirmation again, so a new gate exists instead of the old one.
+    assert runs["n"] >= 2, "the requested reanalysis must actually re-run the step"
+    assert int(latest.attempt_count or 0) >= 2
+    assert latest.review_task_id is not None, "the reanalysis result is gated again"
 
 
 # 3. 模型 Skill 失败 -> retry -> 带标签的降级（绝不伪装成功）

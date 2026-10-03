@@ -1485,6 +1485,8 @@ def decide(
         for artifact in db.scalars(select(AgentArtifact).where(AgentArtifact.step_id == step.id)).all():
             artifact.status = "rejected"
     else:  # request_reanalysis
+        # The step is released here; decide() then resumes the task, so a step that needs human
+        # confirmation runs again and opens a fresh gate - the reanalysis really happens.
         _transition_step(step, sm.STEP_PENDING)
         step.review_task_id = None
         _step_gap(step, "human_reanalysis_requested", f"人工要求重新分析：{comment or '未填写原因'}")
