@@ -92,9 +92,10 @@ export function isResourcesPath(pathname) {
 
 export function navigationTrailForPath(pathname, queryString = "") {
   if (isResourcesPath(pathname)) {
-    const module = Object.keys(RESOURCE_MODULES).find(p => pathname === p || pathname.startsWith(`${p}/`));
+    // Renamed from `module` to satisfy @next/next/no-assign-module-variable (B17).
+    const activeModule = Object.keys(RESOURCE_MODULES).find(p => pathname === p || pathname.startsWith(`${p}/`));
     const detail = DETAIL_PARENTS.find(([pattern]) => pattern.test(pathname));
-    const parentHref = pathname === "/resources" ? null : detail?.[1] || (module && pathname !== module && !pathname.startsWith("/knowledge/") ? module : "/resources");
+    const parentHref = pathname === "/resources" ? null : detail?.[1] || (activeModule && pathname !== activeModule && !pathname.startsWith("/knowledge/") ? activeModule : "/resources");
     return { parentHref, sectionHref: "/resources", sectionLabel: "资料与数据",
       parentLabel: parentHref === "/knowledge/documents" ? "知识文档" : RESOURCE_MODULES[parentHref] || "资料与数据" };
   }
