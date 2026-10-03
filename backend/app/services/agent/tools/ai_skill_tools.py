@@ -23,8 +23,14 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.models import AgentStep, RequirementGenerationInput, RequirementGenerationItem
+from app.models import (
+    AgentStep,
+    Requirement,
+    RequirementGenerationInput,
+    RequirementGenerationItem,
+)
 from app.schemas.ai_skill import SkillEvidence, SkillGap, SkillInputEnvelope, SkillScope
+from app.services.ai_skills.document_context import build_document_envelope
 from app.services.ai_skills.requirement_context import build_requirement_envelope
 from app.schemas.ai_skill_ranking import (
     FieldCandidatePrepare,
@@ -52,6 +58,7 @@ from app.services.ai_skills.runtime import FIELD_RERANK_TASK, execute_skill, res
 
 # Task keys the agent chain resolves through the skill registry when the plan omits one.
 REQUIREMENT_CANDIDATE_TASK = "requirement_candidate_generation"
+DOCUMENT_TASK = "requirement_document_assistance"
 from app.services.auth.permission_service import PermissionService
 from app.services.llm.execution_metadata import stable_hash
 from app.services.mapping.generator_context import (
@@ -1067,7 +1074,9 @@ def _generate_requirement_document(ctx: ToolContext) -> ToolResult:
         isinstance(requirement_id, bool) or not isinstance(requirement_id, int) or requirement_id <= 0
     ):
         raise ToolExecutionError("invalid_tool_input", "requirement_id 必须是正整数。")
-    skill_key = _skill_key(ctx.tool_input.get("skill_key"))
+    # The published skill for this task is resolved through its binding; the plan may still
+    # override it, but an absent override must not skip the skill.
+    skill_key = _skill_key(ctx.tool_input.get("skill_key")) or DOCUMENT_TASK
 
     facts, policy, contract_gaps, excluded = _collect_task_evidence(ctx)
     gaps: list[SkillGap] = list(contract_gaps)
@@ -1080,11 +1089,30 @@ def _generate_requirement_document(ctx: ToolContext) -> ToolResult:
     binding_available = False
     degraded_path: str | None = None
     if skill_key:
-        try:
-            envelope = _build_requirement_envelope(ctx, skill_key, facts, policy, subject, contract_gaps)
-        except ValidationError:
-            envelope = None
-            gaps.append(gap("evidence_contract_violation", "证据信封构建失败，已改为确定性草稿。"))
+        envelope = None
+        # The document contract requires the fixed revision context, which only the platform
+        # builder produces; without it the skill refuses the envelope.
+        revision_id = requirement_id
+        if revision_id is None:
+            revision_id = ctx.db.scalar(select(Requirement.id).where(
+                Requirement.project_id == ctx.project.id).order_by(Requirement.id.desc()))
+        requirement = ctx.db.get(Requirement, revision_id) if revision_id is not None else None
+        if requirement is not None and requirement.project_id == ctx.project.id \
+                and requirement.content_version:
+            try:
+                built = build_document_envelope(ctx.db, ctx.principal, ctx.project.id,
+                                                requirement.id, requirement.content_version)
+            except (ValueError, HTTPException) as exc:
+                gaps.append(gap("document_revision_unavailable", _clip(str(exc), 200)))
+            else:
+                envelope = next((item for item in built if isinstance(item, SkillInputEnvelope)), None) \
+                    if isinstance(built, tuple) else built
+        if envelope is None:
+            try:
+                envelope = _build_requirement_envelope(ctx, skill_key, facts, policy, subject, gaps)
+            except ValidationError:
+                envelope = None
+                gaps.append(gap("evidence_contract_violation", "证据信封构建失败，已改为确定性草稿。"))
         if envelope is not None:
             result = _execute_requirement_skill(ctx, envelope, gaps)
             if result is not None:
