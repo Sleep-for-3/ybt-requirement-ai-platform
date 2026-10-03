@@ -1,6 +1,9 @@
-from datetime import UTC, datetime
+import os
+import socket
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundJob
@@ -29,6 +32,50 @@ def _resolve_handler(job_type: str, handler: JobHandler | None = None) -> JobHan
     if resolved is not None:
         register_job_handler(job_type, resolved)
     return resolved
+
+
+# How long one worker may hold a job before another may take it over (B07).
+JOB_LEASE_SECONDS = 900
+
+# A job in one of these states may still be claimed; anything else is a duplicate consumer.
+CLAIMABLE_STATUSES = ("queued", "partially_completed")
+
+
+def _lease_owner() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _claim_job(db: Session, job: BackgroundJob, *, owner: str, lease_seconds: int = JOB_LEASE_SECONDS) -> bool:
+    """Transition the job to running with a single conditional UPDATE.
+
+    Exactly one consumer can win: the update only matches a queued/partially-completed job or a
+    running job whose lease already expired (a crashed runner). A completed, cancelled or
+    actively-leased job is never matched, so the handler is not executed twice.
+    """
+
+    now = datetime.now(UTC)
+    claimed = db.execute(
+        update(BackgroundJob)
+        .where(
+            BackgroundJob.id == job.id,
+            or_(
+                BackgroundJob.status.in_(CLAIMABLE_STATUSES),
+                and_(
+                    BackgroundJob.status == "running",
+                    or_(BackgroundJob.lease_expires_at.is_(None),
+                        BackgroundJob.lease_expires_at < now),
+                ),
+            ),
+        )
+        .values(status="running", progress=1, started_at=now,
+                lease_owner=owner, lease_expires_at=now + timedelta(seconds=lease_seconds))
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    db.commit()
+    if claimed != 1:
+        return False
+    db.refresh(job)
+    return True
 
 
 class InlineTaskQueue:
@@ -81,10 +128,13 @@ class InlineTaskQueue:
             db.commit()
             db.refresh(job)
             return job
-        job.status = "running"
-        job.progress = 1
-        job.started_at = datetime.now(UTC)
-        db.commit()
+        # B07: claim the job atomically before running anything. Only a queued, retried or
+        # expired-lease job can be claimed, so a duplicate consumer (re-delivery, second worker,
+        # or a run that already finished) short-circuits without executing the handler again.
+        owner = _lease_owner()
+        if not _claim_job(db, job, owner=owner):
+            db.refresh(job)
+            return job
         try:
             result = handler(db, job)
             db.refresh(job)
@@ -107,6 +157,10 @@ class InlineTaskQueue:
             job.error_message = str(exc)[:2000]
             job.progress = 100
         job.finished_at = datetime.now(UTC)
+        # The run is over: drop the lease so a legitimate retry can claim it again while a
+        # finished job can never be claimed a second time.
+        job.lease_owner = None
+        job.lease_expires_at = None
         db.commit()
         db.refresh(job)
         return job
