@@ -145,9 +145,23 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 
 ### 未完成（阻碍阶段退出）
 
-- **B11 剩余接线**：顶栏项目、选择需求、字段/场景、前端路由的“保存/放弃/取消离开”交互式离开
-  守卫尚未逐页接入（当前已覆盖刷新/关闭与统一 dirty 登记原语与本地草稿）；需逐页接入并做
-  浏览器流程回归（390px/768px/桌面）。
+### B11 接线进展
+
+已接入（均已验证）：
+
+- **刷新/关闭**：`<UnsavedChangesGuard />` 挂载于 `app/layout.tsx`（提交 `db1cc57`）。
+- **顶栏项目切换**：`components/ProjectContext.tsx` 的 `changeProject()` 先调 `confirmLeave()`；
+  取消时不动 URL/状态（受控 select 停留当前项目）（提交 `140e2b0`）。
+- **选择需求**：`components/requirement-workspace/RequirementWorkspace.tsx` 新增
+  `selectRequirement()`，与已有 `changeTable`/`changeScenario`/`changeField` 一致地先看
+  `scopeDirty`/`editorDirty`；且把 `requirement-editor` 与 `requirement-scope` 两个 dirty 标志
+  用 `useUnsavedChanges()` **注册到共享登记**（此前无人注册，导致全局刷新/关闭守卫对工作区无效）
+  （提交 `de15c9b`）。
+- **本地草稿**：`lib/unsaved-changes.mjs` 提供 `saveDraft/readDraft/clearDraft`（配额/损坏不抛错），
+  已有 8 例测试。
+
+**尚未接入（如实标记）**：前端路由跳转（`<Link>`/`router.push`）的交互式离开确认，以及
+**真实浏览器流程回归**（本机无 Playwright 浏览器、仓库无 e2e 用例；390px/768px/桌面折叠恢复未实测）。
 
 ---
 
