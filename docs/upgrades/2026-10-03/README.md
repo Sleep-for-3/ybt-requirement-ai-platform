@@ -9,7 +9,7 @@
 | W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | 进行中 | `1782bac`（B23 契约） |
 | W02 机构熔断与令牌原子轮换 | B02/BA05, B05/BA04 | 已修复 / 已验证 | `16767d7`（B02）、见下（B05） |
 | W03 审核内容与正式产物不可变 | B03/BA01 | 已修复 / 已验证 | 见下 |
-| W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 待开始 | — |
+| W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 已修复 / 已验证 | 见下 |
 | W05 后台任务幂等与恢复 | B07/BA06 | 待开始 | — |
 | W06 人工编辑与模型配置完整性 | B10–B13, B15–B16 | 待开始 | — |
 
@@ -128,3 +128,33 @@
 - **业务证据**：AI 草稿与人工最终口径的区分保持不变；批准内容不可被普通编辑静默替换；旧批准版本可回读。
 - **发布与回滚**：无数据库迁移（复用既有 `mapping_versions` 表）；回滚只需回退提交。
 - **已知限制**：送审与编辑的**真实 PostgreSQL 并发实测**尚未执行（预留到 W10 与真实依赖一起验收）。
+
+---
+
+## W04：SQL 限额、脱敏与连接器能力契约（B04/B06/B09）
+
+- **问题与行为**：
+  - B06：`_force_limit` 用正则搜整段渲染 SQL，子查询/CTE/字符串里的 `LIMIT` 被当成外层限量
+    （审查复现：`max_rows=2` 却返回 5 行）；且执行端 `result.mappings().all()` 无硬上限。
+  - B04：`_sanitize_rows` 只要**返回列名**像统计列就跳过值敏感检测，`phone AS cnt` 原值被保留
+    （审查复现：`alias_preserves_sensitive_value=true`）。
+  - B09：`_sqlglot_dialect` 把非 mysql/sqlite 全部回落 `postgres`，Oracle/SQL Server/Db2 声明
+    `safe_query=true` 却输出 `LIMIT`。
+- **改动**（`app/services/db/safe_sql_executor.py`、`app/services/connectors/registry.py`）：
+  - 限额改为在 **AST** 上施加（`tree.limit(n)`）并按目标方言渲染；不会抬高语句已有的更小外层限额
+    （`min(cap, existing)`）；执行端第二层硬上限 `fetchmany(max_limit+1)` 并截断（保留对简单结果
+    替身的兼容回退）。
+  - 新增 `_safe_aggregate_aliases(tree)`：只有**确证为聚合且其参数不含敏感列**的投影才享有统计
+    豁免；`phone AS cnt`、`count(phone) AS cnt`、拼接表达式均不豁免，`count(*) AS cnt` 保留豁免。
+  - `_sqlglot_dialect` 严格化：只支持 `postgresql/postgres/mysql/mysql_compatible/sqlite`，其余
+    返回 None 并在 `validate_and_prepare` 抛出 `Safe SELECT is not supported for dialect ...`（失败关闭）。
+  - 能力矩阵修正：Oracle/SQL Server/Db2 的 `safe_query` 改为 **False** 并附 `safe_query_note`
+    （方言限量/超时/只读账号未验收）。
+- **验证**：`tests/test_safe_sql_hardening.py` 14 例，直接复现三类风险：外层/子查询/字符串/CTE/UNION
+  限额；别名/表达式/聚合敏感列的脱敏豁免；未验收方言被拒与能力矩阵不夸大。
+  回归：安全 SQL/数据源/元数据目录共 **53 passed**。
+- **业务证据**：安全查询的行数、时间与结果字节均有硬上限；别名与表达式不能绕过脱敏；不支持的安全
+  执行显式拒绝而不会静默降级。
+- **发布与回滚**：无数据库迁移；回滚只需回退提交（旧行为将恢复正则限额与宽松豁免）。
+- **已知限制**：Oracle/SQL Server/Db2 的**真实只读账号集成验收**未做（属 W10 银行接入）；
+  MySQL 方言限量渲染已验证但**未在真实 MySQL 实例上执行**。

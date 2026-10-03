@@ -39,7 +39,8 @@ CONNECTORS: tuple[dict[str, Any], ...] = (
         "required_fields": ["name", "host", "port", "service_name", "username", "password"],
         "optional_fields": ["display_name", "description", "schema_name", "sid", "ssl_mode"],
         "database_label": "Service Name / SID", "schema_label": "Schema", "service_name_mode": "service_name_or_sid",
-        "ssl_tls_capability": "driver_configurable", "metadata_discovery": True, "safe_query": True,
+        "ssl_tls_capability": "driver_configurable", "metadata_discovery": True, "safe_query": False,
+        "safe_query_note": "B09：方言限量/超时/只读账号尚未验收，安全查询暂不支持",
         "readonly_validation": "policy_only", "implementation": "sqlalchemy_generic",
     },
     {
@@ -48,7 +49,8 @@ CONNECTORS: tuple[dict[str, Any], ...] = (
         "required_fields": ["name", "host", "port", "database_name", "username", "password"],
         "optional_fields": ["display_name", "description", "schema_name", "odbc_driver", "ssl_mode"],
         "database_label": "Database / Catalog", "schema_label": "Schema", "service_name_mode": "unsupported",
-        "ssl_tls_capability": "driver_configurable", "metadata_discovery": True, "safe_query": True,
+        "ssl_tls_capability": "driver_configurable", "metadata_discovery": True, "safe_query": False,
+        "safe_query_note": "B09：方言限量/超时/只读账号尚未验收，安全查询暂不支持",
         "readonly_validation": "policy_only", "implementation": "sqlalchemy_generic",
     },
     {
@@ -57,7 +59,8 @@ CONNECTORS: tuple[dict[str, Any], ...] = (
         "required_fields": ["name", "host", "port", "database_name", "username", "password"],
         "optional_fields": ["display_name", "description", "schema_name", "ssl_mode"],
         "database_label": "Database", "schema_label": "Schema", "service_name_mode": "unsupported",
-        "ssl_tls_capability": "driver_configurable", "metadata_discovery": True, "safe_query": True,
+        "ssl_tls_capability": "driver_configurable", "metadata_discovery": True, "safe_query": False,
+        "safe_query_note": "B09：方言限量/超时/只读账号尚未验收，安全查询暂不支持",
         "readonly_validation": "policy_only", "implementation": "sqlalchemy_generic",
     },
     {

@@ -90,7 +90,22 @@ class SafeSqlExecutor:
             raise ValueError("DDL/DML statements are not allowed, including writable CTEs")
         if _has_select_star_projection(tree):
             raise ValueError("SELECT * is not allowed")
-        return self._force_limit(tree.sql(dialect=_sqlglot_dialect(dialect)), max_rows)
+        resolved_dialect = _sqlglot_dialect(dialect)
+        if resolved_dialect is None:
+            raise ValueError(
+                f"Safe SELECT is not supported for dialect '{dialect or 'unknown'}'"
+            )
+        limit = min(max_rows or self.default_limit, self.max_limit)
+        existing = _existing_outer_limit(tree)
+        if existing is not None:
+            # Never raise a tighter limit the statement already applies.
+            limit = min(limit, existing)
+        # B06: the row limit is applied on the AST, so a subquery or a string literal that merely
+        # contains LIMIT can no longer satisfy the check for the outer statement.
+        limited = _apply_ast_limit(tree, limit)
+        # The sanitizer needs to know which returned columns are genuinely safe aggregates.
+        self._safe_aggregate_aliases = _safe_aggregate_aliases(tree)
+        return limited.sql(dialect=resolved_dialect)
 
     def execute(
         self,
@@ -131,9 +146,19 @@ class SafeSqlExecutor:
             with engine.connect() as connection:
                 with _statement_timeout(connection, datasource.db_type, self.timeout_seconds):
                     result = connection.execute(text(sanitized_sql))
-                    raw_rows = [dict(row) for row in result.mappings().all()]
+                    # B06 second layer: never materialise an unbounded result set.
+                    mappings = result.mappings()
+                    fetchmany = getattr(mappings, "fetchmany", None)
+                    if callable(fetchmany):
+                        raw_rows = [dict(row) for row in fetchmany(self.max_limit + 1)]
+                        if len(raw_rows) > self.max_limit:
+                            raw_rows = raw_rows[: self.max_limit]
+                    else:  # pragma: no cover - simple result doubles
+                        raw_rows = [dict(row) for row in mappings.all()][: self.max_limit]
             engine.dispose()
-            columns, rows, warnings = _sanitize_rows(raw_rows)
+            columns, rows, warnings = _sanitize_rows(
+                raw_rows, safe_aggregate_aliases=getattr(self, "_safe_aggregate_aliases", None)
+            )
             response = SafeSqlResponse(
                 status="success",
                 columns=columns,
@@ -196,25 +221,83 @@ class SafeSqlExecutor:
         return isinstance(tree, (exp.Select, exp.Union, exp.With)) or tree.find(exp.Select) is not None and tree.key == "with"
 
     def _force_limit(self, sql: str, max_rows: int | None) -> str:
+        """Deprecated text-level fallback; kept only for callers that still hold rendered SQL.
+
+        New code must go through the AST limit in ``validate_and_prepare`` (B06).
+        """
+
         limit = min(max_rows or self.default_limit, self.max_limit)
-        match = re.search(r"\blimit\s+(\d+)\b", sql, flags=re.IGNORECASE)
-        if match:
-            existing = int(match.group(1))
-            if existing > limit:
-                return re.sub(r"\blimit\s+\d+\b", f"LIMIT {limit}", sql, flags=re.IGNORECASE)
-            return sql
-        return f"{sql} LIMIT {limit}"
+        return _apply_ast_limit(sqlglot.parse_one(sql), limit).sql()
 
 
-def _sanitize_rows(raw_rows: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+SAFE_QUERY_DIALECTS = {"postgresql", "mysql", "mysql_compatible", "sqlite"}
+
+
+def _apply_ast_limit(tree: exp.Expression, limit: int) -> exp.Expression:
+    """B06: set the row limit on the parsed statement itself.
+
+    A subquery, CTE, UNION arm or a string literal containing ``LIMIT`` must never be mistaken
+    for the outer statement's limit, and the rendered form uses the target dialect (TOP / FETCH
+    for dialects that need it) instead of appending PostgreSQL-style ``LIMIT``.
+    """
+
+    try:
+        limited = tree.limit(limit)
+    except (AttributeError, TypeError) as exc:  # pragma: no cover - defensive
+        raise ValueError("Unable to apply a row limit to this statement") from exc
+    return limited
+
+
+def _existing_outer_limit(tree: exp.Expression) -> int | None:
+    limit = tree.args.get("limit")
+    if limit is None:
+        return None
+    try:
+        return int(limit.expression.this)
+    except (AttributeError, TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+
+
+def _safe_aggregate_aliases(tree: exp.Expression) -> dict[str, bool]:
+    """Map returned column name -> whether it is a genuinely safe statistic.
+
+    B04: value screening must not be skipped just because the client named a column ``cnt``.
+    A statistic exemption requires the projection itself to be an aggregate whose arguments
+    contain no sensitive column, so ``phone AS cnt`` stays screened while ``count(*) AS cnt``
+    keeps its exemption.
+    """
+
+    flags: dict[str, bool] = {}
+    for select in tree.find_all(exp.Select):
+        for projection in select.expressions:
+            name = (projection.alias_or_name or "").lower()
+            if not name:
+                continue
+            aggregate = projection.find(exp.AggFunc)
+            safe = False
+            if aggregate is not None:
+                referenced = {column.name.lower() for column in aggregate.find_all(exp.Column)}
+                safe = not (referenced & SENSITIVE_FIELD_NAMES)
+            flags[name] = safe
+    return flags
+
+
+def _sanitize_rows(
+    raw_rows: list[dict[str, Any]],
+    safe_aggregate_aliases: dict[str, bool] | None = None,
+) -> tuple[list[str], list[dict[str, Any]], list[str]]:
     if not raw_rows:
         return [], [], []
+
+    safe_aggregates = safe_aggregate_aliases or {}
     sensitive = {column for column in raw_rows[0] if column.lower() in SENSITIVE_FIELD_NAMES or column in SENSITIVE_FIELD_NAMES}
     value_sensitive = {
         column
         for column in raw_rows[0]
         if column not in sensitive
-        and column.lower() not in SAFE_STATISTIC_COLUMNS
+        # B04: the exemption needs a verified aggregate projection, not merely a safe-sounding
+        # alias chosen by the client.
+        and not (column.lower() in SAFE_STATISTIC_COLUMNS and safe_aggregates.get(column.lower(), False))
         and any(looks_sensitive_value(row.get(column)) for row in raw_rows)
     }
     sensitive.update(value_sensitive)
@@ -243,12 +326,25 @@ def _elapsed_ms(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
 
 
-def _sqlglot_dialect(db_type: str | None) -> str:
+def _sqlglot_dialect(db_type: str | None) -> str | None:
+    """Map a connector to a dialect we can safely rewrite, or None when unsupported.
+
+    B09: Oracle / SQL Server / Db2 used to fall back to PostgreSQL and were emitted with
+    ``LIMIT``. Those connectors are not verified for safe query yet, so they must be refused
+    instead of silently producing a statement the target database cannot run.
+    """
+
+    if db_type is None:
+        # No dialect given: keep the historical default (PostgreSQL rendering).
+        return "postgres"
+
     if db_type in {"mysql", "mysql_compatible"}:
         return "mysql"
     if db_type == "sqlite":
         return "sqlite"
-    return "postgres"
+    if db_type in {"postgresql", "postgres"}:
+        return "postgres"
+    return None
 
 
 @contextmanager
