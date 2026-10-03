@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
-export default function FieldPage({ params }: { params: { fieldId: string } }) {
-  redirect(`/fields/${params.fieldId}/scenarios`);
+// Next 15 hands server components a promise; awaiting it also works on Next 14.
+export default async function FieldPage({ params }: { params: Promise<{ fieldId: string }> }) {
+  const { fieldId } = await params;
+  redirect(`/fields/${fieldId}/scenarios`);
 }

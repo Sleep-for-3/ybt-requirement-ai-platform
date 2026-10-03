@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ListChecks } from "lucide-react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
@@ -41,8 +42,10 @@ function resultValue(value: unknown) {
   return null;
 }
 
-export default function JobDetailsPage({ params }: { params: { jobId: string } }) {
-  const jobId = Number(params.jobId);
+export default function JobDetailsPage() {
+  // Next 15 passes params as a promise; useParams() keeps this client page version-agnostic.
+  const { jobId: jobIdParam } = useParams<{ jobId: string }>();
+  const jobId = Number(jobIdParam);
   const [initialJob, setInitialJob] = useState<BackgroundJobSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
