@@ -23,8 +23,9 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.models import AgentStep
+from app.models import AgentStep, RequirementGenerationInput, RequirementGenerationItem
 from app.schemas.ai_skill import SkillEvidence, SkillGap, SkillInputEnvelope, SkillScope
+from app.services.ai_skills.requirement_context import build_requirement_envelope
 from app.schemas.ai_skill_ranking import (
     FieldCandidatePrepare,
     FieldCandidateQuery,
@@ -772,13 +773,52 @@ def _build_requirement_envelope(
     gaps: list[SkillGap],
 ) -> SkillInputEnvelope:
     scope = project_scope(ctx.task)
+    # The requirement contract demands exactly one fixed requirement_context fact, which only
+    # the platform's own builder can produce (from a prepared generation input row + item).
+    # Without it the skill can never accept the envelope, so locate that row instead of
+    # fabricating a context here.
+    # The subject argument is already an evidence fact, so the target field id comes from the
+    # step input (and only falls back to the fact when it happens to carry one).
+    field_id = ctx.tool_input.get("target_field_id") or subject.get("target_field_id")
+    row = ctx.db.scalar(select(RequirementGenerationInput).where(
+        RequirementGenerationInput.project_id == ctx.project.id,
+    ).order_by(RequirementGenerationInput.id.desc()))
+    item = None
+    if row is not None and field_id is not None:
+        item = ctx.db.scalar(select(RequirementGenerationItem).where(
+            RequirementGenerationItem.input_id == row.id,
+            RequirementGenerationItem.field_id == field_id,
+        ).order_by(RequirementGenerationItem.id))
+    if row is not None and item is not None:
+        try:
+            fixed = build_requirement_envelope(ctx.project, row, item)
+        except (ValueError, HTTPException) as exc:
+            gaps.append(gap("requirement_input_invalid",
+                            f"需求生成输入不可用：{_clip(str(exc), 200)}"))
+        else:
+            known = {evidence.id for evidence in fixed.facts} | {e.id for e in fixed.policy_evidence}
+            # Only non-knowledge facts may ride along: the requirement contract rebuilds its own
+            # typed knowledge/policy layer from the fixed input units, and an agent-collected
+            # policy_clause without a real unit_id is rejected as an invalid evidence identity.
+            extra_facts = [SkillEvidence.model_validate(raw) for raw in [subject, *facts]
+                           if raw.get("id") not in known
+                           and raw.get("kind") not in {"knowledge_evidence", "policy_clause"}]
+            return fixed.model_copy(update={
+                "skill_key": skill_key,
+                "task_key": skill_key,
+                "facts": [*fixed.facts, *extra_facts],
+                "gaps": [*fixed.gaps, *gaps],
+            })
+    else:
+        gaps.append(gap("requirement_input_missing",
+                        "项目尚未准备需求生成输入（Requirement + 字段），无法构造固定需求上下文。"))
     return SkillInputEnvelope(
         skill_key=skill_key,
         task_key=skill_key,
         scope=scope,
         subject_ref=f"agent-task:{ctx.task.id}:step:{ctx.step.step_key}"[:255],
-        facts=[subject, *facts],
-        policy_evidence=policy,
+        facts=[SkillEvidence.model_validate(subject), *[SkillEvidence.model_validate(item2) for item2 in facts]],
+        policy_evidence=[SkillEvidence.model_validate(item2) for item2 in policy],
         gaps=list(gaps),
     )
 
@@ -806,7 +846,8 @@ def _execute_requirement_skill(
         gaps.append(gap(_http_code(exc), f"Skill 执行被拒绝：{_clip(str(exc.detail), 300)}"))
         return None
     except Exception as exc:  # noqa: BLE001 - a skill outage degrades, it must not fail the task
-        gaps.append(gap("skill_execution_unavailable", f"Skill 执行失败：{type(exc).__name__}"))
+        gaps.append(gap("skill_execution_unavailable",
+                         f"Skill 执行失败：{type(exc).__name__}: {_clip(str(exc), 300)}"))
         return None
     if result is None:
         gaps.append(gap("skill_binding_missing", "没有已发布并固定采用的 Skill 绑定。"))
@@ -906,7 +947,7 @@ def _generate_requirement_candidate(ctx: ToolContext) -> ToolResult:
     subject = _subject_fact(ctx, scope, confidentiality)
     if skill_key:
         try:
-            envelope = _build_requirement_envelope(ctx, skill_key, facts, policy, subject, contract_gaps)
+            envelope = _build_requirement_envelope(ctx, skill_key, facts, policy, subject, gaps)
         except ValidationError:
             envelope = None
             gaps.append(gap("evidence_contract_violation", "证据信封构建失败，已改为确定性草稿。"))
