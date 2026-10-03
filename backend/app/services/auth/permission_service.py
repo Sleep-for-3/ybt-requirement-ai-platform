@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from typing import Any, TypeVar
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Institution, InstitutionMembership, Project, ProjectMembership
@@ -176,10 +176,14 @@ class PermissionService:
         )
         member_projects = select(ProjectMembership.project_id).join(
             Project, Project.id == ProjectMembership.project_id,
+        ).outerjoin(
+            Institution, Institution.id == Project.institution_id,
         ).where(
                 ProjectMembership.user_id == self.principal.user_id,
                 ProjectMembership.status == "active",
                 Project.project_status == "active",
+                # 停用机构同样不得出现在列表（无机构的项目保持旧行为）。
+                or_(Institution.id.is_(None), Institution.status == "active"),
         )
         return list(self.db.scalars(select(Project.id).where(
             Project.id.in_(member_projects) | Project.institution_id.in_(managed_institutions)
@@ -196,6 +200,10 @@ class PermissionService:
             raise HTTPException(status_code=404, detail="Project not found")
         if self.principal.is_legacy_system or self.is_platform_admin():
             return project
+        if not self._institution_is_active(project.institution_id):
+            # 停用机构：列表、直达 ID、关联资源与后台执行使用同一规则（平台管理员已在上面
+            # 作为显式恢复例外）。
+            raise HTTPException(status_code=404, detail="Project not found")
         if (self._is_institution_admin(project)
                 or self._has_institution_role(project, {"auditor"})):
             return project
@@ -225,9 +233,25 @@ class PermissionService:
             permissions.update(PROJECT_ROLE_PERMISSIONS.get(membership.project_role, set()))
         return permissions
 
+    def _institution_is_active(self, institution_id: int | None) -> bool:
+        """Unified institution-state guard: a deactivated institution grants no project access.
+
+        The single source of truth for list visibility, direct-ID access, related resources and
+        background execution. Projects without an institution keep their previous behaviour.
+        Platform admins are the explicit recovery exception and are excluded before this check.
+        """
+
+        if institution_id is None:
+            return True
+        return self.db.scalar(select(Institution.status).where(
+            Institution.id == institution_id,
+        )) == "active"
+
     def _is_institution_admin(self, project: Project) -> bool:
         if project.institution_id is None or self.principal.user_id is None:
             return self.principal.is_legacy_system
+        if not self._institution_is_active(project.institution_id):
+            return False
         return self.db.scalar(select(InstitutionMembership.id).where(
             InstitutionMembership.institution_id == project.institution_id,
             InstitutionMembership.user_id == self.principal.user_id,
@@ -237,6 +261,8 @@ class PermissionService:
 
     def _has_institution_role(self, project: Project, roles: set[str]) -> bool:
         if project.institution_id is None or self.principal.user_id is None:
+            return False
+        if not self._institution_is_active(project.institution_id):
             return False
         return self.db.scalar(select(InstitutionMembership.id).where(
             InstitutionMembership.institution_id == project.institution_id,
