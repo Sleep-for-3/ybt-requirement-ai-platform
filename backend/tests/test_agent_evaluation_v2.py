@@ -263,6 +263,9 @@ EXPECTED_VALUES = {
     "impact_propagation_accuracy": round(1 / 2, 4),
     "task_completion_rate": round(2 / 4, 4),
     "incomplete_task_rate": round(1 / 3, 4),
+    "model_execution_rate": 0.0,
+    "deterministic_fallback_rate": 0.0,
+    "human_reanalysis_rate": round(1 / 5, 4),
 }
 
 EXPECTED_DENOMINATORS = {
@@ -273,6 +276,9 @@ EXPECTED_DENOMINATORS = {
     "tool_success_rate": 9,
     "human_reject_rate": 5,
     "evidence_coverage": 5,
+    "model_execution_rate": 5,
+    "deterministic_fallback_rate": 5,
+    "human_reanalysis_rate": 5,
     "unsupported_claim_rate": 1,
     "hallucination_guard_failure_rate": 1,
     "final_artifact_acceptance_rate": 3,

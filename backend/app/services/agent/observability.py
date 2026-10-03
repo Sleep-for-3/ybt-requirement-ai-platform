@@ -107,6 +107,9 @@ V2_METRICS: tuple[str, ...] = (
     "task_completion_rate",
     "incomplete_task_rate",
     "final_artifact_acceptance_rate",
+    "model_execution_rate",
+    "deterministic_fallback_rate",
+    "human_reanalysis_rate",
 )
 
 # ``metrics`` and ``denominators`` always carry exactly these keys.
@@ -138,6 +141,9 @@ METRIC_LABELS: dict[str, str] = {
     "policy_citation_accuracy": "条款引用准确率",
     "historical_case_usage_rate": "历史案例使用率",
     "case_adoption_rate": "案例采纳率",
+    "model_execution_rate": "模型真实执行率",
+    "deterministic_fallback_rate": "确定性回退率",
+    "human_reanalysis_rate": "人工要求重分析率",
     "sql_semantic_detection_recall": "SQL 语义变更召回率",
     "sql_semantic_false_positive_rate": "SQL 语义变更误报率",
     "impact_propagation_accuracy": "影响传播准确率",
@@ -182,6 +188,9 @@ NONE_REASONS: dict[str, str] = {
     "impact_propagation_accuracy": f"{_BENCHMARK_NOTE}：步骤未持久化期望影响集 {IMPACT_LABEL_KEY}",
     "task_completion_rate": "没有已终态任务（completed/failed/cancelled）",
     "incomplete_task_rate": "任务未持久化完整性标记 result_summary_json.incomplete",
+    "model_execution_rate": "没有已执行步骤（attempt_count>0）",
+    "deterministic_fallback_rate": "没有已执行步骤（attempt_count>0）",
+    "human_reanalysis_rate": "没有人工决策记录",
 }
 
 
@@ -323,7 +332,21 @@ def agent_metrics(db, *, project_id: int | None = None, limit: int = 500) -> dic
     # --- human gates ------------------------------------------------------------------
     edit_decisions = [item for item in decisions if item.decision in EDIT_DECISIONS]
     record("human_edit_rate", len(edit_decisions), len(decisions))
+    # A reanalysis request is a human refusing the model's conclusion, not adopting it.
+    reanalysis_decisions = [item for item in decisions
+                            if item.decision == "request_reanalysis"]
+    record("human_reanalysis_rate", len(reanalysis_decisions), len(decisions))
 
+    # --- model execution vs deterministic fallback (per executed step) ----------------
+    def _model_execution(step) -> dict[str, Any]:
+        return _as_dict(_as_dict(step.output_summary_json).get("model_execution"))
+
+    model_executed_steps = [step for step in executed_steps
+                            if _model_execution(step).get("executed") is True]
+    degraded_steps = [step for step in executed_steps
+                      if _model_execution(step).get("degraded_path")]
+    record("model_execution_rate", len(model_executed_steps), len(executed_steps))
+    record("deterministic_fallback_rate", len(degraded_steps), len(executed_steps))
     # --- planning (persisted AgentPlan rows) ------------------------------------------
     active_plans = [plan for plan in plans if plan.status == "active"]
     record("planner_valid_rate", len([plan for plan in plans if not _as_list(plan.validation_errors_json)]),
