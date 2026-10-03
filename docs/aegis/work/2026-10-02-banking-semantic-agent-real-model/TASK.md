@@ -434,3 +434,26 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 1. 为项目 11 发布本项目 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`（最后一个模型步骤）；
 2. 15 步计划审查（固定/Observation 决定/可插入/optional）；
 3. Agent 级业务质量评测集（10 项，含模型执行率/回退率）+ 最终自主性与交付物报告。
+
+## 29. Round 15 —— 目标第⑥项：15 步计划审查（有行为改变，不只是文档）
+
+审查结论（已用契约测试 `tests/test_agent_plan_review.py` 钉住，5 passed）：
+
+| 分类 | 步骤 |
+|---|---|
+| **必须固定** | `search_policy`、`search_metadata`、`recall_candidates`、`rerank_candidates`、`inspect_sql`、`compare_policy`、`generate_requirement_candidate`、`confirm_requirement_candidate`（人工闸门）、`generate_requirement_document`、`summarize_evidence`、`create_gap_report` |
+| **Observation 可决定 / optional** | `query_lineage`、`analyze_impact`、`prepare_mapping`、`generate_mapping_draft` |
+| **可插入（Planner/补丁）** | 任何不在计划内的注册工具步骤（补查/补证据），受 `MAX_PLANS_STEPS`、校验与重规划预算约束 |
+
+**关键行为改变**：`query_lineage`/`analyze_impact` 原本是 `generate_requirement_candidate` 的**硬依赖** →
+一个没有血缘的字段会**直接阻断需求草稿**。现改为 optional（`required: False`），`analyze_impact` 可选依赖血缘，
+需求候选可选依赖影响面 → 缺失时**记缺口并继续**，交付物与人工闸门不被阻断。
+
+真实全链复验（改动后）：`task completed`、**`model_executed=3` 保持**（mapping / requirement candidate / document）。
+回归：**97 passed**（核心集）。
+
+## 30. 下一步
+
+1. 项目 11 的 `field_semantic_matching` 版本（≥2 候选）→ 重排 `executed=true`；
+2. Agent 级业务质量评测集（10 项）——可直接基于现有记录（模型执行率、回退率、replan 率、人工驳回率、交付物采纳率）；
+3. 最终报告（自主性/固定流程/真实模型/replan/human gate/交付物清单/剩余非 Agent 部分）。
