@@ -139,7 +139,9 @@
 
 ## 9. 仍非 Agent / 未完成（诚实的剩余项）
 
-1. **模型重排尚未真实执行**：`field_semantic_matching` 的已发布版本均作用域在项目 1/5，项目级版本不能跨项目采用；要在项目 11 上真实执行，需**为本项目发布本项目作用域版本**并补 **≥2 个候选来源字段**。当前行为是如实的确定性降级 + `skill_binding_missing` 缺口（不再是硬失败）。
+1. **模型重排被平台的“数据出境”治理守卫拦住（按设计，非缺陷）**：`recall_fields` 已能返回 4 个候选（已为项目 11 补齐 3 个合成目录列），但 `field_rerank.confidentiality_floor()` 默认把项目数据视为 `confidential`，**除非项目 id 在 `AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS`（默认空）中**，否则拒绝将目录结构发送给外部模型 → 测试与运行均返回 `external_model_data_denied`，步骤如实降级为确定性召回并记 `skill_binding_missing`/缺口。
+   **这是一个需要业务/安全决策的事项**（是否允许本项目把目录结构发给外部云模型，或改用本地/内部模型档），我不擅自修改该策略。
+   （侧证：同一项目的 `scenario_business_mapping` 路径未被此规则拦截，因为该守卫只在 rerank 的目录结构出境路径上生效。）
 2. **执行顺序仍由模板给定**：Agent 可插入/调整未执行步骤，但不能重新发明整链顺序；这是本阶段的刻意边界（避免"自主"退化为不可审计的随机性）。
 3. **上下文/证据预算为静态配额**：`MAX_FACTS_PER_STEP` 等硬上限 + observation digest 上限已实现，但未做按模型窗口动态分配。
 4. **4 个指标需要标注基准集**（scenario/evidence_recall/sql_semantic_recall·false_positive/impact_propagation）：无标注时返回 null，不美化。

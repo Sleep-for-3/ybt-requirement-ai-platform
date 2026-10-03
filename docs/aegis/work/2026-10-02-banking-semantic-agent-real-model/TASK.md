@@ -481,3 +481,22 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
    独立审批 → 发布 → 绑定项目 11）。
 
 完成后重跑全链，预期 `model_executed = 4`。
+
+## 33. Round 18 —— 重排的最后障碍是治理策略，不是数据
+
+已实际执行：
+
+1. **补齐候选**：为项目 11 的目录表克隆 3 个合成目录列（id 2851/2852/2853，含本金/利息/业务状态口径）→
+   `recall_fields` 现返回 **4 个候选**（catalog:2850 得分 0.6375，2851/2852/2853 依次降序）。
+2. **为本项目建了 `field_semantic_matching` 版本 15（no 10，draft）**，测试用例 14 用平台构造器
+   `field_rerank.build_rerank_envelope(project, scope, target_field_id, recall)` 生成（envelope facts=4，block_code=None）。
+3. **评测被拒**：`RUN 42`（deterministic）与 `RUN 43`（real_model）均 `failed`，结果
+   `external_model_data_denied`（`case_defect: True`）→ `submit` 被 `release_gate_failed` 拦住。
+
+**根因（代码证据）**：`app/services/ai_skills/field_rerank.py::confidentiality_floor()` 明确写道
+“Catalog structure stays sensitive: cloud providers are denied unless it is local/Mock”，
+除非项目 id 在 `AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS`（settings 默认 **空**）中，否则将项目数据提到
+`confidential` 下限 → 出境被拒。**这是有意的安全设计，与目标第⑨项“不允许未经授权向外部模型发送敏感数据”一致。**
+
+因此：**最后一个模型步骤需要用户/安全方的业务决策**（授权该项目使用外部模型，或为重排改用本地/内部模型档），
+我不擅自修改该白名单或放宽下限。已播种的 3 个合成候选与 draft 版本 15 保留在本地库，不影响任何既有行为。
