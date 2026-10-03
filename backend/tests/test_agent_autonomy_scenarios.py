@@ -271,8 +271,6 @@ def test_a_sql_change_scenario_plans_the_impact_chain(scope):
         "the triggering change must stay attached to the task"
 
 
-@pytest.mark.xfail(strict=False,
-                   reason="gap: the sql_change_impact scenario has no requirement/mapping recheck step")
 def test_a_sql_change_leads_to_a_requirement_or_mapping_recheck(scope):
     template = planner.deterministic_plan(objective="SQL 语义变化影响分析",
                                           scenario_key="sql_change_impact",
