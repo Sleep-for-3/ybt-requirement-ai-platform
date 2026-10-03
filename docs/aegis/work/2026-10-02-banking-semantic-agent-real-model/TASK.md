@@ -232,3 +232,48 @@ search_policy completed → search_metadata completed(gap metadata_not_found)
 2. 重跑全链，确认 `rerank_candidates` 与 `generate_requirement_candidate` 均为 `executed=true`；
 3. 建 `requirement_document_assistance` skill；
 4. 4 组自主性场景 + Agent 级业务质量评测集。
+
+## 17. Round 9（续）—— 需求候选成为第二个真实模型步骤 ✅
+
+### 绑定缺陷的真相
+
+`releases.adopt` 拒绝（`resource_not_found`）+ `resolve_skill` 报 `binding_scope_invalid`：
+**`field_semantic_matching` 已发布的版本全部作用域在项目 1/5，项目级版本不能跨项目采用**——我手工直插的绑定指向了外部作用域版本。
+已删除该非法绑定，`resolve_skill → None`，重排回到**如实的确定性降级**（`deterministic_recall` + `skill_binding_missing`），不再硬失败。
+重排要走模型，必须先**为项目 11 发布一个本项目的 `field_semantic_matching` 版本**（同 6 步流程），还需 ≥2 个候选。
+
+### 依赖冻结治理（重要发现）
+
+改了 `ModelProfile 4`（max_output_tokens 4096→8192）后，已发布版本被平台拒绝：`skill_dependency_changed` ——
+**发布版本的依赖（含模型档）被冻结**，变更后必须重新评测并发布新版本。已按此重新发布：
+
+- 新版本 `requirement_candidate_generation` **v3**（同内容）
+- `RUN 34` deterministic **passed 4**；`RUN 35` real_model **passed 4，real_model_successes=4**
+- submit → `pending_approval` → **独立审批人（user 26）发布**；绑定 → v3
+
+### Agent 链路中第二个真实模型步骤 ✅
+
+`cf9b5e0`：①不再把 Agent 自采事实注入固定需求信封（评测通过的就是纯平台形态）；②合并 gaps 时去重
+（同一 code 重复会让运行抛 ValueError——这就是评测能过、Agent 路径不过的真正差异）。
+
+**验证**：`SUMMARY: unique_steps=15 model_executed=2`；`ModelCallLog 517` =
+`ai_skill:requirement_candidate_generation` **success / kind=real_model / 14.1s / 6632 tokens**。
+
+当前真实模型步骤：
+
+| 步骤 | 状态 | 证据 |
+|---|---|---|
+| `generate_mapping_draft` | ✅ executed=true | `scenario_business_mapping` real_model |
+| `generate_requirement_candidate` | ✅ executed=true | `requirement_candidate_generation` v3 real_model（日志 517） |
+| `rerank_candidates` | ❌ 确定性降级 | 已删除非法绑定；需为项目 11 发布本项目版本 + ≥2 候选 |
+| `generate_requirement_document` | ❌ skill_binding_missing | Skill 未创建 |
+| Observe→Replan | ✅ 多次真实模型成功 | 日志 509/512/515 |
+
+回归：**120 passed**（agent 核心 15 套件）。
+
+## 18. 下一步
+
+1. 为项目 11 发布本项目的 `field_semantic_matching` 版本并绑定（≥2 候选）→ 重排 `executed=true`；
+2. 建 `requirement_document_assistance` Skill（同 6 步流程）；
+3. 4 组自主性场景 + Agent 级业务质量评测集；
+4. 15 步计划审查（固定/Observation 决定/可插入/optional）。
