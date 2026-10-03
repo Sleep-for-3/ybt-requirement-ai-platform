@@ -1,10 +1,17 @@
 """Verify historical migration isolation and forward/backward compatibility."""
 from alembic import command
+from alembic.script import ScriptDirectory
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from app.core.settings import get_settings
 from app.models import AISkillDefinition, AISkillVersion, AISkillScopeBinding, AISkillReleaseEvent, AISkillTestCase, AISkillTestRun, AISkillTestResult
+def _unique_head(cfg: Config) -> str:
+    """The single real head of the migration scripts, so新增迁移不需修改断言。"""
+
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+    assert len(heads) == 1, f"expected exactly one alembic head, got {sorted(heads)}"
+    return heads[0]
 
 
 def test_skill_migration_roundtrip_preserves_legacy_rows(tmp_path, monkeypatch):
@@ -27,7 +34,7 @@ def test_skill_migration_roundtrip_preserves_legacy_rows(tmp_path, monkeypatch):
             with engine.connect() as conn:
                 assert conn.execute(text("SELECT system_prompt FROM prompt_template_versions WHERE prompt_key='legacy_demo'")).scalar_one() == "old system"
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "202609270044"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == _unique_head(cfg)
             assert conn.execute(text("SELECT skill_version_id FROM prompt_template_versions WHERE prompt_key='legacy_demo'")).scalar_one() is None
     finally:
         engine.dispose()

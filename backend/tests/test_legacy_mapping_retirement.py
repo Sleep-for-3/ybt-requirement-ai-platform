@@ -138,19 +138,31 @@ def test_obsolete_composite_constructor_has_no_production_module_or_reference() 
     obsolete_module = REPO_ROOT / "app" / "services" / "mapping_generator.py"
     assert not obsolete_module.exists()
 
-    forbidden = (
+    # 旧复合生成器必须不留模块/导入/符号；这两个 token 仍归无差别禁止。
+    retired_tokens = (
         "app.services.mapping_generator",
-        "generate_mapping_draft",
         "legacy_field_mapping",
     )
     production_files = sorted((REPO_ROOT / "app").rglob("*.py"))
     offenders: list[str] = []
     for path in production_files:
         text = path.read_text(encoding="utf-8")
-        for token in forbidden:
+        for token in retired_tokens:
             if token in text:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{token}")
     assert offenders == []
+
+    # `generate_mapping_draft` 现已是受治理的 Agent 工具键，因此只允许出现在 agent 层
+    # （工具/步骤/决策键）。其他任何位置出现都意味着旧复合生成器在 Agent 控制面之外被重新引入。
+    agent_root = (REPO_ROOT / "app" / "services" / "agent").resolve()
+    misplaced: list[str] = []
+    for path in production_files:
+        text = path.read_text(encoding="utf-8")
+        if "generate_mapping_draft" not in text:
+            continue
+        if agent_root not in path.resolve().parents:
+            misplaced.append(str(path.relative_to(REPO_ROOT)))
+    assert misplaced == [], f"generate_mapping_draft outside the agent layer: {misplaced}"
 
 
 @contextmanager
