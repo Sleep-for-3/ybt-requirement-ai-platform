@@ -6,12 +6,42 @@
 
 | 工作包 | 对应问题 | 状态 | 提交 |
 | --- | --- | --- | --- |
-| W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | 进行中 | `1782bac`（B23 契约） |
+| W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | **部分完成**（B23/B17/B18 已修复验证；Next 升级与依赖锁定待做） | `1782bac` `0950bcd` `909f0f8` |
 | W02 机构熔断与令牌原子轮换 | B02/BA05, B05/BA04 | 已修复 / 已验证 | `16767d7`（B02）、见下（B05） |
 | W03 审核内容与正式产物不可变 | B03/BA01 | 已修复 / 已验证 | 见下 |
 | W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 已修复 / 已验证 | 见下 |
 | W05 后台任务幂等与恢复 | B07/BA06 | 已修复 / 已验证 | 见下 |
 | W06 人工编辑与模型配置完整性 | B10–B13, B15–B16 | 待开始 | — |
+
+第一阶段退出条件尚未满足：**W01 的 Next.js 安全升级与后端依赖锁定未完成**，W06（前端未保存编辑/表单/模型配置）未开始。已完成项均为“已修复 / 已验证”并附复现与回归证据。
+
+### W01 已完成部分
+
+- **B23 过期测试契约**：`1782bac`（详见下文）。
+- **B17 独立 lint 门禁**：`0950bcd`。`next lint` 从 exit 1（5 个错误）变为 **exit 0**；
+  四个 `*.d.mts` 声明文件改为排除出 ESLint，**保留独立 `tsc --noEmit`** 作为声明文件的权威检查；
+  `navigation-contract.mjs` 的局部 `module` 变量重命名。验收：lint exit 0、tsc exit 0、`node --test` **204 passed**。
+- **B18 版本一致性**：`909f0f8`。新增 `app/services/version_info.py` + `GET /api/version`
+  + Celery `app.workers.version_report` + 前端 `lib/build-info.ts`（含 `identityMismatches`）；
+  `versions_match()` 将 `unknown` 视为**不一致**（未知无法证明一致）；schema head 从 `alembic_version` 实读，
+  并与迁移目录真实唯一 head 对齐。测试：后端 6 例 + 前端 6 例。
+
+### W01 未完成（阻碍阶段退出）
+
+1. **Next.js / React 安全升级（B01）**：当前 `next 14.2.35`（`package.json` 声明 `^14.2.20`），
+   官方已将其列为**不再支持**；Windows 原生 `next start` 的未认证 RCE 告警适用。
+   修复需升级到官方受支持且已修复该告警的版本（评估时官方安全发布为 15.5.27 维护线 / 16.3.8 活跃线），
+   并同步 `eslint-config-next`/React 及 77 个页面与动态路由/鉴权/下载路径的回归。
+   **未执行**：升级涉及大面积前端回归，需在隔离分支完成并跑完整 production browser 回归，
+   本轮未在剩余预算内实施，避免留下不可运行的前端。开工前需重新核对官方公告与支持状态。
+2. **后端依赖锁定与 SBOM（B17/供应链）**：尚未固定传递依赖/hash、镜像与 Node LTS 版本基线；
+   CI/Docker 目前仍为 Node 20（本机为 Node 24，两者不可互相替代）。
+3. **前端 production browser 回归**：升级后必须覆盖登录/续期、项目切换、需求、语义目录、下载；尚未执行。
+
+### 前置风险（已记录）
+
+- npm 全依赖审计：1 critical、13 high、1 moderate；生产依赖：1 critical、2 high（审查证据 `npm-audit*.json`）。
+- 本机验证 Node 24，CI/Docker 目标 Node 20；本项目 harness 直接使用全局 WebSocket，Node 20 默认未开放。
 
 ---
 
