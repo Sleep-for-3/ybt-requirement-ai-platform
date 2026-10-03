@@ -1,4 +1,4 @@
-FROM node:20-alpine AS dependencies
+FROM node:24-alpine AS dependencies
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ ARG NPM_REGISTRY=https://registry.npmjs.org
 COPY package*.json ./
 RUN npm ci --registry="${NPM_REGISTRY}"
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY package*.json ./
 COPY . .
 RUN mkdir -p public && npm run build
 
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 WORKDIR /app
 
