@@ -9,7 +9,7 @@ import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
-
+import { buildModelProfileConfig } from "@/lib/model-profile-config.mjs";
 type ProviderStatus = {
   provider: string;
   model?: string | null;
@@ -91,7 +91,9 @@ export default function Page() {
     event.preventDefault();
     setBusy("save");
     setMessage("");
-    const form = new FormData(event.currentTarget);
+    // B10: keep the form node before any await; event.currentTarget is null afterwards.
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const provider = String(form.get("provider_type"));
     const modelName = String(form.get("model_name") || "") || null;
     if (looksLikeApiKey(modelName)) {
@@ -106,20 +108,17 @@ export default function Page() {
       model_name: modelName,
       api_key_env_name: String(form.get("api_key_env_name") || "") || null,
       local_only: provider.startsWith("local_"),
-      config_json: {
-        json_mode: true,
-        max_output_tokens: 2048,
-        temperature: .2,
-        timeout_seconds: 60,
-        retry_count: 2,
-        requirement_max_input_bytes: Number(form.get("requirement_max_input_bytes")),
-      },
+      // B13: preserve every stored tuning value; only the field the operator edits changes.
+      config_json: buildModelProfileConfig(
+        editing,
+        Number(form.get("requirement_max_input_bytes")),
+      ),
     };
     try {
       if (editing) await apiPatch(`/model-profiles/${editing.id}`, payload);
       else await apiPost("/model-profiles", payload);
       setEditing(null);
-      event.currentTarget.reset();
+      formElement.reset();
       setMessage(editing ? "Profile 已更新" : "Profile 已创建，连接测试不会自动激活");
       await reload();
     } catch (error) {
