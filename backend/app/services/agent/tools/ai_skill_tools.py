@@ -800,14 +800,19 @@ def _build_requirement_envelope(
             # Only non-knowledge facts may ride along: the requirement contract rebuilds its own
             # typed knowledge/policy layer from the fixed input units, and an agent-collected
             # policy_clause without a real unit_id is rejected as an invalid evidence identity.
-            extra_facts = [SkillEvidence.model_validate(raw) for raw in [subject, *facts]
-                           if raw.get("id") not in known
-                           and raw.get("kind") not in {"knowledge_evidence", "policy_clause"}]
+            # The agent's own facts are deliberately NOT injected: the requirement contract
+            # rebuilds every evidence layer from the fixed input units, and the evaluation that
+            # released this version passed with exactly that shape (extra facts made the model's
+            # candidate fail the output contract).  Their absence is recorded instead.
+            extra_facts: list[SkillEvidence] = []
+            if [raw for raw in [subject, *facts] if raw.get("id") not in known]:
+                gaps.append(gap("agent_evidence_not_injected",
+                                "Agent 自采事实未注入需求信封（固定输入单元决定证据层）。"))
             return fixed.model_copy(update={
                 "skill_key": skill_key,
                 "task_key": skill_key,
                 "facts": [*fixed.facts, *extra_facts],
-                "gaps": [*fixed.gaps, *gaps],
+                "gaps": _dedupe_gaps([*fixed.gaps, *gaps]),
             })
     else:
         gaps.append(gap("requirement_input_missing",
@@ -821,6 +826,19 @@ def _build_requirement_envelope(
         policy_evidence=[SkillEvidence.model_validate(item2) for item2 in policy],
         gaps=list(gaps),
     )
+
+
+def _dedupe_gaps(items: list[SkillGap]) -> list[SkillGap]:
+    """The envelope builder and the caller both report the same codes: keep one of each."""
+
+    seen: set[str] = set()
+    unique: list[SkillGap] = []
+    for item in items:
+        if item.code in seen:
+            continue
+        seen.add(item.code)
+        unique.append(item)
+    return unique
 
 
 def _append_result_gaps(gaps: list[SkillGap], result: dict[str, Any]) -> None:
