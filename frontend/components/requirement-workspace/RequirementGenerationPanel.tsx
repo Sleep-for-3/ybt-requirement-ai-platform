@@ -81,7 +81,9 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     finally{setBusy(false);}
   }
   function queueCandidate(){
+    // B12: a candidate must not be queued on top of unsaved manual edits.
     const data=candidate.data;if(!data||busy||!selected.length)return;
+    if(dirty){setError("请先保存当前人工编辑，再加入采用清单。");return;}
     const manualSelected=data.changes.filter(change=>change.manual&&selected.includes(change.field)).map(change=>change.field);
     if(manualSelected.some(field=>!replace.includes(field))){setError("替换人工内容前，请逐项确认允许替换。");return;}
     setBasket(current=>({...current,[data.id]:{item_id:data.id,candidate_hash:data.candidate_hash,
@@ -89,7 +91,8 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     setCandidateId(null);setNotice("已加入采用清单；确认完同批候选后一次写入新版本。");
   }
   async function adoptBasket(){
-    const selections=Object.values(basket);if(!selections.length||busy)return;
+    // B12: adopting writes a new content version, so unsaved manual edits must be saved first.
+    const selections=Object.values(basket);if(!selections.length||busy||dirty)return;
     setBusy(true);setError("");
     try{await apiPost(`${base}/generation-candidates/adopt`,{expected_content_version:contentVersion,selections});
       setBasket({});setCandidateId(null);setNotice("采用清单已一次写入新的需求内容版本，仍待审核确认。");await runs.refetch();onChanged();}
@@ -118,7 +121,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     {currentRun?<div className="mt-3 border-t border-line pt-3 text-xs"><div className="flex flex-wrap gap-x-3 gap-y-1"><span>总数 {currentRun.total}</span><span>已生成 {currentRun.counts.completed}</span><span>失败 {currentRun.counts.failed}</span><span>阻断 {currentRun.counts.blocked}</span><span>待处理 {pendingCandidates.length}</span></div>
       {(currentRun.counts.failed||currentRun.counts.blocked)&&currentRun.job_id?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy} onClick={()=>void retry()} type="button"><RefreshCw size={13}/>重试失败项</button>:null}
       <div className="mt-2 max-h-48 space-y-1 overflow-auto">{pendingCandidates.map(item=><button className="flex w-full items-center justify-between border border-line bg-white px-2 py-2 text-left" key={item.id} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><Eye className="shrink-0" size={13}/></button>)}</div>
-      {Object.keys(basket).length?<button className="button-primary mt-2 w-full" disabled={busy} onClick={()=>void adoptBasket()} type="button"><Check size={14}/>应用采用清单（{Object.keys(basket).length}）</button>:null}
+      {Object.keys(basket).length?<><button className="button-primary mt-2 w-full" disabled={busy||dirty} onClick={()=>void adoptBasket()} type="button"><Check size={14}/>应用采用清单（{Object.keys(basket).length}）</button>{dirty?<p className="mt-2 text-xs text-amber-700">请先保存当前人工编辑，再采用候选。</p>:null}</>:null}
     </div>:runs.isPending?<p className="mt-2 text-xs text-slate-500">正在读取生成状态…</p>:null}
     {notice?<p className="mt-2 text-xs text-emerald-700">{notice}</p>:null}{error?<p className="mt-2 text-xs text-red-700" role="alert">{error}</p>:null}
     {candidateId?<div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label="候选差异">
