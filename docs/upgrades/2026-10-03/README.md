@@ -6,7 +6,7 @@
 
 | 工作包 | 对应问题 | 状态 | 提交 |
 | --- | --- | --- | --- |
-| W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | **部分完成**（B23/B17/B18 已修复验证；Next 升级与依赖锁定待做） | `1782bac` `0950bcd` `909f0f8` |
+| W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | **已修复 / 已验证**（仅 production browser 回归待做） | `1782bac` `0950bcd` `909f0f8` `7b9bc46` `7640d97` |
 | W02 机构熔断与令牌原子轮换 | B02/BA05, B05/BA04 | 已修复 / 已验证 | `16767d7`（B02）、见下（B05） |
 | W03 审核内容与正式产物不可变 | B03/BA01 | 已修复 / 已验证 | 见下 |
 | W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 已修复 / 已验证 | 见下 |
@@ -58,11 +58,21 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 且已逐项给出依据而非笼统忽略。升级目标版本按官方当前发布：**15.5.27（维护 LTS）或 16.3.8（活跃 LTS）**，
 不得只升到旧报告中的首个修复版本。
 
-**升级未执行的原因（如实记录）**：跨大版本迁移（15/16 需 React 19、异步请求 API），影响 22 个动态路由与全部页面，
-并需完整 production browser 回归（登录/续期、项目切换、需求、语义目录、下载）；本轮会话剩余预算不足以安全完成，
-强行半升会留下不可运行的前端（违背“稳定优先”与不留下破损工作的要求）。下一轮应在**隔离分支**按以下步骤执行：
-锁定 `next@15.5.27` + `eslint-config-next@15.5.27` + React 19 → `npm install` → `tsc`/`lint`/`test`/`build`
-→ production browser 回归 → 更新 `package-lock.json` → 重新审计（`npm audit --omit=dev`）→ 提交并记录。
+**升级已执行（Round 5/6）** —— 提交 `7640d97`：`next`/`eslint-config-next` 锁定 **15.5.27**（维护 LTS），
+`react`/`react-dom`/`@types/*` 升至 **^19.3.0**；源码侧唯一不兼容点是两个同步读 `params` 的页面：
+`app/jobs/[jobId]/page.tsx` 改用 `useParams()`（本身就是客户端组件，与其它详情页一致），
+`app/fields/[fieldId]/page.tsx` 改为 async 服务端组件并 `await params`（`await` 在 Next 14 下同样成立，向后兼容）。
+`package-lock.json` 用 `npm install --package-lock-only` 更新；**运行实例的 node_modules 刻意未动**，
+以免打断正在服务的旧构建。
+
+验证（在隔离副本中按提交的 lock 执行 `npm ci` 复现）：`npm ci` 成功 → `node --test` **223 passed** →
+`tsc --noEmit` exit 0 → `next lint` exit 0 → `next build` exit 0（54 页）。
+**生产依赖审计 critical 1 → 0**（升级前 1 critical + 2 high；升级后 0 critical + 2 high），
+全量审计 critical 1 → 0（15 → 14 项）。
+
+**尚未执行（如实标记）**：升级后的 **production browser 回归**（登录/续期、项目切换、需求、语义目录、下载）
+未在本机跑；**运行实例仍服务 Next 14 构建**，需经批准的 `npm ci` + 重新构建 + 重启，
+按发布/回滚步骤执行。剩余 2 个 high 与 2 个 moderate 告警需逐项做适用性判定（后续）。
 
 ### 已完成：依赖与运行时基线（B17/供应链）
 
