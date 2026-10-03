@@ -182,7 +182,10 @@ def test_a_conflict_stops_at_a_human_gate_and_records_the_decision(scope):
         "the reanalysis request must be on the decision ledger"
 
 
-@pytest.mark.xfail(strict=False, reason="gap: request_reanalysis does not release the gate for a new run")
+@pytest.mark.xfail(strict=False, reason=(
+    "gap: request_reanalysis leaves the step in waiting_human - decide() has an else-branch that "
+    "transitions it to pending, but the ledger still shows ['waiting_human'] after the decision"
+))
 def test_request_reanalysis_releases_the_gate_and_reanalyses(scope):
     db = scope["db"]
     tool_key = _register("auto_conflict2", lambda ctx: ToolResult(output={"pass": True}, step_output={}),
@@ -196,7 +199,9 @@ def test_request_reanalysis_releases_the_gate_and_reanalyses(scope):
     task = db.get(AgentTask, task.id)
     runtime.decide(db, scope["principal"], task, step, sm.DECISION_REQUEST_REANALYSIS, comment="重做")
     db.expire_all()
-    assert _step(db, task.id, "compare").status != sm.STEP_WAITING_HUMAN
+    rows = db.query(AgentStep).filter_by(task_id=task.id, step_key="compare").all()
+    assert all(row.status != sm.STEP_WAITING_HUMAN for row in rows), \
+        f"reanalysis must release the gate, got {[row.status for row in rows]}"
     assert db.get(AgentTask, task.id).status != sm.TASK_WAITING_HUMAN
 
 
