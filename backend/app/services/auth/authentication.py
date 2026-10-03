@@ -1,7 +1,7 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -44,7 +44,13 @@ def authenticate(db: Session, username: str, password: str) -> User:
     return user
 
 
-def create_session(db: Session, user: User) -> dict[str, object]:
+def create_session(db: Session, user: User, *, commit: bool = True) -> dict[str, object]:
+    """Issue an access/refresh pair.
+
+    ``commit=False`` flushes the refresh row inside the caller's transaction so a rotation can
+    revoke the old token and issue the replacement atomically (W02/B05).
+    """
+
     settings = get_settings()
     access, _ = create_token(user.id, "access", timedelta(minutes=settings.access_token_minutes))
     refresh_lifetime = timedelta(days=settings.refresh_token_days)
@@ -55,7 +61,10 @@ def create_session(db: Session, user: User) -> dict[str, object]:
         token_hash=token_digest(refresh),
         expires_at=datetime.now(UTC) + refresh_lifetime,
     ))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {
         "access_token": access,
         "refresh_token": refresh,
@@ -63,25 +72,60 @@ def create_session(db: Session, user: User) -> dict[str, object]:
         "expires_in": settings.access_token_minutes * 60,
     }
 
-
 def rotate_refresh_token(db: Session, refresh_token: str) -> dict[str, object]:
+    """Rotate a refresh token exactly once, atomically.
+
+    The old token is claimed with a single conditional UPDATE, so of N concurrent requests
+    carrying the same refresh token only one wins (the others see rowcount 0 and are rejected).
+    Revoking the old token and issuing the replacement happen in the same transaction; there is
+    no commit boundary in between that a concurrent request could observe.
+    """
+
     try:
         claims = decode_token(refresh_token, "refresh")
     except TokenError as exc:
         raise AuthenticationError(str(exc)) from exc
-    record = db.scalar(select(RefreshToken).where(RefreshToken.token_jti == claims["jti"]))
-    if not record or record.revoked_at or record.token_hash != token_digest(refresh_token):
+    jti = str(claims["jti"])
+    digest = token_digest(refresh_token)
+    now = datetime.now(UTC)
+
+    claimed = db.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.token_jti == jti,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.token_hash == digest,
+        )
+        .values(revoked_at=now)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if claimed != 1:
+        db.rollback()
+        # Unknown, already consumed (replay) or tampered token: one indistinguishable error.
         raise AuthenticationError("Refresh token is revoked")
-    if _aware(record.expires_at) <= datetime.now(UTC):
+
+    record = db.scalar(select(RefreshToken).where(RefreshToken.token_jti == jti))
+    if record is None:  # pragma: no cover - the claim above guarantees the row
+        db.rollback()
+        raise AuthenticationError("Refresh token is revoked")
+    if _aware(record.expires_at) <= now:
+        db.rollback()
         raise AuthenticationError("Refresh token is expired")
     user = db.get(User, int(claims["sub"]))
     if not user or user.status != "active":
+        db.rollback()
         raise AuthenticationError("User is disabled")
-    replacement = create_session(db, user)
-    replacement_claims = decode_token(str(replacement["refresh_token"]), "refresh")
-    record.revoked_at = datetime.now(UTC)
-    record.replaced_by_jti = replacement_claims["jti"]
-    db.commit()
+
+    try:
+        replacement = create_session(db, user, commit=False)
+        replacement_claims = decode_token(str(replacement["refresh_token"]), "refresh")
+        record.replaced_by_jti = replacement_claims["jti"]
+        db.commit()
+    except Exception:
+        # Issuing the replacement failed: roll the whole rotation back so the old token is not
+        # consumed and no partial replacement is left active.
+        db.rollback()
+        raise
     return replacement
 
 
