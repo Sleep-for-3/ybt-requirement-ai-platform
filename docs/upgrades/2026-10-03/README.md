@@ -11,9 +11,10 @@
 | W03 审核内容与正式产物不可变 | B03/BA01 | 已修复 / 已验证 | 见下 |
 | W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 已修复 / 已验证 | 见下 |
 | W05 后台任务幂等与恢复 | B07/BA06 | 已修复 / 已验证 | 见下 |
-| W06 人工编辑与模型配置完整性 | B10–B13, B15–B16 | 待开始 | — |
+| W06 人工编辑与模型配置完整性 | B10–B13, B15–B16 | **部分完成**（B10/B11/B13 已修复验证；B12/B15/B16 待做） | `ac6ffbd` `db1cc57` |
 
-第一阶段退出条件尚未满足：**W01 的 Next.js 安全升级与后端依赖锁定未完成**，W06（前端未保存编辑/表单/模型配置）未开始。已完成项均为“已修复 / 已验证”并附复现与回归证据。
+第一阶段退出条件尚未满足：**W01 的 Next.js/React 安全升级与后端依赖锁定未完成**，
+W06 的 **B12/B15/B16 与 B11 剩余接线未完成**。已完成项均为“已修复 / 已验证”并附复现与回归证据。
 
 ### W01 已完成部分
 
@@ -42,6 +43,36 @@
 
 - npm 全依赖审计：1 critical、13 high、1 moderate；生产依赖：1 critical、2 high（审查证据 `npm-audit*.json`）。
 - 本机验证 Node 24，CI/Docker 目标 Node 20；本项目 harness 直接使用全局 WebSocket，Node 20 默认未开放。
+
+---
+
+## W06：人工编辑、表单与模型配置完整性（部分完成）
+
+### 已修复 / 已验证
+
+- **B10（await 后使用 `event.currentTarget`）** `ac6ffbd`：`model-profiles` 保存流程在 `await` 之后
+  调用 `event.currentTarget.reset()`，此时 `currentTarget` 已为 null，表单实际不清空（还可能抛错）。
+  改为在 await 前保存表单节点。
+- **B13（模型配置被重置）** `ac6ffbd`：保存 payload 硬编码 `json_mode/max_output_tokens/temperature/
+  timeout_seconds/retry_count`，**只改名称也会把全部调优值重置为默认**（例如已调高的 `max_output_tokens`）。
+  改为从既有 `config_json` 合并、只替换表单实际编辑的字段；合并逻辑提取到
+  `lib/model-profile-config.mjs`（带 `.d.mts` 声明），使测试跑的就是页面真实调用的代码。
+- **B11（统一 dirty 登记与离开守卫）** `db1cc57`：新增无框架 `lib/unsaved-changes.mjs`
+  （按 owner 登记/清除、`dirtyOwners`、fail-safe `leaveDecision`、`beforeunload` 返回值、
+  本地草稿存取且配额/损坏不抛错）+ `hooks/useUnsavedChanges.tsx`（`useUnsavedChanges`、
+  `confirmLeave`、`<UnsavedChangesGuard />`），并在 `app/layout.tsx` 挂载**全局刷新/关闭守卫**。
+
+验证：前端 `node --test` **216 passed**（含 `model-profile-config` 4 例、`unsaved-changes` 8 例）；
+`tsc --noEmit` exit 0；`next lint` exit 0；隔离副本 production build exit 0。
+
+### 未完成（阻碍阶段退出）
+
+- **B12**：有未保存编辑时禁止直接应用候选（或先保存并重校验候选基准）；采纳成功不得隐式清除
+  另一编辑器的 dirty。
+- **B15**：折叠按钮始终可见（390px/768px/桌面）。
+- **B16**：UAT/审计按业务 permission 呈现，不要求普通审核人员成为管理员。
+- **B11 剩余接线**：顶栏项目切换、选择需求、字段/场景切换与前端路由的“保存/放弃/取消离开”交互
+  尚未逐页接入（当前已覆盖刷新/关闭与统一登记原语）；需逐页接入并做浏览器流程回归。
 
 ---
 
