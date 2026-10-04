@@ -160,7 +160,12 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 - **本地草稿**：`lib/unsaved-changes.mjs` 提供 `saveDraft/readDraft/clearDraft`（配额/损坏不抛错），
   已有 8 例测试。
 
-**尚未接入（如实标记）**：前端路由跳转（`<Link>`/`router.push`）的交互式离开确认，以及
+- **应用内路由跳转（本轮完成，提交 `4f6cd3d`）**：`lib/unsaved-changes.mjs` 新增 `shouldInterceptNavigation()`
+  （框架无关、可单测），`UnsavedChangesGuard` 在**捕获阶段**监听文档 click：仅在“同源普通左键点击”且存在脏
+  编辑器时弹确认，取消则阻止跳转；修饰键/新窗口/中键/外链/锚点/已处理事件/带 `data-skip-unsaved-guard`
+  的链接一律放行（避免误伤）。测试扩至 **9 例**。
+
+**尚未接入（如实标记）**：浏览器前进/后退（`popstate`）的离开确认，以及
 **真实浏览器流程回归**（本机无 Playwright 浏览器、仓库无 e2e 用例；390px/768px/桌面折叠恢复未实测）。
 
 ---
