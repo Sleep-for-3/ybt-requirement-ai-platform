@@ -1,4 +1,4 @@
-"""W01 / B18: every component must report the same release identity.
+﻿"""W01 / B18: every component must report the same release identity.
 
 Without this, a release can silently mix an old frontend with a new API/worker, and readiness
 cannot prove which migration the database is actually on.
@@ -118,3 +118,34 @@ def test_unknown_identity_is_explicit_rather_than_empty(monkeypatch):
     real_report = dict(unknown_report, app_commit="abc1234", build_time="t1")
     assert versions_match(unknown_report, real_report) is False
     assert versions_match(unknown_report, dict(unknown_report, component="worker")) is False
+
+
+def test_beat_schedule_actually_reports_the_release_identity():
+    """B18: the worker/beat must report their identity, not merely expose a task for it.
+
+    The task existed but nothing scheduled it, so a running deployment never produced the worker
+    identity and a stale worker after a partial deploy stayed invisible.
+    """
+    from app.workers import celery_app
+
+    tasks = {entry.get("task") for entry in celery_app.conf.beat_schedule.values() if isinstance(entry, dict)}
+    assert "app.workers.version_report" in tasks
+
+
+def test_worker_identity_matches_the_api_identity(monkeypatch):
+    """The worker must report the same release identity values the API reports.
+
+    ``versions_match`` is deliberately not asserted across the two here: the worker task opens its own
+    session, so in this SQLite fixture it cannot see an ``alembic_version`` row and reports a schema
+    head of None - and ``versions_match`` treats an unknown schema head as a mismatch on purpose
+    (unknown must never prove consistency; see test_mixed_component_versions_are_detected).
+    """
+    monkeypatch.setenv("APP_COMMIT", "abc1234")
+    monkeypatch.setenv("BUILD_TIME", "2026-10-04T00:00:00Z")
+    from app.workers import report_worker_version
+
+    worker = report_worker_version.apply().get()
+
+    assert worker["component"] == "worker"
+    assert worker["app_commit"] == "abc1234"
+    assert worker["build_time"] == "2026-10-04T00:00:00Z"

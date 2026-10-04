@@ -17,6 +17,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.poll_lineage_repositories",
         "schedule": 60.0,
     },
+    # B18: the worker/beat must actually report their release identity, otherwise the identity the
+    # task returns is never produced in a running deployment and a stale worker after a partial
+    # deploy stays invisible. Kept lightweight (env reads + one alembic_version select).
+    "version-report": {
+        "task": "app.workers.version_report",
+        "schedule": 300.0,
+    },
 }
 
 
