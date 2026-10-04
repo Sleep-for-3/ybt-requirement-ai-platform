@@ -73,6 +73,12 @@ POST /api/projects/{id}/uat-packs/upload | /validate # 银行侧 UAT 包导入�
 
 ## 5. 交付物清单（缺任一项不得视为通过）
 
+**可直接填写的模板**（本目录 `w11/`）：
+
+- `w11/input-manifest.md` —— 输入 manifest（10 类输入，要求文件名 + 版本/日期 + SHA-256；含覆盖自检）
+- `w11/role-matrix.md` —— 四角色矩阵 + UAT 四类签署角色 + 每轮必须绑定的 8 项
+- `w11/evidence-checklist.md` —— 平台侧 / 业务侧 / 专家评价 / “不得发生”四段证据清单
+
 - [ ] **输入 manifest**（模板/目录/制度/脚本的文件名 + hash + 版本）
 - [ ] **角色矩阵**（§2，含实际操作人与时间）
 - [ ] **操作证据**（关键页面/接口调用留痕；UAT 证据包 zip）
