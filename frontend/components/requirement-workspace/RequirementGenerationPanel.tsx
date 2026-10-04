@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { apiGet, apiPost } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
+import { classifyQueryState, isRetryable } from "@/lib/query-state.mjs";
 import { SkillRunProvenance, type CandidateExecution } from "@/components/SkillRunProvenance";
 
 type Section = "business" | "lineage";
@@ -59,6 +60,8 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     setReplace(saved?.replace_manual_fields||[]);setRejectReason("");
   },[candidate.data,basket]);
   const pendingCandidates=currentRun?.items.filter(item=>item.status==="completed"&&item.decision==="pending")||[];
+  // W07: a failed or forbidden runs query must not look like "no generation runs".
+  const runsState=classifyQueryState({isPending:runs.isPending,isError:runs.isError,error:runs.error,hasData:Boolean(runs.data),itemCount:runs.data?.length||0});
   const sections:Section[]=[...(business&&canBusiness?["business" as const]:[]),...(lineage&&canLineage?["lineage" as const]:[])];
   const fieldIds=mode==="field"&&currentFieldId?[currentFieldId]:fields.map(field=>field.id);
 
@@ -122,7 +125,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
       {(currentRun.counts.failed||currentRun.counts.blocked)&&currentRun.job_id?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy} onClick={()=>void retry()} type="button"><RefreshCw size={13}/>重试失败项</button>:null}
       <div className="mt-2 max-h-48 space-y-1 overflow-auto">{pendingCandidates.map(item=><button className="flex w-full items-center justify-between border border-line bg-white px-2 py-2 text-left" key={item.id} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><Eye className="shrink-0" size={13}/></button>)}</div>
       {Object.keys(basket).length?<><button className="button-primary mt-2 w-full" disabled={busy||dirty} onClick={()=>void adoptBasket()} type="button"><Check size={14}/>应用采用清单（{Object.keys(basket).length}）</button>{dirty?<p className="mt-2 text-xs text-amber-700">请先保存当前人工编辑，再采用候选。</p>:null}</>:null}
-    </div>:runs.isPending?<p className="mt-2 text-xs text-slate-500">正在读取生成状态…</p>:null}
+    </div>:runsState.kind==="loading"||runsState.kind==="empty"?<p className="mt-2 text-xs text-slate-500">{runsState.kind==="loading"?"正在读取生成状态…":"尚无生成轮次，可先按范围生成候选。"}</p>:runsState.kind==="ready"?null:<p className={`mt-2 text-xs ${runsState.kind==="forbidden"?"text-amber-700":"text-red-700"}`} role={runsState.kind==="forbidden"?"status":"alert"}>{runsState.kind==="forbidden"?"没有查看生成状态的权限，请联系项目管理员。":`生成状态读取失败：${runsState.message}`}{isRetryable(runsState.kind)?<button className="ml-2 underline" onClick={()=>void runs.refetch()} type="button">重试</button>:null}</p>}
     {notice?<p className="mt-2 text-xs text-emerald-700">{notice}</p>:null}{error?<p className="mt-2 text-xs text-red-700" role="alert">{error}</p>:null}
     {candidateId?<div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label="候选差异">
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-xl">
