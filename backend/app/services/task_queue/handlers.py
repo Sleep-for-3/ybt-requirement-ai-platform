@@ -16,7 +16,7 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
         knowledge_embedding_reindex_handler,
         knowledge_reindex_handler,
         metadata_sync_handler,
-        project_backup_handler,
+        project_manifest_export_handler,
         rag_evaluation_handler,
     )
     from app.services.uat.execution import uat_run_job_handler
@@ -36,7 +36,9 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
         "metadata_sync": metadata_sync_handler,
         "column_profile": column_profile_handler,
         "rag_evaluation": rag_evaluation_handler,
-        "project_backup": project_backup_handler,
+        "project_manifest_export": project_manifest_export_handler,
+        # retired key kept so historical jobs keep resolving
+        "project_backup": project_manifest_export_handler,
         "script_upload_ingestion": script_archive_ingestion_handler,
         "script_repository_sync": script_repository_sync_handler,
         "lineage_export": lineage_export_handler,

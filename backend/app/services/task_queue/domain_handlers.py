@@ -126,22 +126,52 @@ def rag_evaluation_handler(db: Session, job) -> dict:
     return {"success_count": 1, "failed_count": 0, "evaluation_run_id": run.id}
 
 
-def project_backup_handler(db: Session, job) -> dict:
+def project_manifest_export_handler(db: Session, job) -> dict:
+    """W09: export a project metadata manifest - explicitly NOT a backup.
+
+    The previous name ('project backup') described a file that only carried the project id, name
+    and a scope marker, which invites treating it as a restorable backup. It now declares what it
+    is, what it does not contain, and what a real backup still requires, so nobody can mistake the
+    manifest for disaster recovery.
+    """
     import json
+    from datetime import UTC, datetime
     project = db.get(Project, job.project_id)
     if project is None:
         raise ValueError("Project not found")
-    content = json.dumps({"project_id": project.id, "project_name": project.name, "backup_scope": "metadata"}, ensure_ascii=False).encode("utf-8")
-    saved = get_storage_service().save(content, file_name=f"project-{project.id}-backup.json", project_id=project.id)
+    manifest = {
+        "project_id": project.id,
+        "project_name": project.name,
+        "artifact_kind": "project_metadata_manifest",
+        "is_full_backup": False,
+        "backup_scope": "metadata",
+        "notice": "本文件仅为项目元数据清单，不含业务数据、附件、向量索引或数据库转储，不能用于恢复。",
+        "full_backup_requires": [
+            "PostgreSQL 转储（业务数据与审核记录，含一致性点）",
+            "附件与正式交付对象存储",
+            "配置安全引用（不含明文密钥）",
+            "向量索引快照或可靠重建依据",
+            "依赖清单与版本（应用 commit / 迁移 head / Skill 与模型版本）",
+        ],
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    content = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+    file_name = f"project-{project.id}-manifest.json"
+    saved = get_storage_service().save(content, file_name=file_name, project_id=project.id)
     row = StoredFile(
         institution_id=project.institution_id, project_id=project.id, storage_key=saved.storage_key,
-        original_file_name=f"project-{project.id}-backup.json", content_type="application/json",
+        original_file_name=file_name, content_type="application/json",
         byte_size=saved.byte_size, content_hash=saved.content_hash, classification=project.confidentiality_level,
         created_by=job.created_by, enabled=True,
     )
     db.add(row);db.flush()
-    _complete(db, job, "export", "project_backup", row.id, "export_completed", "项目备份完成")
+    _complete(db, job, "export", "project_manifest_export", row.id, "export_completed", "项目元数据清单导出完成（非完整备份）")
     return {"success_count": 1, "failed_count": 0, "file_id": row.id, "byte_size": saved.byte_size}
+
+
+# Retired alias: historical jobs and API clients still reference the old job key, so it keeps
+# resolving to the manifest export instead of silently disappearing.
+project_backup_handler = project_manifest_export_handler
 
 
 def _complete(db: Session, job, action: str, resource_type: str, resource_id: int, notification_type: str, title: str) -> None:

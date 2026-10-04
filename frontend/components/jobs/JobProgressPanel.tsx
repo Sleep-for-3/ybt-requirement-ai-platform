@@ -22,7 +22,9 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   knowledge_embedding_reindex: "正式语义索引重建",
   lineage_export: "血缘分析结果导出",
   metadata_sync: "元数据同步",
-  project_backup: "项目备份",
+  project_manifest_export: "项目元数据清单（非完整备份）",
+  // retired key kept so historical jobs still render with an honest label
+  project_backup: "项目元数据清单（非完整备份）",
   rag_evaluation: "知识检索效果评估",
   repository_sync: "代码仓库同步",
   script_repository_sync: "代码仓库同步",

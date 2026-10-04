@@ -25,7 +25,7 @@ from app.services.governance.scenario_review import get_or_create_review_package
 from app.services.export import export_traceability_workbook
 from app.services.storage import get_storage_service
 from app.services.task_queue import get_task_queue
-from app.services.task_queue.domain_handlers import project_backup_handler
+from app.services.task_queue.domain_handlers import project_manifest_export_handler
 from app.services.task_queue.idempotency import semantic_idempotency_key
 from app.services.task_queue.presentation import job_submission_response
 
@@ -150,9 +150,18 @@ def batch_export(project_id: int, payload: BatchOperationRequest, principal: Rea
     return _enqueue(db, project_id, principal, "excel_export", payload.model_dump(mode="json"), idempotency_key, _export_handler)
 
 
-@router.post("/projects/{project_id}/backup", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/projects/{project_id}/manifest-export", status_code=status.HTTP_202_ACCEPTED)
+def project_manifest_export(project_id: int, principal: RealPrincipal, db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
+    """W09: export the project metadata manifest (explicitly not a backup)."""
+
+    return _enqueue(db, project_id, principal, "project_manifest_export", {}, idempotency_key, project_manifest_export_handler)
+
+
+@router.post("/projects/{project_id}/backup", status_code=status.HTTP_202_ACCEPTED, deprecated=True)
 def project_backup(project_id: int, principal: RealPrincipal, db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict:
-    return _enqueue(db, project_id, principal, "project_backup", {}, idempotency_key, project_backup_handler)
+    """Deprecated alias kept for existing clients; it produces the metadata manifest, not a backup."""
+
+    return _enqueue(db, project_id, principal, "project_manifest_export", {}, idempotency_key, project_manifest_export_handler)
 
 
 def _enqueue(db, project_id, principal, job_type, payload, idempotency_key, handler):
