@@ -52,15 +52,16 @@
 
 | 工作包 | 对应问题 | 状态 | 提交 |
 | --- | --- | --- | --- |
-| W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | **已修复 / 已验证**（仅 production browser 回归待做） | `1782bac` `0950bcd` `909f0f8` `7b9bc46` `7640d97` |
+| W01 供应链与发布基线 | B01, B17, B18, 过期迁移 head | **已修复 / 已验证**（仅 production browser 回归待做） | `1782bac` `0950bcd` `909f0f8` `7b9bc46` `7640d97` `7714227` `caf60bd` `f452b29` |
 | W02 机构熔断与令牌原子轮换 | B02/BA05, B05/BA04 | 已修复 / 已验证 | `16767d7`（B02）、见下（B05） |
 | W03 审核内容与正式产物不可变 | B03/BA01 | 已修复 / 已验证 | 见下 |
 | W04 SQL 限额/脱敏/连接器契约 | B04/BA02, B06/BA03, B09/BA07 | 已修复 / 已验证 | 见下 |
 | W05 后台任务幂等与恢复 | B07/BA06 | 已修复 / 已验证 | 见下 |
 | W06 人工编辑与模型配置完整性 | B10–B13, B15–B16 | **已修复 / 已验证**（B11 逐页接线为剩余项） | `ac6ffbd` `db1cc57` `6ea5779` `f6e90ec` |
 
-第一阶段退出条件尚未满足：**W01 的 Next.js/React 安全升级与后端依赖锁定未完成**；
-W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为“已修复 / 已验证”并附复现与回归证据。
+第一阶段退出条件尚未满足：**W01 的 Next.js/React 安全升级尚未部署到运行实例**（依赖锁定、隔离构建与依赖审计已完成，
+2B 路径待批准）、**升级后的 production browser 回归未做**。W06 的 B11 逐页接线已完成（见下）。
+已完成项均为“已修复 / 已验证”并附复现与回归证据。
 
 ### W01 已完成部分
 
@@ -82,6 +83,14 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
     并加 2 个测试锁定（调度中必须含该任务；worker 上报值与 API 一致）。
   - 实测：worker 侧与 API 的 `app_commit`/`build_time`/`schema_head` **完全一致**，`versions_match=True`
     （用 Celery eager `apply()` 本地验证，**未触碰共享 broker**）。
+  - **前端从未展示标识差异（本轮补齐，提交 `f452b29`）**：`frontend/lib/build-info.ts` 的
+    `frontendIdentity()` / `identityMismatches()` 早已存在且有 6 例单测，但**没有任何界面调用**——
+    用旧 commit 构建的前端对上新后端时，界面看起来完全正常（与 B11「有实现无接线」同类缺陷）。
+    新增 `frontend/components/ReleaseIdentityNotice.tsx`：比对构建期内联标识与 `/api/version` 的
+    `app_commit`/`build_time`/`schema_head`，**仅在不一致或任一侧为 `unknown` 时**渲染琥珀色提示
+    （`role="status"`），一致时保持静默；挂载于顶栏。`/api/version` 为**无鉴权**端点（不含密钥），
+    未登录也能核对。验证：前端 `node --test` **253 passed**、`tsc --noEmit` exit 0、`next lint`
+    exit 0、隔离生产构建 exit 0（54 页）。组件为薄接线，纯逻辑已由既有 6 例覆盖，未新增重复的字符串断言。
 
 ### W01 未完成（阻碍阶段退出）
 
