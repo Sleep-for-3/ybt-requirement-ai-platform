@@ -29,7 +29,15 @@
 | 备份可恢复性 | `w09_backup_plan.py`（先 dry-run，再 `--execute --out <工作区内路径>`） | 隔离库恢复 | 备份成功 + `pg_restore` 无错 + 行数一致 |
 | 外发判定不可绕过 | 静态核对 + `pytest tests/test_outbound_policy_gateway.py -q` | — | 唯一网关；两条真实路径均过网关；无绕过点 |
 
-> **安全**：以上 PG 脚本只写自己的隔离库/表；`w05` 脚本在跑任何 DDL 前先校验解析目标确为隔离库，否则拒绝执行。
+> **安全（N13，2026-10-05 加固）**：以上破坏性 PG 脚本现在**由代码强制**只操作本轮隔离库：统一守卫
+> `docs/upgrades/2026-10-03/isolated_pg_guard.py` 在**任何 DDL 之前**校验——库名必须带隔离前缀
+> （`ybt_upgrade_` / `ybt_iso_` / `w10_iso_`）；拒绝业务库 `ybt_dsh_handoff_v2`、`postgres`、`template0/1`
+> 以及 `backend/.env` 中配置的库；拒绝非 loopback 主机；目标库**已存在且非空**时默认拒绝。
+> 因此重跑需显式加 `--allow-reset-existing`（声明同意重置该隔离库），例如
+> `... w10_postgres_job_claim.py --database ybt_upgrade_w02_iso --allow-reset-existing --threads 12`。
+> 负例测试：`backend/tests/test_isolated_script_guard.py`（22 例）；集成负例：以
+> `--database ybt_dsh_handoff_v2` 运行任一脚本会在 DDL 前非零退出。`w09_backup_plan.py` 只读（`pg_dump`），
+> 不在破坏性守卫范围内；`w05` 原本已有等价的库名 allowlist 与解析目标校验。
 
 ## C. 真实浏览器验证（本轮已做，可重做）
 

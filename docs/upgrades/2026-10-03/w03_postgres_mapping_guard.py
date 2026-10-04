@@ -34,12 +34,28 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5432)
     parser.add_argument("--user", default="postgres")
+    parser.add_argument("--allow-reset-existing", action="store_true",
+                        help="N13: allow resetting an existing non-empty isolated DB (the business DB is always refused)")
     args = parser.parse_args()
 
     password = os.environ.get("PGPASSWORD") or ""
     if not password:
         print(json.dumps({"ok": False, "error": "PGPASSWORD is not set"}, ensure_ascii=False))
         return 2
+
+    # N13: refuse any target that is not this run's throw-away isolated database, before any DDL.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from isolated_pg_guard import require_isolated_target
+
+    require_isolated_target(
+        args.database,
+        script="w03_postgres_mapping_guard.py",
+        host=args.host,
+        port=args.port,
+        user=args.user,
+        password=password,
+        allow_existing=args.allow_reset_existing,
+    )
     url = f"postgresql+psycopg://{args.user}:{password}@{args.host}:{args.port}/{args.database}"
     os.environ["DATABASE_URL"] = url
 
