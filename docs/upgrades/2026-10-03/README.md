@@ -593,8 +593,16 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
-| 后端（本轮改动面：机构熔断/令牌轮换/审核不可变/SQL 加固/任务幂等/备份清单/版本一致性/发布基线/外发网关/外发授权/rerank/知识RAG/LLM 运行时/迁移与冻结门禁） | `pytest` 见下方命令 | **193 passed** |
+| **后端完整回归（全量 `tests/`）** | `pytest tests -q`（见下方） | **1429 passed**（18m→17m；修复两处回归后全绿） |
+| 后端（改动面定向） | 见下方命令 | **193 passed** |
 | 前端（隔离副本：`node --test` + `tsc` + `next lint` + `next build`） | 见下方命令 | **252 passed**；tsc/lint exit 0；build exit 0（54 页） |
+
+> **全量回归发现并修复的两处回归**（提交 `4979843`，均非基线问题）：
+> ① `test_performance_integrity.py` 把镜像硬编码为 `node:20-alpine`，与升级后的受支持 LTS 冲突 →
+> 改为断言"多阶段 + 受支持 Node 主版本（≥22）"，**该测试其余断言全部保留**；
+> ② `test_agent_autonomy_scenarios.py::test_request_reanalysis_triggers_a_real_reanalysis` ——
+> `resume_task` 复用已 `completed` 的同一作业，被 W05 原子领取**正确拒绝**，导致人工"重新分析"未真正重跑。
+> 改为让显式续跑先把作业重置为 `queued`（可审计），**W05 终态保证未放宽**。
 
 ```powershell
 # 后端（在 backend/，先设 TASK_QUEUE_PROVIDER=inline、AUTH_MODE=optional）
@@ -608,6 +616,9 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
 # 前端（在隔离副本目录）
 node --test tests/*.test.mjs ; node node_modules/typescript/bin/tsc --noEmit --incremental false
 node node_modules/next/dist/bin/next lint --no-cache ; node node_modules/next/dist/bin/next build
+# 全量后端回归
+cd backend ; $env:TASK_QUEUE_PROVIDER='inline' ; $env:AUTH_MODE='optional'
+& ".venv\Scripts\python.exe" -m pytest tests -q
 ```
 
 ### 真实依赖验收（非 Mock）
@@ -618,6 +629,8 @@ node node_modules/next/dist/bin/next lint --no-cache ; node node_modules/next/di
 | 后台任务唯一领取（W05/B07 → W10） | 隔离 PostgreSQL，12 并发 | `claim_winners=1`；有效租约阻止第二消费者；过期租约可恢复；终态不可再领取（`w10_postgres_job_claim.py`） |
 | Next 15.5.27 生产构建运行时 | 隔离副本 + 备用端口 3100 | `/login` 200；`/fields/1` **307 → /fields/1/scenarios**；关键路由 200；未知路由 404（探测后已停进程） |
 | 依赖审计 | 官方 registry | 生产依赖 **critical 1 → 0**（升级后 0 critical / 2 high）；`nanoid` 经 `overrides` 修复 |
+| 审核内容并发行锁（W03，本轮补测＋修复） | 隔离 PostgreSQL，8 并发写同一已批准映射 | **仅 1 个成功开启新修订**，其余被拒；终态 `draft`、`reviewed_by` 清空（`w03_postgres_mapping_guard.py`） |
+| SQL 安全查询契约（W04，本轮补测） | 隔离 PostgreSQL，真实 50 行 / `max_rows=5` | 子查询/字符串/CTE 载 `LIMIT` 均**无法绕过**（实返 5 行，渲染 SQL 带外层 `LIMIT 5`）；写入/多语句/可写 CTE/`SELECT *` 全部拒绝；表行数未变（`w04_postgres_safe_query.py`） |
 
 ### 未执行 / 待银行输入（不得当作通过）
 
