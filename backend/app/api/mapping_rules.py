@@ -121,7 +121,7 @@ def get_source_to_mart_mapping(mapping_id: int, db: Session = Depends(get_db)) -
 
 @router.put("/source-to-mart-mappings/{mapping_id}", response_model=SourceToMartMappingRead)
 def update_source_to_mart_mapping(mapping_id: int, payload: SourceToMartMappingUpdate, db: Session = Depends(get_db)) -> SourceToMartMapping:
-    mapping = _get_source_to_mart_or_404(db, mapping_id)
+    mapping = _get_source_to_mart_or_404(db, mapping_id, for_update=True)
     updates = payload.model_dump(exclude_unset=True)
     if updates.get("mapping_status") in {"approved", "rejected"}:
         _reject_legacy_review(db, mapping.project_id)
@@ -136,7 +136,7 @@ def update_source_to_mart_mapping(mapping_id: int, payload: SourceToMartMappingU
 
 @router.delete("/source-to-mart-mappings/{mapping_id}")
 def delete_source_to_mart_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
-    mapping = _get_source_to_mart_or_404(db, mapping_id)
+    mapping = _get_source_to_mart_or_404(db, mapping_id, for_update=True)
     _guard_double_layer_delete(db, "source_to_mart", mapping)
     _delete_mapping_dependencies(db, "source_to_mart", mapping_id)
     db.delete(mapping)
@@ -261,7 +261,7 @@ def get_mart_to_ybt_mapping(mapping_id: int, db: Session = Depends(get_db)) -> M
 
 @router.put("/mart-to-ybt-mappings/{mapping_id}", response_model=MartToYbtMappingRead)
 def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate, db: Session = Depends(get_db)) -> MartToYbtMapping:
-    mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    mapping = _get_mart_to_ybt_or_404(db, mapping_id, for_update=True)
     updates = payload.model_dump(exclude_unset=True)
     if updates.get("mapping_status") in {"approved", "rejected"}:
         _reject_legacy_review(db, mapping.project_id)
@@ -280,7 +280,7 @@ def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate,
 
 @router.delete("/mart-to-ybt-mappings/{mapping_id}")
 def delete_mart_to_ybt_mapping(mapping_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
-    mapping = _get_mart_to_ybt_or_404(db, mapping_id)
+    mapping = _get_mart_to_ybt_or_404(db, mapping_id, for_update=True)
     _guard_double_layer_delete(db, "mart_to_ybt", mapping)
     _delete_mapping_dependencies(db, "mart_to_ybt", mapping_id)
     db.delete(mapping)
@@ -392,15 +392,23 @@ def _get_target_field_or_404(db: Session, field_id: int) -> TargetField:
     return field
 
 
-def _get_source_to_mart_or_404(db: Session, mapping_id: int) -> SourceToMartMapping:
-    mapping = db.get(SourceToMartMapping, mapping_id)
+def _get_source_to_mart_or_404(db: Session, mapping_id: int, *, for_update: bool = False) -> SourceToMartMapping:
+    # W03: write paths take a row lock so the lifecycle guard reads a stable state and a concurrent
+    # edit/submit cannot both pass on the same pre-state (SQLite ignores FOR UPDATE).
+    statement = select(SourceToMartMapping).where(SourceToMartMapping.id == mapping_id)
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    mapping = db.scalar(statement)
     if mapping is None:
         raise HTTPException(status_code=404, detail="Source-to-mart mapping not found")
     return mapping
 
 
-def _get_mart_to_ybt_or_404(db: Session, mapping_id: int) -> MartToYbtMapping:
-    mapping = db.get(MartToYbtMapping, mapping_id)
+def _get_mart_to_ybt_or_404(db: Session, mapping_id: int, *, for_update: bool = False) -> MartToYbtMapping:
+    statement = select(MartToYbtMapping).where(MartToYbtMapping.id == mapping_id)
+    if for_update:
+        statement = statement.with_for_update().execution_options(populate_existing=True)
+    mapping = db.scalar(statement)
     if mapping is None:
         raise HTTPException(status_code=404, detail="Mart-to-YBT mapping not found")
     return mapping
