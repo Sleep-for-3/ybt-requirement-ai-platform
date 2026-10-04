@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
 import { classifyQueryState, isRetryable } from "@/lib/query-state.mjs";
-import { ITEM_STATES, canAdoptRound, filterRunItems, itemStateCounts, itemStateLabel, resolveRound, roundLabel, selectableRounds } from "@/lib/generation-rounds.mjs";
+import { ITEM_STATES, canAdoptRound, filterRunItems, itemStateCounts, itemStateLabel, resolveRound, roundLabel, scopeFromRound, selectableRounds } from "@/lib/generation-rounds.mjs";
 import { SkillRunProvenance, type CandidateExecution } from "@/components/SkillRunProvenance";
 
 type Section = "business" | "lineage";
@@ -44,6 +44,8 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   const [basket,setBasket]=useState<Record<number,BasketSelection>>({});
   const [rejectReason,setRejectReason]=useState("");
   const [itemFilter,setItemFilter]=useState("all");
+  // W07: explicitly regenerating a historical round's scope; null means "use the current selection".
+  const [scopeOverride,setScopeOverride]=useState<number[]|null>(null);
   const submitKey=useRef<string|null>(null);
   const auth=useQuery({queryKey:["requirement-generation-access",projectId],queryFn:({signal})=>apiGet<{effective_project_permissions?:Record<string,string[]>}>("/auth/me",{signal})});
   const permissions=auth.data?.effective_project_permissions?.[String(projectId)]||[];
@@ -78,13 +80,25 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   const runsState=classifyQueryState({isPending:runs.isPending,isError:runs.isError,error:runs.error,hasData:Boolean(runs.data),itemCount:runs.data?.length||0});
   const sections:Section[]=[...(business&&canBusiness?["business" as const]:[]),...(lineage&&canLineage?["lineage" as const]:[])];
   const fieldIds=mode==="field"&&currentFieldId?[currentFieldId]:fields.map(field=>field.id);
+  // A round-specific scope overrides the on-screen selection until the operator changes it.
+  const effectiveFieldIds=scopeOverride??fieldIds;
+
+  function applyRoundScope(run:{items?:ReadonlyArray<{field_id:number;section:string}>}|null){
+    if(!run)return;
+    const scope=scopeFromRound(run);
+    if(scope.empty){setError("该轮次没有可复用的字段范围。");return;}
+    setScopeOverride(scope.fieldIds);
+    if(scope.business)setBusiness(true);
+    if(scope.lineage)setLineage(true);
+    setNotice("已填入该轮次的 " + scope.fieldIds.length + " 个字段与范围，请确认后点击“生成候选”。");
+  }
 
   async function generate(){
-    if(busy||dirty||!contentVersion||!fieldIds.length||!sections.length)return;
+    if(busy||dirty||!contentVersion||!effectiveFieldIds.length||!sections.length)return;
     setBusy(true);setError("");setNotice("");
     submitKey.current ||= createClientId();
     try{
-      await apiPost(`${base}/generation-runs`,{expected_content_version:contentVersion,field_ids:fieldIds,
+      await apiPost(`${base}/generation-runs`,{expected_content_version:contentVersion,field_ids:effectiveFieldIds,
         sections,idempotency_key:submitKey.current});
       submitKey.current=null;setNotice("生成任务已提交，结果只会进入候选区。");await runs.refetch();
     }catch{setError("提交失败；再次点击会复用同一输入，不会重复创建结果。");}
@@ -139,6 +153,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     {rounds.length>1?<label className="mt-3 block text-xs"><span className="mb-1 block text-slate-500">生成轮次（历史轮次只读）</span><select aria-label="生成轮次" className="control h-8 text-xs" onChange={event=>setSelectedRunId(Number(event.target.value)||null)} value={currentRun?.id??""}>{rounds.map(item=><option key={item.id} value={item.id}>{roundLabel(item)}</option>)}</select></label>:null}
     {currentRun?<div className="mt-3 border-t border-line pt-3 text-xs"><div className="flex flex-wrap gap-x-3 gap-y-1"><span>{roundLabel(currentRun)}</span><span>总数 {currentRun.total}</span><span>已生成 {currentRun.counts.completed}</span><span>失败 {currentRun.counts.failed}</span><span>阻断 {currentRun.counts.blocked}</span><span>待处理 {pendingCandidates.length}</span></div>
       {!roundAdoptable?<p className="mt-2 text-xs text-amber-700">这是内容 v{currentRun.content_version} 的历史轮次，只能查看或拒绝，不能写入当前 v{contentVersion}。</p>:null}
+      {!roundAdoptable?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy||dirty} onClick={()=>applyRoundScope(currentRun)} type="button"><RefreshCw size={13}/>按此轮范围重新生成</button>:null}
       {(currentRun.counts.failed||currentRun.counts.blocked)&&currentRun.job_id&&roundAdoptable?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy} onClick={()=>void retry()} type="button"><RefreshCw size={13}/>重试失败项</button>:null}
       <label className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500"><span>候选状态</span><select aria-label="候选状态筛选" className="control h-7 w-auto text-[11px]" onChange={event=>setItemFilter(event.target.value)} value={itemFilter}><option value="all">全部 {roundItems.length}</option>{ITEM_STATES.filter(state=>state!=="all").map(state=><option key={state} value={state}>{ITEM_STATE_LABELS[state]||state} {stateCounts[state]||0}</option>)}</select></label>
       <div className="mt-2 max-h-48 space-y-1 overflow-auto">{visibleItems.map(item=><button className="flex w-full items-center justify-between border border-line bg-white px-2 py-2 text-left" key={item.id} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><span className="shrink-0 text-[10px] text-slate-500">{itemStateLabel(item)}</span><Eye className="shrink-0" size={13}/></button>)}</div>

@@ -86,3 +86,21 @@ export function itemStateCounts(items) {
   }
   return counts;
 }
+
+/**
+ * The scope a historical round covered, so an operator can regenerate it (W07: old candidates are
+ * read-only but may be regenerated). Regeneration always targets the current content version, so
+ * this only carries the field/section scope, never a target version.
+ */
+export function scopeFromRound(run) {
+  const items = Array.isArray(run?.items) ? run.items.filter(Boolean) : [];
+  const fieldIds = [...new Set(items.map((item) => Number(item.field_id)).filter((id) => Number.isSafeInteger(id) && id > 0))];
+  const sections = [...new Set(items.map((item) => String(item.section || "")).filter(Boolean))];
+  return {
+    fieldIds: fieldIds.sort((left, right) => left - right),
+    sections: sections.sort(),
+    business: sections.includes("business"),
+    lineage: sections.includes("lineage"),
+    empty: fieldIds.length === 0 || sections.length === 0,
+  };
+}

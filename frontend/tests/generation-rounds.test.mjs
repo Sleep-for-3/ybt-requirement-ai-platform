@@ -13,6 +13,7 @@ import {
   itemStateLabel,
   resolveRound,
   roundLabel,
+  scopeFromRound,
   selectableRounds,
 } from "../lib/generation-rounds.mjs";
 
@@ -96,4 +97,34 @@ test("候选状态可查询：按状态筛选并给出各状态计数", () => {
   assert.deepEqual(filterRunItems(items, "nonexistent"), []);
   assert.deepEqual(filterRunItems(null, "failed"), []);
   assert.equal(itemStateCounts(undefined).failed, 0);
+});
+
+test("历史轮次范围可提取用于重新生成（不含目标版本）", () => {
+  const historical = {
+    id: 9, content_version: 1, stale: true, status: "completed", total: 3,
+    counts: { completed: 3 },
+    items: [
+      { id: 1, field_id: 7, section: "business", status: "completed", decision: "adopted" },
+      { id: 2, field_id: 7, section: "lineage", status: "completed", decision: "rejected" },
+      { id: 3, field_id: 8, section: "business", status: "failed", decision: "pending" },
+    ],
+  };
+  const scope = scopeFromRound(historical);
+  // the distinct field and section coverage, not the item list
+  assert.deepEqual(scope.fieldIds, [7, 8]);
+  assert.deepEqual(scope.sections, ["business", "lineage"]);
+  assert.equal(scope.business, true);
+  assert.equal(scope.lineage, true);
+  assert.equal(scope.empty, false);
+  // regenerating is always against the current version, so no target version leaks in
+  assert.equal("content_version" in scope, false);
+  assert.equal("stale" in scope, false);
+});
+
+test("空轮次/坏输入的范围提取不抛错且标记为空", () => {
+  for (const bad of [null, undefined, {}, { items: [] }, { items: [null, { field_id: 0, section: "" }] }]) {
+    const scope = scopeFromRound(bad);
+    assert.equal(scope.empty, true, String(bad));
+    assert.deepEqual(scope.fieldIds, []);
+  }
 });

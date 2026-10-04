@@ -33,3 +33,10 @@ export const ITEM_STATES: readonly string[];
 export function itemState(item: Pick<GenerationRunItem, "status" | "decision">): string;
 export function filterRunItems(items: unknown, state?: string): GenerationRunItem[];
 export function itemStateCounts(items: unknown): Record<string, number>;
+export function scopeFromRound(run: unknown): {
+  fieldIds: number[];
+  sections: string[];
+  business: boolean;
+  lineage: boolean;
+  empty: boolean;
+};
