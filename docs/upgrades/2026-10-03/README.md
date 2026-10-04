@@ -203,15 +203,36 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
   `if expected_version != input_version or requirement.content_version != input_version: raise HTTPException(409, "候选属于旧内容版本，请重新生成")`
   **拒绝跨版本与过期采用**。复测 `tests/test_requirement_candidate_adoption.py` → **4 passed**
   （含 stale 候选 409、已拒绝候选 409、被篡改候选 409、跨项目 404、人工内容需显式替换、批量采用只建一个修订、重复采用幂等）。
+- **审核与正式交付两条历史的失败不再合并**（提交 `26d436e`）：交付面板原先把 `submissions`/`deliveries`
+  任一失败合并为一行“审核或交付记录读取失败”，无法判断哪条失败且无重试。现分别用 `classifyQueryState`
+  分类：各自命名失败对象并各自提供重试（`submissions.refetch()` / `deliveries.refetch()`），403 显示
+  对应琥珀色权限提示；成功但为空时仍显示“尚未提交审核”。
 
 验证：前端 `node --test` **249 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）；
 后端采用链路回归 **4 passed**。
+
+### 五类状态的如实评估（W07）
+
+任务书要求把“人工认可摘要 / 采用到正文 / 审核通过 / 正式文件生成 / UAT 签署”拆为不同状态。经核对，
+**数据模型与现有界面已区分**这些状态：
+
+- **采用到正文**：文档记录 `manual_ownership[field][section.field].kind`（人工为 `manual`、AI 采用为 `ai_adopted`），
+  面板显示“人工内容”徽标并在替换人工内容时要求逐项确认；
+- **审核通过**：`review-submissions` 的 `status`（`draft`/`in_review`/`approved`…），面板按 `statusLabel` 显示；
+- **正式文件生成**：`formal-deliveries` 列表（`status: "formal"`、`version_no`、`content_version`）与下载入口，
+  仅在有记录时出现；
+- **UAT 签署**：独立的 `RequirementUatPanel` / `/uat` 页面（`uat.view`/`uat.manage`/`uat.signoff` 权限）；
+- **人工认可摘要**：`DocumentPreview` 区分“需求文档草稿预览”与“已确认需求文档”，并说明 AI 草稿必须经人工采用。
+
+**仍缺少的**：把五者汇总为**同一处的状态条**（当前分散在各面板），以及“人工认可摘要”尚无独立的
+显式状态字段（当前由内容状态与审核状态共同表达）。已如实记为剩余项，未以现有分散展示冒充完成。
 
 ### 未完成（W07 其余项）
 
 - 生成轮次/内容版本/字段筛选/失败、拒绝、已采用、过期状态的**可查询视图**（轮次选择器与只读已实现；
   按状态筛选尚未提供）；旧候选重生成入口。
-- 将“人工认可摘要 / 采用到正文 / 审核通过 / 正式文件生成 / UAT 签署”拆为不同状态。
+- 将五类状态（人工认可摘要 / 采用到正文 / 审核通过 / 正式文件生成 / UAT 签署）汇总为同一处状态条；
+  “人工认可摘要”仍无独立状态字段（现由内容状态与审核状态共同表达）。
 - 其他面板（candidate 详情、字段候选列表等）尚未逐个接入查询状态分类（**已接入：生成面板、交付面板**）。
 
 ---
