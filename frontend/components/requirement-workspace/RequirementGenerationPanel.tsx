@@ -78,6 +78,8 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   const visibleItems=filterRunItems(roundItems,itemFilter);
   // W07: a failed or forbidden runs query must not look like "no generation runs".
   const runsState=classifyQueryState({isPending:runs.isPending,isError:runs.isError,error:runs.error,hasData:Boolean(runs.data),itemCount:runs.data?.length||0});
+  // W07: a 403 on the candidate must not read as "failed or unavailable", and a failure offers retry.
+  const candidateState=classifyQueryState({isPending:candidate.isPending,isError:candidate.isError,error:candidate.error,hasData:Boolean(candidate.data),itemCount:candidate.data?1:0});
   const sections:Section[]=[...(business&&canBusiness?["business" as const]:[]),...(lineage&&canLineage?["lineage" as const]:[])];
   const fieldIds=mode==="field"&&currentFieldId?[currentFieldId]:fields.map(field=>field.id);
   // A round-specific scope overrides the on-screen selection until the operator changes it.
@@ -164,7 +166,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     {candidateId?<div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label="候选差异">
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-xl">
         <div className="flex items-center gap-2"><h2 className="text-base font-semibold">候选差异</h2><button aria-label="关闭候选差异" className="ml-auto icon-button" onClick={()=>setCandidateId(null)} type="button"><X size={18}/></button></div>
-        {candidate.isPending?<p className="mt-5 text-sm">正在读取候选…</p>:candidate.isError||!candidate.data?<p className="mt-5 text-sm text-red-700">候选读取失败或已不可用。</p>:<CandidateBody data={candidate.data} selected={selected} replace={replace} onSelected={setSelected} onReplace={setReplace}/>}
+        {candidateState.kind==="loading"?<p className="mt-5 text-sm">正在读取候选…</p>:candidateState.kind==="forbidden"?<p className="mt-5 text-sm text-amber-700" role="status">没有查看该候选的权限，请联系项目管理员。</p>:isRetryable(candidateState.kind)?<p className="mt-5 text-sm text-red-700" role="alert">候选读取失败：{candidateState.message}<button className="ml-2 underline" onClick={()=>void candidate.refetch()} type="button">重试</button></p>:candidate.data?<CandidateBody data={candidate.data} selected={selected} replace={replace} onSelected={setSelected} onReplace={setReplace}/>:<p className="mt-5 text-sm text-red-700" role="alert">候选已不可用。</p>}
         {candidate.data?<><label className="mt-4 block text-xs">拒绝原因<textarea aria-label="候选拒绝原因" className="control mt-1 min-h-20" value={rejectReason} onChange={event=>setRejectReason(event.target.value)}/></label><div className="mt-4 flex flex-wrap justify-end gap-2"><button className="button-secondary" disabled={busy||!rejectReason.trim()} onClick={()=>void reject()} type="button"><X size={14}/>拒绝候选</button><button className="button-primary" disabled={busy||candidate.data.stale||!selected.length} onClick={queueCandidate} type="button"><Check size={14}/>加入采用清单</button></div></>:null}
         {error?<p className="mt-3 text-xs text-red-700" role="alert">{error}</p>:null}
       </div>
