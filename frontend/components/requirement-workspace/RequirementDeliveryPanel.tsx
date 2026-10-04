@@ -154,6 +154,10 @@ export function RequirementDeliveryPanel({
   const ready = readiness.data;
   // W07: a 403 must not be reported as a read failure, and a failure must offer a retry.
   const readinessState = classifyQueryState({ isPending: readiness.isPending, isError: readiness.isError, error: readiness.error, hasData: Boolean(readiness.data), itemCount: readiness.data ? 1 : 0 });
+  // W07: the review and delivery histories are two independent capabilities, so a failure in one
+  // must name that one and offer its own retry instead of one merged "read failed" line.
+  const submissionsState = classifyQueryState({ isPending: submissions.isPending, isError: submissions.isError, error: submissions.error, hasData: Boolean(submissions.data), itemCount: submissions.data?.length || 0 });
+  const deliveriesState = classifyQueryState({ isPending: deliveries.isPending, isError: deliveries.isError, error: deliveries.error, hasData: Boolean(deliveries.data), itemCount: deliveries.data?.length || 0 });
   return <section className="panel mb-3" id="requirement-delivery" aria-label="审核与正式交付">
     <div className="panel-header flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -195,7 +199,10 @@ export function RequirementDeliveryPanel({
           </li>)}</ol>
       </div> : null}
       {canView && submissions.isSuccess && !latest ? <p className="text-xs text-slate-500">尚未提交审核。</p> : null}
-      {submissions.isError || deliveries.isError ? <p role="alert" className="text-xs text-coral-700">审核或交付记录读取失败，请稍后重试。</p> : null}
+      {isRetryable(submissionsState.kind) ? <p role="alert" className="text-xs text-coral-700">审核记录读取失败：{submissionsState.message}<button className="ml-2 underline" onClick={() => void submissions.refetch()} type="button">重试</button></p> : null}
+      {submissionsState.kind === "forbidden" ? <p role="status" className="text-xs text-amber-700">没有查看审核记录的权限。</p> : null}
+      {isRetryable(deliveriesState.kind) ? <p role="alert" className="text-xs text-coral-700">正式交付记录读取失败：{deliveriesState.message}<button className="ml-2 underline" onClick={() => void deliveries.refetch()} type="button">重试</button></p> : null}
+      {deliveriesState.kind === "forbidden" ? <p role="status" className="text-xs text-amber-700">没有查看正式交付记录的权限。</p> : null}
 
       {canView && deliveries.data?.length ? <div className="border-t border-line pt-3">
         <h3 className="text-xs font-semibold text-ink">历史正式交付</h3>
