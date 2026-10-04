@@ -630,7 +630,7 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
-| **后端完整回归（全量 `tests/`）** | `pytest tests -q`（见下方） | **1429 passed**（18m→17m；修复两处回归后全绿） |
+| **后端完整回归（全量 `tests/`）** | `pytest tests -q`（见下方） | **1431 passed / exit 0**（1429→1431；含新增 2 例机构停用执行用例） |
 | 后端（改动面定向） | 见下方命令 | **193 passed** |
 | 前端（隔离副本：`node --test` + `tsc` + `next lint` + `next build`） | 见下方命令 | **252 passed**；tsc/lint exit 0；build exit 0（54 页） |
 
