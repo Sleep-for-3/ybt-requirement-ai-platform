@@ -72,6 +72,16 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
   + Celery `app.workers.version_report` + 前端 `lib/build-info.ts`（含 `identityMismatches`）；
   `versions_match()` 将 `unknown` 视为**不一致**（未知无法证明一致）；schema head 从 `alembic_version` 实读，
   并与迁移目录真实唯一 head 对齐。测试：后端 6 例 + 前端 6 例。
+- **B18 两处落地缺口（本轮修复，提交 `7714227` / `caf60bd`）**：机制存在但**落地不到位**，核对运行实例时发现：
+  - **发布标识从未注入**：`GET /api/version` 在运行实例上返回 `app_commit=unknown`/`build_time=unknown`（代码正确：
+    取 `APP_COMMIT`/`BUILD_TIME`，回退打包 `backend/build-info.json`；`versions_match` 将 unknown 判为不一致）。
+    已由真实 HEAD + UTC 时间生成 `build-info.json`（**运行实例无需重启即报出标识**），并加入 `.gitignore`；
+    runbook 发布验证段补充注入步骤。
+  - **worker/beat 上报从未被调度**：`beat_schedule` 原只含 lineage 监控，`app.workers.version_report` 虽存在
+    但**从不执行** → 运行中不产生 worker 标识、部分部署后的陈旧 worker 不可见。已加入调度（**每 300s**），
+    并加 2 个测试锁定（调度中必须含该任务；worker 上报值与 API 一致）。
+  - 实测：worker 侧与 API 的 `app_commit`/`build_time`/`schema_head` **完全一致**，`versions_match=True`
+    （用 Celery eager `apply()` 本地验证，**未触碰共享 broker**）。
 
 ### W01 未完成（阻碍阶段退出）
 
