@@ -648,6 +648,11 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
   重复处理变成 failed；崩溃后可恢复且仍保持唯一执行者。
 - **发布与回滚**：需执行迁移 `alembic upgrade head`（新增可空列+索引，向后兼容）；回滚：先升级前
   回退提交，或先 `downgrade` 再回退代码。
+- **迁移已在真实 PostgreSQL 演练（本轮，提交 `888e0ea`）**：`w05_postgres_migration_rehearsal.py`
+  在独立库 `ybt_upgrade_mig_iso` 完成完整往返：`upgrade head` → `202610030001`（新增两列可空 +
+  索引 `ix_background_jobs_lease_expires_at`）→ `downgrade -1` → `202610020051`（**列与索引均消失**）
+  → `upgrade head` 再次回到 `202610030001`。脚本在跑任何 DDL 前先校验**解析目标确为隔离库**，否则拒绝；
+  不打印凭据、不删除任何东西、**未触碰业务库**。发布前对业务库执行同一迁移的风险由此显著降低。
 - **已知限制**：**真实 Redis/Celery 多 worker 重投递实测未做**（属 W10）；
   事务 outbox（数据库提交成功但 broker 投递失败）尚未实现，当前仍依赖入队幂等键与消费端短路径。
 - **owner fencing（本轮修复并验收，提交 `f4fba42`）**：核对发现 `_execute` 在原子领取后**无条件**写终态，
