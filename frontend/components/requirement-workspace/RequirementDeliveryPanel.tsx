@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 
 import { apiDownload, apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, statusLabel, workflowStepLabel } from "@/lib/product-language";
+import { classifyQueryState, isRetryable } from "@/lib/query-state.mjs";
 
 type Readiness = {
   eligible: boolean;
@@ -151,6 +152,8 @@ export function RequirementDeliveryPanel({
 
   const latest = submissions.data?.[0];
   const ready = readiness.data;
+  // W07: a 403 must not be reported as a read failure, and a failure must offer a retry.
+  const readinessState = classifyQueryState({ isPending: readiness.isPending, isError: readiness.isError, error: readiness.error, hasData: Boolean(readiness.data), itemCount: readiness.data ? 1 : 0 });
   return <section className="panel mb-3" id="requirement-delivery" aria-label="审核与正式交付">
     <div className="panel-header flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -163,8 +166,9 @@ export function RequirementDeliveryPanel({
     </div>
     <div className="panel-body space-y-3">
       {!contentVersion ? <p className="text-xs text-slate-600">请先建立需求专属内容，草稿预览不能直接作为正式交付。</p> : null}
-      {readiness.isPending ? <p role="status" className="text-xs">正在核验送审条件…</p> : null}
-      {readiness.isError ? <p role="alert" className="text-xs text-coral-700">送审条件读取失败，请刷新后重试。</p> : null}
+      {readinessState.kind==="loading" ? <p role="status" className="text-xs">正在核验送审条件…</p> : null}
+      {readinessState.kind==="forbidden" ? <p role="status" className="text-xs text-amber-700">没有核验送审条件的权限，请联系项目管理员。</p> : null}
+      {isRetryable(readinessState.kind) ? <p role="alert" className="text-xs text-coral-700">送审条件读取失败：{readinessState.message}<button className="ml-2 underline" onClick={()=>void readiness.refetch()} type="button">重试</button></p> : null}
       {ready && !ready.eligible ? <div className="border-l-2 border-gold-400 pl-3 text-xs text-slate-600">
         <p className="font-semibold text-ink">正式交付暂不可用</p>
         <ul className="mt-1 space-y-1">{ready.reasons.slice(0, 5).map((reason) =>
