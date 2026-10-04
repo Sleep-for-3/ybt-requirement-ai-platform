@@ -48,6 +48,12 @@ cd backend; $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 
 > 兼容性已核（本会话）：在**仓库侧（Next 14 类型）**执行 `tsc --noEmit` **exit 0**、`node --test tests/*.test.mjs` **253 passed**，
 > 所以新增的前端改动（状态筛选、可重生成、最后成功时间、应用内导航守卫等）**不会阻塞 2A 路径**。
+>
+> ⚠️ **必须用启动器构建，不要裸跑 `next build`**：`frontend/lib/api.ts` 的默认 API 基址是
+> `http://localhost:8000/api`，真实值由**构建期** `NEXT_PUBLIC_API_BASE_URL` 注入；
+> 启动器的 `build` 动作会先设 `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api` 再构建。
+> 若用其他方式构建（例如在别处直接 `next build`），产出的前端会指向 `localhost:8000`，
+> 在本机浏览器里表现为 **CORS / 请求失败**（已在隔离副本上实测复现）。
 
 ```powershell
 & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass `
