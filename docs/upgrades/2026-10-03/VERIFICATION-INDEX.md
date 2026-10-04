@@ -8,7 +8,7 @@
 
 | 主张 | 复跑命令 | 期望 |
 | --- | --- | --- |
-| 后端全量无回归 | `cd backend; & ".venv\Scripts\python.exe" -m pytest tests -q` | **1431 passed**（exit 0） |
+| 后端全量无回归 | `cd backend; & ".venv\Scripts\python.exe" -m pytest tests -q` | **1433 passed**（exit 0） |
 | 前端逻辑/规则无回归 | `cd frontend; <node> --test tests/*.test.mjs` | **253 passed** |
 | 前端类型安全（仓库 Next 14） | `cd frontend; <node> node_modules\typescript\bin\tsc --noEmit --incremental false` | exit 0 |
 | 前端生产构建（升级后 Next 15.5.27，隔离副本） | 隔离副本内 `npm ci` 后 `<node> node_modules\next\dist\bin\next build` | exit 0，54 页 |

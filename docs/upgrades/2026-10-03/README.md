@@ -92,7 +92,12 @@
     未登录也能核对。验证：前端 `node --test` **253 passed**、`tsc --noEmit` exit 0、`next lint`
     exit 0、隔离生产构建 exit 0（54 页）。组件为薄接线，纯逻辑已由既有 6 例覆盖，未新增重复的字符串断言。
 
-### W01 未完成（阻碍阶段退出）
+### W01 未完成项（**2026-10-04 晚已全部闭环**）
+
+> **更新（2026-10-04 晚，见 [W01-R2B-DEPLOY-AND-MIGRATION.md](W01-R2B-DEPLOY-AND-MIGRATION.md)）**：下列 3 项已执行完毕——
+> ① Next/React 已升级到 **15.5.27 / 19.3.0** 并**在运行实例上生效**；② 后端依赖锁定与 SBOM 已完成（Node 24）；
+> ③ **升级后的真实浏览器回归已执行**（登录/续期基础、项目切换、需求、语义目录、交付）。
+> 另：业务库已应用迁移 `202610030001`（先转储，业务数据行数未变）。以下原文保留作历史记录。
 
 1. **Next.js / React 安全升级（B01）**：当前 `next 14.2.35`（`package.json` 声明 `^14.2.20`），
    官方已将其列为**不再支持**；Windows 原生 `next start` 的未认证 RCE 告警适用。
@@ -722,9 +727,9 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
-| **后端完整回归（全量 `tests/`）** | `pytest tests -q`（见下方） | **1431 passed / exit 0**（1429→1431；含新增 2 例机构停用执行用例） |
+| **后端完整回归（全量 `tests/`）** | `pytest tests -q`（见下方） | **1433 passed / exit 0**（2026-10-04 晚实跑 1040s；较 1431 增 2 例为 B18 调度测试） |
 | 后端（改动面定向） | 见下方命令 | **193 passed** |
-| 前端（隔离副本：`node --test` + `tsc` + `next lint` + `next build`） | 见下方命令 | **252 passed**；tsc/lint exit 0；build exit 0（54 页） |
+| 前端（隔离副本：`node --test` + `tsc` + `next lint` + `next build`） | 见下方命令 | **253 passed**；tsc/lint exit 0；build exit 0（54 页） |
 
 > **全量回归发现并修复的两处回归**（提交 `4979843`，均非基线问题）：
 > ① `test_performance_integrity.py` 把镜像硬编码为 `node:20-alpine`，与升级后的受支持 LTS 冲突 →
