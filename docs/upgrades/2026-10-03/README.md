@@ -285,6 +285,37 @@ system prompt 固定 `["internal"]`、`lineage/explanation`、四个 `mapping/*_
 的分级；`test_outbound_authorization.py`、`test_ai_skill_field_rerank.py::test_rerank_envelope_carries_only_catalog_metadata_under_the_confidentiality_floor`、
 `test_knowledge_rag.py` 与 `test_llm_runtime.py` 中既有的拒绝/审计断言必须继续通过（现已全绿）。
 
+### 已具备：指标与分母机制（已核实，非新增）
+
+任务书要求“同一固定输入分别跑确定性规则、Mock、内部真实模型；输出准确率/召回/证据有效率/无依据率/
+人工修订率和分母，保留失败样本”“指标 UI 使用后端 labels/notes，显示分子分母…null 标为缺少评测数据”。
+核对结果：`app/services/agent/observability.py` **已实现**该机制，无需新增：
+
+- 指标集：V1 + `V2_METRICS`（24 项，含 `human_edit_rate` 人工修订率、`unsupported_claim_rate` 无依据结论率、
+  `evidence_recall`/`evidence_precision`、`policy_citation_accuracy`、`scenario_accuracy`、
+  `sql_semantic_detection_recall`/`sql_semantic_false_positive_rate`、`impact_propagation_accuracy`、
+  `model_execution_rate`、`deterministic_fallback_rate` 等），并随包返回 `metric_labels` 与 `denominators`；
+- **无分母即 null**：`test_metrics_return_null_without_a_denominator` 已固定该行为；
+- **需真值的指标在没有标注行时返回 `None` 并附说明**：标注键为既有 JSON 列（无 schema 变更）——
+  `expected_scenario_key`（task.result_summary_json）、`expected_evidence_refs`（step.output_summary_json）、
+  `expected_semantic_changed`（call.output_summary_json）、`expected_impact_refs`（step.output_summary_json）；
+  缺标注时 note 直接指向缺失的键名。
+
+回归：`tests/test_agent_business_metrics.py` + `tests/test_agent_evaluation_v2.py` → **8 passed**。
+
+### 待验收（受阻于银行专家标注，不依赖项已继续推进）
+
+**初始黄金集未建立**：任务书要求与业务专家建立**至少 30 个正例/负例/歧义例**的初始黄金集（按产品、
+关联粒度、码值、制度版本、无依据、冲突、多来源分组），真值须包含**场景/主体、目标字段、正确来源、
+条款位置、必要工具链、合理缺口、预期人工闸门、影响范围**，且**标注需独立复核**。相关数据只能由本行的
+标注流程产出（"Ground truth can only be produced by a labelled benchmark"），**我无法代为编造真值**，
+故记为**待验收**而非通过。
+
+**银行侧所需交付（可直接对上现有接口）**：按上述 8 类真值字段提供标注用例，并写入对应的 4 个标注键
+（`expected_scenario_key`/`expected_evidence_refs`/`expected_semantic_changed`/`expected_impact_refs`）
+或走 `evaluation.create_case` 的 Skill 评测用例；提供后即可按确定性/Mock/内部真实模型三种模式跑同一固定
+输入并输出带分母的指标与失败样本。**业务准确率阈值须由银行专家在试点前明确，不得事后用成功率替换。**
+
 ---
 
 ## B23：两个过期后端测试契约
