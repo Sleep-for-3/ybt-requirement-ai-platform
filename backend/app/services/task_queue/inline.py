@@ -156,11 +156,27 @@ class InlineTaskQueue:
             job.status = "failed"
             job.error_message = str(exc)[:2000]
             job.progress = 100
-        job.finished_at = datetime.now(UTC)
-        # The run is over: drop the lease so a legitimate retry can claim it again while a
-        # finished job can never be claimed a second time.
-        job.lease_owner = None
-        job.lease_expires_at = None
+        # Fencing (B07/W10): only the runner that still holds the lease may record the terminal
+        # state. A long run whose lease expired can already have been taken over by another worker;
+        # that newer owner's state must not be overwritten by this stale runner, and the stale
+        # runner must not clear the new owner's lease. The guarded UPDATE keeps the normal path
+        # byte-for-byte identical while making the takeover safe.
+        fenced = db.execute(
+            update(BackgroundJob)
+            .where(BackgroundJob.id == job.id, BackgroundJob.lease_owner == owner)
+            .values(
+                status=job.status,
+                progress=job.progress,
+                result_summary_json=job.result_summary_json,
+                error_message=job.error_message,
+                finished_at=datetime.now(UTC),
+                lease_owner=None,
+                lease_expires_at=None,
+            )
+        ).rowcount == 1
+        if not fenced:
+            # Lost the lease to a newer owner: report its state instead of overwriting it.
+            db.rollback()
         db.commit()
         db.refresh(job)
         return job
