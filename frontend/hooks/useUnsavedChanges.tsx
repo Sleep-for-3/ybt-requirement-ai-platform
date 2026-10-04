@@ -14,6 +14,7 @@ import {
   beforeUnloadReturnValue,
   leaveDecision,
   registerDirty,
+  shouldInterceptNavigation,
 } from "@/lib/unsaved-changes.mjs";
 
 export function useUnsavedChanges(ownerId: string, isDirty: boolean): void {
@@ -36,8 +37,34 @@ export function UnsavedChangesGuard() {
       event.preventDefault();
       event.returnValue = value;
     }
+    /**
+     * B11: also intercept in-app link clicks. `beforeunload` never fires for a client-side route
+     * change, so a sidebar <Link> used to drop the operator's edits with no prompt.
+     */
+    function handleClick(event: MouseEvent) {
+      const anchor = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const decision = shouldInterceptNavigation({
+        defaultPrevented: event.defaultPrevented,
+        button: event.button,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        target: anchor.getAttribute("target"),
+        href: anchor.getAttribute("href"),
+        sameOrigin: anchor.origin === window.location.origin,
+        skipGuard: anchor.hasAttribute("data-skip-unsaved-guard"),
+      });
+      if (!decision) return;
+      if (!confirmLeave()) event.preventDefault();
+    }
     window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleClick, true);
+    };
   }, []);
   return null;
 }

@@ -15,6 +15,7 @@ import {
   registerDirty,
   resetForTests,
   saveDraft,
+  shouldInterceptNavigation,
 } from "../lib/unsaved-changes.mjs";
 
 function fakeStorage() {
@@ -108,4 +109,20 @@ test("损坏的草稿内容被忽略而不是抛出", () => {
   assert.equal(readDraft(storage, "broken"), null);
   storage.setItem("draft:other", JSON.stringify({ savedAt: "t" })); // no payload
   assert.equal(readDraft(storage, "other"), null);
+});
+
+test("应用内链接点击需在脏状态下拦截，其余情形放行", () => {
+  const plain = { button: 0, href: "/workspace", target: null, sameOrigin: true };
+  assert.equal(shouldInterceptNavigation(plain), true);
+  // 放行：修饰键 / 非左键 / 新窗口 / 外部链接 / 锚点 / 已处理 / 显式跳过
+  assert.equal(shouldInterceptNavigation({ ...plain, ctrlKey: true }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, metaKey: true }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, button: 1 }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, target: "_blank" }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, sameOrigin: false }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, href: "#section" }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, href: "" }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, defaultPrevented: true }), false);
+  assert.equal(shouldInterceptNavigation({ ...plain, skipGuard: true }), false);
+  assert.equal(shouldInterceptNavigation(null), false);
 });

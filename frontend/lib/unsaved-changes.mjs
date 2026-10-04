@@ -48,6 +48,27 @@ export function beforeUnloadReturnValue() {
   return hasUnsavedChanges() ? UNSAVED_MESSAGE : undefined;
 }
 
+/**
+ * B11: does an in-app link click need the unsaved-changes prompt?
+ *
+ * `beforeunload` covers reload/close and the project/requirement switches call confirmLeave()
+ * explicitly, but a plain <Link> click used to navigate away and silently drop the operator's
+ * edits. Only an unmodified plain left click on a same-app link is intercepted: modified clicks
+ * (new tab/window, download, middle click), external links, hash-only jumps, links that already
+ * handled the event and links tagged `data-skip-unsaved-guard` are left to the browser.
+ */
+export function shouldInterceptNavigation(click) {
+  if (!click || click.defaultPrevented) return false;
+  if (click.button !== 0) return false;
+  if (click.metaKey || click.ctrlKey || click.shiftKey || click.altKey) return false;
+  if (click.target && click.target !== "_self") return false;
+  const href = click.href || "";
+  if (!href || href.startsWith("#")) return false;
+  if (click.sameOrigin === false) return false;
+  if (click.skipGuard) return false;
+  return true;
+}
+
 /** Local draft persistence: keep the unfinished body so a reload can restore it. */
 export function draftKey(scope) {
   return `draft:${scope}`;

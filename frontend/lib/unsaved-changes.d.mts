@@ -6,6 +6,18 @@ export function dirtyOwners(): string[];
 export const UNSAVED_MESSAGE: string;
 export function leaveDecision(): "allow" | "confirm";
 export function beforeUnloadReturnValue(): string | undefined;
+export function shouldInterceptNavigation(click: {
+  defaultPrevented?: boolean;
+  button?: number;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+  target?: string | null;
+  href?: string | null;
+  sameOrigin?: boolean;
+  skipGuard?: boolean;
+} | null | undefined): boolean;
 export function draftKey(scope: string): string;
 export function saveDraft(storage: Storage, scope: string, payload: unknown): boolean;
 export function readDraft(storage: Storage, scope: string): { savedAt?: string; payload: unknown } | null;
