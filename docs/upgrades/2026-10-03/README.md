@@ -290,6 +290,24 @@ prompt  路径：ensure_external_allowed("internal", local_only=False)     → �
 
 **回归**：外发/rerank/知识/LLM 守卫套件 **92 passed**；适配器/运行时/契约套件 **85 passed**。
 
+### 网关不可绕过性核查（本轮，验证通过，无需改动）
+
+对本会话"外发判定已收敛到单一网关"的主张做了独立核对（`grep` 全量扫描 `app/`）：
+
+- **唯一实现**位于 `app/services/security/outbound_policy.py`（`ensure_external_send_allowed` /
+  `external_send_denied`）；`app/services/security/__init__.py` 仅**再导出** `content_redactor` 的
+  `ensure_external_allowed`，而后者**委派**给该网关（无第二套判定）。
+- **真实模型调用路径均执行判定**：`llm/prompt_runtime.py:170` 调用 `ensure_external_allowed(level,
+  runtime.local_only)` 并在拒绝时记审计 `external_model_data_denied`；`embeddings/observability.py:125`
+  对嵌入文本执行同一判定并记 `external_embedding_data_denied`；拒绝时文本**先脱敏**（`redact_content`）。
+- **`field_rerank.py` 保留历史函数名但委派**到网关（`catalog_confidentiality_floor` /
+  `outbound_authorized_project_ids`），源码注释亦说明目的是"使 rerank 与 prompt 路径不会漂移"。
+- **未发现绕过点**：全库唯一直连外部 HTTP 的客户端是 `llm/openai_compatible.py` 与
+  `embeddings/openai_compatible.py`，二者均把 `local_only` 交给地址防护（`llm/providers.py` 的
+  `_is_forbidden_external_address`），且其上游调用方（prompt runtime / embedding observability）都已过网关。
+- **仍未完成的部分**：**各素材/提示路径应申报的分级仍须银行确定**（本核查只证明"现有判定无法被绕过"，
+  并未新增白名单条目或下调任何分级）。
+
 ### 仍待银行确认（未擅自决定）
 
 prompt 路径调用方（7+ 处：`requirement_generation_worker`、`ai_skills/runtime` 正文按 envelope 分级而
