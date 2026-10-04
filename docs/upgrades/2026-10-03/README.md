@@ -350,6 +350,45 @@ JSON **确实只有** `project_id`/`project_name`/`backup_scope`，却被命名�
 
 ---
 
+## W10：真实依赖集成与并发验收（进行中）
+
+### 已验证：真实 PostgreSQL 下的后台任务唯一领取（本轮）
+
+W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真实 PostgreSQL**（`ybt_upgrade_w02_iso`，
+绝不触碰业务库）上按 12 并发独立连接复现，脚本
+`docs/upgrades/2026-10-03/w10_postgres_job_claim.py`：
+
+```json
+{ "ok": true, "database": "ybt_upgrade_w02_iso", "threads": 12, "claim_winners": 1,
+  "claim_winner": "worker-11", "lease_owner_recorded": "worker-11", "running_rows": 3,
+  "live_lease_blocked_second_consumer": true, "expired_lease_recovered": true,
+  "completed_job_not_reclaimable": true }
+```
+
+即：**12 个并发消费者只有 1 个领取成功**；有效租约阻止第二消费者；**过期租约可被恢复**；
+已完成作业不会被再次领取。这关闭了 W05 记录中“真实依赖下并发领取未实测”的数据库层部分。
+
+验证方式：`& ".venv\Scripts\python.exe" ..\docs\upgrades\2026-10-03\w10_postgres_job_claim.py --threads 12`
+（`PGPASSWORD` 仅取自 `.admin-pw.txt`，脚本不打印凭据，只 drop/create 自己的表）。
+
+### 未完成（W10 其余项）
+
+- **真实 Redis/Celery 多 worker 重投递**与 **>900s 长任务租约续期/owner fencing** 未实测（本轮用线程+真实
+  PG 验证了数据库语义，未经过 broker 投递路径）；
+- 真实**向量库/对象存储**集成层、迁移升级与失败回滚、模型超时、依赖断连、worker 崩溃、API 重启、
+  跨主机恢复未执行；
+- **压力与容量验收**未执行：容量假设（如 20 并发交互用户、5 个后台生成任务、1 万目录表/10 万字段/
+  10 万知识单元）须先由产品与银行确认，且不得把模型耗时并入所有页面的统一阈值。
+
+### 环境备注（如实记录）
+
+本轮开始时本机本地栈整体处于停止状态（5432/6379/8000/11434 均无监听，`pg.log` 停在 2026-10-03 19:50）。
+用既有 `.local-run/local-deploy.ps1 start` 恢复后：postgres/redis/embedding/backend(8000)/celery beat 起来，
+**frontend(3000) 启动失败**，原因是 `frontend/.next` 缺少 `BUILD_ID`（无生产构建）。该前端实例的
+重建与重启属生产系统操作，**未擅自执行**。
+
+---
+
 ## B23：两个过期后端测试契约
 
 见提交 `1782bac`。
