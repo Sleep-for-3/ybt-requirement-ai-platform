@@ -190,14 +190,20 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
   “送审条件读取失败”，403（无核验权限）会被误认为故障，且没有重试入口。现用同一 `classifyQueryState`
   分类：加载保留状态行、403 显示琥珀色权限提示、error/offline 显示红色失败信息 + 重试按钮
   （接 `readiness.refetch()`）。
+- **Agent 交付物展示完整正文并链接真实对象**（提交 `d942718`）：原先只显示 200 字预览，引用
+  (`ref_type`/`ref_id`) 是纯文本，无法跳转。新增 `lib/artifact-links.mjs`（+`.d.mts`）——`artifactRefHref`
+  把 `requirement`→`/workspace?projectId=&requirementId=`、`target_field`→`/fields/{id}`、`agent_task`→`/agent`；
+  **无法确定映射的类型（如 `scenario_business_mapping`，其 ref_id 是映射 ID，而 `/mapping-drafts` 只接受
+  `source_to_mart`/`mart_to_ybt`）返回 null，宁可不链也不拼错**；`artifactRefLabel` 对无页面类型明确说明；
+  `artifactCompleteness` 报告正文/证据数/执行类型/可链接性。面板改为渲染**完整正文**（保留换行、防御性
+  stringify），无正文时明确提示。测试 6 例。
 
-验证：前端 `node --test` **243 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）。
+验证：前端 `node --test` **249 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）。
 
 ### 未完成（W07 其余项）
 
-- 生成轮次/内容版本/字段筛选/失败、拒绝、已采用、过期状态的可查询视图；旧候选只读与重生成；
-  禁止跨版本直接采用。
-- Agent artifact 展示完整正文、证据、缺口与执行类型，并链接到真实字段候选/需求修订/口径草稿。
+- 生成轮次/内容版本/字段筛选/失败、拒绝、已采用、过期状态的可查询视图（**轮次选择与只读已实现**）；
+  旧候选重生成入口；跨版本采用的**后端**强制（前端已通过 `expected_content_version` 与只读门控）。
 - 将“人工认可摘要 / 采用到正文 / 审核通过 / 正式文件生成 / UAT 签署”拆为不同状态。
 - 其他面板（candidate 详情、字段候选列表等）尚未逐个接入查询状态分类（**已接入：生成面板、交付面板**）。
 
