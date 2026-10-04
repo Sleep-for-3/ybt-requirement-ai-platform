@@ -7,6 +7,9 @@ import assert from "node:assert/strict";
 import {
   canAdoptRound,
   defaultRoundId,
+  filterRunItems,
+  itemState,
+  itemStateCounts,
   itemStateLabel,
   resolveRound,
   roundLabel,
@@ -68,4 +71,29 @@ test("候选条目状态可区分失败/阻断/已采用/已拒绝/待采用", (
   assert.equal(itemStateLabel({ status: "completed", decision: "rejected" }), "已拒绝");
   assert.equal(itemStateLabel({ status: "completed", decision: "pending" }), "待采用");
   assert.equal(itemStateLabel({ status: "running", decision: "pending" }), "生成中");
+});
+
+test("候选状态可查询：按状态筛选并给出各状态计数", () => {
+  const items = [
+    { id: 1, status: "completed", decision: "pending" },
+    { id: 2, status: "completed", decision: "adopted" },
+    { id: 3, status: "completed", decision: "rejected" },
+    { id: 4, status: "failed", decision: "pending" },
+    { id: 5, status: "blocked", decision: "pending" },
+    { id: 6, status: "running", decision: "pending" },
+  ];
+  // machine states are stable and distinct
+  assert.deepEqual(items.map(itemState), ["pending", "adopted", "rejected", "failed", "blocked", "running"]);
+  // every state is queryable, and "all" returns everything
+  assert.deepEqual(filterRunItems(items, "failed").map((item) => item.id), [4]);
+  assert.deepEqual(filterRunItems(items, "adopted").map((item) => item.id), [2]);
+  assert.deepEqual(filterRunItems(items, "rejected").map((item) => item.id), [3]);
+  assert.deepEqual(filterRunItems(items, "blocked").map((item) => item.id), [5]);
+  assert.deepEqual(filterRunItems(items, "running").map((item) => item.id), [6]);
+  assert.equal(filterRunItems(items, "all").length, 6);
+  assert.deepEqual(itemStateCounts(items), { pending: 1, adopted: 1, rejected: 1, failed: 1, blocked: 1, running: 1 });
+  // unknown states and bad input never throw
+  assert.deepEqual(filterRunItems(items, "nonexistent"), []);
+  assert.deepEqual(filterRunItems(null, "failed"), []);
+  assert.equal(itemStateCounts(undefined).failed, 0);
 });

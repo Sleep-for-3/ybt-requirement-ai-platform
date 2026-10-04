@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
 import { classifyQueryState, isRetryable } from "@/lib/query-state.mjs";
-import { canAdoptRound, itemStateLabel, resolveRound, roundLabel, selectableRounds } from "@/lib/generation-rounds.mjs";
+import { ITEM_STATES, canAdoptRound, filterRunItems, itemStateCounts, itemStateLabel, resolveRound, roundLabel, selectableRounds } from "@/lib/generation-rounds.mjs";
 import { SkillRunProvenance, type CandidateExecution } from "@/components/SkillRunProvenance";
 
 type Section = "business" | "lineage";
@@ -25,6 +25,7 @@ type BasketSelection={item_id:number;candidate_hash:string;selected_fields:strin
 
 const labels:Record<string,string>={business_definition:"业务定义",processing_logic:"加工规则",final_content:"章节正文",
   physical_references:"物理字段引用",evidence:"证据引用"};
+const ITEM_STATE_LABELS:Record<string,string>={pending:"待采用",adopted:"已采用",rejected:"已拒绝",failed:"失败",blocked:"阻断",running:"生成中"};
 
 export function RequirementGenerationPanel({projectId,requirementId,contentVersion,currentFieldId,fields,dirty,onChanged,onSelectField}: {
   projectId:number;requirementId:number;contentVersion:number;currentFieldId:number|null;
@@ -42,6 +43,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   const [replace,setReplace]=useState<string[]>([]);
   const [basket,setBasket]=useState<Record<number,BasketSelection>>({});
   const [rejectReason,setRejectReason]=useState("");
+  const [itemFilter,setItemFilter]=useState("all");
   const submitKey=useRef<string|null>(null);
   const auth=useQuery({queryKey:["requirement-generation-access",projectId],queryFn:({signal})=>apiGet<{effective_project_permissions?:Record<string,string[]>}>("/auth/me",{signal})});
   const permissions=auth.data?.effective_project_permissions?.[String(projectId)]||[];
@@ -67,6 +69,11 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     setReplace(saved?.replace_manual_fields||[]);setRejectReason("");
   },[candidate.data,basket]);
   const pendingCandidates=currentRun?.items.filter(item=>item.status==="completed"&&item.decision==="pending")||[];
+  // W07: every candidate state (failed / rejected / adopted / running / pending) is queryable, not
+  // just the pending ones; the counts are shown so the operator sees what is filterable.
+  const roundItems=currentRun?.items||[];
+  const stateCounts=itemStateCounts(roundItems);
+  const visibleItems=filterRunItems(roundItems,itemFilter);
   // W07: a failed or forbidden runs query must not look like "no generation runs".
   const runsState=classifyQueryState({isPending:runs.isPending,isError:runs.isError,error:runs.error,hasData:Boolean(runs.data),itemCount:runs.data?.length||0});
   const sections:Section[]=[...(business&&canBusiness?["business" as const]:[]),...(lineage&&canLineage?["lineage" as const]:[])];
@@ -133,7 +140,9 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     {currentRun?<div className="mt-3 border-t border-line pt-3 text-xs"><div className="flex flex-wrap gap-x-3 gap-y-1"><span>{roundLabel(currentRun)}</span><span>总数 {currentRun.total}</span><span>已生成 {currentRun.counts.completed}</span><span>失败 {currentRun.counts.failed}</span><span>阻断 {currentRun.counts.blocked}</span><span>待处理 {pendingCandidates.length}</span></div>
       {!roundAdoptable?<p className="mt-2 text-xs text-amber-700">这是内容 v{currentRun.content_version} 的历史轮次，只能查看或拒绝，不能写入当前 v{contentVersion}。</p>:null}
       {(currentRun.counts.failed||currentRun.counts.blocked)&&currentRun.job_id&&roundAdoptable?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy} onClick={()=>void retry()} type="button"><RefreshCw size={13}/>重试失败项</button>:null}
-      <div className="mt-2 max-h-48 space-y-1 overflow-auto">{pendingCandidates.map(item=><button className="flex w-full items-center justify-between border border-line bg-white px-2 py-2 text-left" key={item.id} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><span className="shrink-0 text-[10px] text-slate-500">{itemStateLabel(item)}</span><Eye className="shrink-0" size={13}/></button>)}</div>
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500"><span>候选状态</span><select aria-label="候选状态筛选" className="control h-7 w-auto text-[11px]" onChange={event=>setItemFilter(event.target.value)} value={itemFilter}><option value="all">全部 {roundItems.length}</option>{ITEM_STATES.filter(state=>state!=="all").map(state=><option key={state} value={state}>{ITEM_STATE_LABELS[state]||state} {stateCounts[state]||0}</option>)}</select></label>
+      <div className="mt-2 max-h-48 space-y-1 overflow-auto">{visibleItems.map(item=><button className="flex w-full items-center justify-between border border-line bg-white px-2 py-2 text-left" key={item.id} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><span className="shrink-0 text-[10px] text-slate-500">{itemStateLabel(item)}</span><Eye className="shrink-0" size={13}/></button>)}</div>
+      {!visibleItems.length?<p className="mt-2 text-xs text-slate-500">当前状态下没有候选。</p>:null}
       {Object.keys(basket).length?<><button className="button-primary mt-2 w-full" disabled={busy||dirty||!roundAdoptable} onClick={()=>void adoptBasket()} type="button"><Check size={14}/>应用采用清单（{Object.keys(basket).length}）</button>{dirty?<p className="mt-2 text-xs text-amber-700">请先保存当前人工编辑，再采用候选。</p>:null}{!roundAdoptable?<p className="mt-2 text-xs text-amber-700">当前查看的是历史轮次，只能查看或拒绝，不能写入当前版本。</p>:null}</>:null}
     </div>:runsState.kind==="loading"||runsState.kind==="empty"?<p className="mt-2 text-xs text-slate-500">{runsState.kind==="loading"?"正在读取生成状态…":"尚无生成轮次，可先按范围生成候选。"}</p>:runsState.kind==="ready"?null:<p className={`mt-2 text-xs ${runsState.kind==="forbidden"?"text-amber-700":"text-red-700"}`} role={runsState.kind==="forbidden"?"status":"alert"}>{runsState.kind==="forbidden"?"没有查看生成状态的权限，请联系项目管理员。":`生成状态读取失败：${runsState.message}`}{isRetryable(runsState.kind)?<button className="ml-2 underline" onClick={()=>void runs.refetch()} type="button">重试</button>:null}</p>}
     {notice?<p className="mt-2 text-xs text-emerald-700">{notice}</p>:null}{error?<p className="mt-2 text-xs text-red-700" role="alert">{error}</p>:null}

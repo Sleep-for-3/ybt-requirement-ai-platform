@@ -29,3 +29,7 @@ export function resolveRound(
 export function canAdoptRound(run: GenerationRun | null | undefined, contentVersion: number): boolean;
 export function roundLabel(run: GenerationRun | null | undefined): string;
 export function itemStateLabel(item: Pick<GenerationRunItem, "status" | "decision">): string;
+export const ITEM_STATES: readonly string[];
+export function itemState(item: Pick<GenerationRunItem, "status" | "decision">): string;
+export function filterRunItems(items: unknown, state?: string): GenerationRunItem[];
+export function itemStateCounts(items: unknown): Record<string, number>;

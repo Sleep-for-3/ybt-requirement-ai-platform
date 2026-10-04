@@ -53,3 +53,36 @@ export function itemStateLabel(item) {
   if (status === "completed") return "待采用";
   return "生成中";
 }
+
+/** The stable machine states a candidate item can be queried by (W07). */
+export const ITEM_STATES = Object.freeze(["all", "pending", "adopted", "rejected", "failed", "blocked", "running"]);
+
+export function itemState(item) {
+  const decision = String(item?.decision || "pending");
+  const status = String(item?.status || "");
+  if (decision === "adopted") return "adopted";
+  if (decision === "rejected") return "rejected";
+  if (status === "failed") return "failed";
+  if (status === "blocked") return "blocked";
+  if (status === "completed") return "pending";
+  return "running";
+}
+
+/**
+ * Query the round's candidates by state. ``stale`` is a run-level property, so a stale round can
+ * still be inspected by state but never written (see canAdoptRound).
+ */
+export function filterRunItems(items, state = "all") {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!state || state === "all") return list;
+  return list.filter((item) => itemState(item) === state);
+}
+
+/** State counts for the whole round, so the UI can show what is queryable before filtering. */
+export function itemStateCounts(items) {
+  const counts = Object.fromEntries(ITEM_STATES.filter((state) => state !== "all").map((state) => [state, 0]));
+  for (const item of Array.isArray(items) ? items.filter(Boolean) : []) {
+    counts[itemState(item)] = (counts[itemState(item)] || 0) + 1;
+  }
+  return counts;
+}
