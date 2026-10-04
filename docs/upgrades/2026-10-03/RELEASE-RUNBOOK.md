@@ -105,6 +105,13 @@ cd backend
 
 ## 4. 发布后验证
 
+> **当前实例的就绪状态（本会话实测，发布前）**：`GET /api/health/ready` = **`not_ready`**，
+> 唯一不健康项为 **`alembic_revision`**（库在 `202610020051`，代码 head 为 `202610030001`），其余 10 项
+> （application/database/storage/redis/task_queue/vector_store/llm/embedding/semantic_index/disk）均 healthy。
+> 即就绪门禁**正确检出待迁移**；执行第 3 步迁移后应转为 `ready`。
+> 另：启动器的 `backend http=unreachable` 是因它探测 `/health/ready`（未就绪则非 200），**并非后端宕机**
+> （`/api/health/live` = 200）；评读时勿误判。
+
 ```powershell
 # 版本一致性（W01/B18）：API/worker/beat 应报同一 commit、构建时间与 schema head
 # ⚠️ 发布前必须先注入发布标识，否则 /api/version 返回 unknown（本会话实测）：
