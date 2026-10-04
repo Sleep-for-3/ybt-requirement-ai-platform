@@ -460,7 +460,17 @@ def _snapshot_target(db: Session, project_id: int, target_type: str, target_id: 
     model = TARGET_MODELS.get(target_type)
     if model is None:
         raise HTTPException(status_code=400, detail="Unsupported workflow target type")
-    target = db.get(model, target_id)
+    # N03/BF03: submission must take the *same* row lock as the edit/delete and review-end paths.
+    # Without it a submission can snapshot a row another transaction is still editing, and both
+    # commit (review opened on stale content). PostgreSQL honours FOR UPDATE; SQLite ignores it.
+    if target_type in {"source_to_mart", "mart_to_ybt"}:
+        target = db.scalars(
+            select(model).where(model.id == target_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+    else:
+        target = db.get(model, target_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Workflow target not found")
     actual_project_id = target.id if isinstance(target, Project) else getattr(target, "project_id", None)
@@ -489,9 +499,22 @@ def _validate_double_layer_target(db: Session, target_type: str, target_id: int)
     model = {"source_to_mart": SourceToMartMapping, "mart_to_ybt": MartToYbtMapping}.get(target_type)
     if model is None:
         raise HTTPException(status_code=400, detail="Double-layer review requires a source_to_mart or mart_to_ybt target")
-    mapping = db.get(model, target_id)
+    # N03/BF03: the submission entry must take the *same* row lock as the edit/delete entry
+    # points, otherwise a submission can snapshot a row that another transaction is still
+    # editing and both commit.  PostgreSQL honours FOR UPDATE; SQLite ignores it (harmless).
+    mapping = db.scalars(
+        select(model).where(model.id == target_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one_or_none()
     if mapping is None:
         raise HTTPException(status_code=404, detail="Double-layer mapping not found")
+    # Re-read the lifecycle *after* the lock: a concurrent edit may have flipped the status
+    # (or a concurrent submission may have opened a review) between lock acquisition and here.
+    # N03/BF03: this runs after the row lock, so the checks below cannot race with a concurrent
+    # edit/delete/submission.  (An *in-progress* review is the normal state at final approval,
+    # so it is not rejected here; the write guard on the edit path is what rejects edits while
+    # a review is open.)
     if not mapping.final_content or not mapping.final_content.strip():
         raise HTTPException(status_code=409, detail="final_content is required before final review")
     evidence_id = db.scalar(select(MappingEvidenceReference.id).where(
