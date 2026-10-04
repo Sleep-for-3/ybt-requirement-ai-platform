@@ -45,6 +45,9 @@ cd backend; $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 
 仓库 `frontend/node_modules` 仍是 **Next 14.2.35**（本轮我刻意未动 node_modules）。此路径**只重建并启动**：
 
+> 兼容性已核（本会话）：在**仓库侧（Next 14 类型）**执行 `tsc --noEmit` **exit 0**、`node --test tests/*.test.mjs` **253 passed**，
+> 所以新增的前端改动（状态筛选、可重生成、最后成功时间、应用内导航守卫等）**不会阻塞 2A 路径**。
+
 ```powershell
 & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass `
   -File .local-run\local-deploy.ps1 build    # 生成 frontend/.next（含 BUILD_ID）
