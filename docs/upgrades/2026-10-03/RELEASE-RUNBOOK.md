@@ -107,6 +107,11 @@ cd backend
 
 ```powershell
 # 版本一致性（W01/B18）：API/worker/beat 应报同一 commit、构建时间与 schema head
+# ⚠️ 发布前必须先注入发布标识，否则 /api/version 返回 unknown（本会话实测）：
+$commit = & git rev-parse HEAD
+@"
+{ "app_commit": "$commit", "build_time": "$(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')" }
+"@ | Set-Content -LiteralPath backend\build-info.json -Encoding utf8   # 或改用 APP_COMMIT/BUILD_TIME 环境变量
 curl.exe -s http://127.0.0.1:8000/api/version
 curl.exe -s http://127.0.0.1:8000/api/health/ready
 # 前端关键路由

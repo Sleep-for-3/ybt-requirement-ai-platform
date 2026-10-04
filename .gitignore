@@ -41,3 +41,5 @@ Thumbs.db
 /backend/pytest-of-*/
 /backend/lifecycle-*/
 /docs/evaluation/**/push.log
+# B18: generated at release time (git rev-parse HEAD + timestamp); must not be committed
+backend/build-info.json
