@@ -237,6 +237,35 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 
 ---
 
+## W08：统一 AI 外发治理（已核实现状与缺口，尚未实施）
+
+任务书要求“将知识正文、目录结构、口径、schema 等外发分类收敛到统一网关；保留 rerank 默认保护，
+不扩大白名单”。本机**实测**发现两条外发路径口径不一致（同一项目、同一素材）：
+
+```
+rerank 路径：confidentiality_floor(internal 项目) = "confidential" → 云端发送 DENIED
+prompt  路径：ensure_external_allowed("internal", local_only=False)     → 云端发送 ALLOWED
+```
+
+- `app/services/ai_skills/field_rerank.py::confidentiality_floor()` 把目录结构视为敏感：取
+  `max(declared, "confidential")`，未知分级按 `restricted`，仅在
+  `AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS`（默认空）显式授权时才回落为项目分级；
+- `app/services/security/content_redactor.py::ensure_external_allowed()` 只拦 `restricted`/`confidential`
+  且非 `local_only`；**对 `internal` 直接放行，且没有项目白名单概念**；
+- prompt 路径的调用方各自声明分级，共 7+ 处：`requirement_generation_worker`、`ai_skills/runtime`
+  （正文用 envelope 分级、system prompt 固定 `["internal"]`）、`lineage/explanation`、
+  `mapping/{context_adapters, mart_to_ybt_generator, scenario_draft_generator, source_to_mart_generator}`。
+
+**影响**：同一项目的目录/口径素材在 rerank 路径被拒绝、在 prompt 路径被放行，说明“外发决策”仍分散在
+调用点，不是统一网关——正是任务书指出的缺陷。**未实施**（本轮只取证）：统一网关需要确定每类素材的
+分级归属并由单一入口执行+审计，属于有回归风险的跨模块改动，已列为 W08 工作项。
+
+**实施约束（不可违反）**：统一网关必须**至少与现有一侧同样严格**——不得新增白名单条目（项目 11 仍不在
+白名单）、不得下调任何素材的分级；`test_outbound_authorization.py`、`test_ai_skill_field_rerank.py::test_rerank_envelope_carries_only_catalog_metadata_under_the_confidentiality_floor`、
+`test_knowledge_rag.py` 与 `test_llm_runtime.py` 中既有的拒绝/审计断言必须继续通过。
+
+---
+
 ## B23：两个过期后端测试契约
 
 见提交 `1782bac`。
