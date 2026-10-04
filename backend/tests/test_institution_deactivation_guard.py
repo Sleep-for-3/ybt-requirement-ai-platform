@@ -177,3 +177,53 @@ def test_cross_institution_access_is_rejected(db_session) -> None:
         with pytest.raises(HTTPException) as excinfo:
             service.require_project_permission(project.id, "project.view")
         assert excinfo.value.status_code == 404
+
+
+def test_deactivated_institution_stops_background_execution(db_session) -> None:
+    """B02: the guard must also cover background execution, not only list/direct-ID access.
+
+    A job enqueued while the institution was active must not write results after it is
+deactivated; it is cancelled with an explainable reason instead of running.
+    """
+    from app.models import BackgroundJob
+    from app.services.task_queue import inline as inline_queue
+
+    active = _institution(db_session, "GUARD_EXEC", status="inactive")
+    project = _project(db_session, active, "已停用机构项目")
+    job = BackgroundJob(institution_id=active.id, project_id=project.id, job_type="w02_exec_probe",
+                        status="queued", progress=0, created_by=1,
+                        idempotency_key="guard-exec", payload_summary_json={}, result_summary_json={})
+    db_session.add(job); db_session.commit()
+    ran = {"n": 0}
+
+    def handler(db, job) -> dict:
+        ran["n"] += 1
+        return {"success_count": 1, "failed_count": 0}
+
+    inline_queue.register_job_handler("w02_exec_probe", handler)
+    inline_queue.InlineTaskQueue().execute_existing(db_session, job, handler)
+    db_session.refresh(job)
+
+    assert ran["n"] == 0, "a deactivated institution's job must not execute"
+    assert job.status == "cancelled"
+    assert "机构已停用" in (job.error_message or "")
+
+
+def test_job_without_institution_still_runs(db_session) -> None:
+    """The guard keeps its previous behaviour for jobs that carry no institution."""
+    from app.models import BackgroundJob
+    from app.services.task_queue import inline as inline_queue
+
+    job = BackgroundJob(institution_id=None, project_id=None, job_type="w02_exec_probe_free",
+                        status="queued", progress=0, created_by=1,
+                        idempotency_key="guard-exec-free", payload_summary_json={}, result_summary_json={})
+    db_session.add(job); db_session.commit()
+
+    def handler(db, job) -> dict:
+        return {"success_count": 1, "failed_count": 0}
+
+    inline_queue.register_job_handler("w02_exec_probe_free", handler)
+    inline_queue.InlineTaskQueue().execute_existing(db_session, job, handler)
+    db_session.refresh(job)
+
+    assert job.status == "completed"

@@ -3,7 +3,7 @@ import socket
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundJob
@@ -43,6 +43,20 @@ CLAIMABLE_STATUSES = ("queued", "partially_completed")
 
 def _lease_owner() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _institution_can_run(db: Session, institution_id: int | None) -> bool:
+    """B02: background execution must respect the institution-state guard.
+
+    Mirrors ``PermissionService._institution_is_active`` (a job without an institution keeps its
+    previous behaviour) without needing a principal, since workers have none.
+    """
+
+    if institution_id is None:
+        return True
+    from app.models import Institution
+
+    return db.scalar(select(Institution.status).where(Institution.id == institution_id)) == "active"
 
 
 def _claim_job(db: Session, job: BackgroundJob, *, owner: str, lease_seconds: int = JOB_LEASE_SECONDS) -> bool:
@@ -124,6 +138,18 @@ class InlineTaskQueue:
         if handler is None:
             job.status = "failed"
             job.error_message = "No worker handler is registered for this job type"
+            job.finished_at = datetime.now(UTC)
+            db.commit()
+            db.refresh(job)
+            return job
+        # B02: a deactivated institution must also stop *background execution*, not just list and
+        # direct-ID access. A job enqueued while the institution was active is refused here instead
+        # of writing results for an institution that is no longer active. Jobs without an
+        # institution keep their previous behaviour, matching the permission guard's semantics.
+        if not _institution_can_run(db, job.institution_id):
+            job.status = "cancelled"
+            job.progress = 100
+            job.error_message = "机构已停用，作业不予执行"[:2000]
             job.finished_at = datetime.now(UTC)
             db.commit()
             db.refresh(job)
