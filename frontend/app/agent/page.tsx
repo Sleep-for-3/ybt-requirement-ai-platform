@@ -17,6 +17,7 @@ import {
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
+import { artifactRefHref, artifactRefLabel } from "@/lib/artifact-links.mjs";
 
 /** 静态字面量类名：Tailwind 只会保留源码里出现过的类名。 */
 const TONE_CLASS: Record<StatusTone, string> = { success: "badge-success", danger: "badge-danger", warning: "badge-warning", info: "badge-info", neutral: "badge-neutral" };
@@ -264,7 +265,7 @@ export default function AgentWorkspacePage() {
             <CaseMemoryPanel steps={detail.steps || []} />
             <SqlChangePanel steps={detail.steps || []} />
             <GapPanel gaps={detail.gaps || []} />
-            <ArtifactPanel artifacts={detail.artifacts || []} />
+            <ArtifactPanel artifacts={detail.artifacts || []} projectId={projectId} />
             <Section title="执行日志" meta={`工具调用 ${logSummary.total} 次 · 成功 ${logSummary.completed} · 失败 ${logSummary.failed} · 降级 ${logSummary.degraded} · 平均耗时 ${logSummary.averageDurationMs} ms · 证据 ${logSummary.evidenceCount}`}>
               {calls.length ? (
                 <div className="space-y-2">
@@ -584,25 +585,29 @@ function GapPanel({ gaps }: { gaps: AgentSnapshot["gaps"] }) {
   );
 }
 
-function ArtifactPanel({ artifacts }: { artifacts: AgentSnapshot["artifacts"] }) {
+function ArtifactPanel({ artifacts, projectId }: { artifacts: AgentSnapshot["artifacts"]; projectId?: number | null }) {
   const rows = artifacts || [];
   return (
     <Section title="交付物" meta={`共 ${rows.length} 个 · 仅记录候选与确认状态`}>
       {rows.length ? (
         <div className="grid gap-3 sm:grid-cols-2">
-          {rows.map((artifact) => (
+          {rows.map((artifact) => {
+            const href = artifactRefHref(artifact.ref_type, artifact.ref_id, projectId);
+            return (
             <div className={`${CARD} text-sm`} key={artifact.id}>
               <div className={CHIP}>
                 <span className="font-medium text-ink">{artifact.title}</span>
                 <Badge status={artifact.status} />
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                类型 {artifact.artifact_type} · 引用 {artifact.ref_type || "—"} {artifact.ref_id ?? ""} · 证据{" "}
+                类型 {artifact.artifact_type} · 引用{" "}
+                {href ? <Link className="text-pine-700 underline" href={href}>{artifactRefLabel(artifact.ref_type, artifact.ref_id)}</Link> : artifactRefLabel(artifact.ref_type, artifact.ref_id)} · 证据{" "}
                 {artifact.evidence_refs?.length ?? 0} 条{artifact.confirmed_by ? ` · 确认人 ${artifact.confirmed_by}` : ""}
               </p>
-              {artifact.summary ? <p className="mt-1 text-xs text-slate-500">{preview(artifact.summary, 200)}</p> : null}
+              {artifact.summary ? <p className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-600">{typeof artifact.summary === "string" ? artifact.summary : JSON.stringify(artifact.summary, null, 2)}</p> : <p className="mt-1 text-xs text-amber-700">该交付物没有正文摘要，仅记录类型与引用。</p>}
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : <p className="text-sm text-slate-500">尚无交付物候选。</p>}
     </Section>
