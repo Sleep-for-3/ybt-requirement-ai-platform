@@ -4,5 +4,6 @@ def redact_content(text:str)->str:
     for pattern,replacement in PATTERNS:text=pattern.sub(replacement,text)
     return text
 def ensure_external_allowed(level:str,local_only:bool)->None:
-    if level=="restricted" and not local_only:raise ValueError("restricted 内容只允许本地模型")
-    if level=="confidential" and not local_only:raise ValueError("confidential 内容默认只允许 local_only 模型")
+    # W08: the outbound decision lives in one gateway so the rerank and prompt paths share it.
+    from app.services.security.outbound_policy import ensure_external_send_allowed
+    return ensure_external_send_allowed(level,local_only)

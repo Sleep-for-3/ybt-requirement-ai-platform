@@ -31,23 +31,20 @@ def confidentiality_floor(project) -> str:
     """Catalog structure stays sensitive: cloud providers are denied unless it is local/Mock.
 
     An unknown or missing project classification is treated as ``restricted`` rather than
-    silently downgraded.  A future outbound-authorization projection must be designed and
-    reviewed separately before this floor can be lowered per source.
+    silently downgraded. The rule itself now lives in the single outbound gateway
+    (``app.services.security.outbound_policy``) so the rerank and prompt paths cannot drift apart;
+    this wrapper keeps the historical name for existing callers and tests.
     """
 
-    declared = project.confidentiality_level if project.confidentiality_level in LEVELS else "restricted"
-    if str(project.id) in _outbound_authorized_project_ids():
-        # Explicit outbound authorization in effect (AI_EXTERNAL_MODEL_ALLOWED_PROJECT_IDS): the
-        # named projects may send catalog structure to the configured external provider. The default
-        # is empty, so the conservative floor stays in force everywhere else.
-        return declared
-    return max((declared, "confidential"), key=LEVELS.__getitem__)
+    from app.services.security.outbound_policy import catalog_confidentiality_floor
+
+    return catalog_confidentiality_floor(project)
 
 
 def _outbound_authorized_project_ids() -> set[str]:
-    from app.core.settings import get_settings
-    raw = (get_settings().ai_external_model_allowed_project_ids or "").strip()
-    return {part.strip() for part in raw.split(",") if part.strip().isdigit()}
+    from app.services.security.outbound_policy import outbound_authorized_project_ids
+
+    return outbound_authorized_project_ids()
 
 
 def build_rerank_envelope(project, scope: SkillScope, target_field_id: int, recall: dict):
