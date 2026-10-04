@@ -597,8 +597,16 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
   重复处理变成 failed；崩溃后可恢复且仍保持唯一执行者。
 - **发布与回滚**：需执行迁移 `alembic upgrade head`（新增可空列+索引，向后兼容）；回滚：先升级前
   回退提交，或先 `downgrade` 再回退代码。
-- **已知限制**：**真实 Redis/Celery 多 worker 重投递与 >900s 长任务租约续期实测未做**（属 W10）；
+- **已知限制**：**真实 Redis/Celery 多 worker 重投递实测未做**（属 W10）；
   事务 outbox（数据库提交成功但 broker 投递失败）尚未实现，当前仍依赖入队幂等键与消费端短路径。
+- **owner fencing（本轮修复并验收，提交 `f4fba42`）**：核对发现 `_execute` 在原子领取后**无条件**写终态，
+  未校验自己是否仍持有租约 —— 即长任务租约过期被接管后，**原 runner 仍会覆盖新 owner 的状态并清掉其租约**
+  （重复执行 + 拥有者被静默作废）。原记录称"fencing 未实测"，实际是**未实现**。现终态写入改为
+  仅在 `lease_owner == 本 runner` 时的原子 UPDATE（正常路径行为不变，stale writer 得 `rowcount=0`）。
+  真实 PostgreSQL 验收（`w10_postgres_lease_fencing.py`）：有效租约拒绝二次领取、过期租约被接管、
+  **stale writer 写入 rowcount=0 且新 owner 的 `running`/租约被保留**、当前 owner 自身写入仍成功并完成。
+  回归：任务幂等+治理+自主性+清单导出 **51 passed**。
+  **仍待**：真实 Celery 多 worker 重投递与**主动续租心跳**（>900s 任务需周期性续租，当前仅靠接管+围栏保证不被覆盖）。
 
 ---
 
