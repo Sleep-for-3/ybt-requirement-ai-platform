@@ -197,13 +197,20 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
   `source_to_mart`/`mart_to_ybt`）返回 null，宁可不链也不拼错**；`artifactRefLabel` 对无页面类型明确说明；
   `artifactCompleteness` 报告正文/证据数/执行类型/可链接性。面板改为渲染**完整正文**（保留换行、防御性
   stringify），无正文时明确提示。测试 6 例。
+- **跨版本/过期候选不能写入正文——后端强制已核实**（既有守卫，本轮复测取证）：`app/services/requirement_candidates.py::adopt_candidates()`
+  在锁定需求后校验候选哈希（不符 → 409「候选已变化」）、同批必须来自同一固定生成输入（→ 422）、
+  已处理候选不可重复采用（→ 409），并最终以
+  `if expected_version != input_version or requirement.content_version != input_version: raise HTTPException(409, "候选属于旧内容版本，请重新生成")`
+  **拒绝跨版本与过期采用**。复测 `tests/test_requirement_candidate_adoption.py` → **4 passed**
+  （含 stale 候选 409、已拒绝候选 409、被篡改候选 409、跨项目 404、人工内容需显式替换、批量采用只建一个修订、重复采用幂等）。
 
-验证：前端 `node --test` **249 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）。
+验证：前端 `node --test` **249 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）；
+后端采用链路回归 **4 passed**。
 
 ### 未完成（W07 其余项）
 
-- 生成轮次/内容版本/字段筛选/失败、拒绝、已采用、过期状态的可查询视图（**轮次选择与只读已实现**）；
-  旧候选重生成入口；跨版本采用的**后端**强制（前端已通过 `expected_content_version` 与只读门控）。
+- 生成轮次/内容版本/字段筛选/失败、拒绝、已采用、过期状态的**可查询视图**（轮次选择器与只读已实现；
+  按状态筛选尚未提供）；旧候选重生成入口。
 - 将“人工认可摘要 / 采用到正文 / 审核通过 / 正式文件生成 / UAT 签署”拆为不同状态。
 - 其他面板（candidate 详情、字段候选列表等）尚未逐个接入查询状态分类（**已接入：生成面板、交付面板**）。
 
