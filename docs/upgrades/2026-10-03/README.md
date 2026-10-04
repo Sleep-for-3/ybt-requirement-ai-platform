@@ -517,7 +517,14 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
   “准备度需要双层映射批准”意图未变。
 - **业务证据**：AI 草稿与人工最终口径的区分保持不变；批准内容不可被普通编辑静默替换；旧批准版本可回读。
 - **发布与回滚**：无数据库迁移（复用既有 `mapping_versions` 表）；回滚只需回退提交。
-- **已知限制**：送审与编辑的**真实 PostgreSQL 并发实测**尚未执行（预留到 W10 与真实依赖一起验收）。
+- **并发（本轮补测并修复，提交 `1d6cb6e`）**：核对发现双层映射的 PUT/DELETE **未加行锁**（而
+  `requirement_revisions`/`requirement_delivery`/`requirement_candidates` 均已用 `SELECT FOR UPDATE`），
+  故"送审与编辑并发只有一个明确结果"在真实 PostgreSQL 下**无保证**——两个并发请求可读到同一前置状态而
+  双双通过（SQLite 忽略 `FOR UPDATE`，单测无法暴露）。已为两个 PUT 与两个 DELETE 的取数加
+  `with_for_update()`（只读调用方仍走无锁路径）；并新增真实 PG 验收脚本
+  `docs/upgrades/2026-10-03/w03_postgres_mapping_guard.py`：8 并发写同一已批准映射 →
+  **仅 1 个成功开启新修订**，其余在获得行锁后看到已转 `draft` 的后置状态而被拒，终态 `draft`、
+  `reviewed_by` 已清空、无意外错误。回归：映射相关 4 个测试文件 **48 passed**。
 
 ---
 
