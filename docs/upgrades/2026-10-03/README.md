@@ -237,7 +237,7 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 
 ---
 
-## W08：统一 AI 外发治理（已核实现状与缺口，尚未实施）
+## W08：统一 AI 外发治理（网关已收敛，策略细节待银行确认）
 
 任务书要求“将知识正文、目录结构、口径、schema 等外发分类收敛到统一网关；保留 rerank 默认保护，
 不扩大白名单”。本机**实测**发现两条外发路径口径不一致（同一项目、同一素材）：
@@ -257,12 +257,33 @@ prompt  路径：ensure_external_allowed("internal", local_only=False)     → �
   `mapping/{context_adapters, mart_to_ybt_generator, scenario_draft_generator, source_to_mart_generator}`。
 
 **影响**：同一项目的目录/口径素材在 rerank 路径被拒绝、在 prompt 路径被放行，说明“外发决策”仍分散在
-调用点，不是统一网关——正是任务书指出的缺陷。**未实施**（本轮只取证）：统一网关需要确定每类素材的
-分级归属并由单一入口执行+审计，属于有回归风险的跨模块改动，已列为 W08 工作项。
+调用点，不是统一网关——正是任务书指出的缺陷。
 
-**实施约束（不可违反）**：统一网关必须**至少与现有一侧同样严格**——不得新增白名单条目（项目 11 仍不在
-白名单）、不得下调任何素材的分级；`test_outbound_authorization.py`、`test_ai_skill_field_rerank.py::test_rerank_envelope_carries_only_catalog_metadata_under_the_confidentiality_floor`、
-`test_knowledge_rag.py` 与 `test_llm_runtime.py` 中既有的拒绝/审计断言必须继续通过。
+### 已实施（提交 `5a910f2`）
+
+新增 `app/services/security/outbound_policy.py` 作为**唯一外发网关**，集中持有：分级表与未知分级处理
+（未知一律 `restricted`）、外发授权名单解析（非数字项忽略）、目录结构分级下限
+（`catalog_confidentiality_floor`：未授权项目取 `max(declared,"confidential")`，已授权项目保留申报级别）、
+发送判定 `ensure_external_send_allowed` 及非抛错变体 `external_send_denied`。两条路径均改为委托：
+`field_rerank.confidentiality_floor()`/`_outbound_authorized_project_ids()` 与
+`content_redactor.ensure_external_allowed()`（`app.services.security` 公开名保持不变，既有调用方不受影响）。
+
+**这是收敛重构，严格度不变**：未新增白名单条目、未下调任何分级、未放宽任一侧。新增
+`tests/test_outbound_policy_gateway.py` 7 例（两条路径同源同判、打补丁可经 rerank 包装器观测、名单解析、
+未授权项目各申报级别的下限、已授权项目保留申报级别、未知分级不降级、发送判定与历史语义一致）。
+
+**回归**：外发/rerank/知识/LLM 守卫套件 **92 passed**；适配器/运行时/契约套件 **85 passed**。
+
+### 仍待银行确认（未擅自决定）
+
+prompt 路径调用方（7+ 处：`requirement_generation_worker`、`ai_skills/runtime` 正文按 envelope 分级而
+system prompt 固定 `["internal"]`、`lineage/explanation`、四个 `mapping/*_generator`）**各自申报分级**。
+网关已统一“判定”，但“哪类素材应申报哪一级”属业务/安全策略，需银行明确后逐调用点收敛；在那之前保持现状
+（不擅自加严以免中断既有内部流程，也不放宽）。
+
+**实施约束（不可违反，已由测试固定）**：不得新增白名单条目（**项目 11 仍不在白名单**）、不得下调任何素材
+的分级；`test_outbound_authorization.py`、`test_ai_skill_field_rerank.py::test_rerank_envelope_carries_only_catalog_metadata_under_the_confidentiality_floor`、
+`test_knowledge_rag.py` 与 `test_llm_runtime.py` 中既有的拒绝/审计断言必须继续通过（现已全绿）。
 
 ---
 
