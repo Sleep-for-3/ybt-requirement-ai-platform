@@ -179,8 +179,15 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
   `loading/forbidden/offline/error/empty/ready`（复用已有 `normalizeRequestError`，仅**成功响应**才允许
   判 `empty`，且**错误优先于空**），并提供 `withLastSuccess()/lastSuccessLabel()` 保留最后一次成功的
   数据与时间；生成面板分别展示加载、空提示、403 琥珀色提示、失败+重试。测试 7 例。
+- **历史生成轮次可达且只读**（提交 `b79ddbb`）：原先显示轮次是“非过期且 content_version 等于当前版本”的
+  查询结果，新版本生成后**旧轮次及其候选完全消失**（违反“前轮其他候选仍可访问”）。新增
+  `lib/generation-rounds.mjs`（+`.d.mts`）——`selectableRounds`（不过滤、新在前）、`defaultRoundId`、
+  `resolveRound`（返回 `{run, adoptable, historical}`）、`canAdoptRound`（仅当前版本的非过期轮次可写入）、
+  `roundLabel`、`itemStateLabel`（失败/阻断/已采用/已拒绍/待采用/生成中）。面板增加轮次选择器；
+  历史轮次标为只读（按钮禁用+琥珀色提示，且队列/采用函数自身也拒绝），重试失败项仅对可写轮次显示；
+  待处理候选行显示各自状态。测试 7 例。
 
-验证：前端 `node --test` **236 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）。
+验证：前端 `node --test` **243 passed**；tsc exit 0；lint exit 0；隔离副本 production build exit 0（54 页）。
 
 ### 未完成（W07 其余项）
 
