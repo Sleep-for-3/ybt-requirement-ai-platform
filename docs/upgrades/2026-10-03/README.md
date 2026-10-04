@@ -235,6 +235,9 @@ W06 的 B11 “顶栏/路由逐页接入” 仍为剩余项。已完成项均为
 - 查询状态分类已接入：生成面板（runs + **候选详情**）、交付面板（readiness + submissions + deliveries）。
   其余需求工作区面板（path/policy/resources/lineage/content-editor/recheck）**经核对本就区分** loading 与
   error 且多数带重试。
+- **保留最后成功数据与时间**（提交 `52b0779`）：`lib/query-state.mjs` 早已实现并有测试的
+  `withLastSuccess()/lastSuccessLabel()` **此前无任何面板使用**（属"有实现无接线"）。现生成面板在每次成功
+  加载时记住生成状态与读取时间，失败时继续展示该状态并附**如实提示**（时间戳 + "可能已过期"）。
 - **候选详情不再把权限问题报成失败**（提交 `9ed2377`）：原 `candidate.isError || !candidate.data` 合成一句
   “候选读取失败或已不可用”，403 会被误认为候选已失效且无重试。现分类为 加载／403 琥珀提示／失败（具名 +
   重试 `candidate.refetch()`）／成功但无数据（明确“已不可用”）。
