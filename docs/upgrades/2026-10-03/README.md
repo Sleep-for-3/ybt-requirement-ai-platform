@@ -574,3 +574,53 @@ W05 的原子领取此前只在 SQLite + 线程层验证；本轮在**隔离真�
   回退提交，或先 `downgrade` 再回退代码。
 - **已知限制**：**真实 Redis/Celery 多 worker 重投递与 >900s 长任务租约续期实测未做**（属 W10）；
   事务 outbox（数据库提交成功但 broker 投递失败）尚未实现，当前仍依赖入队幂等键与消费端短路径。
+
+---
+
+## 附：会话合并验收证据（2026-10-04）
+
+本节固化本会话（审查基线 `17486f1` 之后共 **54 个提交**）的整体验收证据，供主审一次性核对。
+**权威发布步骤见同目录 `RELEASE-RUNBOOK.md`。**
+
+### 合并回归（本轮实跑）
+
+| 范围 | 命令 | 结果 |
+| --- | --- | --- |
+| 后端（本轮改动面：机构熔断/令牌轮换/审核不可变/SQL 加固/任务幂等/备份清单/版本一致性/发布基线/外发网关/外发授权/rerank/知识RAG/LLM 运行时/迁移与冻结门禁） | `pytest` 见下方命令 | **193 passed** |
+| 前端（隔离副本：`node --test` + `tsc` + `next lint` + `next build`） | 见下方命令 | **252 passed**；tsc/lint exit 0；build exit 0（54 页） |
+
+```powershell
+# 后端（在 backend/，先设 TASK_QUEUE_PROVIDER=inline、AUTH_MODE=optional）
+& ".venv\Scripts\python.exe" -m pytest tests/test_institution_deactivation_guard.py tests/test_product_integrity.py `
+  tests/test_refresh_rotation_atomicity.py tests/test_reviewed_content_immutability.py tests/test_safe_sql_hardening.py `
+  tests/test_safe_sql_executor.py tests/test_safe_sql_executor_v2.py tests/test_job_idempotency.py `
+  tests/test_project_manifest_export.py tests/test_version_consistency.py tests/test_release_baseline.py `
+  tests/test_outbound_policy_gateway.py tests/test_outbound_authorization.py tests/test_ai_skill_field_rerank.py `
+  tests/test_knowledge_rag.py tests/test_llm_runtime.py tests/test_ai_skill_migration.py `
+  tests/test_legacy_mapping_retirement.py tests/test_migration_schema_freeze.py -q
+# 前端（在隔离副本目录）
+node --test tests/*.test.mjs ; node node_modules/typescript/bin/tsc --noEmit --incremental false
+node node_modules/next/dist/bin/next lint --no-cache ; node node_modules/next/dist/bin/next build
+```
+
+### 真实依赖验收（非 Mock）
+
+| 项 | 环境 | 结果 |
+| --- | --- | --- |
+| 刷新令牌原子轮换（W02/B05） | 隔离 PostgreSQL `ybt_upgrade_w02_iso`，20 并发独立连接 | 成功 1 / 失败 19；活跃替代 1；重放被拒（`w02_postgres_concurrency.py`） |
+| 后台任务唯一领取（W05/B07 → W10） | 隔离 PostgreSQL，12 并发 | `claim_winners=1`；有效租约阻止第二消费者；过期租约可恢复；终态不可再领取（`w10_postgres_job_claim.py`） |
+| Next 15.5.27 生产构建运行时 | 隔离副本 + 备用端口 3100 | `/login` 200；`/fields/1` **307 → /fields/1/scenarios**；关键路由 200；未知路由 404（探测后已停进程） |
+| 依赖审计 | 官方 registry | 生产依赖 **critical 1 → 0**（升级后 0 critical / 2 high）；`nanoid` 经 `overrides` 修复 |
+
+### 未执行 / 待银行输入（不得当作通过）
+
+真实浏览器流程回归（无 Playwright 浏览器、仓库无 e2e 用例）；真实 Redis/Celery 多 worker 重投递与
+>900s 租约续期；向量/对象存储真实集成；压力与容量验收（容量数字待产品与银行确认）；系统级备份与
+隔离恢复演练（RTO/RPO、异机副本、具名 runbook）；银行专家标注黄金集（≥30 正/负/歧义例）；
+**运行实例尚未更新，且前端实例当前未运行**（`frontend/.next` 缺 `BUILD_ID`），需按 runbook 经批准后恢复/发布。
+
+### 审阅入口建议
+
+1. 先读本文件各工作包小节（含"已修复/已验证/待验证/受阻"标记与证据）；
+2. 再读 `RELEASE-RUNBOOK.md`（发布/回滚/风险）；
+3. 需要逐提交审阅时：`git log --oneline 17486f1..HEAD`（54 项，每项含 B/W 编号与验证结论）。
