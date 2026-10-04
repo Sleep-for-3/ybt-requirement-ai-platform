@@ -426,6 +426,18 @@ JSON **确实只有** `project_id`/`project_name`/`backup_scope`，却被命名�
   **已存在目录一律拒绝**（发布备份不可覆盖），每个产物记录 SHA-256 并写 `manifest.json`；
   唯一数据库访问是**只读 `pg_dump`**，不删除任何数据，恢复仍为需银行批准的独立演练。
   dry-run 实测：五类产物均在位、`missing_critical=[]`、**未写入文件**。
+- **备份可恢复性已验证（本轮，同一提交）**：在**工作区内**实际执行了一次备份
+  （`--execute --out ..\.local-run\backups\release-<时间戳>`）并做恢复演练：
+  - 备份：`ybt_dsh_handoff_v2.dump` **12.3 MB**、**2.7 s**，SHA-256 已记入 manifest；附件 **61 文件 / 1.5 MB**；`version.json`。
+  - 恢复：`pg_restore` 到**隔离库** `ybt_upgrade_restore_iso`，**15.5 s**、无报错；`projects/users/target_fields/
+    background_jobs/mapping_versions` 行数与源库**逐一相等**（11/29/22/123/3）。
+  - **RPO** = 转储时刻；**RTO（仅数据库部分）** ≈ 16 s（含应用启动与附件校验的**全链 RTO 未测**，如实标注）。
+  - 恢复库 `alembic_version = 202610020051`，**反证业务库尚未应用 `202610030001`**（与“运行实例未更新”一致）。
+- **运维注意（本轮实测）**：在 `C:\Users\admin\dsh-pg18` **下无法新建目录**（WinError 5，沙箱 ACL 对
+  `CodexSandboxUsers` 仅 ReadAndExecute），因此备份目录应放在**工作区内**（如 `.local-run\backups\`）
+  或您授权的可写路径。`RELEASE-RUNBOOK.md` 已相应更正。
+- **按规则未删除**：本次备份目录与隔离演练库（`ybt_upgrade_restore_iso`、`ybt_upgrade_mig_iso`）均保留，
+  由您决定是否清理。
 
 ---
 

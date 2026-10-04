@@ -36,7 +36,8 @@ cd backend; $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
   tests/test_project_manifest_export.py tests/test_outbound_policy_gateway.py -q
 # 3) 前端（隔离副本）node --test / tsc / lint / build 全绿（见 docs/upgrades/2026-10-03/README.md 各工作包）
 # 4) 备份现状（不需我代删；仅复制，勿覆盖）：
-#    备份 frontend/.next 与 backend/.env、并确认 C:\Users\admin\dsh-pg18\backups 有最近转储
+#    做一次转储（-out 必须用工作区内可写路径；本机实测 C:\Users\admin\dsh-pg18 下无法新建目录）：
+#      & ".venv\Scripts\python.exe" ..\docs\upgrades\2026-10-03\w09_backup_plan.py --execute --out ..\.local-run\backups\release-<时间戳>
 ```
 
 ## 2. 前端发布（两种路径，二选一）
