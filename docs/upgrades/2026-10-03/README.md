@@ -318,6 +318,38 @@ system prompt 固定 `["internal"]`、`lineage/explanation`、四个 `mapping/*_
 
 ---
 
+## W09：可恢复备份（误导命名已修正；系统级备份待实施）
+
+### 已修复 / 已验证（提交 `45e5cc1`）
+
+任务书要求“立即把仅含 3 个描述字段的‘项目备份’改成真实名称”。核实：`project_backup` 作业写出的
+JSON **确实只有** `project_id`/`project_name`/`backup_scope`，却被命名为“项目备份”并把通知写成
+“项目备份完成”，容易被当作可用于恢复的备份。现已改为**明确的项目元数据清单**：
+
+- 处理器 `project_manifest_export_handler` 输出 `artifact_kind=project_metadata_manifest`、
+  `is_full_backup=false`、明确声明“不能用于恢复”，并列出 `full_backup_requires`（PostgreSQL 转储
+  （含一致性点）、附件与正式交付对象存储、配置安全引用（不含明文密钥）、向量索引快照或可靠重建依据、
+  依赖清单与版本）；
+- 落盘文件名改为 `project-<id>-manifest.json`，完成通知改为“项目元数据清单导出完成（非完整备份）”；
+- 新增准确路由 `POST /projects/{id}/manifest-export`；旧路由 `POST /projects/{id}/backup` 保留为
+  **已弃用别名**（同样产出清单），旧作业键 `project_backup` 仍可解析，历史作业与既有客户端不受影响；
+- 前端作业标签两个键均显示“项目元数据清单（非完整备份）”。
+
+测试：`tests/test_project_manifest_export.py` 4 例（清单声明非备份并列出真实要求、文件名不再像备份、
+两个键都解析到清单导出、inline 队列可完成新键）。回归：清单 + 治理 + 任务幂等 **44 passed**；
+前端 **249 passed**、tsc/lint/build 全绿。
+
+### 未完成（W09 其余项，属系统级/运维）
+
+- **系统备份**：PostgreSQL + 附件/正式交付对象存储 + 配置安全引用 + 向量索引快照/重建依据，需明确
+  一致性点；**发布备份目录使用不可覆盖的时间/UUID**（本机 `.local-run` 与 `dsh-pg18\backups` 目录需核查）；
+- 备份**加密、访问权限、hash 清单、保留周期、异机副本**按银行要求落地（密钥不得与数据同包）；
+- **在独立新环境恢复并实测 RTO/RPO**（行数/版本/hash/权限/附件下载/知识检索/交付可读），并形成
+  **具名值班与恢复 runbook**；
+- 本项**未执行**：需要独立恢复环境与银行运维策略，且不得触碰现有业务库（`ybt_dsh_handoff_v2`）。
+
+---
+
 ## B23：两个过期后端测试契约
 
 见提交 `1782bac`。
