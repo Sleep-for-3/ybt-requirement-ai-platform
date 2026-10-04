@@ -73,13 +73,25 @@ def main() -> int:
     Base.metadata.create_all(engine)
 
     # 50 real rows, so an unbounded query would return more than max_rows if the limit leaked.
+    CUSTOMERS = "w04_iso_customers"
+    SYNTHETIC_PHONE = "13800001111"
+    SYNTHETIC_ACCOUNT = "6222000012345678"
     with engine.begin() as conn:
         conn.execute(text(f"DROP TABLE IF EXISTS {TABLE}"))
         conn.execute(text(f"CREATE TABLE {TABLE} (n integer, marker text)"))
         for start in range(0, args.rows, 10):
             values = ", ".join(f"({i}, 'limit 1')" for i in range(start, min(start + 10, args.rows)))
             conn.execute(text(f"INSERT INTO {TABLE} (n, marker) VALUES {values}"))
-
+        # N01: synthetic sensitive values plus a non-sensitive column to group by.
+        conn.execute(text(f"DROP TABLE IF EXISTS {CUSTOMERS}"))
+        conn.execute(text(f"CREATE TABLE {CUSTOMERS} (phone text, account_no text, n integer)"))
+        conn.execute(
+            text(
+                f"INSERT INTO {CUSTOMERS} (phone, account_no, n) VALUES "
+                f"('{SYNTHETIC_PHONE}', '{SYNTHETIC_ACCOUNT}', 1), "
+                f"('{SYNTHETIC_PHONE}', '{SYNTHETIC_ACCOUNT}', 2)"
+            )
+        )
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as db:
         # Idempotent: reuse the fixture rows if a previous run left them behind.
@@ -115,6 +127,20 @@ def main() -> int:
         "cte_limit": f"WITH recent AS (SELECT n FROM {TABLE} LIMIT 1) SELECT n FROM recent",
     }
 
+    # N01/BF01: the aggregate exemption must be decided in the outer output scope, for the
+    # whole projection. Both triggers previously returned the synthetic phone verbatim with
+    # no warning; the plain COUNT control must keep its exemption.
+    n01_cases = {
+        "n01_subquery_alias": (
+            f"SELECT phone AS cnt FROM {CUSTOMERS} "
+            f"WHERE EXISTS (SELECT COUNT(*) AS cnt FROM {CUSTOMERS})"
+        ),
+        "n01_concat_count": (
+            f"SELECT phone || '-' || CAST(COUNT(*) AS TEXT) AS cnt FROM {CUSTOMERS} GROUP BY phone"
+        ),
+        "n01_plain_count": f"SELECT COUNT(*) AS cnt FROM {CUSTOMERS}",
+    }
+
     results: dict[str, object] = {}
     for name, sql in cases.items():
         with factory() as db:
@@ -126,6 +152,35 @@ def main() -> int:
         results[name] = {"status": response.status, "row_count": response.row_count,
                          "sanitized_sql": response.sanitized_sql}
 
+    n01: dict[str, object] = {}
+    for name, sql in n01_cases.items():
+        with factory() as db:
+            datasource = db.get(DataSource, datasource_id)
+            response = executor.execute(
+                datasource, sql, project_id=project.id, max_rows=args.max_rows,
+                task_id=None, profile_task_id=None, created_by=None,
+            )
+        leaked = json.dumps(response.rows, ensure_ascii=False, default=str)
+        n01[name] = {
+            "status": response.status,
+            "columns": list(response.columns or []),
+            "rows": [dict(row) for row in (response.rows or [])],
+            "warnings": list(response.warnings or []),
+            "synthetic_phone_returned": SYNTHETIC_PHONE in leaked,
+            "synthetic_account_returned": SYNTHETIC_ACCOUNT in leaked,
+        }
+
+    # The two triggers must not return the synthetic raw values and must warn; the plain
+    # COUNT control must still be returned as a genuine statistic.
+    n01_ok = (
+        n01["n01_subquery_alias"]["synthetic_phone_returned"] is False
+        and n01["n01_subquery_alias"]["warnings"]
+        and n01["n01_concat_count"]["synthetic_phone_returned"] is False
+        and n01["n01_concat_count"]["synthetic_account_returned"] is False
+        and n01["n01_concat_count"]["warnings"]
+        and n01["n01_plain_count"]["columns"] == ["cnt"]
+        and n01["n01_plain_count"]["synthetic_phone_returned"] is False
+    )
     # Refusals that must happen before any SQL reaches the server.
     refusals: dict[str, str] = {}
     for name, sql in {
@@ -148,6 +203,7 @@ def main() -> int:
     with engine.begin() as conn:
         actual_rows = int(conn.execute(text(f"SELECT count(*) FROM {TABLE}")).scalar_one())
         conn.execute(text(f"DROP TABLE IF EXISTS {TABLE}"))
+        conn.execute(text(f"DROP TABLE IF EXISTS {CUSTOMERS}"))
 
     capped = all(int(item["row_count"] or 0) <= args.max_rows for item in results.values())
     all_success = all(item["status"] == "success" for item in results.values())
@@ -155,12 +211,14 @@ def main() -> int:
     untouched = actual_rows == args.rows
 
     result = {
-        "ok": capped and all_success and all_refused and untouched,
+        "ok": capped and all_success and all_refused and untouched and n01_ok,
         "database": args.database,
         "rows_available": args.rows,
         "max_rows": args.max_rows,
         "queries": results,
         "refusals": refusals,
+        "n01_aggregate_exemption": n01,
+        "n01_ok": n01_ok,
         "table_row_count_unchanged": untouched,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))

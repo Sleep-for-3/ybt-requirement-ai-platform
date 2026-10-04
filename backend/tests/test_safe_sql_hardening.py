@@ -121,6 +121,49 @@ def test_an_expression_or_concatenation_is_not_exempt():
         [{"total_count": "13800001111-6222000012345678"}], safe_aggregate_aliases=aliases)
     assert sanitized == [{}]
 
+def test_a_subquery_count_alias_does_not_exempt_the_outer_sensitive_projection():
+    """N01/BF01 trigger A: an inner ``COUNT(*) AS cnt`` must not lend its exemption outward."""
+    tree = sqlglot.parse_one(
+        "SELECT phone AS cnt FROM customers WHERE EXISTS (SELECT COUNT(*) AS cnt FROM customers)"
+    )
+    aliases = _safe_aggregate_aliases(tree)
+    assert aliases["cnt"] is False
+    columns, sanitized, warnings = _sanitize_rows(
+        [{"cnt": "13800001111"}], safe_aggregate_aliases=aliases
+    )
+    assert columns == [] and sanitized == [{}]
+    assert warnings, "the sensitive value must be removed and reported"
+
+
+def test_a_sensitive_column_concatenated_with_count_is_not_exempt():
+    """N01/BF01 trigger B: the whole expression decides, not only the aggregate's arguments."""
+    tree = sqlglot.parse_one(
+        "SELECT phone || '-' || CAST(COUNT(*) AS TEXT) AS cnt FROM customers GROUP BY phone"
+    )
+    aliases = _safe_aggregate_aliases(tree)
+    assert aliases["cnt"] is False
+    _columns, sanitized, _warnings = _sanitize_rows(
+        [{"cnt": "13800001111-3"}], safe_aggregate_aliases=aliases
+    )
+    assert sanitized == [{}]
+
+
+def test_a_union_arm_with_a_sensitive_projection_cancels_the_shared_alias_exemption():
+    tree = sqlglot.parse_one(
+        "SELECT count(*) AS cnt FROM customers UNION ALL SELECT phone AS cnt FROM customers"
+    )
+    aliases = _safe_aggregate_aliases(tree)
+    assert aliases["cnt"] is False
+
+
+def test_plain_aggregates_keep_their_exemption_after_the_n01_fix():
+    for sql in (
+        "SELECT count(*) AS cnt FROM customers",
+        "SELECT SUM(n) AS cnt FROM sample",
+        "SELECT CAST(COUNT(*) AS TEXT) AS cnt FROM customers",
+    ):
+        aliases = _safe_aggregate_aliases(sqlglot.parse_one(sql))
+        assert aliases["cnt"] is True, sql
 
 def test_an_unaliased_sensitive_column_is_still_removed_by_name():
     rows_by_name = [{"mobile": "13800001111", "客户姓名": "张三"}]

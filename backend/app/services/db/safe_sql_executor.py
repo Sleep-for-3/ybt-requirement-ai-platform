@@ -258,27 +258,68 @@ def _existing_outer_limit(tree: exp.Expression) -> int | None:
         return None
 
 
+_UNWRAP_TYPES = tuple(
+    node_type
+    for node_type in (getattr(exp, name, None) for name in ("Alias", "Cast", "TryCast", "Paren"))
+    if node_type is not None
+)
+_SET_OPERATION_TYPES = tuple(
+    getattr(exp, name) for name in ("Union", "Except", "Intersect") if hasattr(exp, name)
+)
+
+
+def _unwrap_projection(node: exp.Expression) -> exp.Expression:
+    core = node
+    while isinstance(core, _UNWRAP_TYPES):
+        inner = core.this
+        if not isinstance(inner, exp.Expression):
+            break
+        core = inner
+    return core
+
+
+def _output_scopes(tree: exp.Expression) -> list[exp.Select]:
+    """The SELECTs that actually define the returned columns, never a nested subquery.
+
+    ``tree.find_all(exp.Select)`` also walks ``WHERE EXISTS (...)`` / CTE bodies; an inner
+    ``COUNT(*) AS cnt`` used to overwrite the outer ``phone AS cnt`` exemption.
+    """
+    if _SET_OPERATION_TYPES and isinstance(tree, _SET_OPERATION_TYPES):
+        scopes: list[exp.Select] = []
+        for side in (tree.left, tree.right):
+            if isinstance(side, exp.Expression):
+                scopes.extend(_output_scopes(side))
+        return scopes
+    if isinstance(tree, exp.Select):
+        return [tree]
+    found = tree.find(exp.Select)
+    return [found] if found is not None else []
+
+
 def _safe_aggregate_aliases(tree: exp.Expression) -> dict[str, bool]:
     """Map returned column name -> whether it is a genuinely safe statistic.
 
-    B04: value screening must not be skipped just because the client named a column ``cnt``.
-    A statistic exemption requires the projection itself to be an aggregate whose arguments
-    contain no sensitive column, so ``phone AS cnt`` stays screened while ``count(*) AS cnt``
-    keeps its exemption.
-    """
+    B04 + N01/BF01: the exemption is decided **inside the outer output scope** and must hold
+    for the whole projection expression:
 
+    * a subquery's ``COUNT(*) AS cnt`` must not lend its exemption to an outer ``phone AS cnt``
+      (previously the last projection visited won, across every nested SELECT);
+    * the aggregate must be the projection itself, so ``phone || CAST(COUNT(*) AS TEXT) AS cnt``
+      stays screened (previously only the aggregate's own arguments were inspected);
+    * any sensitive column anywhere in the expression cancels the exemption.
+
+    Anything that cannot be *proven* safe falls back to ordinary value screening (fail closed).
+    """
     flags: dict[str, bool] = {}
-    for select in tree.find_all(exp.Select):
-        for projection in select.expressions:
+    for scope in _output_scopes(tree):
+        for projection in scope.expressions:
             name = (projection.alias_or_name or "").lower()
             if not name:
                 continue
-            aggregate = projection.find(exp.AggFunc)
-            safe = False
-            if aggregate is not None:
-                referenced = {column.name.lower() for column in aggregate.find_all(exp.Column)}
-                safe = not (referenced & SENSITIVE_FIELD_NAMES)
-            flags[name] = safe
+            core = _unwrap_projection(projection)
+            referenced = {column.name.lower() for column in projection.find_all(exp.Column)}
+            safe = isinstance(core, exp.AggFunc) and not (referenced & SENSITIVE_FIELD_NAMES)
+            flags[name] = flags.get(name, True) and safe
     return flags
 
 
