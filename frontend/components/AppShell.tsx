@@ -38,6 +38,7 @@ import { useEffect, useState } from "react";
 
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { ReleaseIdentityNotice } from "@/components/ReleaseIdentityNotice";
 import { ProjectJobsSummary, apiGet, clearSession } from "@/lib/api";
 import {
   isResourcesPath,
@@ -285,6 +286,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
               <span className={`h-1.5 w-1.5 rounded-full ${runningJobs ? "bg-gold-500" : "bg-pine-400"}`} />
               {runningJobs ? `${runningJobs} 个后台任务运行中` : "后台任务正常"}
             </Link>
+            <ReleaseIdentityNotice />
             <ProjectSelector className="w-32 sm:w-52" />
             <div className="flex items-center gap-1 sm:gap-2 sm:border-l sm:border-line sm:pl-3">
               <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pine-100 text-sm font-semibold text-pine-700 sm:flex">
