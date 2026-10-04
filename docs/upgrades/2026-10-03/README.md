@@ -747,7 +747,12 @@ cd backend ; $env:TASK_QUEUE_PROVIDER='inline' ; $env:AUTH_MODE='optional'
 真实浏览器流程回归（无 Playwright 浏览器、仓库无 e2e 用例）；真实 Redis/Celery 多 worker 重投递与
 >900s 租约续期；向量/对象存储真实集成；压力与容量验收（容量数字待产品与银行确认）；系统级备份与
 隔离恢复演练（RTO/RPO、异机副本、具名 runbook）；银行专家标注黄金集（≥30 正/负/歧义例）；
-**运行实例尚未更新，且前端实例当前未运行**（`frontend/.next` 缺 `BUILD_ID`），需按 runbook 经批准后恢复/发布。
+**运行实例尚未升级**（仍服务 Next 14.2.35 构建；迁移 `202610030001` **未应用**，已由恢复库 `alembic_version` 反证）。
+**前端降级状态已修复（本会话按 Runbook §2A 执行）**：用启动器 `build` 重建（因该动作会注入 `NEXT_PUBLIC_API_BASE_URL`，
+故必须用它而非裸 `next build`）并启动，`/login` 200、`/` 与 `/fields/1` 307；
+真实浏览器验证：页面完整渲染、**无 CORS 报错**（对比隔离副本裸构建时的 CORS 现象，反向确认 API 基址正确）。
+构建未产生额外工作区改动（`git status` 仅审查方保留文件；`frontend/tsconfig.json` 无 diff）。
+**2B（部署 Next 15.5.27）仍未执行**，需 `npm ci` 与您的批准。
 
 ### 审阅入口建议
 

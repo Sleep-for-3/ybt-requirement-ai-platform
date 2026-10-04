@@ -11,7 +11,7 @@
 | Redis（便携，`C:\Users\admin\dsh-redis`） | 6379 | ✅ 监听 |
 | 后端 FastAPI | 8000 | ✅ `/api/health/live` = 200 |
 | Embedding（FastEmbed） | 11434 | ✅ 监听 |
-| 前端 Next | 3000 | ❌ **未运行**：`frontend/.next` 缺 `BUILD_ID`（无完整生产构建），启动器报 “Could not find a production build” |
+| 前端 Next | 3000 | ✅ **已运行（本会话按 §2A 恢复）**：因 `.next` 缺 `BUILD_ID` 曾未运行；本会话用启动器 `build` 重建（Next 14.2.35，注入正确 API 基址）后启动，`/login` **200**、`/` 与 `/fields/1` **307**；真实浏览器渲染正常、**无 CORS 报错** |
 
 启动器：`.local-run/local-deploy.ps1`，动词 `status|start|stop|restart|build|pg-start|…|backend-restart`；
 `build` = `Build-Frontend`（在 `frontend` 内跑 `next build`，日志 `.local-run/frontend-build.log`）；
