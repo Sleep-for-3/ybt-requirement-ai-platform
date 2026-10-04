@@ -1526,6 +1526,15 @@ def resume_task(db, principal: Principal, task: AgentTask, *, job: BackgroundJob
     job = job or db.get(BackgroundJob, task.background_job_id)
     queue = get_task_queue()
     if job is not None and hasattr(queue, "execute_existing"):
+        # W05 guarantees a finished job is never re-consumed by a duplicate delivery. A human
+        # reanalysis is a *new legitimate run*, so it must be made claimable explicitly rather
+        # than relying on a terminal job being claimable again.
+        if job.status != "queued":
+            job.status = "queued"
+            job.progress = 0
+            job.finished_at = None
+            job.error_message = None
+            db.commit()
         queue.execute_existing(db, job, run_agent_task)
     else:  # celery: enqueue a distinct continuation instead of executing in-process
         project = db.get(Project, task.project_id)

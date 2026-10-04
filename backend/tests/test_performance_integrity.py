@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi import Response
@@ -36,7 +37,12 @@ def test_production_docker_contract_uses_next_start_celery_and_postgresql() -> N
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     development_compose = (ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8")
 
-    assert dockerfile.count("FROM node:20-alpine") >= 2
+    # The contract is a multi-stage build on a *supported* Node LTS, not one frozen major: Node 20
+    # is end-of-life and lacks the global WebSocket the browser harness needs, so pinning 20 here
+    # would contradict the runtime baseline this upgrade established.
+    node_bases = re.findall(r"^FROM node:(\d+)-alpine", dockerfile, flags=re.MULTILINE)
+    assert len(node_bases) >= 2, f"expected a multi-stage Node build, found {node_bases}"
+    assert all(int(major) >= 22 for major in node_bases), f"unsupported EOL Node base image: {node_bases}"
     assert 'CMD ["npm", "run", "start"' in dockerfile
     assert "npm run dev" not in dockerfile
     assert "NODE_ENV=production" in dockerfile
