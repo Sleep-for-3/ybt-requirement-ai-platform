@@ -200,6 +200,17 @@ class SafeSqlExecutor:
             return SafeSqlResponse(status="failed", error_message=message, sanitized_sql=sanitized_sql, execution_time_ms=_elapsed_ms(started))
 
     def profile_field(self, table_name: str, field_name: str) -> dict:
+        # B608/security: these two values are interpolated into SQL, so this method owns the
+        # "they must be identifiers" contract. ``validate_and_prepare`` only proves the *whole*
+        # string is one SELECT -- a crafted "field name" such as
+        # ``1) from t union select password from users --`` still passes that check and produces a
+        # statement that reads another table (confirmed by probe_b608_reachability.py).
+        # Bare ``schema.table`` / ``column`` identifiers are allowed; anything else is refused.
+        for label, value in (("table_name", table_name), ("field_name", field_name)):
+            if not _is_plain_identifier(value):
+                raise ValueError(
+                    f"{label} must be a plain SQL identifier (letters, digits, underscore), got {value!r}"
+                )
         query = self.validate_and_prepare(
             f"select count({field_name}) as non_null_count, "
             f"count(distinct {field_name}) as distinct_count from {table_name}"
@@ -231,6 +242,22 @@ class SafeSqlExecutor:
 
 
 SAFE_QUERY_DIALECTS = {"postgresql", "mysql", "mysql_compatible", "sqlite"}
+
+
+# Identifier charset for values that get interpolated into SQL (profiling table/column names).
+# ``schema.table`` is accepted as two dotted parts so qualified names keep working.
+PLAIN_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)?$")
+
+
+def _is_plain_identifier(value: str | None) -> bool:
+    """True only for a bare (optionally schema-qualified) SQL identifier.
+
+    This is a *contract*, not a convenience: a value that fails it must never be interpolated into
+    a statement, because ``validate_and_prepare`` checks the assembled SQL and cannot tell an
+    intended column from an injected clause.
+    """
+
+    return bool(value) and bool(PLAIN_IDENTIFIER_RE.match(value.strip()))
 
 
 def _apply_ast_limit(tree: exp.Expression, limit: int) -> exp.Expression:
