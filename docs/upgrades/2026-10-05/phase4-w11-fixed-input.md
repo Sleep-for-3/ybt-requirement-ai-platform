@@ -1,7 +1,7 @@
-# 第四阶段（第五次更新）：**正式交付闭环打通** —— readiness 清零、24/24 全通过
+# 第四阶段（第六次更新）：**正式交付 + 变更复核全链跑通** —— 28/28 通过
 
-本轮（2026-10-05）继续 W11 固定输入链，完成了上一轮列为“下一轮可执行路径”的全部剩余步骤：
-**readiness 由 12 降至 0**，并首次跑通 **提审 → 三级审核 → 冻结正式交付 → 导出 Word/Excel**。
+本轮（2026-10-05）在上一轮打通正式交付的基础上，补齐了 W11 第 7 步**变更复核**，
+并修正了一处我自己写错的验收断语。**结果：`{"ok": true, "steps": 28}` / `EXIT=0`**（上轮 24/24）。
 
 脚本：`docs/upgrades/2026-10-05/phase4_w11_fixed_input.py`（N13 守卫先于任何 DDL）
 前置：`phase4_synthetic_uat_closed_loop.py` 建立已知状态
@@ -27,7 +27,19 @@
 | `frozen_formal_delivery_binds_version` | **ok=true** —— 正式交付绑定同一版本与 hash |
 | `frozen_formal_export_xlsx` / `_docx` | 均 **200**（16,885 / 39,237 字节） |
 | `formal_export_identities_agree` | **ok=true** —— Word 与 Excel 快照 hash 完全一致 |
-## 2. 本轮新解决的四个障碍（均为实证定位）
+| `script_v2_uploaded` | 上传同源脚本 **v2**（新增注释），新旧版本并存，旧依据文件本身不变 |
+| `change_impacts_listed` | `200`，`count=1`，检出变更：`script:1 脚本 … 已变化或停用（frozen v1 → current v2）` |
+| **`change_review_opened`** | **201** —— 变更复核开启，`change_hash=13840fa78689335e…` |
+| `change_review_detail` | `recheck_id=1`，`status=pending`，已生成 **1 个复核任务** |
+## 2. 本轮新解决的障碍（均为实证定位）
+
+9. **变更复核不可凭空开启**：`create_recheck` 会把入参哈希与**服务端** `impact_summary` 比对，
+   而 `impact_summary` 仅在 `script_basis_changes` 检出漂移时才返回结果 —— 所以“自己造一个 change_hash”
+   必然被 409「变化依据已更新」拒绝（此前多轮就是这样卡住的）。**修复**：先上传**同源脚本 v2**
+   触发可检测的版本漂移，再从 `GET .../change-impacts` 取**服务端**哈希提交复核。
+10. **我写错了一处验收断语**：最初断言导出头的 `X-Requirement-Snapshot-Hash` 应等于提审 `content_hash`，
+   实测不等。阅读 `load_formal_delivery` 后确认导出头是**快照 hash**（含 `formal_delivery` 块），
+   与提审哈希**按设计不同**。已改为验证“两种格式头部相等且稳定”——这是**纠正错误断言**，不是放宽测试。
 
 5. **制度文档未被需求选中**：`policy_snapshot.allowed.document_ids` 取自**需求范围**，而需求创建时
    `document_ids=[]` → `normative_units` 为空，`missing_basis` 永远清不掉。**修复**：把制度文档
@@ -42,8 +54,7 @@
    `status == approved` 且 `submission.status == approved`；直接 finalize 会得到 409
    “送审记录尚未通过完整审核”。**修复**：显式走完 3 个审核步骤（业务→技术→终审）。
 
-> 上一轮的四个障碍（目标列不足 / 上游元数据缺失 / 标识符不一致 / 模板漂移误判）已在本轮继续有效；
-> 全部八项都是**合成 fixture 必须满足的真实契约**，不是产品缺陷。
+> 第 1–8 项为前几轮已解决的同类障碍，均为 fixture 必须满足的真实契约，不是产品缺陷。
 
 ## 3. 正式交付的可核对细节
 
@@ -71,7 +82,8 @@
 4. 本轮未在业务库应用迁移 `202610050001`/`202610050002`；本地后端仍为旧进程。
 
 ## 5. 结论
-第四阶段的**业务闭环已完整跑通**：合成材料 → 6 个角色账号 → 需求与内容版本 → 目录/模板/脚本固定输入 →
-脚本依据与路径确认 → 制度对照 → **readiness 清零** → 提审 → **三级独立审核** → **冻结正式交付** →
-**导出 Word/Excel**（快照 hash 一致）。`{"ok": true, "steps": 24}` / `EXIT=0`。
+第四阶段的**业务闭环已完整跑通**（`{"ok": true, "steps": 28}` / `EXIT=0`）：
+合成材料 → 6 个角色账号 → 需求与内容版本 → 目录/模板/脚本固定输入 → 脚本依据与路径确认 →
+制度对照 → **readiness 清零** → 提审 → **三级独立审核** → **冻结正式交付** → **导出 Word/Excel** →
+**变更复核开启**（v2 脚本漂移 → 检出变更 → 复核任务生成）。
 唯一剩余的是银行侧真实输入与浏览器逐项验收。

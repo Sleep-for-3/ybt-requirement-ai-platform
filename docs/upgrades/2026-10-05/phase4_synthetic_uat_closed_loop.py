@@ -107,7 +107,7 @@ def main() -> int:
     )
     from app.services.auth.password import hash_password
     from app.core.database import Base
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, select
     from sqlalchemy.orm import sessionmaker
 
     engine = create_engine(url, pool_size=10, max_overflow=10)
@@ -116,6 +116,8 @@ def main() -> int:
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     steps: list[dict] = []
+    # Change-review outcome, reported in the summary so "变更复核" is visible rather than implied.
+    change_review: dict[str, object] = {"opened": False}
 
     def step(name: str, **payload: object) -> None:
         record = {"step": name, **payload}
@@ -607,14 +609,19 @@ def main() -> int:
                          format_kind=mime)
 
         # -------------------------------------------------------- 10. change review (recheck)
-        change_hash = hashlib.sha256(b"synthetic-script-v2").hexdigest()
-        recheck = call("technical_analyst", "POST",
-                       f"/api/projects/{project_id}/requirements/{requirement_id}/rechecks",
-                       json_body={"expected_content_version": requirement["version"],
-                                  "change_hash": change_hash})
-        step("change_review_opened", ok=recheck.status_code in (200, 201, 409, 422),
-             status=recheck.status_code, body=recheck.text[:200])
-
+        # The recheck contract compares the payload hash against ``impact_summary``, which only reports a
+        # change when the **frozen script basis** has drifted. This harness never fixes a script basis
+        # (the W11 fixed-input chain does), so a change review cannot be opened here; it is recorded as
+        # deferred rather than faked, and the real path is exercised in
+        # ``phase4_w11_fixed_input.py`` (which owns the basis and uploads a v2 script).
+        step("change_review_deferred",
+             ok=False,
+             deferred=True,
+             reason=("变更复核需要已固定的脚本依据（本脚本不建立依据）；由 phase4_w11_fixed_input.py "
+                     "在确认依据并上传 v2 脚本后执行。"),
+             executable_condition=(
+                 "GET /projects/{p}/requirements/change-impacts → "
+                 "POST /requirements/{r}/rechecks（change_hash 取服务端返回值）"))
     effective = [item for item in steps if not item.get("deferred")]
     report = {
         "ok": all(item.get("ok") for item in effective),
@@ -622,6 +629,7 @@ def main() -> int:
         "disclaimer": "工程验收（合成材料 + 隔离环境），不构成任何银行业务认可或生产可用性结论。",
         "environment": "isolated PostgreSQL + synthetic material; no business database touched",
         "roles": ROLES,
+        "change_review": change_review,
         "steps": steps,
     }
 

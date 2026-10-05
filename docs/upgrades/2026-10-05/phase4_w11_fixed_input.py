@@ -633,6 +633,58 @@ def main() -> int:
              equals_delivery_content_hash=export_headers.get("xlsx") == content_hash,
              note="导出头是快照 hash（含 formal_delivery 块），与提审 content_hash 不同属预期契约")
 
+        # ---- 6. change review: upload a v2 script, then open the recheck ---------------------
+        # W11 step 7. ``impact_summary`` only reports a change when the frozen basis has drifted, so a
+        # new script version is the real trigger; the change hash must be the server's own value
+        # (an invented one is always refused with "变化依据已更新").
+        with factory() as db:
+            project = db.scalar(select(Project).order_by(Project.id).limit(1))
+            from app.services.lineage.ingestion import ScriptIngestionService as _Ingest
+            from app.services.storage import get_storage_service as _storage
+
+            service = _Ingest(db, _storage())
+            # A new comment line is enough for the parser to record a different version, so the basis
+            # drifts without changing the transformation the operator already confirmed.
+            v2_text = build_synthetic_script(field_codes) + "-- synthetic v2: 新增注释以触发变更复核\n"
+            try:
+                revised = service.ingest(project=project, data=v2_text.encode("utf-8"),
+                                         file_name="synthetic_loan.sql",
+                                         relative_path="synthetic/synthetic_loan.sql",
+                                         dialect="postgres", actor_user_id=None,
+                                         change_note="W11 synthetic script v2 (change review trigger)")
+                db.commit()
+                v2_id = int(revised.version.id)
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                v2_id = None
+                step("script_v2_upload_failed", ok=False, error=f"{type(exc).__name__}: {exc}"[:250])
+        step("script_v2_uploaded", ok=v2_id is not None, version_id=v2_id,
+             note="新版本与旧版本并存；旧依据文件本身不变")
+
+        impacts = call("business_analyst", "GET",
+                       f"/api/projects/{project_id}/requirements/change-impacts")
+        items = (impacts.json().get("items") if impacts.status_code == 200 else None) or []
+        mine = next((item for item in items if int(item.get("requirement_id", 0)) == requirement_id), None)
+        step("change_impacts_listed", ok=bool(mine), status=impacts.status_code,
+             count=len(items), has_own_requirement=bool(mine),
+             changes=len((mine or {}).get("changes") or []))
+
+        if mine is None:
+            step("change_review_unavailable", ok=False,
+                 reason="上传 v2 后仍未检测到脚本变更影响，无法开启变更复核")
+        else:
+            recheck = call("technical_analyst", "POST",
+                           f"/api/projects/{project_id}/requirements/{requirement_id}/rechecks",
+                           json_body={"expected_content_version": int(mine["content_version"]),
+                                      "change_hash": mine["change_hash"]})
+            step("change_review_opened", ok=recheck.status_code == 201,
+                 status=recheck.status_code, body=recheck.text[:250])
+            if recheck.status_code == 201:
+                review = recheck.json()
+                step("change_review_detail", ok=True, recheck_id=int(review["id"]),
+                     status=review.get("status"), task_count=len(review.get("tasks") or []),
+                     change_hash=str(mine["change_hash"])[:16])
+
     report = {
         "ok": all(item.get("ok") for item in steps),
         "disclaimer": "工程验收（合成脚本 + 目录元数据 + 隔离库）；不代表银行真实脚本或真实目录。",
