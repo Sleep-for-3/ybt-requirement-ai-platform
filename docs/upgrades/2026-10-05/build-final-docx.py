@@ -77,7 +77,7 @@ def main() -> int:
     set_cjk(run)
     sub = document.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = sub.add_run("分支 dsh/banking-semantic-agent-v2　·　最终提交 148bd7a　·　工程验收（合成材料 / 隔离环境）")
+    r = sub.add_run("分支 dsh/banking-semantic-agent-v2　·　最终提交 58cf2f9　·　工程验收（合成材料 / 隔离环境）")
     r.font.size = Pt(10)
     set_cjk(r)
 
@@ -95,6 +95,7 @@ def main() -> int:
         ["bandit 静态分析（68,877 行）", "HIGH 0；与已定性扫描 STABLE（0 新增）"],
         ["合成工程业务闭环", "41/41 通过（readiness 清零 → 三级审核 → 冻结交付 → Word/Excel → Finding 整改重测 → 四角色签署 → 变更复核关闭）"],
         ["真实浏览器验收", "F01–F10 共 10/10 项（隔离栈；未做像素级视觉检查）"],
+        ["真实 Redis/Celery 队列", "8/8 通过（独立 worker 进程消费、队列排空、重复投递围栏生效）"],
     ])
 
     heading(document, "二、修复的真实缺陷（含修复前后证据）", 1)
