@@ -101,7 +101,19 @@ def default_system_prompt(prompt_key: str) -> str:
     )
 
 
-def get_prompt_runtime(db, prompt_key: str) -> PromptRuntime:
+def get_prompt_runtime(db, prompt_key: str, *, model_profile_id: int | None = None) -> PromptRuntime:
+    """Build the runtime for ``prompt_key``.
+
+    C06: when a caller has an **explicitly selected** profile (an evaluation run's
+    ``model_profile_id``, a skill's pinned profile, ...), that profile must be the one actually
+    executed. Previously this function always took the lowest-id enabled profile, so a run could
+    record ``chat_model=model-B`` while the real runtime was profile A.
+
+    ``model_profile_id=None`` keeps the previous "lowest-id enabled profile" behaviour, and the
+    resolved id is still returned in ``PromptRuntime.model_profile_id`` so callers can record what
+    was actually used instead of only the environment default.
+    """
+
     prompt = db.scalar(
         select(PromptTemplateVersion)
         .where(
@@ -110,11 +122,20 @@ def get_prompt_runtime(db, prompt_key: str) -> PromptRuntime:
         )
         .order_by(PromptTemplateVersion.version_no.desc())
     )
-    model = db.scalar(
-        select(ModelProfile)
-        .where(ModelProfile.enabled.is_(True))
-        .order_by(ModelProfile.id)
-    )
+    if model_profile_id is not None:
+        # A selected profile must exist and be enabled; silently falling back would re-create the
+        # exact mismatch this guard exists to prevent.
+        model = db.get(ModelProfile, model_profile_id)
+        if model is None:
+            raise ValueError(f"model profile {model_profile_id} does not exist")
+        if not model.enabled:
+            raise ValueError(f"model profile {model_profile_id} is disabled")
+    else:
+        model = db.scalar(
+            select(ModelProfile)
+            .where(ModelProfile.enabled.is_(True))
+            .order_by(ModelProfile.id)
+        )
     settings = get_settings()
     provider = normalize_provider_type(model.provider_type if model else settings.llm_provider)
     local_only = bool(model.local_only) if model else provider == "mock" or is_local_provider(provider)

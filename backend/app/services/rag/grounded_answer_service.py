@@ -65,7 +65,11 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
         f"[{item['knowledge_unit_id']}] {item['content']}" for item in items[:10]
     )
     prompt = f"问题：{query}\n只允许引用以下知识单元，不得新增来源表字段：\n{evidence}"
-    runtime = evidence_runtime(get_prompt_runtime(db, "regulatory_field_explanation"))
+    # C06: the caller's selected profile must reach the runtime; otherwise the recorded model and the
+    # executed model disagree (and an evaluation could grade a different model than it names).
+    runtime = evidence_runtime(
+        get_prompt_runtime(db, "regulatory_field_explanation",
+                           model_profile_id=filters.get("model_profile_id")))
     try:
         model_input = prepare_model_input(
             runtime, prompt, [item["confidentiality_level"] for item in items],
