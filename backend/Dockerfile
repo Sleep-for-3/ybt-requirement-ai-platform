@@ -26,6 +26,11 @@ COPY . .
 # overrides the identity the release script passed to `docker build`.
 RUN printf '{"app_commit": "%s", "build_time": "%s"}\n' "$APP_COMMIT" "$BUILD_TIME" > /app/build-info.json
 
+# C09: carry the build identity on the image itself, so the release gate can verify the artifact it
+# actually produced instead of only comparing labels that could all be wrong together.
+LABEL org.ybt.app.commit="$APP_COMMIT" \
+      org.ybt.build.time="$BUILD_TIME"
+
 EXPOSE 8000
 
 # Schema upgrades run in the one-shot ``migrate`` Compose service so API,

@@ -47,6 +47,12 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
+# C09: same identity label as the backend image, so the release gate can verify each artifact it
+# actually built rather than trusting that several labels agree with one another.
+ARG NEXT_PUBLIC_APP_COMMIT=unknown
+ARG NEXT_PUBLIC_BUILD_TIME=unknown
+LABEL org.ybt.app.commit="$NEXT_PUBLIC_APP_COMMIT" \
+      org.ybt.build.time="$NEXT_PUBLIC_BUILD_TIME"
 EXPOSE 3000
 
 CMD ["npm", "run", "start", "--", "-H", "0.0.0.0"]

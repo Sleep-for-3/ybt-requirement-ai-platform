@@ -53,22 +53,54 @@ PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api}"
 
-# B18/P2: resolve the release identity *once* and give the same values to the backend containers and
-# the frontend build, so all four components are comparable afterwards. A dirty worktree produces a
-# suffixed commit (<sha>-dirty) instead of silently pretending to be the clean revision.
-APP_COMMIT="${APP_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+# B18/P2 + C09: resolve the release identity *once* and give the same values to the backend containers
+# and the frontend build, so all four components are comparable afterwards. A dirty worktree produces
+# a suffixed commit (<sha>-dirty) instead of silently pretending to be the clean revision.
+#
+# C09: the identity must describe **this** build. ``load_env_file`` above exports the APP_COMMIT /
+# BUILD_TIME that a previous release wrote back into .env, so reading them here would make release B
+# inherit release A's identity. Only an explicit build manifest (CI-provided) or this worktree's git
+# HEAD may decide it; anything else stops the release instead of guessing.
+unset APP_COMMIT BUILD_TIME 2>/dev/null || true
+MANIFEST_COMMIT="${YBT_RELEASE_COMMIT:-}"
+MANIFEST_BUILD_TIME="${YBT_RELEASE_BUILD_TIME:-}"
+if [[ -n "$MANIFEST_COMMIT" ]]; then
+  APP_COMMIT="$MANIFEST_COMMIT"
+else
+  APP_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+fi
 if [[ "$APP_COMMIT" != unknown ]] && ! git diff --quiet HEAD -- 2>/dev/null; then
   APP_COMMIT="${APP_COMMIT}-dirty"
 fi
-BUILD_TIME="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+# Same reasoning for the build time: a manifest value wins, otherwise stamp this run.
+BUILD_TIME="${MANIFEST_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 SCHEMA_HEAD="${SCHEMA_HEAD:-}"
 export APP_COMMIT BUILD_TIME SCHEMA_HEAD
 
 if [[ "$APP_COMMIT" == unknown ]]; then
-  echo "无法确定发布提交（不在 git 工作区且未设置 APP_COMMIT），停止发布" >&2
+  echo "无法确定发布提交（不在 git 工作区且未提供 YBT_RELEASE_COMMIT 构建清单），停止发布" >&2
   exit 1
 fi
+
+# C09: remember the identity the *previous* release left in .env, so a rollback can restore both the
+# image tag and the reported identity instead of leaving .env describing the release being undone.
+PREVIOUS_TAG="$(printf '%s' "${YBT_RELEASE_TAG:-}")"
+PREVIOUS_APP_COMMIT="$(grep -E '^APP_COMMIT=' ./.env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+PREVIOUS_BUILD_TIME="$(grep -E '^BUILD_TIME=' ./.env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
 log() { printf '\n[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
+
+# C09: ``docker compose up -d`` selects images by ``YBT_RELEASE_TAG`` from .env, so the tag must be
+# pinned **before** any compose call in this release. Previously it was written only after the health
+# gate, so compose brought up the PREVIOUS image while the gate expected this release's commit.
+set_env_value() {
+  local key="$1" value="$2" file=".env"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
 
 log "1/6 备份：数据库 + 编排配置 + 当前镜像（不可覆盖目录）"
 mkdir -p "$BACKUP_DIR"
@@ -81,11 +113,14 @@ chmod 700 "$BACKUP_DIR"
 ENTRIES="$(grep -c ';' "$BACKUP_DIR/db.contents.txt" || true)"
 [[ "$ENTRIES" -gt 100 ]] || { echo "备份条目数异常（$ENTRIES），停止发布" >&2; exit 1; }
 cp -a .env "$BACKUP_DIR/env"
+# C09: only now (after the pre-release .env is safely backed up) pin the tag this release will run.
+set_env_value YBT_RELEASE_TAG "$TAG"
 cp -a docker-compose.yml docker-compose.server.yml "$BACKUP_DIR/"
 docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' > "$BACKUP_DIR/images.txt"
 # B18/P2: record the identity this release claims, so a later incident review can tell which build
 # produced the dump without guessing from timestamps.
-printf 'release_tag=%s\napp_commit=%s\nbuild_time=%s\n' "$TAG" "$APP_COMMIT" "$BUILD_TIME" > "$BACKUP_DIR/release-identity.txt"
+printf 'release_tag=%s\napp_commit=%s\nbuild_time=%s\nprevious_tag=%s\nprevious_app_commit=%s\nprevious_build_time=%s\n' \
+  "$TAG" "$APP_COMMIT" "$BUILD_TIME" "$PREVIOUS_TAG" "$PREVIOUS_APP_COMMIT" "$PREVIOUS_BUILD_TIME" > "$BACKUP_DIR/release-identity.txt"
 sha256sum "$BACKUP_DIR/db.dump" | tee "$BACKUP_DIR/db.dump.sha256"
 log "备份完成：$BACKUP_DIR（pg_restore 条目 $ENTRIES）"
 
@@ -162,21 +197,35 @@ for ROLE in worker beat; do
   echo "$ROLE 身份：$ROLE_REPORT"
 done
 
+# C09: the gate must check the **actual running components**, not just prove that a few (possibly
+# identically wrong) labels agree with each other. Each published image carries its own identity; if a
+# stale image is still running under the new tag, the labels below would agree while the process is old.
+for IMAGE in "ybt-backend:${TAG}" "ybt-frontend:${TAG}"; do
+  IMAGE_COMMIT="$(docker image inspect "$IMAGE" \
+    --format '{{index .Config.Labels "org.ybt.app.commit"}}' 2>/dev/null || true)"
+  if [[ -z "$IMAGE_COMMIT" ]]; then
+    echo "镜像 $IMAGE 缺少构建身份标签，无法核对本次构建，停止发布" >&2
+    exit 1
+  fi
+  if [[ "$IMAGE_COMMIT" != "$APP_COMMIT" ]]; then
+    echo "镜像 $IMAGE 的身份为 $IMAGE_COMMIT，与本次发布 $APP_COMMIT 不一致，停止发布" >&2
+    exit 1
+  fi
+  echo "$IMAGE 镜像标签身份：$IMAGE_COMMIT"
+done
+
 curl -fsS -o /dev/null -w 'frontend HTTP %{http_code}\n' "http://127.0.0.1:${FRONTEND_HOST_PORT:-3000}/"
 # P2: persist the identity back into .env so a later manual ``docker compose up -d`` (the documented
 # rollback step) keeps reporting the same release instead of silently reverting to ``unknown``.
 # ``sed`` alone would do nothing when the key is absent, so append in that case.
-set_env_value() {
-  local key="$1" value="$2" file=".env"
-  if grep -q "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$file"
-  fi
-}
+# C09: persist the **tag** as well. Without it, the next ``docker compose ... up -d`` (the documented
+# rollback step) would rebuild the identity from .env while compose still selected the image by the
+# old tag, so commit and image could disagree.
 set_env_value APP_COMMIT "$APP_COMMIT"
 set_env_value BUILD_TIME "$BUILD_TIME"
-log "发布完成：${TAG}（commit ${APP_COMMIT}，schema ${REPORTED_SCHEMA}）"
-log "回滚：把 .env 里的 YBT_RELEASE_TAG 改回上一版标签后执行 docker compose -f docker-compose.yml -f docker-compose.server.yml up -d；备份与身份记录见 $BACKUP_DIR"
+set_env_value YBT_RELEASE_TAG "$TAG"
+log "发布完成：${TAG}（commit ${APP_COMMIT}，schema ${REPORTED_SCHEMA}，上一版 ${PREVIOUS_TAG:-无}）"
+# C09: roll back with the helper, which restores the image tag **and** the reported identity together.
+log "回滚：scripts/deploy/rollback-server.sh ${PREVIOUS_TAG:-<上一版标签>}（备份与身份记录见 $BACKUP_DIR）"
 "${COMPOSE[@]}" ps
 exit 0
