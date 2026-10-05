@@ -73,13 +73,26 @@ def _renew_lease(db: Session, job_id: int, *, owner: str, lease_seconds: int = J
     db.commit()
     return renewed == 1
 
+# C05: how the heartbeat handles a *transient* renewal error.
+# A single database blip used to end the thread permanently without signalling lease loss, so the
+# attempt silently stopped renewing: another worker could take over after the lease expired while
+# this attempt still believed it owned the job and later wrote its own outcome.
+# The beat now retries inside a bounded safety window (< lease length) and, if it still cannot
+# renew, reports the loss explicitly instead of exiting quietly.
+HEARTBEAT_RETRY_ATTEMPTS = 3
+HEARTBEAT_RETRY_DELAY_SECONDS = 0.25
 
-def _start_lease_heartbeat(db: Session, job, *, owner: str, lost: threading.Event) -> threading.Event:
-    """BF02/N02: keep the lease alive on a background thread while the handler runs.
 
-    Returns a stop event.  When the renewal fails the attempt no longer owns the job, so the
-    ``lost`` event is set and the caller skips its success write (the successor owns the
-    outcome).  The heartbeat is best-effort: a failing beat must never kill the run itself.
+def _start_lease_heartbeat(db: Session, job_id: int, *, owner: str, lost: threading.Event) -> threading.Event:
+    """BF02/N02 + C05: keep the lease alive on a background thread while the handler runs.
+
+    Returns a stop event.  When renewal fails (or keeps failing after bounded retries) the attempt no
+    longer owns the job, so the ``lost`` event is set and the caller skips its success write (the
+    successor owns the outcome).  A transient error is retried inside the lease safety window; a
+    sustained failure is reported rather than silently ending the heartbeat.
+
+    C05: ``job_id`` is captured at start so the thread never touches a detached ORM instance, and the
+    beat uses its own Session.
     """
 
     stop = threading.Event()
@@ -89,19 +102,34 @@ def _start_lease_heartbeat(db: Session, job, *, owner: str, lost: threading.Even
     except Exception:  # noqa: BLE001 - a session without a usable bind keeps the old behaviour
         return stop
 
-    def loop() -> None:
-        while not stop.wait(interval):
+    def beat_once() -> bool:
+        """One renewal with bounded retries for transient errors.
+
+        Returns True when the lease was renewed. Returns False when the attempt must be treated as
+        lost -- either another owner holds the job, or renewal kept failing.
+        """
+
+        for attempt in range(HEARTBEAT_RETRY_ATTEMPTS):
+            if stop.is_set():
+                return False
             try:
                 with factory() as beat_db:
-                    if not _renew_lease(beat_db, job.id, owner=owner):
-                        lost.set()
-                        return
+                    return _renew_lease(beat_db, job_id, owner=owner)
             except Exception:  # noqa: BLE001 - a failed heartbeat is not a handler failure
+                if attempt + 1 >= HEARTBEAT_RETRY_ATTEMPTS:
+                    return False
+                # Stay inside the lease window: bounded backoff, never longer than one interval.
+                stop.wait(min(HEARTBEAT_RETRY_DELAY_SECONDS * (attempt + 1), interval / 2))
+        return False
+
+    def loop() -> None:
+        while not stop.wait(interval):
+            if not beat_once():
+                lost.set()
                 return
 
     threading.Thread(target=loop, daemon=True).start()
     return stop
-
 
 def _institution_can_run(db: Session, institution_id: int | None) -> bool:
     """B02: background execution must respect the institution-state guard.
@@ -115,6 +143,33 @@ def _institution_can_run(db: Session, institution_id: int | None) -> bool:
     from app.models import Institution
 
     return db.scalar(select(Institution.status).where(Institution.id == institution_id)) == "active"
+
+
+def _record_terminal_state(db: Session, job: BackgroundJob, *, owner: str) -> bool:
+    """C04: write a terminal state only while this attempt still owns the job.
+
+    The claim already proved ownership; this guarded UPDATE closes the remaining window between the
+    claim and the write, so a concurrent consumer (or a takeover after an expired lease) cannot be
+    overwritten by this attempt. Returns False when the fence did not match.
+    """
+
+    written = db.execute(
+        update(BackgroundJob)
+        .where(BackgroundJob.id == job.id, BackgroundJob.lease_owner == owner)
+        .values(
+            status=job.status,
+            progress=job.progress,
+            error_message=job.error_message,
+            finished_at=job.finished_at,
+            lease_owner=None,
+            lease_expires_at=None,
+        )
+        .execution_options(synchronize_session=False)
+    ).rowcount == 1
+    if not written:
+        db.rollback()
+        db.refresh(job)
+    return written
 
 
 def _claim_job(db: Session, job: BackgroundJob, *, owner: str, lease_seconds: int = JOB_LEASE_SECONDS) -> bool:
@@ -193,10 +248,25 @@ class InlineTaskQueue:
         return self._execute(db, job, _resolve_handler(job.job_type, handler))
 
     def _execute(self, db: Session, job: BackgroundJob, handler: JobHandler | None) -> BackgroundJob:
+        # C04: a job that already reached a terminal state must be a pure no-op on re-delivery.
+        # Previously the "handler missing" and "institution inactive" branches wrote failed/cancelled
+        # **before** the atomic claim, so re-consuming a completed job rewrote its history (a completed
+        # job became cancelled/failed and contradicted its own successful result).
+        if job.status not in CLAIMABLE_STATUSES and job.status != "running":
+            return job
         if handler is None:
+            # C04: fence this failure write too. It must not overwrite a terminal job, and only one
+            # concurrent consumer may record it. Claiming first gives us exactly that guarantee.
+            owner = _lease_owner()
+            if not _claim_job(db, job, owner=owner):
+                db.refresh(job)
+                return job
             job.status = "failed"
             job.error_message = "No worker handler is registered for this job type"
+            job.progress = 100
             job.finished_at = datetime.now(UTC)
+            if not _record_terminal_state(db, job, owner=owner):
+                db.rollback()
             db.commit()
             db.refresh(job)
             return job
@@ -205,10 +275,18 @@ class InlineTaskQueue:
         # of writing results for an institution that is no longer active. Jobs without an
         # institution keep their previous behaviour, matching the permission guard's semantics.
         if not _institution_can_run(db, job.institution_id):
+            # C04: same reasoning as the missing-handler branch -- fence the cancellation write so a
+            # re-delivered completed job keeps its successful history.
+            owner = _lease_owner()
+            if not _claim_job(db, job, owner=owner):
+                db.refresh(job)
+                return job
             job.status = "cancelled"
             job.progress = 100
             job.error_message = "机构已停用，作业不予执行"[:2000]
             job.finished_at = datetime.now(UTC)
+            if not _record_terminal_state(db, job, owner=owner):
+                db.rollback()
             db.commit()
             db.refresh(job)
             return job
@@ -222,7 +300,7 @@ class InlineTaskQueue:
         # BF02/N02: keep the lease alive while the handler runs.  If renewal ever fails another
         # attempt has taken over, so this one must not write state or claim success afterwards.
         lease_lost = threading.Event()
-        stop_heartbeat = _start_lease_heartbeat(db, job, owner=owner, lost=lease_lost)
+        stop_heartbeat = _start_lease_heartbeat(db, job.id, owner=owner, lost=lease_lost)
         try:
             result = handler(db, job)
             db.refresh(job)

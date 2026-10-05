@@ -1,5 +1,7 @@
 import hashlib
 import json
+# C03: the attempt queue time is stamped at creation.
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -81,6 +83,8 @@ def create_or_get_job(
         correlation_id=current_request_id(),
         status="queued",
         progress=0,
+        # C03: the attempt's own queue time, used by the compensating dispatcher's grace period.
+        queued_at=datetime.now(UTC),
         payload_summary_json=redact_summary(payload_summary),
         result_summary_json={},
         created_by=created_by,

@@ -54,15 +54,25 @@ class CeleryTaskQueue:
         is never re-sent.  A publish failure is reported and counted instead of aborting the sweep.
         """
 
-        from sqlalchemy import select
+        from sqlalchemy import and_, or_, select
 
+        # C03: the grace period must belong to **this** dispatch attempt. For a fresh enqueue that is
+        # ``created_at``; for a retry the job row is old, so ``queued_at`` is the attempt's own queue
+        # time. Using only ``created_at`` (plus a stale ``dispatched_at``) is exactly what let a
+        # retried, never-published job stay invisible to the sweep forever.
         stale_before = datetime.now(UTC) - timedelta(seconds=self.dispatch_grace_seconds)
+        attempt_queued_before = datetime.now(UTC) - timedelta(
+            seconds=self.retry_dispatch_grace_seconds)
         pending = list(db.scalars(
             select(BackgroundJob)
             .where(
                 BackgroundJob.status == "queued",
                 BackgroundJob.dispatched_at.is_(None),
-                BackgroundJob.created_at < stale_before,
+                or_(
+                    and_(BackgroundJob.queued_at.is_(None),
+                         BackgroundJob.created_at < stale_before),
+                    BackgroundJob.queued_at < attempt_queued_before,
+                ),
             )
             .order_by(BackgroundJob.id)
             .limit(limit)
@@ -89,9 +99,25 @@ class CeleryTaskQueue:
     # N11: a job committed but not yet published is only retried after this grace period, so a
     # publish that is merely slow does not race the compensating dispatcher.
     dispatch_grace_seconds = 60
+    # C03: how long a *freshly queued* attempt may wait before the compensating dispatcher may
+    # re-publish it. The grace period is measured from the attempt's own queue time, not from
+    # ``created_at`` (which for a retry is the original job's creation).
+    retry_dispatch_grace_seconds = 60
+
     def retry(self, db: Session, job: BackgroundJob) -> BackgroundJob:
         if job.status not in {"failed", "partially_completed", "cancelled"}: raise ValueError("Only failed, partially completed or cancelled jobs can be retried")
         if job.retry_count >= job.max_retries: raise ValueError("Maximum retry count reached")
-        job.retry_count+=1;job.status="queued";job.error_message=None;job.finished_at=None;db.commit()
+        # C03: a retry is a **new delivery attempt**. The previous attempt's ``dispatched_at`` and
+        # ``celery_task_id`` describe a message that already ran (and failed), so keeping them would
+        # let the compensating sweep treat the new attempt as already delivered. Clearing them in the
+        # same transaction as the status change makes "this attempt still needs publishing" durable.
+        job.retry_count += 1
+        job.status = "queued"
+        job.error_message = None
+        job.finished_at = None
+        job.dispatched_at = None
+        job.celery_task_id = None
+        job.queued_at = datetime.now(UTC)
+        db.commit()
         self._publish(db, job)
         return job

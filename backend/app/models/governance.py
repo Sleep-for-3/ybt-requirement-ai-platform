@@ -181,6 +181,11 @@ class BackgroundJob(Base, TimestampMixin):
     # database but never published keeps both NULL, so the compensating dispatcher can find it and
     # re-publish instead of leaving the job queued forever.
     dispatched_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), index=True)
+    # C03: when **this delivery attempt** was queued. A retry reuses the same job row, so
+    # ``created_at`` describes the original enqueue; the compensating dispatcher must measure its
+    # grace period from the attempt's own queue time, otherwise a retried-but-never-published job is
+    # permanently invisible to the sweep.
+    queued_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), index=True)
     started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
