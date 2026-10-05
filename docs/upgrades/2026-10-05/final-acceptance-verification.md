@@ -2,10 +2,12 @@
 
 > **本轮为止已完成的验证归集**：
 > - 浏览器验收：**F01–F10 全部 10 项**已在真实浏览器中逐项验证（见 [browser-acceptance.md](browser-acceptance.md)）
-> - 第四阶段业务闭环：**28/28 通过**（readiness 41→0 → 三级审核 → 冻结正式交付 → Word/Excel → 变更复核）
-> - 第五阶段：评测数据集 8/8、备份恢复 7/7、多 worker 10/10
+> - 第五阶段：评测数据集 8/8、备份恢复 7/7、多 worker 10/10（均在当前 HEAD 重跑通过）
+> - 第四阶段业务闭环：**41/41 通过**（readiness 41→0 → 三级审核 → 冻结正式交付 → Word/Excel →
+>   变更复核开启 → Finding 整改重测 → 四角色签署齐全 → 变更复核关闭 `reviewed`）
 
-本轮在**最终 commit**（第四阶段合成工程业务闭环打通后）重新执行完整验收，**不复用历史测试计数**。
+本轮在**最终 commit `2aa7783`**（Finding 整改重测 + 四角色签署 + 变更复核全部闭环后）重新执行完整验收，
+**不复用历史测试计数**。
 历史轮次的计数与过程记录保留在各自的工作包记录中（见 `README.md` 缺陷矩阵与验证索引）。
 
 ## 1. 前端验证（最终 commit）
@@ -53,8 +55,8 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-结果：**1480 passed / 1 skipped / 0 failed**，耗时 1131.06s（0:18:51），`PYTEST_EXIT=0`。
-完整输出：`.local-run/final-regression-4.log`。
+结果：**1480 passed / 1 skipped / 0 failed**，耗时 1385.22s（0:23:05），`PYTEST_EXIT=0`。
+完整输出：`.local-run/final-regression-6.log`。
 
 > 唯一 skipped 是 `test_the_schema_probe_keeps_the_session_usable_after_it_fails` —— 它需显式设置
 > `PHASE4_VERIFY_DATABASE_URL` 才连真实 PostgreSQL（本机隔离库已单独验证过该路径），
@@ -72,7 +74,8 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 | 依赖升级后 | 1479 passed / 0 failed |
 | SEC-1 修复后 | 1481 passed / 0 failed（+2 为 SEC-1 新增回归测试） |
 | 业务闭环完成后 | **1480 passed / 1 skipped / 0 failed**（18:51） |
-| **最终（浏览器验收 10/10 完成后，当前 HEAD）** | **1480 passed / 1 skipped / 0 failed**（17:58） |
+| 浏览器验收 10/10 完成后 | **1480 passed / 1 skipped / 0 failed**（17:58） |
+| **最终（Finding/签署/变更复核补全后，HEAD `2aa7783`）** | **1480 passed / 1 skipped / 0 failed**（23:05） |
 
 > **计数差异说明（不掩盖）**：上两轮的 1481 passed 是因为当时**设置了** `PHASE4_VERIFY_DATABASE_URL`，
 > 那个真实 PostgreSQL 用例会执行并通过；本轮未设该变量，它**主动 skip 并说明原因**。
