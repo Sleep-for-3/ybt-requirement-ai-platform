@@ -1,7 +1,6 @@
-# 第四阶段（第六次更新）：**正式交付 + 变更复核全链跑通** —— 28/28 通过
+# 第四阶段（第七次更新）：**Finding 整改重测 + 四角色签署 + 变更复核全部闭环** —— 41/41 通过
 
-本轮（2026-10-05）在上一轮打通正式交付的基础上，补齐了 W11 第 7 步**变更复核**，
-并修正了一处我自己写错的验收断语。**结果：`{"ok": true, "steps": 28}` / `EXIT=0`**（上轮 24/24）。
+本轮（2026-10-05）补齐了任务书要求但此前未真实走过的三项，**结果：`{"ok": true, "steps": 41}` / `EXIT=0`**（上轮 28/28）。
 
 脚本：`docs/upgrades/2026-10-05/phase4_w11_fixed_input.py`（N13 守卫先于任何 DDL）
 前置：`phase4_synthetic_uat_closed_loop.py` 建立已知状态
@@ -31,7 +30,31 @@
 | `change_impacts_listed` | `200`，`count=1`，检出变更：`script:1 脚本 … 已变化或停用（frozen v1 → current v2）` |
 | **`change_review_opened`** | **201** —— 变更复核开启，`change_hash=13840fa78689335e…` |
 | `change_review_detail` | `recheck_id=1`，`status=pending`，已生成 **1 个复核任务** |
+| **`uat_finding_created`** | **201** —— Finding #2（`data` / `high`，指派技术分析） |
+| **`uat_finding_resolved`** | **200**，`status=resolved` |
+| **`uat_finding_verified`** | **200**，`status=verified` —— **整改重测闭环成立** |
+| **`uat_signoff_chain_completed`** | `project_manager` + `final_acceptance` 均签署成功 |
+| **`uat_signoff_all_four_approved`** | **`[business_owner, final_acceptance, project_manager, technical_owner]`** —— **四角色齐全** |
+| **`change_review_closed`** | **`status=reviewed`**，`replacement_content_version=26` |
 ## 2. 本轮新解决的障碍（均为实证定位）
+
+11. **Finding 需真实失败/缺陷才能建**：`finding_type` 枚举不含 `data_mismatch`（合法值为
+    `functional/data/document/workflow/security/performance/usability/deployment/other`），
+    `severity` 为 `critical/high/medium/low`。我先前两个自造值均被 422 拒绝。
+12. **verify 不是审核人的权限**：`/uat-findings/{id}/verify` 要求 `uat.finding.manage`，
+    审核角色不持有；用 `project_manager` 才得到 200。
+13. **`revise` 返回的是“修订文档”而非需求对象**：`content_version` 嵌在 `revision.content_version` 下
+    （我起初按顶层取，KeyError）。
+14. **重绑依据必须重新预览**：用旧 `preview_hash` 重绑得 409「解析事实与单元数据已变化，请重新预览」。
+15. **顺序不能颠倒**：制度对照会重写 `policy_snapshot`（属 basis），**先确认路径再对照**必然失效；
+    正确顺序是 **对照 → 路径 → 关闭**。
+16. **我造的 v2 脚本一度不可解析**：尾部追加裸注释使解析器报 “No expression was parsed” 并置为
+    `partially_parsed`，导致下游路径确认全部 409。改为扩展 WHERE 谓词（语义等价且可完整解析）。
+    注：生成器输出是 `... IS NOT NULL\nGROUP BY ...;`，所以替换目标必须是**谓词**而不是分号 ——
+    写错会得到与 v1 完全相同的字节，被入库去重，根本没产生漂移。已加 `assert` 防回归。
+17. **变更复核的状态不由 `/resolution` 翻转**：`/resolution` 只绑定替代修订；真正闭需
+    `review_recheck`，它只经**治理工作流任务审批**可达，且**拒绝作者本人** —— 因此必须由
+    另一位用户（技术审核）批准该任务，之后 `status` 才变为 `reviewed`。
 
 9. **变更复核不可凭空开启**：`create_recheck` 会把入参哈希与**服务端** `impact_summary` 比对，
    而 `impact_summary` 仅在 `script_basis_changes` 检出漂移时才返回结果 —— 所以“自己造一个 change_hash”
@@ -54,7 +77,7 @@
    `status == approved` 且 `submission.status == approved`；直接 finalize 会得到 409
    “送审记录尚未通过完整审核”。**修复**：显式走完 3 个审核步骤（业务→技术→终审）。
 
-> 第 1–8 项为前几轮已解决的同类障碍，均为 fixture 必须满足的真实契约，不是产品缺陷。
+> 第 1–10 项为前几轮已解决的同类障碍，均为 fixture 必须满足的真实契约，不是产品缺陷。
 
 ## 3. 正式交付的可核对细节
 
@@ -82,8 +105,9 @@
 4. 本轮未在业务库应用迁移 `202610050001`/`202610050002`；本地后端仍为旧进程。
 
 ## 5. 结论
-第四阶段的**业务闭环已完整跑通**（`{"ok": true, "steps": 28}` / `EXIT=0`）：
+第四阶段的**业务闭环已完整跑通**（`{"ok": true, "steps": 41}` / `EXIT=0`）：
 合成材料 → 6 个角色账号 → 需求与内容版本 → 目录/模板/脚本固定输入 → 脚本依据与路径确认 →
 制度对照 → **readiness 清零** → 提审 → **三级独立审核** → **冻结正式交付** → **导出 Word/Excel** →
-**变更复核开启**（v2 脚本漂移 → 检出变更 → 复核任务生成）。
-唯一剩余的是银行侧真实输入与浏览器逐项验收。
+**变更复核开启** → **Finding 创建/整改/复核** → **四角色 UAT 签署齐全** →
+**变更复核关闭**（`status=reviewed`，替代修订 v26）。
+唯一剩余的是银行侧真实输入与签署人。

@@ -9,10 +9,12 @@
 - [x] 角色矩阵清单（`w11/role-matrix.md`）—— 含角色、账号、时间
 - [x] UAT 套件与轮次：`suite_id` = **1**、`run_id` = **1**、`environment_name` = **isolated-synthetic**
 - [x] 用例规模：自动 **0** 条 / 人工 **1** 条 / 失败 **0** 条；失败均已建 Finding：**无失败**
-- [ ] Finding 全链路闭环（`new → resolved → verified`）：ID ____________ —— **本轮无 Finding，链条未被真实走过**
+- [x] **Finding 全链路闭环（`open/assigned → resolved → verified`）**：`finding_id=2`，最终 `status=verified`
 - [~] UAT 报告（`GET /api/uat-runs/{run_id}/report`，xlsx）—— 页面**提供下载入口**，本轮未归档到固定路径
 - [~] 证据包（`GET /api/uat-runs/{run_id}/evidence-package`，zip）—— 同上，未归档
-- [~] 签署记录（`GET /api/uat-runs/{run_id}/signoffs`）—— **4 个角色只有 2 个已批准**（见 `role-matrix.md` §2）
+- [x] **签署记录**（`GET /api/uat-runs/{run_id}/signoffs`）：**四个角色全部 `approved`**
+      （`business_owner` / `technical_owner` / `project_manager` / `final_acceptance`），
+      且四个签置绑定**同一 `evidence_hash`**
 - [x] 版本一致性：`GET /api/version` 的 `app_commit` / `build_time` / `schema_head` 与部署记录一致
       （`9b5d00c…` / `2026-10-04T13:29:05Z` / `null`，前端横幅主动检出与 HEAD 的差异）
 
@@ -23,8 +25,8 @@
 - [x] 人工审核结论：8 个字段口径逐项核对通过（合成材料「逐项核对通过」）
 - [~] 未采纳/拒绝的候选与理由码：验证了**机制存在**（候选可拒绝、理由码可写），
       但未构造“缺证据/冲突/超出范围/人工修改”四类业务样例
-- [ ] 变更复核：`recheck_id=1` 已开启（`status=pending`，1 个复核任务），
-      **但未走完 `resolved/verified`**，也**未形成新的正式文件版本**
+- [x] **变更复核闭环**：`recheck_id=1` → 替代修订 v26 → `status=**reviewed**`
+      （由**另一位用户**技术审核批准治理任务；作者本人被拒，符合职责分离）
 
 ## 3. 专项评测（须含分母与失败样本）
 
@@ -52,11 +54,11 @@
 | 项 | 结论 |
 | --- | --- |
 | 平台链路（固定输入 → 依据 → 路径 → 制度对照 → readiness 清零 → 提审 → 三级审核 → 冻结交付 → 导出 → 变更复核开启） | ✅ **已跑通**（28/28） |
-| UAT 签署链 | ❌ **不完整**（4 角色仅 2 个已批准） |
-| Finding 整改重测闭环 | ❌ **未被真实走过**（无失败用例） |
-| 变更复核闭环 | ❌ **仅开启未完成** |
+| UAT 签署链 | ✅ **四角色齐全**（均为 `approved`，同一 `evidence_hash`） |
+| Finding 整改重测闭环 | ✅ **已真实走过**（创建 201 → 整改 200 → 复核 200，`verified`） |
+| 变更复核闭环 | ✅ **已完成**（`status=reviewed`，替代修订 v26） |
 | 专项评测 | ❌ **无真值，无法计算** |
-| 银行侧输入与签署人 | ❌ **未提供** |
+| 银行侧输入与签署人 | ❌ **未提供**（本表全部为合成账号/合成材料） |
 
-**因此第六节“W11 验收”整体判定为：不通过（未达成）。** 已达成的是“链路与守卫可用”，
-不是“银行验收通过”。合成数据永远不能替代银行真值与签署。
+**因此“W11 验收”整体仍判定为：不通过（未达成）。** 平台侧链路、职责分离与守卫**已全部跑通**，
+但**银行真值、真实输入、评价阀值与真实签署人仍然缺失** —— 合成数据永远不能替代银行验收。

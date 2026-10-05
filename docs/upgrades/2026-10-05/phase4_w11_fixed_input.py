@@ -626,6 +626,73 @@ def main() -> int:
             step(f"frozen_formal_export_{fmt}", ok=exported.status_code == 200 and bool(header),
                  status=exported.status_code, bytes=len(exported.content),
                  snapshot_hash=header[:16])
+        # ---- 7. UAT: finding remediation loop + the two remaining signoffs --------------------
+        # The task book requires "Finding 整改重测" and a complete four-role signoff chain. Both were
+        # previously unexercised (no failing case, only two signoffs), so this section creates a real
+        # finding on the passed run, drives it open -> resolved -> verified, then signs off the two
+        # remaining roles to leave the chain complete.
+        uat_finding: dict[str, object] = {"created": False}
+        run_id = 1
+        finding_created = call("project_manager", "POST", f"/api/uat-runs/{run_id}/findings",
+                               json_body={"finding_type": "data", "severity": "high",
+                                          "title": "合成验收 Finding：口径映射待复核",
+                                          "description": "合成材料：LOAN_BAL 汇总口径与制度条款需人工复核后重测。",
+                                          "assigned_role": "technical_analyst"})
+        step("uat_finding_created", ok=finding_created.status_code == 201,
+             status=finding_created.status_code, body=finding_created.text[:200])
+        if finding_created.status_code == 201:
+            finding_id = int(finding_created.json()["id"])
+            uat_finding["created"] = True
+            uat_finding["finding_id"] = finding_id
+            uat_finding["finding_no"] = finding_created.json().get("finding_no")
+            uat_finding["status_after_create"] = finding_created.json().get("status")
+
+            resolved = call("technical_analyst", "POST",
+                            f"/api/uat-findings/{finding_id}/resolve",
+                            json_body={"resolution_text": "合成验收：已修正映射并重跑用例，结果为通过。"})
+            step("uat_finding_resolved", ok=resolved.status_code == 200,
+                 status=resolved.status_code,
+                 finding_status=(resolved.json() or {}).get("status") if resolved.status_code == 200 else None)
+            if resolved.status_code == 200:
+                uat_finding["status_after_resolve"] = resolved.json().get("status")
+
+            # ``/verify`` requires ``uat.finding.manage``, which the reviewer roles do not hold; the
+            # project manager owns the finding lifecycle, so verification is done by that account.
+            verified = call("project_manager", "POST",
+                            f"/api/uat-findings/{finding_id}/verify",
+                            json_body={"verification_comment": "合成验收：整改已复核，证据与结论一致。"})
+            step("uat_finding_verified", ok=verified.status_code == 200,
+                 status=verified.status_code,
+                 finding_status=(verified.json() or {}).get("status") if verified.status_code == 200 else None)
+            if verified.status_code == 200:
+                uat_finding["status_after_verify"] = verified.json().get("status")
+                uat_finding["closed"] = verified.json().get("status") == "verified"
+
+            listed = call("project_manager", "GET", f"/api/uat-runs/{run_id}/findings")
+            uat_finding["run_finding_count"] = len(listed.json()) if listed.status_code == 200 else None
+
+        # complete the four-role signoff chain (business/technical already signed)
+        remaining_signoffs = ["project_manager", "final_acceptance"]
+        signed_roles: list[str] = []
+        for role in remaining_signoffs:
+            actor = "project_manager" if role == "project_manager" else "final_reviewer"
+            signed = call(actor, "POST", f"/api/uat-runs/{run_id}/signoff",
+                          json_body={"signoff_role": role, "signoff_status": "approved",
+                                     "comment": f"合成验收：{role} 已复核并通过。"})
+            if signed.status_code in (200, 201):
+                signed_roles.append(role)
+            else:
+                step("uat_signoff_failed", ok=False, role=role, status=signed.status_code,
+                     body=signed.text[:200])
+        step("uat_signoff_chain_completed", ok=len(signed_roles) == 2, signed=signed_roles)
+
+        signoffs = call("project_manager", "GET", f"/api/uat-runs/{run_id}/signoffs")
+        rows = signoffs.json() if signoffs.status_code == 200 else []
+        approved = sorted(str(row.get("signoff_role")) for row in rows
+                          if row.get("signoff_status") == "approved")
+        expected = sorted(["business_owner", "technical_owner", "project_manager", "final_acceptance"])
+        step("uat_signoff_all_four_approved", ok=approved == expected, approved=approved)
+
         step("formal_export_identities_agree",
              ok=bool(export_headers.get("xlsx")) and export_headers.get("xlsx") == export_headers.get("docx"),
              xlsx=(export_headers.get("xlsx") or "")[:16],
@@ -643,12 +710,28 @@ def main() -> int:
             from app.services.storage import get_storage_service as _storage
 
             service = _Ingest(db, _storage())
-            # A new comment line is enough for the parser to record a different version, so the basis
-            # drifts without changing the transformation the operator already confirmed.
-            v2_text = build_synthetic_script(field_codes) + "-- synthetic v2: 新增注释以触发变更复核\n"
+            # v2 must stay a **fully parseable** script: appending a bare SQL comment after the last
+            # statement makes the parser report "No expression was parsed" for a trailing statement and
+            # marks the file ``partially_parsed``, which then blocks every downstream path confirmation.
+            # A semantically equivalent rewrite (explicit alias in the projection) drifts the parsed
+            # facts without breaking the parse.
+            _v1 = build_synthetic_script(field_codes)
+            # Append an extra predicate to the WHERE clause: a syntactically valid, fully parseable
+            # change that still produces a new script version (which is what the drift check reads).
+            # The generator emits "... IS NOT NULL\nGROUP BY ...;", so the predicate (not the statement
+            # terminator) is what must be extended. Getting this wrong makes v2 byte-identical to v1,
+            # which the ingester dedupes -- leaving no drift and no change review at all.
+            assert " IS NOT NULL\n" in _v1, "v2 drift target missing; the generator changed"
+            v2_text = _v1.replace(" IS NOT NULL\n", " IS NOT NULL AND 1 = 1\n", 1)
             try:
+                # ``ingest`` keys a version by (script_file, file_hash) and bumps ``current_version_no``
+                # in place, so re-uploading through the same relative_path does not create the second
+                # version the drift check needs. A distinct path produces a genuine new version.
                 revised = service.ingest(project=project, data=v2_text.encode("utf-8"),
                                          file_name="synthetic_loan.sql",
+                                         # Same path on purpose: ``script_basis_changes`` detects drift by
+                                         # comparing the frozen version_no with ``ScriptFile.current_version_no``,
+                                         # so the new version must belong to the frozen script file.
                                          relative_path="synthetic/synthetic_loan.sql",
                                          dialect="postgres", actor_user_id=None,
                                          change_note="W11 synthetic script v2 (change review trigger)")
@@ -684,8 +767,138 @@ def main() -> int:
                 step("change_review_detail", ok=True, recheck_id=int(review["id"]),
                      status=review.get("status"), task_count=len(review.get("tasks") or []),
                      change_hash=str(mine["change_hash"])[:16])
+                # Closing a recheck is a real workflow, not a single call: ``replacement_revision``
+                # requires a revision **newer than the frozen one** whose basis, paths and policy
+                # comparison are all already clean and whose gaps are empty. So the replacement must
+                # be built and re-verified first:
+                #   revise (business.edit) -> script-basis on v2 -> paths -> policy comparison -> resolution.
+                revised = call("business_analyst", "POST",
+                               f"/api/projects/{project_id}/requirements/{requirement_id}"
+                               f"/rechecks/{int(review['id'])}/revise",
+                               json_body={"reason": "合成验收：按 v2 脚本建立替代修订。",
+                                          "expected_content_version": content_version})
+                step("change_review_revised", ok=revised.status_code == 201,
+                     status=revised.status_code, body=revised.text[:200])
+                if revised.status_code == 201:
+                    # ``revise`` returns a **revision document** (``revision_document``), so the version
+                    # lives under ``revision.content_version`` -- not at the top level.
+                    content_version = int(revised.json()["revision"]["content_version"])
+
+                    # The replacement revision needs its **own** preview hash: rebinding against the
+                    # previously confirmed preview fails with "解析事实与单元数据已变化，请重新预览".
+                    with factory() as db:
+                        from app.services.requirement_script_basis import script_preview as _preview
+                        fresh = _preview(db, project_id, [v2_id])
+                        fresh_preview_hash = fresh["preview_hash"]
+                        fresh_target_key = fresh["targets"][0]["key"] if fresh["targets"] else target_key
+                        fresh_fields = list(db.scalars(select(TargetField).where(
+                            TargetField.project_id == project_id).order_by(TargetField.id)).all())
+                        fresh_bindings = {column: int(fresh_fields[index].id)
+                                          for index, column in enumerate(fresh["targets"][0]["columns"])
+                                          if fresh["targets"] and index < len(fresh_fields)}
+                    step("change_review_fresh_preview", ok=bool(fresh_target_key),
+                         preview_hash=fresh_preview_hash[:16], bindings=len(fresh_bindings))
+                    relinked = call("technical_analyst", "POST",
+                                    f"/api/projects/{project_id}/requirements/{requirement_id}/script-basis",
+                                    json_body={"script_version_ids": [v2_id],
+                                               "expected_content_version": content_version,
+                                               "preview_hash": fresh_preview_hash,
+                                               "template_version_id": int(template.id),
+                                               "target_key": fresh_target_key,
+                                               "field_bindings": fresh_bindings})
+                    step("change_review_basis_rebound", ok=relinked.status_code == 201,
+                         status=relinked.status_code, body=relinked.text[:200])
+                    if relinked.status_code != 201:
+                        content_version = int(revised.json()["content_version"])
+                    else:
+                        content_version = int(relinked.json()["revision"]["content_version"])
+
+                        # Order matters and mirrors the proven main flow: the policy comparison rewrites
+                        # ``policy_snapshot`` (part of the basis), which invalidates any path confirmation
+                        # made before it. So: comparison first, then paths, then resolution.
+                        with factory() as db:
+
+                            from app.services.requirement_policy_comparison import basis_hash as _bh
+                            from app.services.requirement_revisions import load_revision as _load
+                            _rev = _load(db, project_id, requirement_id, content_version)
+                            _basis = (_rev.content_json or {}).get("script_basis") or {}
+                            _rules = [r["rule_id"] for r in _basis.get("rules", [])]
+                            _units = [u["unit_id"] for u in
+                                      (_basis.get("policy_snapshot", {}) or {}).get("evidence", [])
+                                      if u.get("source_category") in {"regulatory_formal", "regulatory_qa",
+                                                                       "internal_policy"}]
+                            _hash = _bh(_basis)
+                        if _units and _rules:
+                            recmp = call("technical_analyst", "POST",
+                                         f"/api/projects/{project_id}/requirements/{requirement_id}"
+                                         f"/policy-comparison",
+                                         json_body={"expected_content_version": content_version,
+                                                    "basis_hash": _hash,
+                                                    "decisions": [{"unit_id": _units[0], "rule_ids": _rules,
+                                                                   "status": "matched",
+                                                                   "rationale": "合成验收：替代修订逐条复核一致。",
+                                                                   "difference": ""}]})
+                            if recmp.status_code == 201:
+                                content_version = int(recmp.json()["revision"]["content_version"])
+                            step("change_review_comparison_redone", ok=recmp.status_code == 201,
+                                 status=recmp.status_code)
+
+                        # paths are confirmed **after** the comparison, on the current basis
+                        rpreview = call("technical_analyst", "GET",
+                                        f"/api/projects/{project_id}/requirements/{requirement_id}"
+                                        f"/paths?content_version={content_version}")
+                        if rpreview.status_code == 200:
+                            rconfirm = call("technical_analyst", "POST",
+                                            f"/api/projects/{project_id}/requirements/{requirement_id}/paths",
+                                            json_body={"expected_content_version": content_version,
+                                                       "preview_hash": rpreview.json()["preview_hash"],
+                                                       "rationale": "合成验收：替代修订重新确认加工路径。"})
+                            if rconfirm.status_code == 201:
+                                content_version = int(rconfirm.json()["revision"]["content_version"])
+                            step("change_review_paths_reconfirmed", ok=rconfirm.status_code == 201,
+                                 status=rconfirm.status_code, body=rconfirm.text[:200])
+
+                        # Step 1: ``/resolution`` binds the replacement revision and writes the rationale.
+                        resolution = call("technical_analyst", "POST",
+                                          f"/api/projects/{project_id}/requirements/{requirement_id}"
+                                          f"/rechecks/{int(review['id'])}/resolution",
+                                          json_body={"reason": "合成验收：替代修订已重新核验，关闭复核。",
+                                                     "expected_content_version": content_version})
+                        step("change_review_resolution", ok=resolution.status_code in (200, 201),
+                             status=resolution.status_code, body=resolution.text[:250])
+
+                        # Step 2: the resolution call binds the replacement revision but does **not** flip the
+                        # status. ``review_recheck`` (reachable only through the governance workflow) does,
+                        # and it refuses the author, so a different user must approve the change-review task.
+                        with factory() as db:
+                            from app.models import ReviewTask as _Task
+                            task = db.scalar(select(_Task).where(
+                                _Task.project_id == project_id,
+                                _Task.target_type == "requirement_recheck",
+                                _Task.target_id == int(review["id"])).order_by(_Task.id))
+                            change_task_id = int(task.id) if task is not None else None
+                        if change_task_id is not None:
+                            approved_change = call("technical_reviewer", "POST",
+                                                   f"/api/review-tasks/{change_task_id}/approve",
+                                                   json_body={"comment": "合成验收：替代修订已独立复核通过。"})
+                            step("change_review_approved", ok=approved_change.status_code in (200, 201),
+                                 status=approved_change.status_code, body=approved_change.text[:200],
+                                 task_id=change_task_id)
+
+                        finals = call("project_manager", "GET",
+                                      f"/api/projects/{project_id}/requirements/{requirement_id}/rechecks")
+                        rows_final = finals.json() if finals.status_code == 200 else []
+                        final_status = next((row.get("status") for row in rows_final
+                                             if int(row.get("id", 0)) == int(review["id"])), None)
+                        replacement = next((row.get("replacement_content_version") for row in rows_final
+                                            if int(row.get("id", 0)) == int(review["id"])), None)
+                        uat_finding["recheck_status"] = final_status
+                        uat_finding["replacement_content_version"] = replacement
+                        step("change_review_closed", ok=final_status == "reviewed",
+                             recheck_status=final_status, replacement_content_version=replacement)
 
     report = {
+        "uat_finding": uat_finding,
         "ok": all(item.get("ok") for item in steps),
         "disclaimer": "工程验收（合成脚本 + 目录元数据 + 隔离库）；不代表银行真实脚本或真实目录。",
         "acceptance_preconditions_not_met": [

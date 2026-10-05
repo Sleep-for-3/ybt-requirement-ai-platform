@@ -21,16 +21,16 @@
 | --- | --- | --- | --- | --- |
 | `business_owner` | business_reviewer / project_manager | 合成-业务审核（user 3） | 2026-10-05 | `193f0e7afe228150…`（**已批准**） |
 | `technical_owner` | technical_reviewer / project_manager | 合成-技术审核（user 7） | 2026-10-05 | `193f0e7afe228150…`（**已批准**） |
-| `project_manager` | project_manager | — | — | **未签署** |
-| `final_acceptance` | final_reviewer / project_manager | — | — | **未签署** |
+| `project_manager` | project_manager | 合成-项目经理（user 6） | 2026-10-05 | `193f0e7afe228150…`（**已批准**） |
+| `final_acceptance` | final_reviewer / project_manager | 合成-终审（user 4） | 2026-10-05 | `193f0e7afe228150…`（**已批准**） |
 
 **两个角色签署绑定同一 `evidence_hash`**，与轮次 `manifest_json` 冻结的发布身份一致 —— 这正是 N05
 （签署与冻结证据一致性）要保证的：签署不是对“当时的页面”负责，而是对某个确定证据快照负责。
 
 ### ⚠ 未达成（不得当作通过）
 
-- **4 个签署角色只完成 2 个**（`business_owner`、`technical_owner`）；`project_manager` 与
-  `final_acceptance` 未签署。轮次 1 状态为 `passed`，但签署链**不完整**。
+- **四个签署角色已全部批准**（`business_owner`/`technical_owner`/`project_manager`/`final_acceptance`），
+  且均绑定同一 `evidence_hash`。
 - 银行侧尚**未指定**签署人；本表账号为合成验收账号。
 
 ## 3. 每个 UAT 轮次绑定（缺失任一项视为无效）
