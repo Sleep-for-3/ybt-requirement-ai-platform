@@ -10,16 +10,29 @@
 
 export const LINKABLE_REF_TYPES = Object.freeze(["requirement", "target_field", "agent_task"]);
 
-export function artifactRefHref(refType, refId, projectId) {
+export function artifactRefHref(refType, refId, projectId, context) {
   const type = String(refType || "");
   const id = Number(refId);
   if (!Number.isSafeInteger(id) || id <= 0) return null;
   if (type === "requirement") {
-    const query = projectId ? `projectId=${projectId}&requirementId=${id}` : `requirementId=${id}`;
-    return `/workspace?${query}`;
+    // F07: the workspace also restores tableId/scenarioId from the URL, so a requirement reference
+    // opens on the same table/scenario it belongs to instead of dropping the operator on a bare
+    // workspace that may default to a different one.
+    const parts = [];
+    if (projectId) parts.push(`projectId=${projectId}`);
+    parts.push(`requirementId=${id}`);
+    const tableId = Number(context?.tableId);
+    const scenarioId = Number(context?.scenarioId);
+    if (Number.isSafeInteger(tableId) && tableId > 0) parts.push(`tableId=${tableId}`);
+    if (Number.isSafeInteger(scenarioId) && scenarioId > 0) parts.push(`scenarioId=${scenarioId}`);
+    return `/workspace?${parts.join("&")}`;
   }
   if (type === "target_field") return `/fields/${id}`;
-  if (type === "agent_task") return `/agent`;
+  // F07: an agent-task reference must re-open that task. The page reads ``taskId`` and falls back to
+  // the newest task, so without the parameter the link silently showed a different task.
+  if (type === "agent_task") {
+    return projectId ? `/agent?projectId=${projectId}&taskId=${id}` : `/agent?taskId=${id}`;
+  }
   return null;
 }
 
@@ -45,6 +58,6 @@ export function artifactCompleteness(artifact) {
     truncated: text.length > 400,
     evidenceCount: Array.isArray(artifact?.evidence_refs) ? artifact.evidence_refs.length : 0,
     executionType: artifact?.artifact_type ? String(artifact.artifact_type) : null,
-    linkable: artifactRefHref(artifact?.ref_type, artifact?.ref_id, artifact?.project_id) !== null,
+    linkable: artifactRefHref(artifact?.ref_type, artifact?.ref_id, artifact?.project_id, artifact?.ref_context) !== null,
   };
 }

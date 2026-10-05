@@ -14,11 +14,23 @@ import {
 test("需求修订链接到工作区并保留项目上下文", () => {
   assert.equal(artifactRefHref("requirement", 42, 7), "/workspace?projectId=7&requirementId=42");
   assert.equal(artifactRefHref("requirement", 42), "/workspace?requirementId=42");
+  // F07: when the artifact knows its table/scenario, the link carries them so the workspace opens on
+  // the same table and scenario instead of defaulting to another one.
+  assert.equal(
+    artifactRefHref("requirement", 42, 7, { tableId: 3, scenarioId: 9 }),
+    "/workspace?projectId=7&requirementId=42&tableId=3&scenarioId=9",
+  );
+  assert.equal(
+    artifactRefHref("requirement", 42, null, { tableId: 3, scenarioId: 0 }),
+    "/workspace?requirementId=42&tableId=3",
+  );
 });
 
 test("目标字段与智能体任务链接到真实页面", () => {
   assert.equal(artifactRefHref("target_field", 15), "/fields/15");
-  assert.equal(artifactRefHref("agent_task", 99), "/agent");
+  // F07: the task link must re-open that task rather than the newest one.
+  assert.equal(artifactRefHref("agent_task", 99, 7), "/agent?projectId=7&taskId=99");
+  assert.equal(artifactRefHref("agent_task", 99), "/agent?taskId=99");
 });
 
 test("无法确定映射的类型不生成链接（宁可不链也不拼错）", () => {

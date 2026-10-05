@@ -26,7 +26,7 @@
 | F06 | P2 | last-success 数据只提示不渲染 | **已修复**（失败时真正回退渲染 + 只读 + 标注所属内容版本） | [F06-F08-F09-cache-uat-metrics.md](F06-F08-F09-cache-uat-metrics.md) |
 | F08 | P1 | UAT 建轮次硬编码 `uat`/null 版本 | **已修复**（自动绑定 `/version` 的 commit+schema，环境可填） | 同上 |
 | F09 | P1 | 指标 UI 不读服务端 labels/notes | **已修复**（服务端标签优先 + notes + 类型补齐） | 同上 |
-| F07 | P2 | 引用链接不定位到真实对象 | 待实施 | — |
+| F07 | P2 | 引用链接不定位到真实对象 | **已修复**（需求带 tableId/scenarioId；任务链接恢复 `taskId` 且页面读取）；后端 `ref_context` 待核 | [F07-artifact-reference-targeting.md](F07-artifact-reference-targeting.md) |
 | N12 | 中高 | 备份缺关键项仍 `ok=true`/exit 0，逐文件 SHA 与配置/向量副本缺失 | 待实施 | — |
 
 ## 已完成工作包

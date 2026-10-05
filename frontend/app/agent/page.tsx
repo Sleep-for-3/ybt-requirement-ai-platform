@@ -94,7 +94,13 @@ export default function AgentWorkspacePage() {
   const { projectId } = useProjectWorkspace();
   const queryClient = useQueryClient();
   const [objective, setObjective] = useState("");
-  const [pickedTaskId, setPickedTaskId] = useState<number | null>(null);
+  // F07: honour ``?taskId=`` so an artifact reference link opens the task it points at, instead of
+  // always falling back to the newest task in the list.
+  const [pickedTaskId, setPickedTaskId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const requested = Number(new URLSearchParams(window.location.search).get("taskId"));
+    return Number.isSafeInteger(requested) && requested > 0 ? requested : null;
+  });
   const [notice, setNotice] = useState("");
 
   const tools = useQuery({
@@ -595,7 +601,8 @@ function ArtifactPanel({ artifacts, projectId }: { artifacts: AgentSnapshot["art
       {rows.length ? (
         <div className="grid gap-3 sm:grid-cols-2">
           {rows.map((artifact) => {
-            const href = artifactRefHref(artifact.ref_type, artifact.ref_id, projectId);
+            const href = artifactRefHref(artifact.ref_type, artifact.ref_id, projectId,
+              (artifact as { ref_context?: { tableId?: number; scenarioId?: number } }).ref_context);
             return (
             <div className={`${CARD} text-sm`} key={artifact.id}>
               <div className={CHIP}>
