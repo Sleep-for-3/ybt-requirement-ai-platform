@@ -77,15 +77,15 @@ def main() -> int:
     set_cjk(run)
     sub = document.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = sub.add_run("分支 dsh/banking-semantic-agent-v2　·　最终提交 dd301f6　·　工程验收（合成材料 / 隔离环境）")
+    r = sub.add_run("分支 dsh/banking-semantic-agent-v2　·　最终提交 f79f7f0　·　工程验收（合成材料 / 隔离环境）")
     r.font.size = Pt(10)
     set_cjk(r)
 
     heading(document, "一、结论摘要", 1)
     para(document, "本轮按《复核与下一步开发计划-2026-10-05》与《下一轮开发提示词-2026-10-05》推进五个阶段，"
                    "共 22 个独立提交。第一阶段全部关闭；第三、五阶段验证通过；第二阶段代码全部修复；"
-                   "第四阶段合成工程业务闭环 28/28 跑通；F01–F10 全部 10 项已完成真实浏览器验收；"
-                   "银行侧真实输入仍待提供，已如实列出。")
+                   "第四阶段合成工程业务闭环 41/41 跑通（含 Finding 整改重测、四角色签署、变更复核）；"
+                   "F01–F10 全部 10 项已完成真实浏览器验收；银行侧真实输入仍待提供，已如实列出。")
     table(document, ["检查项", "结果"], [
         ["后端全量回归（最终）", "1480 passed / 1 skipped / 0 failed"],
         ["前端单元测试", "253 passed / 0 failed"],
@@ -93,7 +93,7 @@ def main() -> int:
         ["前端生产依赖审计", "0 漏洞"],
         ["后端依赖 OSV 扫描（96 pin）", "0 公告"],
         ["bandit 静态分析（68,877 行）", "HIGH 0；与已定性扫描 STABLE（0 新增）"],
-        ["合成工程业务闭环", "28/28 通过（readiness 清零 → 三级审核 → 冻结交付 → Word/Excel → 变更复核）"],
+        ["合成工程业务闭环", "41/41 通过（readiness 清零 → 三级审核 → 冻结交付 → Word/Excel → Finding 整改重测 → 四角色签署 → 变更复核关闭）"],
         ["真实浏览器验收", "F01–F10 共 10/10 项（隔离栈；未做像素级视觉检查）"],
     ])
 
@@ -129,7 +129,7 @@ def main() -> int:
         ["2", "前端 F01–F10 人工编辑与集成", "✅ 10/10 项已真实浏览器验收（隔离栈 + 合成数据）"],
         ["3", "发布固化 P1–P4（lock/SBOM、发布身份、备份、失败退出）", "已在真实 Linux 容器验证"],
         ["4", "合成工程 UAT 闭环（8 字段/2 源表/1 集市/1 目标表、独立角色、Finding、签署、冻结）",
-         "业务闭环 28/28 跑通（readiness 41→0；三级审核；冻结交付；Word/Excel 快照 hash 一致；变更复核）"],
+         "业务闭环 41/41 跑通（readiness 41→0；三级审核；冻结交付；Word/Excel 快照 hash 一致；Finding 整改重测；四角色签署；变更复核关闭 reviewed）"],
         ["5", "评测数据集、备份恢复、多 worker 与容量基线", "三项均验证通过"],
     ])
 
