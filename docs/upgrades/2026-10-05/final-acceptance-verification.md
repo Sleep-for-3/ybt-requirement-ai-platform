@@ -83,7 +83,9 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 ## 6. 未达成 / 待验收条件（不得当作通过）
 
 1. **Python 源码静态分析只覆盖 `app/`**；`tests/`、`alembic/`、脚本目录未扫描。
-2. **容器镜像层扫描未做**（trivy/grype 未安装）。
+2. **容器镜像层扫描未做**：Docker 可用且 `aquasec/trivy` 已拉取，但 **WSL 内 DNS 无法解析外部域名**
+   （`lookup mirror.gcr.io on 10.255.255.254:53: no such host`），漏洞库下载失败；Windows 侧下载发布包 404/403。
+   **已实际尝试并失败，未降级为“已扫描”**。
 3. **`npm audit` 只覆盖生产依赖**（`--omit=dev`）；devDependencies 未纳入结论。
 4. **未在 CI（Linux runner）执行**以上任一检查；本结论基于 Windows 本机环境。
 5. **未做渗透测试或运行时 DAST**；SEC-1 是"静态告警 + 针对性可达性实证"，不是全面安全评估。
