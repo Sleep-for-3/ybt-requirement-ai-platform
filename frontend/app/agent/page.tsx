@@ -207,9 +207,12 @@ export default function AgentWorkspacePage() {
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {Object.entries(metrics.data.metrics || {}).map(([key, value]) => (
                 <div className="stat-card" key={key}>
-                  <div className="stat-label">{METRIC_LABELS[key] || key}</div>
+                  {/* F09: prefer the server-provided label/notes so the UI cannot drift from the metric
+                      definition, and so a proxy metric is not presented as a business accuracy rate. */}
+                  <div className="stat-label">{metrics.data?.metric_labels?.[key] || METRIC_LABELS[key] || key}</div>
                   <div className="stat-value">{formatMetric(value)}</div>
                   <div className="mt-1 text-[11px] text-slate-400">分母 {formatMetric(metrics.data?.denominators?.[key] ?? null)}</div>
+                  {metrics.data?.metric_notes?.[key] ? <div className="mt-1 text-[11px] text-slate-500">{metrics.data.metric_notes[key]}</div> : null}
                 </div>
               ))}
             </div>

@@ -23,7 +23,10 @@
 | F03 | P1 | 需求进度读共享整表而非当前需求范围 | **已修复**（按当前需求 records 计算 + 口径标注）；真实交互待测 | [F03-F04-progress-and-scope.md](F03-F04-progress-and-scope.md) |
 | F04 | P1 | 历史范围只开不关、切模式不清 override、按钮判 `fieldIds` | **已修复**（精确还原 + 清除 override + `effectiveFieldIds` + 提交预览） | 同上 |
 | F02 | P1 | Skill 未接入全局 dirty；草稿 helper 无产品调用 | **已修复**（共享登记 + localStorage 草稿恢复/丢弃 + 基线版本提示）；浏览器待测 | [F02-global-dirty-and-draft-recovery.md](F02-global-dirty-and-draft-recovery.md) |
-| F06–F09 | P2 | 错误缓存、引用定位、UAT 版本绑定、指标解释 | 待实施 | — |
+| F06 | P2 | last-success 数据只提示不渲染 | **已修复**（失败时真正回退渲染 + 只读 + 标注所属内容版本） | [F06-F08-F09-cache-uat-metrics.md](F06-F08-F09-cache-uat-metrics.md) |
+| F08 | P1 | UAT 建轮次硬编码 `uat`/null 版本 | **已修复**（自动绑定 `/version` 的 commit+schema，环境可填） | 同上 |
+| F09 | P1 | 指标 UI 不读服务端 labels/notes | **已修复**（服务端标签优先 + notes + 类型补齐） | 同上 |
+| F07 | P2 | 引用链接不定位到真实对象 | 待实施 | — |
 | N12 | 中高 | 备份缺关键项仍 `ok=true`/exit 0，逐文件 SHA 与配置/向量副本缺失 | 待实施 | — |
 
 ## 已完成工作包

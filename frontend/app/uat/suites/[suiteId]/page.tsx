@@ -17,7 +17,15 @@ export default function SuitePage() {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [review,setReview]=useState<{status:string;content_version:number;content_hash:string;pending_review:boolean;issue:string|null;tasks:{id:number;step_key:string;status:string}[]}|null>(null);
+  // F08: the run must record the *actual* release it was executed against, not a hard-coded "uat"
+  // with null version/commit. The identity is read from the live API (the same endpoint the release
+  // banner uses) and shown before the operator confirms.
+  const [release,setRelease]=useState<{app_commit:string;build_time:string;schema_head:string|null}|null>(null);
+  const [environment,setEnvironment]=useState("isolated");
   const [reviewBusy,setReviewBusy]=useState(false);
+  useEffect(() => {
+    apiGet<{app_commit:string;build_time:string;schema_head:string|null}>(`/version`).then(setRelease).catch(() => setRelease(null));
+  }, []);
   const permissions = useProjectPermissions(suite?.project_id);
 
   useEffect(() => {
@@ -37,9 +45,9 @@ export default function SuitePage() {
     try {
       const run = await apiPost<UatRun>(`/uat-suites/${suite.id}/runs`, {
         run_name: name.trim() || `${suite.suite_name} 验收轮次`,
-        environment_name: "uat",
-        application_version: null,
-        git_commit_sha: null
+        environment_name: environment.trim() || "isolated",
+        application_version: release?.schema_head ? `schema:${release.schema_head}` : null,
+        git_commit_sha: release?.app_commit && release.app_commit !== "unknown" ? release.app_commit : null
       });
       router.push(`/uat/runs/${run.id}`);
     } catch (reason) {
@@ -77,6 +85,10 @@ export default function SuitePage() {
         {suite && permissions.can("uat.execute") ? (
           <section className="panel flex flex-wrap gap-3 p-4">
             <input className="control min-w-64 flex-1" value={name} onChange={event => setName(event.target.value)} placeholder="本轮 UAT 名称" />
+            {/* F08: the operator names the environment; the release identity is captured automatically so
+                a run can never claim a blank app version while the page held the real one. */}
+            <input aria-label="执行环境" className="control w-48" value={environment} onChange={event => setEnvironment(event.target.value)} placeholder="执行环境" />
+            <p className="w-full text-xs text-slate-500">{release ? `将绑定发布标识 commit ${release.app_commit} · 构建 ${release.build_time} · schema ${release.schema_head ?? "未知"}` : "未读取到发布标识：本轮次将不绑定 commit，请核对后端 /api/version。"}</p>
             <button className="button-primary" disabled={suite.suite_type==="requirement_rules"&&(!review||review.status!=="approved"||review.pending_review)} onClick={createRun}>
               <Play size={15} />
               创建执行轮次

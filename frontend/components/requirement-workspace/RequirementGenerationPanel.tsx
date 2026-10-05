@@ -59,10 +59,17 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   // W07: previous rounds stay reachable; the displayed round is explicit and read-only when it is
   // not the current content version.
   const [selectedRunId,setSelectedRunId]=useState<number|null>(null);
-  const rounds=selectableRounds(runs.data);
-  const roundSelection=resolveRound(runs.data,selectedRunId,contentVersion);
+  // F06: when the current query key fails, the last successful payload is rendered instead of only
+  // being mentioned in a hint. It is explicitly labelled with the requirement/version it belongs to
+  // and is read-only, so a stale cross-version payload can never be mistaken for current data.
+  const runsFailed=runs.isError&&!runs.isPending;
+  const fallbackRounds=runsFailed&&lastRuns?selectableRounds(lastRuns.data):[];
+  const usingFallback=runsFailed&&fallbackRounds.length>0;
+  const displayedRuns=usingFallback?lastRuns!.data:runs.data;
+  const rounds=selectableRounds(displayedRuns);
+  const roundSelection=usingFallback?{run:fallbackRounds[0],adoptable:false,historical:true}:resolveRound(displayedRuns,selectedRunId,contentVersion);
   const currentRun=roundSelection?.run||null;
-  const roundAdoptable=Boolean(roundSelection?.adoptable);
+  const roundAdoptable=Boolean(roundSelection?.adoptable)&&!usingFallback;
   const candidate=useQuery({queryKey:["requirement-candidate",projectId,requirementId,candidateId],enabled:Boolean(candidateId),
     queryFn:({signal})=>apiGet<Candidate>(`${base}/generation-items/${candidateId}`,{signal})});
   const fieldMap=useMemo(()=>new Map(fields.map(field=>[field.id,field])),[fields]);
@@ -174,7 +181,7 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
       {!visibleItems.length?<p className="mt-2 text-xs text-slate-500">当前状态下没有候选。</p>:null}
       {Object.keys(basket).length?<><button className="button-primary mt-2 w-full" disabled={busy||dirty||!roundAdoptable} onClick={()=>void adoptBasket()} type="button"><Check size={14}/>应用采用清单（{Object.keys(basket).length}）</button>{dirty?<p className="mt-2 text-xs text-amber-700">请先保存当前人工编辑，再采用候选。</p>:null}{!roundAdoptable?<p className="mt-2 text-xs text-amber-700">当前查看的是历史轮次，只能查看或拒绝，不能写入当前版本。</p>:null}</>:null}
     </div>:runsState.kind==="loading"||runsState.kind==="empty"?<p className="mt-2 text-xs text-slate-500">{runsState.kind==="loading"?"正在读取生成状态…":"尚无生成轮次，可先按范围生成候选。"}</p>:runsState.kind==="ready"?null:<p className={`mt-2 text-xs ${runsState.kind==="forbidden"?"text-amber-700":"text-red-700"}`} role={runsState.kind==="forbidden"?"status":"alert"}>{runsState.kind==="forbidden"?"没有查看生成状态的权限，请联系项目管理员。":`生成状态读取失败：${runsState.message}`}{isRetryable(runsState.kind)?<button className="ml-2 underline" onClick={()=>void runs.refetch()} type="button">重试</button>:null}</p>}
-    {isRetryable(runsState.kind)&&lastRuns?<p className="mt-1 text-xs text-slate-500">{lastSuccessLabel(lastRuns)}（以下仍显示最后一次成功读取的生成状态，可能已过期）</p>:null}
+    {usingFallback?<p className="mt-1 text-xs text-amber-700" role="status">{lastSuccessLabel(lastRuns)}（只读回退：以下为该需求内容 v{currentRun?.content_version??"?"} 的历史读取结果，可能已过期；恢复读取后请刷新）</p>:isRetryable(runsState.kind)&&lastRuns?<p className="mt-1 text-xs text-slate-500">{lastSuccessLabel(lastRuns)}（以下仍显示最后一次成功读取的生成状态，可能已过期）</p>:null}
     {notice?<p className="mt-2 text-xs text-emerald-700">{notice}</p>:null}{error?<p className="mt-2 text-xs text-red-700" role="alert">{error}</p>:null}
     {candidateId?<div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label="候选差异">
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-xl">

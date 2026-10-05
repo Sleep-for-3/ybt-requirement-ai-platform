@@ -247,6 +247,10 @@ export type AgentMetrics = {
   status_counts?: Record<string, number> | null;
   metrics?: Record<string, number | null> | null;
   denominators?: Record<string, number> | null;
+  // F09: the server owns the metric vocabulary. Consuming these keeps the UI from presenting a proxy
+  // metric (e.g. subject resolution rate) as a business accuracy rate, and explains a null value.
+  metric_labels?: Record<string, string> | null;
+  metric_notes?: Record<string, string> | null;
 };
 
 export type GapGroup = {
