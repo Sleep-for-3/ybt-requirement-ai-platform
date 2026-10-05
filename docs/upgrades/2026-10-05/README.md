@@ -32,7 +32,8 @@
 | P3 (N12) | 中高 | 同一 TAG 重发会覆盖上一版 `db.dump`（回滚唯一依据） | **已修复 / 已验证**（目录带时间戳+PID，已存在则拒绝；新增 `release-identity.txt`；`BACKUP_UNIQUENESS_OK`） | 同上 |
 | P5 | 高 | `schema_head` 探针吞异常不回滚，PostgreSQL 下中止整个事务 → 同请求后续语句 500 | **已修复 / 已验证**（savepoint 隔离；真实 PG `FOLLOWUP_SELECT_OK`；端到端 16/16 ok） | [P5-schema-probe-transaction-poisoning.md](P5-schema-probe-transaction-poisoning.md) |
 | 阶段5-1 | 高 | 评测数据集无版本绑定/无失败样本对比；备份工具不执行恢复 | **已验证**（版本化数据集 8/8、标注复核、批量重跑、case 级失败对比；真实 dump→restore 7/7，实测 RTO 2.384s） | [phase5-eval-and-backup.md](phase5-eval-and-backup.md) |
-| 阶段5-2 | 高 | 多 worker 故障恢复/容量基线长期记为“受本机约束阻塞” | **已验证**（10/10：跨进程租约围栏、陈旧 attempt `rowcount=0`、6 进程竞争仅 1 赢家、实测容量基线）；真实 broker/多机待验收 | [phase5-multiworker-recovery.md](phase5-multiworker-recovery.md) |
+| 阶段5-2 | 高 | 多 worker 故障恢复/容量基线长期记为“受本机约束阻塞” | **已验证**（10/10：跨进程租约围栏、陈旧 attempt `rowcount=0`、6 进程竞争仅 1 赢家、实测容量基线）；多机待验收 | [phase5-multiworker-recovery.md](phase5-multiworker-recovery.md) |
+| 阶段5-3 | 高 | 真实 Redis/Celery broker 长期记为前置条件未满足 | **已验证**（8/8：真实 Redis 5.0.14.1 + 独立 worker 进程消费 + 队列排空 + 重复投递围栏生效） | [phase5-real-queue.md](phase5-real-queue.md) |
 | SEC-1 | 高 | `db-profile` 接口可用构造标识符把子句拼进 SQL（`UNION SELECT` 穿过 SELECT-only 守卫） | **已修复 / 已验证**（标识符契约 + 422；探针实证修复前 200/落库 → 修复后 422 拒绝；41 passed） | [final-security-scan-bandit.md](final-security-scan-bandit.md) |
 | 阶段4 | 高 | 合成工程业务闭环（readiness → 正式交付）长期未跑通 | **已全部跑通**（readiness 41 → **0**；提审 → 三级审核 → 冻结交付 → Word/Excel → **Finding 整改重测** → **四角色签署齐全** → **变更复核关闭 `reviewed`**；41/41） | [phase4-w11-fixed-input.md](phase4-w11-fixed-input.md) |
 | 阶段2 | 高 | 前端人工编辑与集成（F01–F10）未经真实浏览器验收 | **已完成**（**10/10 项**在隔离栈真实浏览器逐项验证） | [browser-acceptance.md](browser-acceptance.md) |
@@ -49,7 +50,7 @@
 | 源码静态分析（bandit） | **HIGH 0**；与首次定性扫描 **STABLE（0 新增）** | [final-security-scan-bandit.md](final-security-scan-bandit.md) |
 | 第四阶段业务闭环 | **41/41 通过** | [phase4-w11-fixed-input.md](phase4-w11-fixed-input.md) |
 | 真实浏览器验收（F01–F10） | **10/10 项** | [browser-acceptance.md](browser-acceptance.md) |
-| 第五阶段 评测 / 备份 / 多 worker | **8/8 · 7/7 · 10/10**（均在当前 HEAD 重跑） | [phase5-eval-and-backup.md](phase5-eval-and-backup.md) · [phase5-multiworker-recovery.md](phase5-multiworker-recovery.md) |
+| 第五阶段 评测 / 备份 / 多 worker / **真实队列** | **8/8 · 7/7 · 10/10 · 8/8**（均在当前 HEAD 重跑） | [phase5-eval-and-backup.md](phase5-eval-and-backup.md) · [phase5-multiworker-recovery.md](phase5-multiworker-recovery.md) · [phase5-real-queue.md](phase5-real-queue.md) |
 | W11 三张矩阵（已填实） | `role-matrix` / `input-manifest` / `evidence-checklist` | `docs/upgrades/2026-10-03/w11/` |
 | 总结与待验收条件 | 含“未达成”清单 | [FINAL-ACCEPTANCE-REPORT.md](FINAL-ACCEPTANCE-REPORT.md) |
 
