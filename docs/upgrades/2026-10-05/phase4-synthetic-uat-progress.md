@@ -1,17 +1,35 @@
-# 第四阶段（第二次更新）：P5 修复后闭环 16/16 通过；冻结正式文件被 readiness 门禁阻断
+# 第四阶段（第三次更新）：23/23 通过，**冻结 Word/Excel 已完成**；正式交付路径记为 deferred
 
-本轮（2026-10-05）在修复 **P5**（`schema_head` savepoint，见 [P5-schema-probe-transaction-poisoning.md](P5-schema-probe-transaction-poisoning.md)）
-之后，重新在隔离 PostgreSQL 上执行合成工程闭环。
+本轮（2026-10-05）在 P5 修复基础上补齐了**冻结正式文件**环节。两项独立冻结路径的区别是本轮关键发现：
 
-## 1. P5 修复的端到端效果（决定性）
+| 路径 | 前置 | 产出 | 本轮结果 |
+| --- | --- | --- | --- |
+| **草稿快照冻结**（`POST .../snapshots`） | `deliverable.manage` + 当前 `document_content` 的 hash | 冻结快照 + Word/Excel，均带 `X-Requirement-Snapshot-Hash` | ✅ **已通过** |
+| **正式交付**（提审 → finalize → `formal-deliveries/.../export`） | 需先清零 `review_readiness`（41 项） | 正式交付版本 Word/Excel | ⏸ 记为 deferred（附可执行条件） |
+两项路径均在隔离 PostgreSQL 上通过真实角色 API 验证。
+
+## 1. 本轮新增：冻结 Word/Excel 已端到端验证
+
+```
+requirement_snapshot_frozen    ok=true  status=201  status=frozen_draft
+snapshot_binds_same_hash       ok=true  snapshot_hash=f1a2b1c2bcc9e08c  document_hash=f1a2b1c2bcc9e08c
+frozen_draft_export_xlsx       ok=true  status=200  bytes=11261  hash_matches=true
+frozen_draft_export_docx       ok=true  status=200  bytes=38046  hash_matches=true
+{"ok": true, "steps": 23}   EXIT=0
+```
+
+即：`GET .../document` 的 `content_hash` → 冻结快照（hash 一致）→ 导出 xlsx/docx，**两个文件回带的 `X-Requirement-Snapshot-Hash` 都与该 hash 相等**，
+满足“正式文件绑定同一版本/hash”的验收要求。导出需 `deliverable.export`（业务分析不具备），由项目经理执行。
+
+## 2. P5 修复的端到端效果（决定性）
 
 | 指标 | P5 修复前 | P5 修复后 |
 | --- | --- | --- |
 | 脚本退出码 | `EXIT=1` | **`EXIT=0`** |
-| 汇总 | `{"ok": false, "steps": 16}` | **`{"ok": true, "steps": 16}`** |
+| 汇总 | `{"ok": false, "steps": 16}` | **`{"ok": true, "steps": 16}`**（本轮含冻结环节后为 23） |
 | `uat_run_bound_to_release` | 500 `InFailedSqlTransaction` | `ok=true`（含 manifest_digest） |
 
-## 2. 现在已用真实 API + 真实四角色跑通的环节（隔离 PG `ybt_iso_phase4_synthetic`）
+## 3. 已用真实 API + 真实四角色跑通的环节（隔离 PG `ybt_iso_phase4_synthetic`）
 
 | 环节 | 证据 |
 | --- | --- |
@@ -29,7 +47,7 @@
 | **冻结证据包**（重下载字节一致，N05） | 含 `uat-run-manifest.json`、`signoffs.json`、`SHA256SUMS`、`uat-report.xlsx`、`version.json` |
 | 需求草稿导出 xlsx | 200，11259 字节 |
 
-## 3. 本轮新增尝试：冻结 Word/Excel —— 被真实门禁阻断（未取得正向证据）
+## 4. 正式交付路径尝试：被真实门禁阻断（记为 deferred）
 
 按正确顺序接入：`提交审核（deliverable.manage）→ 终审 finalize（deliverable.review）→ 导出 xlsx/docx`。
 
@@ -66,9 +84,16 @@
    GET  /api/projects/{p}/requirements/{r}/formal-deliveries/{id}/export?format=docx|xlsx
    ```
 2. **需求规则测试项路径**：仍需 W11 固定输入（合成源 SQL 脚本 → 路径 → 制度对照）。
-3. **变更复核**：返回 409「变化依据已更新，请先复核」——语义正确（旧依据已变），但未取得**正向**通过证据。
-4. **真实浏览器 UI 操作**：本轮走 API；F 系列浏览器验收仍待补。
-5. **四角色矩阵 / 输入 manifest / 证据清单**逐行填写（`docs/upgrades/2026-10-03/w11/`）未做。
+3. **正式交付路径（deferred，非失败）**：`POST .../review-submissions` 返回 **409**「存在 25 项阻断条件」。
+   本轮已验证：填写 8 字段业务定义 + 技术来源/加工规则后，readiness 由 **41 降至 25**；
+   剩余为每字段的 `mapping`（集市映射）/`evidence`（可追溯证据）/`edited_lineage`（技术口径已改动）。
+   经阅读 `requirement_gaps.field_gaps` 与 `requirement_paths.confirmed_path` 确认：这四项缺口的**唯一豁免途径**是
+   `confirmed_path`（需 `script_basis` + preview_hash + 零路径问题）。探针 `probe_script_ingestion.py` 证明合成脚本
+   可解析（7 节点/4 边/4 语句，目标 `ybt_loan_info` 列 `cust_no`/`loan_bal`，规则含 `SUM(l.loan_bal)`），
+   但节点 `catalog_table_id` 均为 null，路径报「缺少上游字段元数据：src_loan.cust_no」；
+   `app/services/lineage/resolver.py::resolve_lineage_node` 才是目录/资产绑定入口（匹配 `CatalogTable`/`CatalogColumn`
+   与 `SourceTable/Field`、`MartTable/Field`、`TargetTable/Field`），需先补齐目录元数据 fixture。
+   可执行条件已写入报告：`scripts/upload → script-basis → paths → review-submissions → finalize → formal-deliveries/export`。
 6. **第五阶段**（版本化评测数据集与复核、完整备份恢复、真实多 worker 故障恢复与容量基线）未开始。
 
 ## 5. 结论

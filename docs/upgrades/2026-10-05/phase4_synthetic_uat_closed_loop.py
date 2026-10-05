@@ -443,15 +443,141 @@ def main() -> int:
                             f"/api/projects/{project_id}/requirements/{requirement_id}/export")
         step("requirement_draft_export", ok=draft_export.status_code == 200,
              status=draft_export.status_code, bytes=len(draft_export.content))
-        # 提审需要 deliverable.manage（PROJECT_ROLE_PERMISSIONS 里只有项目经理具备），
-        # 因此由项目经理提审、终审角色 finalize —— 依旧满足“提交人与终审人不同”。
+        # 冻结正式文件（草稿快照路径，无需 41 项 readiness）：
+        # GET .../document 给出当前 document_content 的 content_hash；用它冻结快照，
+        # 再导出 Word/Excel —— 两者都带 X-Requirement-Snapshot-Hash，可直接核对版本绑定。
+        snapshot_export: dict[str, object] = {}
+        doc = call("business_analyst", "GET",
+                   f"/api/projects/{project_id}/requirements/{requirement_id}/document")
+        if doc.status_code != 200:
+            step("requirement_document_for_freeze", ok=False, status=doc.status_code,
+                 body=doc.text[:200])
+        else:
+            doc_hash = doc.json()["content_hash"]
+            requirement_now = call("business_analyst", "GET",
+                                   f"/api/projects/{project_id}/requirements")
+            scope_version = 1
+            for item in (requirement_now.json() if requirement_now.status_code == 200 else []):
+                if int(item.get("id", 0)) == requirement_id:
+                    scope_version = int(item.get("version", 1))
+            frozen_snapshot = call("project_manager", "POST",
+                                   f"/api/projects/{project_id}/requirements/{requirement_id}/snapshots",
+                                   json_body={"expected_version": scope_version,
+                                              "expected_hash": doc_hash})
+            step("requirement_snapshot_frozen", ok=frozen_snapshot.status_code == 201,
+                 status=frozen_snapshot.status_code, body=frozen_snapshot.text[:250])
+            if frozen_snapshot.status_code == 201:
+                snap = frozen_snapshot.json()
+                snapshot_id = int(snap["id"])
+                step("snapshot_binds_same_hash",
+                     ok=snap.get("content_hash") == doc_hash,
+                     snapshot_hash=snap.get("content_hash", "")[:16],
+                     document_hash=doc_hash[:16])
+                for fmt in ("xlsx", "docx"):
+                    # 导出需要 deliverable.export；PROJECT_ROLE_PERMISSIONS 中只有项目经理、终审与审计具备。
+                    exported = call("project_manager", "GET",
+                                    f"/api/projects/{project_id}/requirements/{requirement_id}"
+                                    f"/snapshots/{snapshot_id}/export?format={fmt}")
+                    header_hash = (exported.headers.get("X-Requirement-Snapshot-Hash", "")
+                                   if hasattr(exported, "headers") else "")
+                    snapshot_export[fmt] = {
+                        "ok": exported.status_code == 200 and bool(header_hash)
+                        and header_hash == doc_hash,
+                        "status": exported.status_code,
+                        "bytes": len(exported.content),
+                        "hash_matches": header_hash == doc_hash,
+                    }
+                    step(f"frozen_draft_export_{fmt}", **snapshot_export[fmt])
+
+        # 业务面由业务分析填、技术面由技术分析填，仍然满足职责分离。
+        readiness = call("business_analyst", "GET",
+                         f"/api/projects/{project_id}/requirements/{requirement_id}"
+                         f"/review-readiness?content_version={content_version}")
+        step("review_readiness_before_fill", ok=readiness.status_code == 200,
+             status=readiness.status_code,
+             blocking_count=readiness.json().get("blocking_count") if readiness.status_code == 200 else None)
+
+        if readiness.status_code == 200:
+            filled = 0
+            for code, *_rest in FIELDS:
+                fid = field_ids[code]
+                business_edit = call("business_analyst", "PUT",
+                                     f"/api/projects/{project_id}/requirements/{requirement_id}/fields/{fid}",
+                                     json_body={"section": "business",
+                                                "expected_content_version": content_version,
+                                                "changes": {"business_definition": f"合成口径：{code} 的业务定义（仅用于工程验收）。",
+                                                            "final_content": f"合成最终口径：{code}。"}})
+                if business_edit.status_code != 200:
+                    step("field_business_fill_failed", ok=False, field=code,
+                         status=business_edit.status_code, body=business_edit.text[:200])
+                    break
+                content_version = int(business_edit.json()["revision"]["content_version"])
+                tech_edit = call("technical_analyst", "PUT",
+                                 f"/api/projects/{project_id}/requirements/{requirement_id}/fields/{fid}",
+                                 json_body={"section": "lineage",
+                                            "expected_content_version": content_version,
+                                            "changes": {"source_system_name": "核心系统",
+                                                        "source_database_name": "core",
+                                                        "source_table_english_name": "SRC_LOAN",
+                                                        "source_field_english_name": code,
+                                                        "processing_logic": f"合成加工规则：{code} 由 SRC_LOAN 映射。"}})
+                if tech_edit.status_code != 200:
+                    step("field_technical_fill_failed", ok=False, field=code,
+                         status=tech_edit.status_code, body=tech_edit.text[:200])
+                    break
+                content_version = int(tech_edit.json()["revision"]["content_version"])
+                filled += 1
+            else:
+                after = call("business_analyst", "GET",
+                             f"/api/projects/{project_id}/requirements/{requirement_id}"
+                             f"/review-readiness?content_version={content_version}")
+                step("fields_filled_for_readiness", ok=True, fields=filled,
+                     content_version=content_version)
+                readiness_ok = (after.status_code == 200
+                                and after.json().get("blocking_count") == 0)
+                step("review_readiness_after_fill",
+                     ok=readiness_ok,
+                     deferred=not readiness_ok,
+                     status=after.status_code,
+                     blocking_count=after.json().get("blocking_count") if after.status_code == 200 else None,
+                     remaining=[item["code"] for item in (after.json().get("reasons") or [])][:6]
+                     if after.status_code == 200 else None,
+                     reason=None if readiness_ok else (
+                         "正式交付（formal delivery）需先清零 readiness：需逐字段补齐集市映射、可追溯证据，"
+                         "并完成 W11 固定输入（上传合成源 SQL 脚本 → 目录/血缘解析 → script-basis → 路径确认）"
+                         "以使 confirmed_path 豁免 source/mapping/transformation/evidence 四项检查。"),
+                     executable_condition=None if readiness_ok else (
+                         "POST /projects/{p}/scripts/upload → POST .../script-basis → "
+                         "GET/POST .../paths → POST .../review-submissions → .../finalize → "
+                         "GET .../formal-deliveries/{id}/export?format=docx|xlsx"))
+
+        # 字段编辑推进了 content_version，必须用**最新**版本提审，否则报“需求内容已变化”。
+
+        # 提审需要 deliverable.manage（只有项目经理具备），因此由项目经理提审、终审角色 finalize ——
+        # 依旧满足“提交人与终审人不同”。
+        latest = call("business_analyst", "GET",
+                      f"/api/projects/{project_id}/requirements/{requirement_id}/revisions")
+        if latest.status_code == 200 and isinstance(latest.json(), list) and latest.json():
+            newest = max(latest.json(), key=lambda item: item.get("content_version", 0))
+            detail = call("business_analyst", "GET",
+                          f"/api/projects/{project_id}/requirements/{requirement_id}"
+                          f"/revisions/{newest['content_version']}")
+            if detail.status_code == 200:
+                content_version = int(detail.json()["revision"]["content_version"])
+                content_hash = detail.json()["revision"]["content_hash"]
         submitted = call("project_manager", "POST",
                          f"/api/projects/{project_id}/requirements/{requirement_id}/review-submissions",
                          json_body={"expected_content_version": content_version,
                                     "expected_content_hash": content_hash,
                                     "assignments": {}})
-        step("requirement_review_submitted", ok=submitted.status_code in (200, 201),
-             status=submitted.status_code, body=submitted.text[:250])
+        # 正式交付（formal delivery）以 readiness 清零为前提；未清零时如实记为 deferred，不伪装成通过。
+        step("requirement_review_submitted",
+             ok=submitted.status_code in (200, 201),
+             deferred=submitted.status_code not in (200, 201) and not readiness_ok,
+             status=submitted.status_code,
+             reason=None if submitted.status_code in (200, 201) or readiness_ok else
+             "提审需先清零 readiness 阻断条件（见 review_readiness_after_fill）。",
+             body=submitted.text[:250])
 
         if submitted.status_code in (200, 201):
             submission_id = int(submitted.json()["id"])
