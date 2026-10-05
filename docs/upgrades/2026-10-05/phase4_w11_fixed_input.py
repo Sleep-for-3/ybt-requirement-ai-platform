@@ -74,6 +74,102 @@ def build_synthetic_script(field_codes: list[str]) -> str:
         f"GROUP BY {', '.join(f'c.{name}' for name in cust_cols)}, {', '.join(f'l.{name}' for name in loan_cols)};",
     ]) + "\n"
 
+def seed_normative_document(db, project_id: int, requirement_id: int) -> list[int]:
+    """Seed one governance-visible normative document and return its unit ids.
+
+    ``normative_units`` only counts units whose document category is normative *and* whose version is
+    governance-visible: ``lifecycle_status == "active"`` and ``KnowledgeDocument.current_version_id``
+    pointing at that version. A unit without those links is invisible to the comparison, which is
+    what leaves the "missing_basis" blocker in place.
+    """
+
+    from sqlalchemy import select as _select
+
+    from app.models import KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeUnit
+
+    select = _select
+
+    existing = db.scalar(select(KnowledgeUnit).where(
+        KnowledgeUnit.project_id == project_id,
+        KnowledgeUnit.knowledge_type == "synthetic_policy").limit(1))
+    if existing is not None:
+        return [int(existing.id)]
+
+    document = KnowledgeDocument(
+        project_id=project_id, file_name="synthetic-regulation.txt", file_type="txt",
+        source_type="regulatory_source", storage_path="synthetic/synthetic-regulation.txt",
+        knowledge_type="synthetic_policy", knowledge_scope="project",
+        document_status="active", confidentiality_level="internal",
+        source_category="regulatory_formal", file_hash="0" * 64, current_version_no=1,
+    )
+    db.add(document)
+    db.flush()
+
+    version = KnowledgeDocumentVersion(
+        document_id=document.id, project_id=project_id, version_no=1,
+        file_name="synthetic-regulation.txt", storage_path="synthetic/synthetic-regulation.txt",
+        file_hash="0" * 64, parse_status="parsed",
+        lifecycle_status="active", regulatory_version="synthetic-2026",
+    )
+    db.add(version)
+    db.flush()
+    document.current_version_id = version.id
+    db.add(document)
+
+    content = ("合成监管条款：贷款信息相关字段应具备可定位的业务定义、来源与加工规则，"
+               "并保留可追溯证据；口径变更须经独立审核。")
+    unit = KnowledgeUnit(
+        project_id=project_id, document_id=document.id, document_version_id=version.id,
+        knowledge_type="synthetic_policy", knowledge_scope="project", unit_type="clause",
+        title="合成监管条款（工程验收用）", content=content, normalized_content=content,
+        source_file_name="synthetic-regulation.txt", confidentiality_level="internal",
+        enabled=True, content_hash=content_digest_text(content),
+        metadata_json={"locator": {"line_start": 1, "line_end": 2}},
+    )
+    db.add(unit)
+    db.commit()
+    return [int(unit.id)]
+
+
+def patch_requirement_documents(db, project_id: int, requirement_id: int, unit_ids: list[int]) -> list[int]:
+    """Attach the normative document to the requirement scope so the basis snapshots its units.
+
+    The requirement scope is the only source of ``policy_snapshot.allowed.document_ids``; editing the
+    stored scope directly is correct here because the W11 chain legitimately re-declares its fixed
+    input (the real flow does this through ``PUT /requirements/{id}`` before submitting).
+    """
+
+    from sqlalchemy import select as _select
+
+    from app.models import KnowledgeUnit
+    from app.models.requirement import Requirement
+
+    select = _select
+    from app.models.requirement import Requirement
+
+    requirement = db.scalar(select(Requirement).where(
+        Requirement.project_id == project_id, Requirement.id == requirement_id))
+    if requirement is None or not unit_ids:
+        return []
+    unit = db.get(KnowledgeUnit, int(unit_ids[0]))
+    if unit is None:
+        return []
+    existing = list(requirement.scope_json.get("document_ids") or [])
+    if unit.document_id in existing:
+        return existing
+    updated = dict(requirement.scope_json)
+    updated["document_ids"] = existing + [int(unit.document_id)]
+    requirement.scope_json = updated
+    # A scope change bumps the version, so the caller must re-read the content version afterwards.
+    requirement.version = int(requirement.version) + 1
+    db.commit()
+    return list(updated["document_ids"])
+
+
+def content_digest_text(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -235,6 +331,10 @@ def main() -> int:
         "technical_analyst": ("p4_technical_analyst", "Synthetic-technical_analyst-2026!"),
         "business_analyst": ("p4_business_analyst", "Synthetic-business_analyst-2026!"),
         "project_manager": ("p4_project_manager", "Synthetic-project_manager-2026!"),
+        # The review chain needs each step's own role; the final signature also releases the delivery.
+        "business_reviewer": ("p4_business_reviewer", "Synthetic-business_reviewer-2026!"),
+        "technical_reviewer": ("p4_technical_reviewer", "Synthetic-technical_reviewer-2026!"),
+        "final_reviewer": ("p4_final_reviewer", "Synthetic-final_reviewer-2026!"),
     }
 
     with TestClient(app) as client:
@@ -357,6 +457,90 @@ def main() -> int:
         if confirmed.status_code == 201:
             content_version = int(confirmed.json()["revision"]["content_version"])
 
+        # ---- 4. normative basis + per-rule comparison ------------------------------------
+        # ``comparison_issues`` reports one blocker per script rule plus one per normative unit until
+        # every rule is linked to a unit with status=matched and a rationale. The units must come from
+        # a governance-visible document (active version, current_version_id set, normative category),
+        # otherwise ``normative_units`` is empty and "missing_basis" persists.
+        with factory() as db:
+            seeded_units = seed_normative_document(db, project_id, requirement_id)
+        step("normative_document_seeded", ok=bool(seeded_units), unit_ids=seeded_units)
+
+        # ``policy_snapshot.allowed.document_ids`` comes from the requirement **scope**; a requirement
+        # created without ``document_ids`` therefore snapshots zero normative units and
+        # "missing_basis" can never clear. Attach the seeded policy document to the scope first.
+        scope_patch = patch_requirement_documents(db, project_id, requirement_id, seeded_units)
+        step("requirement_policy_document_attached", ok=bool(scope_patch),
+             document_ids=scope_patch)
+
+        linked = call("technical_analyst", "POST",
+                      f"/api/projects/{project_id}/requirements/{requirement_id}/script-basis",
+                      json_body={"script_version_ids": [version_id],
+                                 "expected_content_version": content_version,
+                                 "preview_hash": preview_hash,
+                                 "template_version_id": int(template.id),
+                                 "target_key": target_key,
+                                 "field_bindings": bindings})
+        if linked.status_code != 201:
+            step("script_basis_relinked_for_policy", ok=False, status=linked.status_code,
+                 body=linked.text[:200])
+            return 1
+        content_version = int(linked.json()["revision"]["content_version"])
+
+        # The basis now carries the policy snapshot; bind every script rule to the seeded units.
+        with factory() as db:
+            from app.services.requirement_policy_comparison import basis_hash as _basis_hash
+            from app.services.requirement_revisions import load_revision
+            revision = load_revision(db, project_id, requirement_id, content_version)
+            basis = (revision.content_json or {}).get("script_basis") or {}
+            rule_ids = [rule["rule_id"] for rule in basis.get("rules", [])]
+            current_basis_hash = _basis_hash(basis)
+            unit_ids = [unit["unit_id"] for unit in
+                        (basis.get("policy_snapshot", {}) or {}).get("evidence", [])
+                        if unit.get("source_category") in {"regulatory_formal", "regulatory_qa", "internal_policy"}]
+        step("policy_snapshot_ready", ok=bool(unit_ids) and bool(rule_ids),
+             units=len(unit_ids), rules=len(rule_ids), basis_hash=current_basis_hash[:16])
+
+        if not unit_ids or not rule_ids:
+            step("policy_comparison_skipped", ok=False,
+                 reason="缺少制度单元或脚本规则，无法建立逐条对照")
+            return 1
+
+        decisions = [{"unit_id": unit_ids[0], "rule_ids": rule_ids, "status": "matched",
+                      "rationale": "合成验收：已逐条核对脚本规则与制度条款，语义一致。",
+                      "difference": ""}]
+        compared = call("technical_analyst", "POST",
+                        f"/api/projects/{project_id}/requirements/{requirement_id}/policy-comparison",
+                        json_body={"expected_content_version": content_version,
+                                   "basis_hash": current_basis_hash,
+                                   "decisions": decisions})
+        step("policy_comparison_confirmed", ok=compared.status_code == 201,
+             status=compared.status_code, body=compared.text[:250])
+        if compared.status_code != 201:
+            return 1
+        content_version = int(compared.json()["revision"]["content_version"])
+        # Confirming the comparison rewrites ``policy_snapshot`` (part of the basis), so ``basis_hash``
+        # changes and the earlier ``confirmed_path`` records no longer match ("1:path:0" = 当前脚本路径
+        # 尚未人工确认或技术口径已变化). That is correct product semantics: the fixed input must be
+        # re-confirmed after the comparison instead of being asserted once.
+        repreview = call("technical_analyst", "GET",
+                         f"/api/projects/{project_id}/requirements/{requirement_id}/paths"
+                         f"?content_version={content_version}")
+        step("paths_repreview_after_comparison", ok=repreview.status_code == 200,
+             status=repreview.status_code,
+             issues=len((repreview.json().get("issues") or [])) if repreview.status_code == 200 else None)
+        if repreview.status_code != 200:
+            return 1
+        reconfirmed = call("technical_analyst", "POST",
+                           f"/api/projects/{project_id}/requirements/{requirement_id}/paths",
+                           json_body={"expected_content_version": content_version,
+                                      "preview_hash": repreview.json()["preview_hash"],
+                                      "rationale": "合成验收：制度对照完成后按新依据重新确认加工路径。"})
+        step("paths_reconfirmed", ok=reconfirmed.status_code == 201,
+             status=reconfirmed.status_code, body=reconfirmed.text[:200])
+        if reconfirmed.status_code == 201:
+            content_version = int(reconfirmed.json()["revision"]["content_version"])
+
         readiness = call("business_analyst", "GET",
                          f"/api/projects/{project_id}/requirements/{requirement_id}"
                          f"/review-readiness?content_version={content_version}")
@@ -365,6 +549,89 @@ def main() -> int:
             if readiness.status_code == 200 else None
         step("review_readiness_after_fixed_input", ok=blocking == 0,
              status=readiness.status_code, blocking_count=blocking, remaining=remaining)
+
+        # ---- 5. formal delivery: submit -> finalize -> frozen Word/Excel -------------------
+        # This is the step that was previously unreachable: readiness had to reach zero first.
+        submitted = call("project_manager", "POST",
+                         f"/api/projects/{project_id}/requirements/{requirement_id}/review-submissions",
+                         json_body={"expected_content_version": content_version,
+                                    "expected_content_hash": (readiness.json() or {}).get("content_hash"),
+                                    "assignments": {}})
+        if submitted.status_code not in (200, 201):
+            step("formal_submission_failed", ok=False, status=submitted.status_code,
+                 body=submitted.text[:250])
+            return 1
+        submission_id = int(submitted.json()["id"])
+        content_hash = submitted.json().get("content_hash")
+        step("formal_review_submitted", ok=True, submission_id=submission_id,
+             content_version=submitted.json().get("content_version"),
+             content_hash=(content_hash or "")[:16])
+
+        # ``finalize_formal_delivery`` requires the ``requirement_document_review`` workflow to be
+        # **approved** by every step (business -> technical -> final), so the review chain has to be
+        # walked explicitly. Skipping it is exactly what previously left the delivery unreachable.
+        summary = call("project_manager", "GET",
+                       f"/api/projects/{project_id}/requirements/{requirement_id}/review-submissions")
+        tasks: list[dict] = []
+        if summary.status_code == 200 and summary.json():
+            tasks = list(summary.json()[0].get("tasks") or [])
+        step("review_tasks_listed", ok=bool(tasks), count=len(tasks),
+             steps=[task.get("step_key") for task in tasks])
+
+        reviewers = {"business_review": "business_reviewer", "technical_review": "technical_reviewer",
+                     "final_review": "final_reviewer"}
+        approved_steps: list[str] = []
+        for task in tasks:
+            step_key = str(task.get("step_key"))
+            role = reviewers.get(step_key, "project_manager")
+            if role not in tokens:
+                step("review_role_missing", ok=False, step_key=step_key, role=role)
+                return 1
+            decision = call(role, "POST", f"/api/review-tasks/{task['id']}/approve",
+                            json_body={"comment": f"合成验收：{step_key} 审核通过。"})
+            if decision.status_code not in (200, 201):
+                step("review_approval_failed", ok=False, step_key=step_key, role=role,
+                     status=decision.status_code, body=decision.text[:200])
+                return 1
+            approved_steps.append(step_key)
+        step("review_chain_approved", ok=bool(approved_steps), approved=approved_steps)
+
+        finalized = call("final_reviewer", "POST",
+                         f"/api/projects/{project_id}/requirements/{requirement_id}"
+                         f"/review-submissions/{submission_id}/finalize")
+        step("formal_delivery_finalized", ok=finalized.status_code == 201,
+             status=finalized.status_code, body=finalized.text[:250])
+        if finalized.status_code != 201:
+            return 1
+        delivery = finalized.json()
+        delivery_id = int(delivery["id"])
+        step("frozen_formal_delivery_binds_version",
+             ok=(delivery.get("content_version") == submitted.json().get("content_version")
+                 and delivery.get("content_hash") == content_hash),
+             content_version=delivery.get("content_version"),
+             content_hash=(delivery.get("content_hash") or "")[:16],
+             file_hash=(delivery.get("file_hash") or "")[:16])
+        # The export header is ``content_digest(row.content_json)`` = the delivery's **snapshot_hash**
+        # (which includes the ``formal_delivery`` block), so it is intentionally *not* equal to the
+        # submission's ``content_hash``. What must hold is: both formats return the same header, and
+        # that header is stable across downloads (it identifies the frozen artifact).
+        export_headers: dict[str, str] = {}
+        for fmt in ("xlsx", "docx"):
+            exported = call("final_reviewer", "GET",
+                            f"/api/projects/{project_id}/requirements/{requirement_id}"
+                            f"/formal-deliveries/{delivery_id}/export?format={fmt}")
+            header = (exported.headers.get("X-Requirement-Snapshot-Hash", "")
+                      if hasattr(exported, "headers") else "")
+            export_headers[fmt] = header
+            step(f"frozen_formal_export_{fmt}", ok=exported.status_code == 200 and bool(header),
+                 status=exported.status_code, bytes=len(exported.content),
+                 snapshot_hash=header[:16])
+        step("formal_export_identities_agree",
+             ok=bool(export_headers.get("xlsx")) and export_headers.get("xlsx") == export_headers.get("docx"),
+             xlsx=(export_headers.get("xlsx") or "")[:16],
+             docx=(export_headers.get("docx") or "")[:16],
+             equals_delivery_content_hash=export_headers.get("xlsx") == content_hash,
+             note="导出头是快照 hash（含 formal_delivery 块），与提审 content_hash 不同属预期契约")
 
     report = {
         "ok": all(item.get("ok") for item in steps),

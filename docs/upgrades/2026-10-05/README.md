@@ -34,6 +34,7 @@
 | 阶段5-1 | 高 | 评测数据集无版本绑定/无失败样本对比；备份工具不执行恢复 | **已验证**（版本化数据集 8/8、标注复核、批量重跑、case 级失败对比；真实 dump→restore 7/7，实测 RTO 2.384s） | [phase5-eval-and-backup.md](phase5-eval-and-backup.md) |
 | 阶段5-2 | 高 | 多 worker 故障恢复/容量基线长期记为“受本机约束阻塞” | **已验证**（10/10：跨进程租约围栏、陈旧 attempt `rowcount=0`、6 进程竞争仅 1 赢家、实测容量基线）；真实 broker/多机待验收 | [phase5-multiworker-recovery.md](phase5-multiworker-recovery.md) |
 | SEC-1 | 高 | `db-profile` 接口可用构造标识符把子句拼进 SQL（`UNION SELECT` 穿过 SELECT-only 守卫） | **已修复 / 已验证**（标识符契约 + 422；探针实证修复前 200/落库 → 修复后 422 拒绝；41 passed） | [final-security-scan-bandit.md](final-security-scan-bandit.md) |
+| 阶段4 | 高 | 合成工程业务闭环（readiness → 正式交付）长期未跑通 | **已跑通**（readiness 41 → **0**；提审 → 三级审核 → 冻结交付 → Word/Excel 快照 hash 一致；24/24 通过） | [phase4-w11-fixed-input.md](phase4-w11-fixed-input.md) |
 
 ## 已完成工作包
 
