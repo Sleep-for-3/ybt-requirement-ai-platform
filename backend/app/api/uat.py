@@ -100,8 +100,14 @@ def create_uat_run(suite_id: int, payload: UatRunCreate, principal: CurrentPrinc
     from app.services.requirement_uat import validate_suite_execution
     validate_suite_execution(db, suite.id)
     run_no = (db.scalar(select(func.max(UatRun.run_no)).where(UatRun.project_id == suite.project_id, UatRun.uat_suite_id == suite.id)) or 0) + 1
-    run = UatRun(institution_id=suite.institution_id, project_id=suite.project_id, uat_suite_id=suite.id, run_name=payload.run_name, run_no=run_no, status="draft", environment_name=payload.environment_name, application_version=payload.application_version, git_commit_sha=payload.git_commit_sha, started_by=principal.user_id, summary_json={"attempt": 0})
+    run = UatRun(institution_id=suite.institution_id, project_id=suite.project_id, uat_suite_id=suite.id, run_name=payload.run_name, run_no=run_no, status="draft", environment_name=payload.environment_name, application_version=payload.application_version, git_commit_sha=payload.git_commit_sha, started_by=principal.user_id, summary_json={"attempt": 0}, manifest_json={})
     db.add(run); db.flush()
+    # N05: the server freezes the run/input manifest here, so the evidence of this run never depends
+    # on the environment as it happens to look when someone downloads it later.
+    from app.core.observability import current_request_id
+    from app.services.uat.freeze import freeze_run_manifest
+
+    freeze_run_manifest(db, run, request_id=current_request_id())
     record_audit(db, action="create_uat_run", resource_type="uat_run", resource_id=run.id, actor_user_id=principal.user_id, institution_id=run.institution_id, project_id=run.project_id, after={"suite_id": suite.id, "run_no": run_no})
     db.commit()
     return _run_detail(db, run)
@@ -162,6 +168,10 @@ def complete_manual_result(result_id: int, payload: UatManualResultComplete, pri
         raise HTTPException(409, "Only manual or hybrid UAT cases can be completed manually")
     if run.status == "cancelled":
         raise HTTPException(409, "Cancelled UAT runs cannot be modified")
+    # N04: an approved signoff freezes the run; the caller must revoke it or open a new run.
+    from app.services.uat.freeze import assert_run_mutable
+
+    assert_run_mutable(db, run)
     from app.services.requirement_uat import validate_manual_evidence
     fixed_evidence = validate_manual_evidence(db, case, payload)
     from app.services.governance.audit import redact_summary
@@ -179,6 +189,10 @@ def attach_result_evidence(result_id: int, payload: UatEvidenceAttach, principal
     run = db.get(UatRun, result.uat_run_id)
     if run is None or run.project_id != result.project_id:
         raise HTTPException(404, "UAT case result not found")
+    # N04: attaching evidence changes what a signature approved, so it is refused after signoff.
+    from app.services.uat.freeze import assert_run_mutable
+
+    assert_run_mutable(db, run)
     from app.services.governance.audit import redact_summary
     result.evidence_json = {**(result.evidence_json or {}), **redact_summary(payload.evidence)}
     case = db.get(UatCase, result.uat_case_id)
@@ -310,9 +324,32 @@ def create_uat_signoff(run_id: int, payload: UatSignoffCreate, principal: Curren
     blocking = db.scalar(select(UatFinding.id).where(UatFinding.project_id == run.project_id, UatFinding.uat_run_id == run.id, UatFinding.severity == "critical", UatFinding.status.not_in(("verified", "closed"))).limit(1))
     if blocking is not None:
         raise HTTPException(409, "Critical UAT findings must be verified or closed before signoff")
-    signoff = UatSignoff(project_id=run.project_id, uat_run_id=run.id, signoff_role=payload.signoff_role, signoff_status=payload.signoff_status, comment=payload.comment, signed_by=principal.user_id, signed_at=datetime.now(UTC))
+    # N04: bind the signature to the evidence it approves (frozen manifest + results).
+    from app.services.uat.freeze import freeze_run_manifest, signoff_evidence_hash
+
+    freeze_run_manifest(db, run)
+    evidence_hash = signoff_evidence_hash(db, run)
+    signoff = UatSignoff(project_id=run.project_id, uat_run_id=run.id, signoff_role=payload.signoff_role, signoff_status=payload.signoff_status, comment=payload.comment, signed_by=principal.user_id, signed_at=datetime.now(UTC), evidence_hash=evidence_hash)
     db.add(signoff); db.flush()
-    record_audit(db, action="signoff_uat_run", resource_type="uat_signoff", resource_id=signoff.id, actor_user_id=principal.user_id, institution_id=run.institution_id, project_id=run.project_id, after={"signoff_role": signoff.signoff_role, "signoff_status": signoff.signoff_status})
+    run.summary_json = {**(run.summary_json or {}), "signed_off_evidence_hash": evidence_hash}
+    record_audit(db, action="signoff_uat_run", resource_type="uat_signoff", resource_id=signoff.id, actor_user_id=principal.user_id, institution_id=run.institution_id, project_id=run.project_id, after={"signoff_role": signoff.signoff_role, "signoff_status": signoff.signoff_status, "evidence_hash": evidence_hash})
+    db.commit()
+    return _row(signoff)
+
+
+@router.post("/uat-signoffs/{signoff_id}/revoke")
+def revoke_uat_signoff(signoff_id: int, payload: EmptyRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
+    """N04: explicit revocation so a signed-off run can be corrected on the record.
+
+    Re-signing is then required: the revocation timestamp keeps the original approval auditable.
+    """
+
+    signoff = PermissionService(db, principal).load_project_resource_or_404(UatSignoff, signoff_id, "uat.signoff")
+    if signoff.revoked_at is not None:
+        raise HTTPException(409, "该签署已撤销")
+    signoff.revoked_at = datetime.now(UTC)
+    signoff.revoked_by = principal.user_id
+    record_audit(db, action="revoke_uat_signoff", resource_type="uat_signoff", resource_id=signoff.id, actor_user_id=principal.user_id, institution_id=None, project_id=signoff.project_id, after={"revoked_at": signoff.revoked_at.isoformat()})
     db.commit()
     return _row(signoff)
 

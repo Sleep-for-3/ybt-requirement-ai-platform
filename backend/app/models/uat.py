@@ -68,6 +68,10 @@ class UatRun(Base, TimestampMixin):
     started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     summary_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    # N05: frozen run/input manifest captured by the server when the run is created.  The evidence
+    # package and the report read this snapshot instead of the live environment, so re-downloading
+    # an old run still reproduces the original conclusion.
+    manifest_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     background_job_id: Mapped[int | None] = mapped_column(ForeignKey("background_jobs.id"), index=True)
 
 
@@ -135,6 +139,12 @@ class UatSignoff(Base, TimestampMixin):
     comment: Mapped[str | None] = mapped_column(Text)
     signed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     signed_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # N04: the signature is bound to the evidence it approved.  ``evidence_hash`` covers the frozen
+    # manifest plus the results/signoffs at signing time, so a later change is detectable and the
+    # run must be re-signed (or the signoff explicitly revoked) instead of silently staying valid.
+    evidence_hash: Mapped[str | None] = mapped_column(String(64))
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 
 class UatPack(Base, TimestampMixin):

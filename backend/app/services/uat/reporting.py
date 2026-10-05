@@ -11,11 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.excel import excel_value
-from app.core.settings import get_settings
 from app.models import DeliverablePackageVersion, StoredFile, UatCase, UatCaseResult, UatFinding, UatRun, UatSignoff, UatSuite
 from app.services.deployment import database_revisions
 from app.services.governance.audit import redact_summary
-from app.services.health_checks import run_health_checks
 
 
 SHEET_NAMES = ["验收概览", "测试套件", "测试案例", "失败案例", "阻断案例", "问题清单", "修复记录", "签署记录", "环境信息", "版本信息"]
@@ -65,12 +63,32 @@ def build_evidence_package(db: Session, run: UatRun) -> bytes:
         .order_by(DeliverablePackageVersion.id)
     )]
     current_revision, head_revision = database_revisions(db.connection())
+    # N05: the package reproduces the run's frozen inputs instead of the live environment.  ``version.json``
+    # and ``uat-run-manifest.json`` read the snapshot captured at creation time; the live health probe is
+    # kept only as an explicitly-labelled *current* observation, never as historical evidence.
+    from app.services.uat.freeze import freeze_run_manifest, manifest_digest, signoff_evidence_hash
+
+    manifest = freeze_run_manifest(db, run)
+    signoffs = list(db.scalars(select(UatSignoff).where(UatSignoff.uat_run_id == run.id).order_by(UatSignoff.id)).all())
     entries = {
         "uat-report.xlsx": report,
+        "uat-run-manifest.json": _safe_json_bytes(manifest),
         "case-results.json": _json_bytes([{"case_result_id": item.id, "case_id": item.uat_case_id, "status": item.status, "actual_result": item.actual_result_json, "evidence": item.evidence_json, "duration_ms": item.duration_ms} for item in results]),
-        "health-summary.json": _safe_json_bytes(run_health_checks(db, get_settings())),
+        "signoffs.json": _safe_json_bytes([{"id": item.id, "role": item.signoff_role, "status": item.signoff_status, "signed_by": item.signed_by, "signed_at": item.signed_at, "evidence_hash": item.evidence_hash, "revoked_at": item.revoked_at} for item in signoffs]),
         "delivery-file-references.json": _safe_json_bytes({"references": delivery_files, "restricted_files_included": False}),
-        "version.json": _safe_json_bytes({"alembic_revision": current_revision, "alembic_head_revision": head_revision, "git_commit_sha": run.git_commit_sha, "application_version": run.application_version}),
+        "version.json": _safe_json_bytes({
+            # Live probe at download time (kept for backwards compatibility with the existing
+            # evidence contract); the authoritative historical identity is the frozen block below.
+            "alembic_revision": current_revision,
+            "alembic_head_revision": head_revision,
+            "frozen_manifest_digest": manifest_digest(manifest),
+            "current_signoff_evidence_hash": signoff_evidence_hash(db, run),
+            "frozen_release_identity": manifest.get("release_identity"),
+            "frozen_requirement": manifest.get("requirement"),
+            "frozen_at": manifest.get("frozen_at"),
+            "git_commit_sha": run.git_commit_sha,
+            "application_version": run.application_version,
+        }),
     }
     checksums = "".join(f"{sha256(content).hexdigest()}  {name}\n" for name, content in sorted(entries.items())).encode()
     entries["SHA256SUMS"] = checksums
