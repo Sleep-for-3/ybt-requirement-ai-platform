@@ -124,7 +124,11 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
   const canApprove = capabilities.can_publish && active?.created_by !== capabilities.actor_id && active?.edited_by !== capabilities.actor_id;
   // F02: one stable draft key per editor instance (scope + skill), shared by the registry below and
   // the local draft persistence.
-  const skillDraftKey = `skill-draft:${scope.scope_type}:${scope.project_id ?? "none"}:${scope.institution_id ?? "none"}:${skill.skill_key}`;
+  // C02: 草稿按**可信登录用户**隔离。actor 来自服务端 /ai-skills/permissions 返回的 actor_id；
+  // 未取得身份时（actor 为 null）不拼 key、不读写草稿，避免把上一个账号的内容归属给下一位登录者。
+  const actorId = capabilities.actor_id ?? null;
+  const skillDraftKey = actorId === null ? null
+    : `skill-draft:actor:${actorId}:${scope.scope_type}:${scope.project_id ?? "none"}:${scope.institution_id ?? "none"}:${skill.skill_key}`;
   useEffect(() => { onLockedChange(busy || dirty); }, [busy, dirty, onLockedChange]);
   // F02: register the Skill draft with the shared unsaved-changes registry. Previously this page only
   // installed its own `beforeunload` listener, so the global project switch / in-app link guard could
@@ -137,9 +141,10 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
     // F02: persist a local draft so an accidental discard is recoverable. The draft records the
     // server version it was based on, so a stale draft is flagged rather than silently overwriting
     // newer content.
-    saveDraft(window.localStorage, skillDraftKey, { content, basedOnVersionId: active?.id ?? null });
+    if (!skillDraftKey) return () => window.removeEventListener("beforeunload", warn);
+    saveDraft(window.localStorage, skillDraftKey, { content, basedOnVersionId: active?.id ?? null }, actorId);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, content, active?.id, skillDraftKey]);
+  }, [dirty, content, active?.id, skillDraftKey, actorId]);
   const refresh = useCallback(async (selectedId?: number) => {
     const [items, currentBinding, history, samples, options] = await Promise.all([
       apiGet<Version[]>(`${root}/versions?${query(scope)}`), apiGet<typeof binding>(`${root}/bindings?${query(scope)}`),
@@ -155,11 +160,13 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
   // overwriting newer content.
   const [pendingDraft, setPendingDraft] = useState<{ content: Content; basedOnVersionId: number | null; savedAt: string } | null>(null);
   useEffect(() => {
-    const saved = readDraft(window.localStorage, skillDraftKey) as { savedAt?: string; payload?: { content?: Content; basedOnVersionId?: number | null } } | null;
+    // C02: 未取得身份时不读取草稿（否则可能读到上一位登录者的内容）。
+    if (!skillDraftKey) { setPendingDraft(null); return; }
+    const saved = readDraft(window.localStorage, skillDraftKey, actorId) as { savedAt?: string; owner?: string; payload?: { content?: Content; basedOnVersionId?: number | null } } | null;
     const payload = saved?.payload;
     if (!payload?.content || dirty) { setPendingDraft(null); return; }
     setPendingDraft({ content: payload.content, basedOnVersionId: payload.basedOnVersionId ?? null, savedAt: saved?.savedAt || "" });
-  }, [skillDraftKey, dirty, active?.id]);
+  }, [skillDraftKey, dirty, active?.id, actorId]);
   useEffect(() => {
     setBusy(true);
     void refresh().catch(error => setError(errorMessage(error))).finally(() => setBusy(false));
@@ -172,7 +179,7 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
     const item = active ? await apiPatch<Version>(`${root}/versions/${active.version_no}`, { expected_lock_version: active.lock_version, content })
       : await apiPost<Version>(`${root}/versions`, { scope, content });
     // F02: a saved draft is no longer a recovery candidate.
-    clearDraft(window.localStorage, skillDraftKey);
+    if (skillDraftKey) clearDraft(window.localStorage, skillDraftKey, actorId);
     await refresh(item.id); setNotice("草稿已保存。修改后需要重新测试。");
   }
   async function transition(kind: string) {
@@ -214,7 +221,7 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
       {notice && <p role="status" className="text-sm text-emerald-800">{notice}</p>}
       {busy && <p role="status" className="text-sm">操作处理中，请等待结果…</p>}
       {dirty && <div className="text-sm text-amber-800"><p>有未保存的修改，请先保存或放弃修改，再切换能力、版本或运行测试。</p><button className="mt-1 underline" disabled={busy} onClick={() => setContent(active?.content || initialContent(models[0]?.id, skill.task_key))}>放弃未保存修改</button></div>}
-      {pendingDraft && <div className="text-sm text-sky-800" role="status"><p>发现本地保存的草稿（{pendingDraft.savedAt || "时间未知"}，基于版本 #{pendingDraft.basedOnVersionId ?? "新草稿"}）。{active && pendingDraft.basedOnVersionId !== active.id ? "该草稿基于其他版本，恢复前请核对基线。" : ""}</p><div className="mt-1 flex gap-3"><button className="underline" disabled={busy || readOnly} onClick={() => { setContent(pendingDraft.content); setPendingDraft(null); }}>恢复草稿</button><button className="underline" disabled={busy} onClick={() => { clearDraft(window.localStorage, skillDraftKey); setPendingDraft(null); }}>丢弃草稿</button></div></div>}
+      {pendingDraft && <div className="text-sm text-sky-800" role="status"><p>发现本地保存的草稿（{pendingDraft.savedAt || "时间未知"}，基于版本 #{pendingDraft.basedOnVersionId ?? "新草稿"}）。{active && pendingDraft.basedOnVersionId !== active.id ? "该草稿基于其他版本，恢复前请核对基线。" : ""}</p><div className="mt-1 flex gap-3"><button className="underline" disabled={busy || readOnly} onClick={() => { setContent(pendingDraft.content); setPendingDraft(null); }}>恢复草稿</button><button className="underline" disabled={busy} onClick={() => { if (skillDraftKey) clearDraft(window.localStorage, skillDraftKey, actorId); setPendingDraft(null); }}>丢弃草稿</button></div></div>}
       <fieldset disabled={busy || readOnly} className="space-y-3 disabled:opacity-75">
         <label className="block text-sm">模型配置<select className={inputClass} value={content.model_profile_id} onChange={event => setContent({ ...content, model_profile_id: Number(event.target.value) })}><option value={0}>请选择模型</option>{models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.provider_type}/{model.model_name}</option>)}</select></label>
         <label className="block text-sm">系统提示词<textarea className={inputClass} rows={5} value={content.system_prompt} onChange={event => setContent({ ...content, system_prompt: event.target.value })}/></label>

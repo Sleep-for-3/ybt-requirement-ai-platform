@@ -18,7 +18,13 @@ export function shouldInterceptNavigation(click: {
   sameOrigin?: boolean;
   skipGuard?: boolean;
 } | null | undefined): boolean;
-export function draftKey(scope: string): string;
-export function saveDraft(storage: Storage, scope: string, payload: unknown): boolean;
-export function readDraft(storage: Storage, scope: string): { savedAt?: string; payload: unknown } | null;
-export function clearDraft(storage: Storage, scope: string): boolean;
+// C02: 草稿按可信登录用户 ID 隔离；未取得身份时 draftKey 返回 null，读写均被拒绝。
+export type DraftActorId = number | string | null | undefined;
+export function draftKey(scope: string, actorId: DraftActorId): string | null;
+export function saveDraft(storage: Storage, scope: string, payload: unknown, actorId: DraftActorId): boolean;
+export function readDraft(
+  storage: Storage,
+  scope: string,
+  actorId: DraftActorId
+): { savedAt?: string; owner?: string; payload: unknown } | null;
+export function clearDraft(storage: Storage, scope: string, actorId: DraftActorId): boolean;

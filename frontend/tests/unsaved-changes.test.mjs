@@ -9,6 +9,7 @@ import {
   beforeUnloadReturnValue,
   clearDraft,
   dirtyOwners,
+  draftKey,
   hasUnsavedChanges,
   leaveDecision,
   readDraft,
@@ -75,15 +76,49 @@ test("卸载时清空登记，避免残留脏标记", () => {
 
 test("本地草稿可保存、读回与清除", () => {
   const storage = fakeStorage();
-  assert.equal(readDraft(storage, "requirement:12"), null);
+  assert.equal(readDraft(storage, "requirement:12", 7), null);
 
-  assert.equal(saveDraft(storage, "requirement:12", { business: "未保存正文" }), true);
-  const restored = readDraft(storage, "requirement:12");
+  assert.equal(saveDraft(storage, "requirement:12", { business: "未保存正文" }, 7), true);
+  const restored = readDraft(storage, "requirement:12", 7);
   assert.equal(restored.payload.business, "未保存正文");
+  assert.equal(restored.owner, "7");
   assert.ok(restored.savedAt);
 
-  assert.equal(clearDraft(storage, "requirement:12"), true);
-  assert.equal(readDraft(storage, "requirement:12"), null);
+  assert.equal(clearDraft(storage, "requirement:12", 7), true);
+  assert.equal(readDraft(storage, "requirement:12", 7), null);
+});
+
+test("C02 未取得身份时不读写草稿", () => {
+  const storage = fakeStorage();
+  assert.equal(draftKey("requirement:12", null), null);
+  assert.equal(saveDraft(storage, "requirement:12", { secret: 1 }, null), false);
+  assert.equal(readDraft(storage, "requirement:12", null), null);
+  assert.equal(clearDraft(storage, "requirement:12", null), false);
+});
+
+test("C02 不同账号在相同范围互不可见", () => {
+  const storage = fakeStorage();
+  const scope = "skill-draft:project:11:none:requirement_candidate_generation";
+  assert.equal(saveDraft(storage, scope, { system_prompt: "A 的私有正文" }, 17), true);
+  // A 自己能恢复。
+  assert.equal(readDraft(storage, scope, 17).payload.system_prompt, "A 的私有正文");
+  // B 在同一 scope 下读不到。
+  assert.equal(readDraft(storage, scope, 18), null);
+  // B 保存自己的草稿不会覆盖 A 的。
+  assert.equal(saveDraft(storage, scope, { system_prompt: "B 的正文" }, 18), true);
+  assert.equal(readDraft(storage, scope, 17).payload.system_prompt, "A 的私有正文");
+  assert.equal(readDraft(storage, scope, 18).payload.system_prompt, "B 的正文");
+  // B 清自己的不影响 A。
+  assert.equal(clearDraft(storage, scope, 18), true);
+  assert.equal(readDraft(storage, scope, 17).payload.system_prompt, "A 的私有正文");
+});
+
+test("C02 无 owner 的历史草稿不被自动归属", () => {
+  const storage = fakeStorage();
+  // 旧版本遗留的草稿：没有 owner 字段（模拟升级前写入的数据）。
+  storage.setItem("draft:actor:17:requirement:12",
+    JSON.stringify({ savedAt: "t", payload: { business: "旧数据" } }));
+  assert.equal(readDraft(storage, "requirement:12", 17), null);
 });
 
 test("草稿存储异常不影响主流程", () => {

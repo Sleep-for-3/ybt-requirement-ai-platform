@@ -70,33 +70,52 @@ export function shouldInterceptNavigation(click) {
 }
 
 /** Local draft persistence: keep the unfinished body so a reload can restore it. */
-export function draftKey(scope) {
-  return `draft:${scope}`;
+/**
+ * C02: 草稿必须按**账号**隔离。
+ *
+ * 原键 `draft:${scope}` 不含 actor，所以同一项目/同一 Skill 下，A 未保存的私有正文
+ * 会被 B 读到并可恢复。新键把可信登录用户 ID 编入命名空间；未取得身份时不拼 key。
+ */
+export function draftKey(scope, actorId) {
+  const actor = actorId === null || actorId === undefined || actorId === "" ? null : String(actorId);
+  return actor === null ? null : `draft:actor:${actor}:${scope}`;
 }
 
-export function saveDraft(storage, scope, payload) {
+export function saveDraft(storage, scope, payload, actorId) {
+  const key = draftKey(scope, actorId);
+  if (!key) return false;
   try {
-    storage.setItem(draftKey(scope), JSON.stringify({ savedAt: new Date().toISOString(), payload }));
+    // C02: 草稿本身也记录 owner，读取与恢复都校验；跨账号即使拿到 key 也不能自动归属。
+    storage.setItem(key, JSON.stringify({
+      savedAt: new Date().toISOString(), owner: String(actorId), payload
+    }));
     return true;
   } catch {
     return false;
   }
 }
 
-export function readDraft(storage, scope) {
+export function readDraft(storage, scope, actorId) {
+  const key = draftKey(scope, actorId);
+  if (!key) return null;
   try {
-    const raw = storage.getItem(draftKey(scope));
+    const raw = storage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && "payload" in parsed ? parsed : null;
+    if (!parsed || typeof parsed !== "object" || !("payload" in parsed)) return null;
+    // C02: 历史无 owner 的草稿不得自动归属当前登录者。
+    if (typeof parsed.owner !== "string" || parsed.owner !== String(actorId)) return null;
+    return parsed;
   } catch {
     return null;
   }
 }
 
-export function clearDraft(storage, scope) {
+export function clearDraft(storage, scope, actorId) {
+  const key = draftKey(scope, actorId);
+  if (!key) return false;
   try {
-    storage.removeItem(draftKey(scope));
+    storage.removeItem(key);
     return true;
   } catch {
     return false;
