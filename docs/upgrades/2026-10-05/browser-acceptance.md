@@ -107,13 +107,60 @@ UAT 运行详情页 `/uat/runs/1` 实际渲染（无 console error、无 `role=a
 **结论**：说明文字来自**后端 `metric_notes`**（区分“无数据/未配置基准集”的不同原因），
 且“无法计算”未被美化成 0 —— 正是 F09 要达成的效果。控制台无 error。
 
-## 8. 未完成 / 边界
+## 8. F08 建轮次自动绑定发布身份：真实点击验证
 
-1. 本轮**未覆盖**F02（Skill 离开确认与草稿恢复）、F05（三处表单成功/失败重置）、F06（查询失败回退）、
-   F07（引用定位跳转）、F08（建轮次自动绑定发布身份）的**逐项点击**；
-   这些仍需在隔离环境中构造对应数据后逐条验证（合成库目前没有 Skill 草稿、没有智能体任务）。
-   （F09 已在本轮覆盖，见第 6 节。）
-2. 未做**登录令牌续期**（refresh rotation）的浏览器实测。
-3. `read_image` 在本模型不可用，故**未做像素级视觉检查**（布局/溢出/字体外观未目视确认）；
+`/uat/suites/1` 页面（合成套件）：
+
+- 页面显示：「**将绑定发布标识 commit 9b5d00cada0b640aaa139aa5d234f064d9e11f25 · 构建 2026-10-04T13:29:05Z · schema 未知**」
+- 执行环境是**可编辑输入**，默认值 `isolated`（**不再是硬编码 `uat`**）
+- 填入名称与 `browser-verify` 后**真实点击「创建执行轮次」** → 跳转 `/uat/runs/2`
+
+回读新建轮次（隔离 API）：
+
+```json
+{"runName":"F08 浏览器验收轮次", "environment":"browser-verify",
+ "gitCommitSha":"9b5d00cada0b640aaa139aa5d234f064d9e11f25",
+ "manifestKeys":["manifest_version","frozen_at","request_id","run","release_identity","model_profiles"],
+ "manifestRunEnv":"browser-verify"}
+```
+
+**结论**：UI 提交的轮次**确实带上了 `git_commit_sha`**（自动取自 `/api/version`），环境名来自输入框，
+且服务端同时冻结了 manifest（N05）—— F08 与 N05 均按预期工作。
+
+## 9. F05 三处异步表单：真实提交验证
+
+以**平台管理员**（合成账号 `p4_platform_admin`，`institution_admin` 属于 `platform_operator` 机构）进入
+`/admin/institutions`：
+
+1. 点击「新建机构」→ 表单出现（`input[name=code]`、`input[name=name]`、`select[name=type]`）
+2. 填入 `F05VERIFY` / `F05 浏览器验收机构` / `consulting_company`
+3. 点击「创建机构」
+
+结果：
+
+```json
+{"submitLabel":"创建机构", "formStillOpen":false,
+ "codeValueAfter":null, "nameValueAfter":null,
+ "listHasNewInstitution":true}
+```
+
+数据库核对（隔离库）：
+
+```
+('F05VERIFY', 'F05 浏览器验收机构', 'consulting_company', 'active')
+count = 3
+重复的 F05VERIFY 行数 = 1
+```
+
+**结论**：提交后**表单已关闭、输入已清空、列表已刷新且新机构出现**，且库中**恰好 1 条**（无重复提交）。
+这正是 F05 修复的 `formElement.reset()` + 刷新路径（修复前 `event.currentTarget` 已为 null，
+重置静默失效、后续刷新被跳过）。
+
+## 10. 未完成 / 边界
+
+1. 本轮**未覆盖**F02（Skill 离开确认与草稿恢复）、F06（查询失败回退）、F07（引用定位跳转）的逐项点击。
+2. 已覆盖：F01（第 2–3 节）、F03（第 3 节顺带）、F05（第 9 节）、F08（第 8 节）、F09（第 7 节）、F10（第 4 节）。
+3. 未做**登录令牌续期**（refresh rotation）的浏览器实测。
+4. `read_image` 在本模型不可用，故**未做像素级视觉检查**（布局/溢出/字体外观未目视确认）；
    结论均基于 DOM 文本、元素可见性与状态断言。
-4. 未在真实网络条件（403/500/断网）下验证错误态渲染。
+5. 未在真实网络条件（403/500/断网）下验证错误态渲染。
