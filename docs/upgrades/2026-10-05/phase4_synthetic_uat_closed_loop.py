@@ -437,17 +437,48 @@ def main() -> int:
              has_signoffs="signoffs.json" in names)
 
         # frozen requirement files bind to the same content version/hash
-        # `/export` 只产出草稿 xlsx；**冻结**正式文件走 formal-deliveries（需先冻结快照）。
+        # `/export` 只产出草稿 xlsx；**冻结**正式文件需：提交审核 → 终审 finalize → 导出，
+        # 三个环节必须绑定同一个 content_version / content_hash。
         draft_export = call("business_analyst", "GET",
                             f"/api/projects/{project_id}/requirements/{requirement_id}/export")
-        formal = call("business_analyst", "GET",
-                      f"/api/projects/{project_id}/requirements/{requirement_id}/formal-deliveries")
         step("requirement_draft_export", ok=draft_export.status_code == 200,
              status=draft_export.status_code, bytes=len(draft_export.content))
-        step("requirement_formal_deliveries_listed", ok=formal.status_code == 200,
-             status=formal.status_code,
-             count=len(formal.json()) if formal.status_code == 200 else None,
-             note="冻结 Word/Excel 需先建立正式交付版本（本轮未产出，见未完成项）。")
+        # 提审需要 deliverable.manage（PROJECT_ROLE_PERMISSIONS 里只有项目经理具备），
+        # 因此由项目经理提审、终审角色 finalize —— 依旧满足“提交人与终审人不同”。
+        submitted = call("project_manager", "POST",
+                         f"/api/projects/{project_id}/requirements/{requirement_id}/review-submissions",
+                         json_body={"expected_content_version": content_version,
+                                    "expected_content_hash": content_hash,
+                                    "assignments": {}})
+        step("requirement_review_submitted", ok=submitted.status_code in (200, 201),
+             status=submitted.status_code, body=submitted.text[:250])
+
+        if submitted.status_code in (200, 201):
+            submission_id = int(submitted.json()["id"])
+            # 终审需要 deliverable.review（终审角色具备），且必须与提交人不同。
+            finalized = call("final_reviewer", "POST",
+                             f"/api/projects/{project_id}/requirements/{requirement_id}"
+                             f"/review-submissions/{submission_id}/finalize")
+            step("requirement_delivery_finalized", ok=finalized.status_code == 201,
+                 status=finalized.status_code, body=finalized.text[:250])
+            if finalized.status_code == 201:
+                delivery = finalized.json()
+                delivery_id = int(delivery["id"])
+                frozen = {"content_version": delivery.get("content_version"),
+                          "content_hash": delivery.get("content_hash"),
+                          "file_hash": delivery.get("file_hash")}
+                # 冻结的 Word/Excel 必须与提审时的版本/hash 一致。
+                step("frozen_delivery_binds_same_version",
+                     ok=(frozen["content_version"] == content_version
+                         and frozen["content_hash"] == content_hash),
+                     **frozen)
+                for fmt, mime in (("xlsx", "sheet"), ("docx", "word")):
+                    exported = call("final_reviewer", "GET",
+                                    f"/api/projects/{project_id}/requirements/{requirement_id}"
+                                    f"/formal-deliveries/{delivery_id}/export?format={fmt}")
+                    step(f"frozen_export_{fmt}", ok=exported.status_code == 200,
+                         status=exported.status_code, bytes=len(exported.content),
+                         format_kind=mime)
 
         # -------------------------------------------------------- 10. change review (recheck)
         change_hash = hashlib.sha256(b"synthetic-script-v2").hexdigest()
