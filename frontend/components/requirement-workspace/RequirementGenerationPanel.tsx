@@ -96,11 +96,15 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     if(!run)return;
     const scope=scopeFromRound(run);
     if(scope.empty){setError("该轮次没有可复用的字段范围。");return;}
-    setScopeOverride(scope.fieldIds);
-    if(scope.business)setBusiness(true);
-    if(scope.lineage)setLineage(true);
-    setNotice("已填入该轮次的 " + scope.fieldIds.length + " 个字段与范围，请确认后点击“生成候选”。");
-  }
+  // F04: restore the round's scope exactly - both the sections it used *and* the ones it did not,
+  // otherwise a business-only round silently keeps the technical checkbox on and submits a wider
+  // scope than the operator selected. The mode is pinned too, so the visible range matches the POST.
+  setScopeOverride(scope.fieldIds);
+  setBusiness(scope.business);
+  setLineage(scope.lineage);
+  setMode("scope");
+  setNotice("已填入该轮次的 " + scope.fieldIds.length + " 个字段与范围（业务" + (scope.business ? "✓" : "✗") + " / 技术" + (scope.lineage ? "✓" : "✗") + "），请确认后点击“生成候选”。");
+}
 
   async function generate(){
     if(busy||dirty||!contentVersion||!effectiveFieldIds.length||!sections.length)return;
@@ -153,11 +157,12 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   return <section className="panel mb-3 p-4" aria-label="需求范围生成">
     <div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">范围生成</h2><span className="text-[10px] text-slate-500">内容 v{contentVersion}</span></div>
     <div className="mt-3 grid grid-cols-2 gap-1 rounded border border-line bg-slate-50 p-1" role="group" aria-label="生成字段范围">
-      <button className={`h-8 text-xs ${mode==="scope"?"bg-white font-semibold shadow-sm":"text-slate-500"}`} onClick={()=>setMode("scope")} type="button">全部 {fields.length} 字段</button>
-      <button className={`h-8 text-xs ${mode==="field"?"bg-white font-semibold shadow-sm":"text-slate-500"}`} disabled={!currentFieldId} onClick={()=>setMode("field")} type="button">当前字段</button>
+      <button className={`h-8 text-xs ${mode==="scope"?"bg-white font-semibold shadow-sm":"text-slate-500"}`} onClick={()=>{setMode("scope");setScopeOverride(null);}} type="button">全部 {fields.length} 字段</button>
+      <button className={`h-8 text-xs ${mode==="field"?"bg-white font-semibold shadow-sm":"text-slate-500"}`} disabled={!currentFieldId} onClick={()=>{setMode("field");setScopeOverride(null);}} type="button">当前字段</button>
     </div>
     <div className="mt-3 flex gap-4 text-xs"><label><input checked={business} disabled={!canBusiness||busy} onChange={event=>setBusiness(event.target.checked)} type="checkbox"/> 业务口径</label><label><input checked={lineage} disabled={!canLineage||busy} onChange={event=>setLineage(event.target.checked)} type="checkbox"/> 技术溯源</label></div>
-    <button className="button-primary mt-3 w-full" disabled={busy||dirty||!fieldIds.length||!sections.length||runs.isFetching&&Boolean(currentRun)} onClick={()=>void generate()} type="button"><Sparkles size={15}/>{busy?"处理中…":"生成候选"}</button>
+    <button className="button-primary mt-3 w-full" disabled={busy||dirty||!effectiveFieldIds.length||!sections.length||runs.isFetching&&Boolean(currentRun)} onClick={()=>void generate()} type="button"><Sparkles size={15}/>{busy?"处理中…":"生成候选"}</button>
+    <p className="mt-1 text-[11px] text-slate-500">将生成 {effectiveFieldIds.length} 个字段 · {sections.length? sections.map(section=>section==="business"?"业务口径":"技术溯源").join(" + ") : "未选择范围"}{scopeOverride?"（按历史轮次范围）":""}</p>
     {dirty?<p className="mt-2 text-xs text-amber-700">请先保存需求说明或字段修改。</p>:null}
     {rounds.length>1?<label className="mt-3 block text-xs"><span className="mb-1 block text-slate-500">生成轮次（历史轮次只读）</span><select aria-label="生成轮次" className="control h-8 text-xs" onChange={event=>setSelectedRunId(Number(event.target.value)||null)} value={currentRun?.id??""}>{rounds.map(item=><option key={item.id} value={item.id}>{roundLabel(item)}</option>)}</select></label>:null}
     {currentRun?<div className="mt-3 border-t border-line pt-3 text-xs"><div className="flex flex-wrap gap-x-3 gap-y-1"><span>{roundLabel(currentRun)}</span><span>总数 {currentRun.total}</span><span>已生成 {currentRun.counts.completed}</span><span>失败 {currentRun.counts.failed}</span><span>阻断 {currentRun.counts.blocked}</span><span>待处理 {pendingCandidates.length}</span></div>

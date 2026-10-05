@@ -308,10 +308,12 @@ export function RequirementWorkspace() {
   if (projectionQuery.isPending) return <WorkspaceSkeleton />;
 
   const queryError = projectionQuery.error ? readError(projectionQuery.error, "无法加载当前项目，请确认后端服务和项目权限") : detailQuery.error ? readError(detailQuery.error, "无法加载当前字段详情") : "";
-  // W07: progress comes from the current requirement's full field scope, so finishing one field
-  // no longer renders the whole requirement as complete.
-  const progress = requirementProgress(projection?.records);
-
+  // F03: in requirement mode the progress must come from the *current requirement's* own field
+  // scope, not from the shared whole-table projection (which listed every field of the table and
+  // made 1-of-8 look complete, or 2-of-2 that were done look incomplete).
+  const progressRecords = requirement ? records : summaryRecords;
+  const progressScope: "requirement" | "shared" = requirement ? "requirement" : "shared";
+  const progress = requirementProgress(progressRecords);
   return (
     <>
       <main className="min-w-0">
@@ -322,7 +324,7 @@ export function RequirementWorkspace() {
           </div>
         </div>
         <div className="px-5 pt-4">
-          <StepBar hasTable={Boolean(tableId)} hasScenario={Boolean(scenarioId)} hasDraft={progress.draftComplete} hasFinal={progress.finalComplete} draftProgress={progressLabel(progress.draftCount, progress.total)} finalProgress={progressLabel(progress.finalCount, progress.total)} />
+          <StepBar hasTable={Boolean(tableId)} hasScenario={Boolean(scenarioId)} hasDraft={progress.draftComplete} hasFinal={progress.finalComplete} draftProgress={progressLabel(progress.draftCount, progress.total)} finalProgress={progressLabel(progress.finalCount, progress.total)} scope={progressScope} />
           {error || queryError ? <div className="mt-3 flex items-start gap-2 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{error || queryError}</div> : null}
           {notice ? <div className="mt-3 rounded-lg border border-pine-100 bg-pine-50 px-3 py-2 text-sm text-pine-800">{notice}</div> : null}
         </div>
@@ -433,17 +435,20 @@ export function RequirementWorkspace() {
   );
 }
 
-function StepBar({ hasTable, hasScenario, hasDraft, hasFinal, draftProgress, finalProgress }: { hasTable: boolean; hasScenario: boolean; hasDraft: boolean; hasFinal: boolean; draftProgress?: string; finalProgress?: string }) {
-  // W07: the AI-analysis and review steps show how much of the field scope is actually done, so
-  // a partially finished requirement is visible instead of appearing complete.
+function StepBar({ hasTable, hasScenario, hasDraft, hasFinal, draftProgress, finalProgress, scope }: { hasTable: boolean; hasScenario: boolean; hasDraft: boolean; hasFinal: boolean; draftProgress?: string; finalProgress?: string; scope?: "requirement" | "shared" }) {
+  // F03/W07: the AI-analysis and review steps show how much of the *current scope* is actually
+  // done, so a partially finished requirement is visible instead of appearing complete. In shared
+  // whole-table mode the counts describe every field of the table, which is stated explicitly
+  // instead of being presented as the current requirement's progress.
   const steps = [
     { label: "选择监管目标", done: hasTable },
     { label: "配置分析范围", done: hasTable && hasScenario },
     { label: "AI 口径分析", done: hasDraft, detail: draftProgress },
     { label: "人工校核与导出", done: hasFinal, detail: finalProgress }
   ];
+  const scopeNote = scope === "shared" ? "共享整表模式（计数覆盖该表全部字段）" : "当前需求范围";
   const active = Math.max(0, steps.findIndex((step) => !step.done));
-  return <div className="panel grid grid-cols-2 gap-3 px-4 py-3 lg:flex lg:items-center">{steps.map((step, index) => <div className="contents" key={step.label}><div className="flex min-w-0 items-center gap-2 lg:min-w-[145px]"><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${step.done || index === active ? "border-pine bg-pine text-white" : "border-slate-300 bg-white text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className={`text-xs font-semibold ${step.done ? "text-pine-700" : index === active ? "text-ink" : "text-slate-400"}`}>{step.label}{step.detail ? <span className="ml-1 font-normal text-slate-500">{step.detail}</span> : null}</span></div>{index < steps.length - 1 ? <div className={`mx-2 hidden h-px flex-1 lg:block ${step.done ? "bg-pine-300" : "bg-line"}`} /> : null}</div>)}</div>;
+  return <div className="panel px-4 py-3"><div className="grid grid-cols-2 gap-3 lg:flex lg:items-center">{steps.map((step, index) => <div className="contents" key={step.label}><div className="flex min-w-0 items-center gap-2 lg:min-w-[145px]"><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${step.done || index === active ? "border-pine bg-pine text-white" : "border-slate-300 bg-white text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className={`text-xs font-semibold ${step.done ? "text-pine-700" : index === active ? "text-ink" : "text-slate-400"}`}>{step.label}{step.detail ? <span className="ml-1 font-normal text-slate-500">{step.detail}</span> : null}</span></div>{index < steps.length - 1 ? <div className={`mx-2 hidden h-px flex-1 lg:block ${step.done ? "bg-pine-300" : "bg-line"}`} /> : null}</div>)}</div><p className="mt-1 text-[11px] text-slate-500">进度口径：{scopeNote}</p></div>;
 }
 
 function WorkspaceSkeleton() {

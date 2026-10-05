@@ -20,7 +20,9 @@
 | F01 | P1 | 取消需求切换后左侧面板已切到 B，父级/正文仍 A | **已修复**（决策先于子状态变更）；真实浏览器待测 | [F01-F05-F10-frontend-editing.md](F01-F05-F10-frontend-editing.md) |
 | F05 | P1 | `admin/users`、`admin/institutions`、`mart` 三处 await 后 `currentTarget.reset()` | **已修复**（await 前捕获节点）；真实浏览器待测 | 同上 |
 | F10 | P2 | 移动端折叠后展开按钮随容器一起隐藏 | **已修复**（切换器移出可折叠容器）；三档宽度待实测 | 同上 |
-| F02/F03/F04/F06–F09 | P1/P2 | dirty 全局登记、草稿恢复、当前需求进度、历史范围、错误缓存、引用定位、指标解释 | 待实施 | — |
+| F03 | P1 | 需求进度读共享整表而非当前需求范围 | **已修复**（按当前需求 records 计算 + 口径标注）；真实交互待测 | [F03-F04-progress-and-scope.md](F03-F04-progress-and-scope.md) |
+| F04 | P1 | 历史范围只开不关、切模式不清 override、按钮判 `fieldIds` | **已修复**（精确还原 + 清除 override + `effectiveFieldIds` + 提交预览） | 同上 |
+| F02/F06–F09 | P1/P2 | dirty 全局登记、草稿恢复入口、错误缓存、引用定位、指标解释 | 待实施 | — |
 | N12 | 中高 | 备份缺关键项仍 `ok=true`/exit 0，逐文件 SHA 与配置/向量副本缺失 | 待实施 | — |
 
 ## 已完成工作包
