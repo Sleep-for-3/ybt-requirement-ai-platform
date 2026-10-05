@@ -48,8 +48,12 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-结果：**1481 passed / 11 warnings / 0 failed**，耗时 1107.20s（0:18:27），`PYTEST_EXIT=0`。
-完整输出：`.local-run/final-regression-3.log`。
+结果：**1480 passed / 1 skipped / 0 failed**，耗时 1131.06s（0:18:51），`PYTEST_EXIT=0`。
+完整输出：`.local-run/final-regression-4.log`。
+
+> 唯一 skipped 是 `test_the_schema_probe_keeps_the_session_usable_after_it_fails` —— 它需显式设置
+> `PHASE4_VERIFY_DATABASE_URL` 才连真实 PostgreSQL（本机隔离库已单独验证过该路径），
+> 未设置时 **主动 skip 并说明原因**，不是失败，也不是被禁用。
 
 **历史对照**：第三阶段后曾出现 1 例失败（`test_semantic_catalog_701_...` 的墙上时钟断言
 `elapsed_ms 2444 < 2000`），其后多轮全量回归该用例均通过，**未做任何放宽或跳过** —— 说明它确为
@@ -62,7 +66,11 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 | P5 修复后 | 1479 passed / 0 failed |
 | 依赖升级后 | 1479 passed / 0 failed |
 | SEC-1 修复后 | 1481 passed / 0 failed（+2 为 SEC-1 新增回归测试） |
-| **业务闭环改动后（本轮最终）** | **1481 passed / 0 failed**（18:27） |
+| **业务闭环完成后（本轮，最新 commit）** | **1480 passed / 1 skipped / 0 failed**（18:51） |
+
+> **计数差异说明（不掩盖）**：上两轮的 1481 passed 是因为当时**设置了** `PHASE4_VERIFY_DATABASE_URL`，
+> 那个真实 PostgreSQL 用例会执行并通过；本轮未设该变量，它**主动 skip 并说明原因**。
+> 因此 1480 + 1 skipped = 1481 是同一批测试的两种环境呈现，**不存在测试丢失或被禁用**。
 
 ## 6. 未达成 / 待验收条件（不得当作通过）
 
