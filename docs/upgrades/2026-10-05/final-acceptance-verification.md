@@ -83,16 +83,50 @@ npm audit --omit=dev
 
 ## 4. 未达成 / 待验收条件
 
-1. **Python 依赖漏洞扫描（pip-audit）与静态分析（bandit）尚未完成**：本机 venv 中两者均未安装，
-   安装任务在本轮结束时仍在进行（`pip install pip-audit bandit` 未返回）。
-   **待执行命令**（安装完成后即可跑）：
-   ```
-   cd backend
-   .venv\Scripts\python -m pip_audit -r requirements.lock.txt --strict
-   .venv\Scripts\python -m bandit -r app -ll -q
-   ```
-   在拿到结果前，**不得**声称 Python 侧安全扫描通过。
-2. **未做容器镜像扫描**（trivy/grype 未安装），镜像层漏洞未验证。
-3. **npm audit 只覆盖生产依赖**（`--omit=dev`）；devDependencies（eslint、playwright 等）未纳入本轮结论。
+## 4. Python 依赖安全扫描（OSV）：发现 9 条公告并已清零
+
+`pip-audit`/`bandit` 在本机**装不上**（镜像源持续从源码构建 sdists，长时间不返回；已终止两次尝试）。
+改用**同一个上游数据库 OSV**（pip-audit 内部即用其）直接扫描，走本机已验证的路径
+（bundled node + `HTTPS_PROXY=127.0.0.1:7897`）：`docs/upgrades/2026-10-05/phase5_python_dependency_scan.py`。
+扫描对象是**实际发布的精确 pin**（`backend/requirements.lock.txt`，96 个包含平台标记的包）。
+
+### 4.1 初次结果：9 条公告（3 HIGH / 2 MODERATE / 4 UNKNOWN）
+
+| 包 | 版本 | 等级 | 公告 | 修复版本 |
+| --- | --- | --- | --- | --- |
+| cryptography | 46.0.7 | **HIGH** | GHSA-537c-gmf6-5ccf：wheel 内置易受攻击的 OpenSSL | 48.0.1 |
+| cryptography | 46.0.7 | **HIGH** | GHSA-g6cj-pr64-35w5：PKCS#7 解密可区分的错误/时序导致 Bleichenbacher 预言机 | 50.0.0 |
+| cryptography | 46.0.7 | **HIGH** | GHSA-jwv3-5hgf-82ww：重复自签中间证书导致指数级路径构建 | 49.0.0 |
+| cryptography | 46.0.7 | MODERATE | GHSA-m2h6-j472-rp4c：通配符 DNS 名称可越出 permittedSubtrees | 49.0.0 |
+| pytest | 8.4.2 | MODERATE | GHSA-6w46-j5rx-g56g：tmpdir 处理缺陷 | 9.0.3 |
+
+（另 4 条为 PYSEC 别名条目，与上述 GHSA 同源。）
+
+### 4.2 修复
+
+`cryptography`（库+wheel 双面安全组件，且是鉴权链路依赖）升到 **50.0.0**（同时满足 ≥49 与 ≥50 两个修复要求）；
+`pytest` 升到 **9.0.3**（测试依赖，不影响运行时）。三处同步更新：
+
+- `backend/requirements.lock.txt`：`cryptography==50.0.0`、`pytest==9.0.3`、`pytest-asyncio==1.4.0`
+- `backend/requirements.txt`（声明范围）：`cryptography>=50,<51`、`pytest>=9,<10`、`pytest-asyncio>=1,<2`
+- `backend/requirements.sbom.json`：按升级后的真实环境重新生成（**97** 个组件）
+
+### 4.3 复验
+
+```
+python docs/upgrades/2026-10-05/phase5_python_dependency_scan.py
+→ {"ok": true, "pinned_packages_scanned": 96, "advisory_count": 0, "severity_counts": {}}
+→ SCAN_EXIT=0
+```
+
+基线契约测试（lock/SBOM/Docker/CI 一致性）仍然通过：`pytest tests/test_release_baseline.py tests/test_deployment_contract.py -q` → **22 passed**。
+
+## 5. 未达成 / 待验收条件
+
+1. **源码静态分析（bandit）未执行**：本机安装不成功（同上）。待执行：`python -m bandit -r app -ll -q`。
+   在拿到结果前，**不得**声称 Python 静态分析通过。
+2. **未做容器镜像层扫描**（trivy/grype 未安装），镜像层漏洞未验证。
+3. **npm audit 只覆盖生产依赖**（`--omit=dev`）；devDependencies 未纳入结论。
 4. **未在 CI（Linux runner）上执行**以上任一检查；本结论基于 Windows 本机环境。
-5. 项目 11 外发策略与分类分级未受本轮影响（本次改动仅依赖版本与 lockfile，无策略/权限变更）。
+5. 项目 11 外发策略与分类分级未受本轮影响（改动仅依赖版本/SBOM/lockfile，无策略与权限变更）。
+6. 依赖升级后的全量回归结果见下一轮记录（已在升级后重新执行）。

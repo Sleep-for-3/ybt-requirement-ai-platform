@@ -1,6 +1,6 @@
 {
   "generated_from": "backend/.venv (Python 3.12.14)",
-  "component_count": 96,
+  "component_count": 97,
   "packages": [
     {
       "name": "alembic",
@@ -20,7 +20,7 @@
     {
       "name": "annotated-types",
       "version": "0.8.0",
-      "license": "MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "anyio",
@@ -100,15 +100,15 @@
     {
       "name": "colorama",
       "version": "0.4.6",
-      "license": "BSD License"
-    },
-    {
-      "name": "cryptography",
-      "version": "46.0.7",
       "license": "UNKNOWN"
     },
     {
-      "name": "et_xmlfile",
+      "name": "cryptography",
+      "version": "50.0.0",
+      "license": "UNKNOWN"
+    },
+    {
+      "name": "et-xmlfile",
       "version": "2.0.0",
       "license": "MIT"
     },
@@ -130,7 +130,7 @@
     {
       "name": "filelock",
       "version": "4.0.7",
-      "license": "MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "flatbuffers",
@@ -155,12 +155,12 @@
     {
       "name": "hf-xet",
       "version": "1.6.0",
-      "license": "Apache Software License"
+      "license": "UNKNOWN"
     },
     {
       "name": "httpcore",
       "version": "1.0.9",
-      "license": "BSD License"
+      "license": "UNKNOWN"
     },
     {
       "name": "httptools",
@@ -173,7 +173,7 @@
       "license": "BSD-3-Clause"
     },
     {
-      "name": "huggingface_hub",
+      "name": "huggingface-hub",
       "version": "1.33.0",
       "license": "Apache-2.0"
     },
@@ -200,7 +200,7 @@
     {
       "name": "loguru",
       "version": "0.7.3",
-      "license": "MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "lxml",
@@ -208,12 +208,12 @@
       "license": "BSD-3-Clause"
     },
     {
-      "name": "Mako",
+      "name": "mako",
       "version": "1.4.3",
       "license": "UNKNOWN"
     },
     {
-      "name": "MarkupSafe",
+      "name": "markupsafe",
       "version": "3.0.3",
       "license": "UNKNOWN"
     },
@@ -225,7 +225,7 @@
     {
       "name": "mmh3",
       "version": "5.3.0",
-      "license": "MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "numpy",
@@ -250,7 +250,7 @@
     {
       "name": "orjson",
       "version": "3.12.0",
-      "license": "Apache Software License; MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "packaging",
@@ -260,7 +260,7 @@
     {
       "name": "pandas",
       "version": "3.0.6",
-      "license": "BSD License"
+      "license": "UNKNOWN"
     },
     {
       "name": "pillow",
@@ -268,14 +268,19 @@
       "license": "UNKNOWN"
     },
     {
+      "name": "pip",
+      "version": "25.0.1",
+      "license": "MIT"
+    },
+    {
       "name": "pluggy",
       "version": "1.6.0",
       "license": "MIT"
     },
     {
-      "name": "prompt_toolkit",
+      "name": "prompt-toolkit",
       "version": "3.0.53",
-      "license": "BSD License"
+      "license": "UNKNOWN"
     },
     {
       "name": "protobuf",
@@ -293,7 +298,7 @@
       "license": "UNKNOWN"
     },
     {
-      "name": "py_rust_stemmers",
+      "name": "py-rust-stemmers",
       "version": "0.1.8",
       "license": "UNKNOWN"
     },
@@ -313,32 +318,32 @@
       "license": "UNKNOWN"
     },
     {
-      "name": "pydantic-settings",
-      "version": "2.15.0",
-      "license": "MIT License"
-    },
-    {
-      "name": "pydantic_core",
+      "name": "pydantic-core",
       "version": "2.46.5",
       "license": "UNKNOWN"
     },
     {
-      "name": "Pygments",
+      "name": "pydantic-settings",
+      "version": "2.15.0",
+      "license": "UNKNOWN"
+    },
+    {
+      "name": "pygments",
       "version": "2.21.0",
       "license": "UNKNOWN"
     },
     {
-      "name": "PyJWT",
+      "name": "pyjwt",
       "version": "2.15.1",
       "license": "UNKNOWN"
     },
     {
       "name": "pymilvus",
       "version": "2.6.17",
-      "license": "Apache Software License"
+      "license": "UNKNOWN"
     },
     {
-      "name": "PyMySQL",
+      "name": "pymysql",
       "version": "1.2.3",
       "license": "UNKNOWN"
     },
@@ -349,12 +354,12 @@
     },
     {
       "name": "pytest",
-      "version": "8.4.2",
-      "license": "MIT"
+      "version": "9.0.3",
+      "license": "UNKNOWN"
     },
     {
       "name": "pytest-asyncio",
-      "version": "0.26.0",
+      "version": "1.4.0",
       "license": "UNKNOWN"
     },
     {
@@ -375,17 +380,17 @@
     {
       "name": "python-multipart",
       "version": "0.0.32",
-      "license": "Apache Software License"
+      "license": "UNKNOWN"
     },
     {
-      "name": "PyYAML",
+      "name": "pyyaml",
       "version": "6.0.3",
       "license": "MIT"
     },
     {
       "name": "redis",
       "version": "6.4.0",
-      "license": "MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "requests",
@@ -403,7 +408,7 @@
       "license": "MIT"
     },
     {
-      "name": "SQLAlchemy",
+      "name": "sqlalchemy",
       "version": "2.1.1",
       "license": "UNKNOWN"
     },
@@ -420,7 +425,7 @@
     {
       "name": "tokenizers",
       "version": "0.23.2",
-      "license": "Apache Software License"
+      "license": "UNKNOWN"
     },
     {
       "name": "tqdm",
@@ -428,13 +433,13 @@
       "license": "MPL-2.0 AND MIT"
     },
     {
-      "name": "typing-inspection",
-      "version": "0.4.4",
+      "name": "typing-extensions",
+      "version": "4.16.0",
       "license": "UNKNOWN"
     },
     {
-      "name": "typing_extensions",
-      "version": "4.16.0",
+      "name": "typing-inspection",
+      "version": "0.4.4",
       "license": "UNKNOWN"
     },
     {
@@ -470,7 +475,7 @@
     {
       "name": "wcwidth",
       "version": "0.9.1",
-      "license": "MIT License"
+      "license": "UNKNOWN"
     },
     {
       "name": "websockets",
@@ -478,7 +483,7 @@
       "license": "UNKNOWN"
     },
     {
-      "name": "win32_setctime",
+      "name": "win32-setctime",
       "version": "1.2.0",
       "license": "MIT license"
     }
