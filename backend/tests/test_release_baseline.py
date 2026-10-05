@@ -16,7 +16,10 @@ LOCK = BACKEND / "requirements.lock.txt"
 DECLARED = BACKEND / "requirements.txt"
 SBOM = BACKEND / "requirements.sbom.json"
 
-PIN = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s=]+)$")
+# ``name==version`` optionally followed by a PEP 508 environment marker.  The marker matters on a
+# reproducible release: the lock is generated on the developer's Windows host but installed into a
+# Linux image, so platform-specific pins must be declared rather than shipped blindly.
+PIN = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s=;]+)(\s*;\s*.+)?$")
 
 
 def _requirement_name(line: str) -> str | None:
@@ -34,6 +37,18 @@ def test_the_lock_file_exists_and_pins_every_package_exactly():
     unpinned = [line for line in lines if not PIN.match(line)]
     assert unpinned == [], f"every lock entry must be name==version, offenders: {unpinned[:5]}"
 
+def test_the_lock_marks_platform_specific_pins_instead_of_shipping_them_blindly():
+    """A Windows-only pin must carry a marker so the Linux image can install the lock verbatim."""
+
+    marked = [line.strip() for line in LOCK.read_text(encoding="utf-8").splitlines()
+              if line.strip() and not line.strip().startswith("#") and ";" in line]
+    assert marked, "platform-specific pins must declare an environment marker"
+    for line in marked:
+        name = PIN.match(line).group(1).lower().replace("_", "-")
+        marker = line.split(";", 1)[1]
+        if name == "win32-setctime":
+            assert "sys_platform" in marker and "win32" in marker, line
+
 
 def test_the_lock_covers_every_declared_top_level_dependency():
     declared = {name for name in (_requirement_name(l) for l in DECLARED.read_text(encoding="utf-8").splitlines()) if name}
@@ -48,6 +63,20 @@ def test_the_lock_includes_transitive_pins_not_only_the_declared_ones():
     locked = {PIN.match(line).group(1).lower().replace("_", "-")
               for line in LOCK.read_text(encoding="utf-8").splitlines() if PIN.match(line.strip())}
     assert len(locked) > len(declared), "the lock must also pin transitive dependencies"
+
+
+def test_docker_and_ci_install_from_the_lock_not_the_range_file():
+    """The lock only prevents drift if the release paths actually consume it."""
+
+    repo = BACKEND.parent
+    dockerfile = (BACKEND / "Dockerfile").read_text(encoding="utf-8")
+    assert "requirements.lock.txt" in dockerfile, "the backend image must install the pinned lock"
+    assert "-r requirements.txt" not in dockerfile, "the image must not install the unpinned ranges"
+
+    workflow = (repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "-r backend/requirements.txt" not in workflow, "CI must not install the unpinned ranges"
+    assert workflow.count("-r backend/requirements.lock.txt") >= 3, \
+        "every backend CI job must install the pinned lock"
 
 
 def test_the_sbom_is_machine_readable_and_lists_components():

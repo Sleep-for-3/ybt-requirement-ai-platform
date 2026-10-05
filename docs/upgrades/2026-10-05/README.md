@@ -27,7 +27,10 @@
 | F08 | P1 | UAT 建轮次硬编码 `uat`/null 版本 | **已修复**（自动绑定 `/version` 的 commit+schema，环境可填） | 同上 |
 | F09 | P1 | 指标 UI 不读服务端 labels/notes | **已修复**（服务端标签优先 + notes + 类型补齐） | 同上 |
 | F07 | P2 | 引用链接不定位到真实对象 | **已修复**（需求带 tableId/scenarioId；任务链接恢复 `taskId` 且页面读取）；后端 `ref_context` 待核 | [F07-artifact-reference-targeting.md](F07-artifact-reference-targeting.md) |
-| N12 | 中高 | 备份缺关键项仍 `ok=true`/exit 0，逐文件 SHA 与配置/向量副本缺失 | 待实施 | — |
+| P1 (W01/N10) | 高 | lock/SBOM 只被单测检查文件形态，Docker 与 CI 都装未固定的 `requirements.txt` | **已修复 / 已验证**（lock 加平台标记；Docker+CI+smoke 改装 lock + `pip check`；真实 Linux 容器 96 包逐一相符） | [P1-P4-release-hardening.md](P1-P4-release-hardening.md) |
+| P2 (B18) | 高 | worker/beat 与 api 共用环境，都上报 `api`；前端不烘焙身份；脚本不注入 | **已修复 / 已验证**（角色可区分 + 前后端同源注入 + `build-info.json` 打包回退；真实构建验证 `ROLE_OK` 三项） | 同上 |
+| P3 (N12) | 中高 | 同一 TAG 重发会覆盖上一版 `db.dump`（回滚唯一依据） | **已修复 / 已验证**（目录带时间戳+PID，已存在则拒绝；新增 `release-identity.txt`；`BACKUP_UNIQUENESS_OK`） | 同上 |
+| P4 | 高 | 发布只在 `/health/ready` 探活，不核对 commit/schema/组件；回滚步骤不明确 | **已修复**（身份门禁 fail-closed + 角色探测 + 可复跑回滚提示）；**运行期未真实触发** | 同上 |
 
 ## 已完成工作包
 

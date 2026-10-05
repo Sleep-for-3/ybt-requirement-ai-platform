@@ -51,6 +51,15 @@ services:
       - ./.env
     environment: &backend_environment
       ENVIRONMENT: ${ENVIRONMENT:-production}
+      # B18/P2: release identity is injected by scripts/deploy/release-server.sh, never guessed here.
+      # "unknown" is a deliberate, visible value - the release gate rejects it rather than letting a
+      # component pretend it belongs to a known build.
+      APP_COMMIT: ${APP_COMMIT:-unknown}
+      BUILD_TIME: ${BUILD_TIME:-unknown}
+      IMAGE_DIGEST: ${IMAGE_DIGEST:-unknown}
+      # The API (and its one-shot migrate step) report as "api"; worker/beat override this below so
+      # the four components can be compared instead of all claiming the same identity.
+      SERVICE_COMPONENT: api
       AUTH_MODE: required
       APP_SECRET_KEY: ${APP_SECRET_KEY:?Set APP_SECRET_KEY in the root .env file}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in the root .env file}
@@ -110,7 +119,9 @@ services:
     command: ["python", "-m", "celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO"]
     env_file:
       - ./.env
-    environment: *backend_environment
+    environment:
+      <<: *backend_environment
+      SERVICE_COMPONENT: worker
     volumes:
       - backend_storage:/app/storage
     healthcheck:
@@ -135,7 +146,9 @@ services:
     command: ["python", "-m", "celery", "-A", "app.workers.celery_app", "beat", "--loglevel=INFO"]
     env_file:
       - ./.env
-    environment: *backend_environment
+    environment:
+      <<: *backend_environment
+      SERVICE_COMPONENT: beat
     healthcheck:
       test: ["CMD", "python", "-m", "app.container_probe", "beat"]
       interval: 15s
@@ -153,6 +166,11 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api}
+        # P2: the frontend bakes its identity at build time; the release script passes the same
+        # APP_COMMIT/BUILD_TIME it gives the backend so all four components are comparable.
+        NEXT_PUBLIC_APP_COMMIT: ${APP_COMMIT:-unknown}
+        NEXT_PUBLIC_BUILD_TIME: ${BUILD_TIME:-unknown}
+        NEXT_PUBLIC_SCHEMA_HEAD: ${SCHEMA_HEAD:-}
     container_name: ybt-frontend
     restart: unless-stopped
     environment:

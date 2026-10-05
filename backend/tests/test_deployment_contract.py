@@ -79,16 +79,84 @@ def test_dependency_ports_are_never_published_on_the_host(compose: dict) -> None
 
 
 def test_api_worker_beat_and_migrate_share_one_environment_contract(compose: dict) -> None:
-    services = compose["services"]
-    reference = services["backend"]["environment"]
+    """One configuration contract, with a single deliberate exception: ``SERVICE_COMPONENT``.
 
-    assert services["migrate"]["environment"] == reference
-    for name in ("worker", "beat"):
-        assert services[name]["environment"] == reference
+    P2 requires api/worker/beat to *report different component names* so the release gate can compare
+    four identities; if worker/beat inherited ``api`` the comparison would be vacuous. Every other
+    key - including the release identity injected by the deploy script - must stay identical, so this
+    test pops only ``SERVICE_COMPONENT`` and compares the rest strictly.
+    """
+
+    services = compose["services"]
+    reference = dict(services["backend"]["environment"])
+    assert reference.pop("SERVICE_COMPONENT") == "api"
+
+    migrate_environment = dict(services["migrate"]["environment"])
+    assert migrate_environment.pop("SERVICE_COMPONENT") == "api"
+    assert migrate_environment == reference
+
+    for name, expected in (("worker", "worker"), ("beat", "beat")):
+        environment = dict(services[name]["environment"])
+        assert environment.pop("SERVICE_COMPONENT") == expected, (
+            f"{name} must report its own component name"
+        )
+        assert environment == reference
 
     assert reference["AUTH_MODE"] == "required"
     assert reference["TASK_QUEUE_PROVIDER"] == "celery"
     assert str(reference["DATABASE_URL"]).startswith("${PRODUCTION_DATABASE_URL")
+
+
+def test_release_identity_is_injected_and_never_fabricated(compose: dict) -> None:
+    """P2: identity comes from the deploy environment (or stays visibly ``unknown``)."""
+
+    environment = compose["services"]["backend"]["environment"]
+    for key in ("APP_COMMIT", "BUILD_TIME", "IMAGE_DIGEST"):
+        assert environment[key] == f"${{{key}:-unknown}}", (
+            f"{key} must be injectable and default to a visible 'unknown'"
+        )
+
+
+def test_the_frontend_bakes_the_same_release_identity(compose: dict) -> None:
+    """P2: a frontend build without identity cannot be compared with the API it talks to."""
+
+    args = compose["services"]["frontend"]["build"]["args"]
+    assert args["NEXT_PUBLIC_APP_COMMIT"] == "${APP_COMMIT:-unknown}"
+    assert args["NEXT_PUBLIC_BUILD_TIME"] == "${BUILD_TIME:-unknown}"
+
+RELEASE_SCRIPT_PATH = ROOT / "scripts" / "deploy" / "release-server.sh"
+
+
+def test_the_release_backup_directory_can_never_be_reused(compose_text: str) -> None:
+    """N12/P3: re-releasing a tag must not overwrite the previous pre-release dump."""
+
+    script = RELEASE_SCRIPT_PATH.read_text(encoding="utf-8")
+    assert "release-${TAG}\"" not in script, "the backup dir must not be keyed by tag alone"
+    assert "$$" in script and "STAMP" in script, "the backup dir needs a per-run unique component"
+    assert '[[ -e "$BACKUP_DIR" ]]' in script, "an existing backup dir must abort the release"
+
+
+def test_the_release_script_injects_and_verifies_release_identity() -> None:
+    """P2/P4: identity is injected into both images and then verified, fail-closed."""
+
+    script = RELEASE_SCRIPT_PATH.read_text(encoding="utf-8")
+    for arg in ("APP_COMMIT=${APP_COMMIT}", "BUILD_TIME=${BUILD_TIME}",
+                "NEXT_PUBLIC_APP_COMMIT=${APP_COMMIT}", "NEXT_PUBLIC_BUILD_TIME=${BUILD_TIME}"):
+        assert arg in script, f"the release script must inject {arg}"
+    assert '"$EXPECTED_COMMIT" == unknown' in script, "unknown must be rejected, not accepted"
+    assert '"$EXPECTED_COMMIT" != "$APP_COMMIT"' in script, "a commit mismatch must stop the release"
+    assert '-z "$REPORTED_SCHEMA"' in script, "a missing schema head must stop the release"
+    assert 'for ROLE in worker beat' in script, "worker and beat must report independently"
+    assert 'exit 1' in script
+
+
+def test_the_packaged_build_info_is_written_after_the_source_copy() -> None:
+    """A checked-in build-info.json must not be able to override the injected identity."""
+
+    dockerfile = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    copy_at = dockerfile.index("COPY . .")
+    stamp_at = dockerfile.index("/app/build-info.json")
+    assert stamp_at > copy_at, "build-info.json must be stamped after COPY . . to win"
 
 
 def test_services_read_the_private_env_file_not_the_public_template(

@@ -42,14 +42,35 @@ export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml:docker-compose.server.ym
 # 用命令行参数覆盖 .env 里的标签，保证“构建的镜像”与“启动的镜像”是同一个。
 export YBT_RELEASE_TAG="$TAG"
 COMPOSE=(docker compose)
-BACKUP_DIR="${YBT_BACKUP_ROOT:-/data/ybt/backups}/release-${TAG}"
+BACKUP_ROOT="${YBT_BACKUP_ROOT:-/data/ybt/backups}"
+# N12/P3: a backup directory must never be reused. Re-releasing the same tag used to overwrite the
+# previous ``db.dump`` with a fresh one, silently destroying the only copy of the pre-release state.
+# The directory is therefore made unique per run; the tag stays in the name so operators can find it.
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_DIR="${BACKUP_ROOT}/release-${TAG}-${STAMP}-$$"
+[[ -e "$BACKUP_DIR" ]] && { echo "备份目录已存在，拒绝覆盖：$BACKUP_DIR" >&2; exit 1; }
 PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api}"
 
+# B18/P2: resolve the release identity *once* and give the same values to the backend containers and
+# the frontend build, so all four components are comparable afterwards. A dirty worktree produces a
+# suffixed commit (<sha>-dirty) instead of silently pretending to be the clean revision.
+APP_COMMIT="${APP_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+if [[ "$APP_COMMIT" != unknown ]] && ! git diff --quiet HEAD -- 2>/dev/null; then
+  APP_COMMIT="${APP_COMMIT}-dirty"
+fi
+BUILD_TIME="${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+SCHEMA_HEAD="${SCHEMA_HEAD:-}"
+export APP_COMMIT BUILD_TIME SCHEMA_HEAD
+
+if [[ "$APP_COMMIT" == unknown ]]; then
+  echo "无法确定发布提交（不在 git 工作区且未设置 APP_COMMIT），停止发布" >&2
+  exit 1
+fi
 log() { printf '\n[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
-log "1/6 备份：数据库 + 编排配置 + 当前镜像"
+log "1/6 备份：数据库 + 编排配置 + 当前镜像（不可覆盖目录）"
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 "${COMPOSE[@]}" exec -T postgres sh -c \
@@ -62,16 +83,25 @@ ENTRIES="$(grep -c ';' "$BACKUP_DIR/db.contents.txt" || true)"
 cp -a .env "$BACKUP_DIR/env"
 cp -a docker-compose.yml docker-compose.server.yml "$BACKUP_DIR/"
 docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' > "$BACKUP_DIR/images.txt"
+# B18/P2: record the identity this release claims, so a later incident review can tell which build
+# produced the dump without guessing from timestamps.
+printf 'release_tag=%s\napp_commit=%s\nbuild_time=%s\n' "$TAG" "$APP_COMMIT" "$BUILD_TIME" > "$BACKUP_DIR/release-identity.txt"
 sha256sum "$BACKUP_DIR/db.dump" | tee "$BACKUP_DIR/db.dump.sha256"
 log "备份完成：$BACKUP_DIR（pg_restore 条目 $ENTRIES）"
 
-log "2/6 构建后端镜像 ybt-backend:${TAG}"
-docker build -t "ybt-backend:${TAG}" --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}" ./backend
+log "2/6 构建后端镜像 ybt-backend:${TAG}（commit ${APP_COMMIT}）"
+docker build -t "ybt-backend:${TAG}" \
+  --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}" \
+  --build-arg "APP_COMMIT=${APP_COMMIT}" \
+  --build-arg "BUILD_TIME=${BUILD_TIME}" ./backend
 
 log "3/6 构建前端镜像 ybt-frontend:${TAG}"
 docker build -t "ybt-frontend:${TAG}" \
   --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
-  --build-arg "NEXT_PUBLIC_API_BASE_URL=${API_BASE_URL}" ./frontend
+  --build-arg "NEXT_PUBLIC_API_BASE_URL=${API_BASE_URL}" \
+  --build-arg "NEXT_PUBLIC_APP_COMMIT=${APP_COMMIT}" \
+  --build-arg "NEXT_PUBLIC_BUILD_TIME=${BUILD_TIME}" \
+  --build-arg "NEXT_PUBLIC_SCHEMA_HEAD=${SCHEMA_HEAD}" ./frontend
 
 log "4/6 应用迁移（migrate 一次性服务）"
 "${COMPOSE[@]}" run --rm migrate
@@ -79,18 +109,74 @@ log "4/6 应用迁移（migrate 一次性服务）"
 log "5/6 启动全部服务"
 "${COMPOSE[@]}" up -d
 
-log "6/6 健康门禁"
+log "6/6 健康与发布身份门禁"
+API="http://127.0.0.1:${BACKEND_HOST_PORT:-8000}"
+READY=0
 for _ in $(seq 1 40); do
-  if curl -fsS "http://127.0.0.1:${BACKEND_HOST_PORT:-8000}/health/ready" >/dev/null 2>&1; then
-    curl -fsS "http://127.0.0.1:${BACKEND_HOST_PORT:-8000}/health/ready"; echo
-    curl -fsS -o /dev/null -w 'frontend HTTP %{http_code}\n' "http://127.0.0.1:${FRONTEND_HOST_PORT:-3000}/"
-    log "发布完成：${TAG}"
-    "${COMPOSE[@]}" ps
-    exit 0
+  if curl -fsS "$API/health/ready" >/dev/null 2>&1; then
+    READY=1
+    break
   fi
   sleep 5
 done
 
-echo "健康检查未通过，请查看 docker compose logs backend migrate" >&2
+if [[ "$READY" -ne 1 ]]; then
+  echo "健康检查未通过，请查看 docker compose logs backend migrate" >&2
+  "${COMPOSE[@]}" ps
+  exit 1
+fi
+
+curl -fsS "$API/health/ready"; echo
+
+# B18/P2: a release is only trustworthy when every component reports the same commit/build time.
+# This gate is deliberately fail-closed: ``unknown`` never passes, because "we could not tell" must
+# not be presented as "the versions match".
+log "核对发布身份（期望 commit ${APP_COMMIT}）"
+REPORT="$(curl -fsS "$API/version")" || { echo "无法读取 /version" >&2; exit 1; }
+echo "$REPORT"
+EXPECTED_COMMIT="$(printf '%s' "$REPORT" | sed -n 's/.*"app_commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+REPORTED_SCHEMA="$(printf '%s' "$REPORT" | sed -n 's/.*"schema_head"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+if [[ -z "$EXPECTED_COMMIT" || "$EXPECTED_COMMIT" == unknown ]]; then
+  echo "API 未能上报发布提交（app_commit=$EXPECTED_COMMIT），停止发布" >&2
+  exit 1
+fi
+if [[ "$EXPECTED_COMMIT" != "$APP_COMMIT" ]]; then
+  echo "发布身份不一致：镜像内为 $EXPECTED_COMMIT，本次发布为 $APP_COMMIT" >&2
+  exit 1
+fi
+if [[ -z "$REPORTED_SCHEMA" || "$REPORTED_SCHEMA" == null ]]; then
+  echo "API 未能读取数据库 schema 版本，无法证明迁移已生效，停止发布" >&2
+  exit 1
+fi
+
+# The worker and beat must independently report the *same* identity; if either still says "api" the
+# component override was lost and the comparison would be meaningless.
+for ROLE in worker beat; do
+  ROLE_REPORT="$("${COMPOSE[@]}" exec -T "$ROLE" python -c \
+    'from app.services.version_info import component_name; print(component_name())' 2>/dev/null | tr -d '\r' || true)"
+  if [[ "$ROLE_REPORT" != "$ROLE" ]]; then
+    echo "$ROLE 未按自身角色上报（返回：$ROLE_REPORT），停止发布" >&2
+    exit 1
+  fi
+  echo "$ROLE 身份：$ROLE_REPORT"
+done
+
+curl -fsS -o /dev/null -w 'frontend HTTP %{http_code}\n' "http://127.0.0.1:${FRONTEND_HOST_PORT:-3000}/"
+# P2: persist the identity back into .env so a later manual ``docker compose up -d`` (the documented
+# rollback step) keeps reporting the same release instead of silently reverting to ``unknown``.
+# ``sed`` alone would do nothing when the key is absent, so append in that case.
+set_env_value() {
+  local key="$1" value="$2" file=".env"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+set_env_value APP_COMMIT "$APP_COMMIT"
+set_env_value BUILD_TIME "$BUILD_TIME"
+log "发布完成：${TAG}（commit ${APP_COMMIT}，schema ${REPORTED_SCHEMA}）"
+log "回滚：把 .env 里的 YBT_RELEASE_TAG 改回上一版标签后执行 docker compose -f docker-compose.yml -f docker-compose.server.yml up -d；备份与身份记录见 $BACKUP_DIR"
 "${COMPOSE[@]}" ps
-exit 1
+exit 0

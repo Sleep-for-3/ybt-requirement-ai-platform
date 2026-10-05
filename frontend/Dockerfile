@@ -16,6 +16,16 @@ WORKDIR /app
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 
+# P2: the frontend must report the same release identity as the API/worker/beat, otherwise the
+# version banner cannot prove the release is internally consistent. "unknown" stays visible on
+# purpose: the release gate rejects it instead of showing a plausible-looking wrong commit.
+ARG NEXT_PUBLIC_APP_COMMIT=unknown
+ARG NEXT_PUBLIC_BUILD_TIME=unknown
+ARG NEXT_PUBLIC_SCHEMA_HEAD=
+ENV NEXT_PUBLIC_APP_COMMIT=$NEXT_PUBLIC_APP_COMMIT
+ENV NEXT_PUBLIC_BUILD_TIME=$NEXT_PUBLIC_BUILD_TIME
+ENV NEXT_PUBLIC_SCHEMA_HEAD=$NEXT_PUBLIC_SCHEMA_HEAD
+
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
