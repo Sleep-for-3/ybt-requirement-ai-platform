@@ -77,7 +77,7 @@ def main() -> int:
     set_cjk(run)
     sub = document.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = sub.add_run("分支 dsh/banking-semantic-agent-v2　·　最终提交 f79f7f0　·　工程验收（合成材料 / 隔离环境）")
+    r = sub.add_run("分支 dsh/banking-semantic-agent-v2　·　最终提交 148bd7a　·　工程验收（合成材料 / 隔离环境）")
     r.font.size = Pt(10)
     set_cjk(r)
 
