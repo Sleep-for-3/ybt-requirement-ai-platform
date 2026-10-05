@@ -1,5 +1,10 @@
 # 最终验收：全量回归 + 前端 test/tsc/lint/build + 安全扫描
 
+> **本轮为止已完成的验证归集**：
+> - 浏览器验收：**F01–F10 全部 10 项**已在真实浏览器中逐项验证（见 [browser-acceptance.md](browser-acceptance.md)）
+> - 第四阶段业务闭环：**28/28 通过**（readiness 41→0 → 三级审核 → 冻结正式交付 → Word/Excel → 变更复核）
+> - 第五阶段：评测数据集 8/8、备份恢复 7/7、多 worker 10/10
+
 本轮在**最终 commit**（第四阶段合成工程业务闭环打通后）重新执行完整验收，**不复用历史测试计数**。
 历史轮次的计数与过程记录保留在各自的工作包记录中（见 `README.md` 缺陷矩阵与验证索引）。
 
@@ -18,7 +23,7 @@
 | --- | --- | --- |
 | 前端生产依赖 | `npm audit --omit=dev` | **total 0**（info/low/moderate/high/critical 全 0） |
 | 后端依赖（OSV，96 个 pin） | `phase5_python_dependency_scan.py` | **`ok: true`，`advisory_count: 0`** |
-| 源码静态分析 | `bandit -r app -ll`（68,877 行） | **HIGH 0**；与已定性的扫描 **STABLE** |
+| 源码静态分析 | `bandit -r app -ll`（68,877 行） | **HIGH 0**；与首次定性扫描 **STABLE（0 新增 / 0 消失）** |
 
 `bandit` 稳定性用两份 JSON 报告做差集证明（`.local-run/diff_bandit.py`）：
 
@@ -66,12 +71,12 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 | P5 修复后 | 1479 passed / 0 failed |
 | 依赖升级后 | 1479 passed / 0 failed |
 | SEC-1 修复后 | 1481 passed / 0 failed（+2 为 SEC-1 新增回归测试） |
-| **业务闭环完成后（本轮，最新 commit）** | **1480 passed / 1 skipped / 0 failed**（18:51） |
+| 业务闭环完成后 | **1480 passed / 1 skipped / 0 failed**（18:51） |
+| **最终（浏览器验收 10/10 完成后，当前 HEAD）** | **1480 passed / 1 skipped / 0 failed**（17:58） |
 
 > **计数差异说明（不掩盖）**：上两轮的 1481 passed 是因为当时**设置了** `PHASE4_VERIFY_DATABASE_URL`，
 > 那个真实 PostgreSQL 用例会执行并通过；本轮未设该变量，它**主动 skip 并说明原因**。
 > 因此 1480 + 1 skipped = 1481 是同一批测试的两种环境呈现，**不存在测试丢失或被禁用**。
-
 ## 6. 未达成 / 待验收条件（不得当作通过）
 
 1. **Python 源码静态分析只覆盖 `app/`**；`tests/`、`alembic/`、脚本目录未扫描。
@@ -80,5 +85,6 @@ $env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
 4. **未在 CI（Linux runner）执行**以上任一检查；本结论基于 Windows 本机环境。
 5. **未做渗透测试或运行时 DAST**；SEC-1 是"静态告警 + 针对性可达性实证"，不是全面安全评估。
 6. **银行侧前置条件**：评测真值、业务阈值、身份、RTO/RPO 目标值、生产规模数据、真实样本与四类角色账号均未提供。
-7. **真实浏览器逐项验收**仍受"项目无数据 + 不得写业务库"限制（已完成折叠恢复与进度口径两项）。
+7. **真实浏览器验收已覆盖 F01–F10 全部 10 项**（隔离栈 + 合成夹具）；仍未做的是**像素级视觉检查**
+   （本模型不支持图片输入）与 403/500/断网错误态渲染。
 8. 项目 11 外发策略与分类分级未受本轮影响：无分类降级、无白名单扩大、无 Agent 自动批准或改写正式口径。
