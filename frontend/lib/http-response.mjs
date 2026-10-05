@@ -104,12 +104,19 @@ export function normalizeRequestError(error) {
 }
 
 export async function throwApiError(response, path, environment) {
-  if (response.status === 401 && path !== "/auth/login" && environment) {
+  // C01: 只有仍属于当前会话的请求才能触发“清会话 + 跳登录”。旧账号请求的晚到 401
+  // 不得清掉刚登录的新会话（environment.isCurrentSession 由 api.ts 绑定会话代次提供）。
+  const sameSession = !environment || typeof environment.isCurrentSession !== "function"
+    || environment.isCurrentSession();
+  if (response.status === 401 && path !== "/auth/login" && environment && sameSession) {
     environment.sessionStorage.removeItem(ACCESS_TOKEN_KEY);
     environment.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
     environment.location.replace("/login");
-    // 页面即将整体跳转；保持原请求 pending，避免调用方在跳转完成前产生未处理 rejection。
     return new Promise(() => undefined);
+  }
+  if (response.status === 401 && path !== "/auth/login" && environment && !sameSession) {
+    // C01: 旧会话的 401 不得跳转登录页（用户可能已在新会话中）；按普通错误冒泡。
+    throw parseApiError(await response.text(), response.status);
   }
   throw parseApiError(await response.text(), response.status);
 }

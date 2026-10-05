@@ -8,6 +8,8 @@ export type ApiResponse = {
 export type BrowserAuthEnvironment = {
   location: { replace: (path: string) => void };
   sessionStorage: { removeItem: (key: string) => void };
+  /** C01: 判断发起请求的会话代次是否仍是当前会话；缺省时按旧行为处理。 */
+  isCurrentSession?: () => boolean;
 };
 
 export class ApiError extends Error {

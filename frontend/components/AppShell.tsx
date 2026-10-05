@@ -39,7 +39,7 @@ import { useEffect, useState } from "react";
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ReleaseIdentityNotice } from "@/components/ReleaseIdentityNotice";
-import { ProjectJobsSummary, apiGet, clearSession } from "@/lib/api";
+import { ProjectJobsSummary, apiGet, logoutSession } from "@/lib/api";
 import {
   isResourcesPath,
   canViewNavigationAudience,
@@ -242,7 +242,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const navigationAccess = navigationAccessForProject(user, projectId);
 
   function logout() {
-    clearSession();
+    // C01: 本地退出同步生效（自增会话代次），服务端吊销尽力而为，不阻塞跳转。
+    void logoutSession();
     router.replace("/login");
   }
 
