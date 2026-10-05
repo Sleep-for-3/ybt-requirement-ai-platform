@@ -13,8 +13,8 @@
 | N13 | P0 | 破坏性验收脚本接受任意 `--database` 后 `drop_all`，业务库未被拒绝 | **已修复 / 已验证**（含真实集成负例） | [N13-isolation-hard-checks.md](N13-isolation-hard-checks.md) |
 | N01/BF01 | 高 | 聚合豁免跨作用域：子查询同名 `cnt` 或 `phone` 与 `COUNT` 拼接后外层仍透出合成原值 | **已修复 / 已验证**（单测 29 passed + 真实 execute 路径隔离 PostgreSQL） | [N01-sql-aggregate-exemption.md](N01-sql-aggregate-exemption.md) |
 | N03/BF03 | 高 | 送审入口不加映射行锁，与编辑不互斥 | **已修复 / 已验证**（真实 PG 双连接交错两方向） | [N03-submission-edit-race.md](N03-submission-edit-race.md) |
-| N02/BF02 | 高 | `_lease_owner()` 仅 `hostname:pid`，同进程旧 attempt 可覆盖接管者 | 待实施 | — |
-| N11 | 中高 | broker 投递失败后无补投/outbox | 待实施 | — |
+| N02/BF02 | 高 | `_lease_owner()` 仅 `hostname:pid`，同进程旧 attempt 可覆盖接管者；无主动续租 | **已修复 / 已验证**（8 例新增，含 BF02 复现转绿；真实多 worker 待授权） | [N02-N11-task-fencing-and-redelivery.md](N02-N11-task-fencing-and-redelivery.md) |
+| N11 | 中高 | broker 投递失败后无补投/outbox | **已修复 / 已验证**（`dispatched_at` + `_publish` + `dispatch_undelivered`；真实 broker 待授权） | 同上 |
 | N04 | 高 | UAT 签署后仍可改人工结果且原 approved 保留 | 待实施 | — |
 | N05 | 高 | UAT 证据包每次读当前环境，未固定轮次 manifest | 待实施 | — |
 | N06–N10 | 高/中高 | 前端取消切换错配、Skill/路由 dirty、草稿恢复、历史范围、三处异步表单、移动展开、进度口径、错误缓存、引用定位、指标解释 | 待实施 | — |

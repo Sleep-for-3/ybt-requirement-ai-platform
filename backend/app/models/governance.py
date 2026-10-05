@@ -176,6 +176,11 @@ class BackgroundJob(Base, TimestampMixin):
     # B07: single-runner lease so a re-delivered or crashed job cannot run twice concurrently.
     lease_owner: Mapped[str | None] = mapped_column(String(120))
     lease_expires_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), index=True)
+    # N11: durable delivery marker.  ``celery_task_id`` records the broker handle and
+    # ``dispatched_at`` records that the message was actually published.  A job committed to the
+    # database but never published keeps both NULL, so the compensating dispatcher can find it and
+    # re-publish instead of leaving the job queued forever.
+    dispatched_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), index=True)
     started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
