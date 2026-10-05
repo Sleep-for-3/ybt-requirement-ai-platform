@@ -156,10 +156,42 @@ count = 3
 这正是 F05 修复的 `formElement.reset()` + 刷新路径（修复前 `event.currentTarget` 已为 null，
 重置静默失效、后续刷新被跳过）。
 
-## 10. 未完成 / 边界
+## 10. F02 Skill 未保存保护与草稿恢复：真实浏览器验证
 
-1. 本轮**未覆盖**F02（Skill 离开确认与草稿恢复）、F06（查询失败回退）、F07（引用定位跳转）的逐项点击。
-2. 已覆盖：F01（第 2–3 节）、F03（第 3 节顺带）、F05（第 9 节）、F08（第 8 节）、F09（第 7 节）、F10（第 4 节）。
+为能在浏览器中真正编辑 Skill，先向**隔离库**注入最小合成夹具（`seed_f02_skill_fixture.py`）：
+1 个 `ModelProfile` + 1 个 `AISkillDefinition` + 1 个 **draft** `AISkillVersion`。
+
+定位过程中遇到两个**真实数据库契约**（非夹具自由选择，已写入脚本注释）：
+
+- `ck_ai_skill_version_positive` 要求 `version_no > 0` **且 `lock_version > 0`**（我起初写 0 → CheckViolation）；
+- `ck_ai_skill_version_scope` 要求 `scope_type='project'` 必须同时带 `institution_id` 与 `project_id`；
+- 且 `scope_key` 必须是 `control.scope_key()` 的规范形 `project:{institution_id}:{project_id}`，
+  写成裸项目 id 时列表接口返回 200 但**为空**（版本在库里却看不见）。
+
+修正后 `/ai-control/skills` 正常显示「v1 · 草稿」，随后逐项验证 F02：
+
+| 子行为 | 浏览器证据 |
+| --- | --- |
+| dirty 提示 | 「有未保存的修改，请先保存或放弃修改，再切换能力、版本或运行测试。」 |
+| 真实草稿持久化 | `localStorage` 键 `draft:skill-draft:project:1:1:f02_synthetic_skill`，载荷含 `savedAt` 与 `content.system_prompt` |
+| **应用内链接守卫** | 点击普通 SPA 链接 `/workspace` → 弹窗「**有未保存的编辑，确定要离开并丢失这些内容吗？**」；取消后 `urlUnchanged=true` 且编辑仍在 |
+| **草稿恢复入口** | 刷新后提示「**发现本地保存的草稿（2026-10-05T11:18:57.831Z，基于版本 #3）**」，出现「恢复草稿」「丢弃草稿」按钮，且**编辑器仍显示服务端值**（`editorHasServerValueOnly=true`，未静默覆盖） |
+
+```json
+{"dirtyNotice":"有未保存的修改，…",
+ "localStorageDraftKeys":["draft:skill-draft:project:1:1:f02_synthetic_skill"],
+ "clickedHref":"/workspace", "dialogSeen":true,
+ "dialogMsg":"有未保存的编辑，确定要离开并丢失这些内容吗？",
+ "urlUnchanged":true, "editStillPresent":true}
+```
+
+**结论**：F02 三项承诺（全局 dirty 登记、真实草稿持久化、恢复/丢弃入口）均在真实浏览器中兑现，
+且恢复**不静默覆盖**服务端内容。
+
+## 11. 未完成 / 边界
+
+1. 本轮**未覆盖**F06（查询失败回退）、F07（引用定位跳转）的逐项点击。
+2. 已覆盖：F01（第 2–3 节）、F03（第 3 节顺带）、F02（第 10 节）、F05（第 9 节）、F08（第 8 节）、F09（第 7 节）、F10（第 4 节）—— **共 7/10 项**。
 3. 未做**登录令牌续期**（refresh rotation）的浏览器实测。
 4. `read_image` 在本模型不可用，故**未做像素级视觉检查**（布局/溢出/字体外观未目视确认）；
    结论均基于 DOM 文本、元素可见性与状态断言。
