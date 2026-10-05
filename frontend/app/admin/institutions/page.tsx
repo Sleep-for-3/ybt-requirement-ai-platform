@@ -43,7 +43,9 @@ export default function Page() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    // B10/F05: capture the form node before awaiting; `currentTarget` is cleared afterwards.
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setFormError("");
     setCreating(true);
     try {
@@ -52,7 +54,7 @@ export default function Page() {
         institution_name: form.get("name"),
         institution_type: form.get("type")
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setDirty(false);
       setCreateOpen(false);
       setMsg("机构已创建");

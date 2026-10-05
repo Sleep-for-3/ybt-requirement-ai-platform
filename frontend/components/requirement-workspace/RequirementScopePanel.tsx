@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, apiPut, type TargetField } from "@/lib/api";
 import { RequirementResources, type ResourceSelection } from "./RequirementResources";
 export type RequirementScope={id:number;project_id:number;version:number;name:string;target_table_id:number;field_ids:number[];scenario_id:number;objective:string;background:string;effective_date:string|null;inclusion:string;exclusion:string;document_ids:number[];source_table_ids:number[];mart_table_ids:number[]};
-export function RequirementScopePanel({projectId,tableId,scenarioId,fields,onSelect,onDirty,contentVersion}:{projectId:number;tableId:number|null;scenarioId:number|null;fields:TargetField[];onSelect:(scope:RequirementScope|null)=>void;onDirty:(dirty:boolean)=>void;contentVersion?:number}){
+export function RequirementScopePanel({projectId,tableId,scenarioId,fields,onSelect,onDirty,contentVersion,confirmSwitch}:{projectId:number;tableId:number|null;scenarioId:number|null;fields:TargetField[];onSelect:(scope:RequirementScope|null,options?:{userSwitch?:boolean})=>void;onDirty:(dirty:boolean)=>void;contentVersion?:number;confirmSwitch?:()=>boolean}){
  const alive=useRef(true); const saveSequence=useRef(0);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
  const [items,setItems]=useState<RequirementScope[]>([]);const [selected,setSelected]=useState<RequirementScope|null>(null);
@@ -24,7 +24,16 @@ export function RequirementScopePanel({projectId,tableId,scenarioId,fields,onSel
   setSelected(row);setName(row.name);setBackground(row.background||"");setObjective(row.objective||"");setDate(row.effective_date||"");setInclusion(row.inclusion||"");setExclusion(row.exclusion||"");setIds(row.field_ids);onSelect(row);onDirty(false);
  },[items,projectId,tableId,scenarioId,dirty,selected,onSelect,onDirty]);
  function edit(){setDirty(true);onDirty(true);}
- function choose(row:RequirementScope|null){if(busy)return;restored.current=true;if(dirty&&!window.confirm("放弃尚未保存的需求说明？"))return;setSelected(row);setName(row?.name||"");setBackground(row?.background||"");setObjective(row?.objective||"");setDate(row?.effective_date||"");setInclusion(row?.inclusion||"");setExclusion(row?.exclusion||"");setIds(row?.field_ids||fields.map(f=>f.id));setDirty(false);onDirty(false);onSelect(row);setMessage("");}
+function choose(row:RequirementScope|null){
+  if(busy)return;
+  // F01: the leave/switch decision is taken by the parent BEFORE any child state changes, so a
+  // cancelled switch leaves the selected requirement, its field range, the text and the dirty flag
+  // exactly as they were. Only an accepted switch mutates this panel at all.
+  if(confirmSwitch){if(!confirmSwitch())return;}
+  else if(dirty&&!window.confirm("放弃尚未保存的需求说明？"))return;
+  restored.current=true;
+  setSelected(row);setName(row?.name||"");setBackground(row?.background||"");setObjective(row?.objective||"");setDate(row?.effective_date||"");setInclusion(row?.inclusion||"");setExclusion(row?.exclusion||"");setIds(row?.field_ids||fields.map(f=>f.id));setDirty(false);onDirty(false);onSelect(row,{userSwitch:true});setMessage("");
+}
  useEffect(()=>{if(selected&&(selected.target_table_id!==tableId||selected.scenario_id!==scenarioId)){setSelected(null);onSelect(null);setIds(fields.map(f=>f.id));setDirty(true);onDirty(true);}},[tableId,scenarioId,selected,fields,onSelect,onDirty]);
  async function save(){if(busy||!tableId||!scenarioId)return;const sequence=++saveSequence.current;setBusy(true);setMessage("");try{const payload={name,background,objective,effective_date:date||null,inclusion,exclusion,target_table_id:tableId,scenario_id:scenarioId,field_ids:ids,...resources,expected_version:selected?.version,expected_content_version:contentVersion};const row=selected?await apiPut<RequirementScope>(`/projects/${projectId}/requirements/${selected.id}`,payload):await apiPost<RequirementScope>(`/projects/${projectId}/requirements`,payload);if(!alive.current||sequence!==saveSequence.current)return;setSelected(row);setItems(old=>[row,...old.filter(r=>r.id!==row.id)]);setDirty(false);onDirty(false);onSelect(row);setMessage(`已保存需求版本 v${row.version}`);}catch{if(!alive.current||sequence!==saveSequence.current)return;setMessage("保存失败：请检查名称、字段范围与权限；如版本冲突，请重新加载后合并。");}finally{if(alive.current&&sequence===saveSequence.current)setBusy(false);}}
  return <section className="panel mb-3 p-4"><fieldset disabled={busy}><h2 className="mb-3 text-sm font-semibold">需求说明与生成范围</h2><select className="control mb-3" aria-label="选择需求" value={selected?.id||""} onChange={e=>choose(items.find(r=>r.id===Number(e.target.value))||null)}><option value="">新建需求</option>{items.filter(r=>r.target_table_id===tableId&&r.scenario_id===scenarioId).map(r=><option key={r.id} value={r.id}>{r.name} · v{r.version}</option>)}</select>

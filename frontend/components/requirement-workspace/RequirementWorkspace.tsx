@@ -210,14 +210,29 @@ export function RequirementWorkspace() {
     });
   }
 
-  function selectRequirement(next: RequirementScope | null) {
-    // B11: switching the selected requirement discards the current field edits and the
-    // unsaved scope edits, so it must go through the same guard as table/scenario switches.
-    if (scopeDirty && !window.confirm("需求说明尚未保存，确定放弃并切换？")) return;
-    guardUnsaved(() => {
+  function selectRequirement(next: RequirementScope | null, options?: { userSwitch?: boolean }) {
+    // F01: one decision function for every requirement switch, evaluated before any state change.
+    // The panel calls it as ``confirmSwitch`` prior to touching its own state, so a cancelled switch
+    // leaves the left-hand panel, the field range, the body text and both dirty flags untouched.
+    // ``userSwitch`` marks the call that already passed that gate, so the confirm is asked once.
+    if (options?.userSwitch) {
       if (next?.id !== requirement?.id) setScopeDirty(false);
+      setEditorDirty(false);
       setRequirement(next);
-    });
+      return;
+    }
+    if (!canLeaveCurrentEdits()) return;
+    if (next?.id !== requirement?.id) setScopeDirty(false);
+    setEditorDirty(false);
+    setRequirement(next);
+  }
+
+  function canLeaveCurrentEdits(): boolean {
+    // Scope edits and field edits are two different unsaved states; the user must clear both before
+    // a switch is allowed, so the same predicate drives the panel gate and every internal switch.
+    if (scopeDirty && !window.confirm("需求说明尚未保存，确定放弃并切换？")) return false;
+    if (editorDirty && !window.confirm("当前字段有未保存修改。放弃修改并切换吗？")) return false;
+    return true;
   }
 
   async function generateDrafts() {
@@ -312,7 +327,9 @@ export function RequirementWorkspace() {
           {notice ? <div className="mt-3 rounded-lg border border-pine-100 bg-pine-50 px-3 py-2 text-sm text-pine-800">{notice}</div> : null}
         </div>
         <div className="grid min-w-0 items-start gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
-          <div className={inputPanelOpen ? "min-w-0" : "hidden lg:block"}>
+          {/* F10: one grid child. The toggle stays in an always-visible header and only the panel
+              *content* is hidden, so collapsing can never remove the way back at any width. */}
+          <div className="min-w-0">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600">分析范围与资产</span>
             <button aria-expanded={inputPanelOpen} className="button-secondary h-8 px-2.5 text-xs" onClick={() => setInputPanelOpen((open) => !open)} type="button">
@@ -320,7 +337,8 @@ export function RequirementWorkspace() {
               {inputPanelOpen ? "收起" : "展开"}
             </button>
           </div>
-          <RequirementScopePanel key={`${projectId}:${tableId}:${scenarioId}`} projectId={projectId} tableId={tableId} scenarioId={scenarioId} fields={fields} onSelect={selectRequirement} onDirty={setScopeDirty} contentVersion={scopedDocument.data?.revision?.content_version} />
+          <div className={inputPanelOpen ? "" : "hidden"}>
+          <RequirementScopePanel key={`${projectId}:${tableId}:${scenarioId}`} projectId={projectId} tableId={tableId} scenarioId={scenarioId} fields={fields} onSelect={selectRequirement} onDirty={setScopeDirty} contentVersion={scopedDocument.data?.revision?.content_version} confirmSwitch={canLeaveCurrentEdits} />
           {requirement ? <RequirementScriptPanel key={`scripts:${projectId}:${requirement.id}:${scopedDocument.data?.revision?.content_version||0}`} projectId={projectId}
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
             fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
@@ -369,6 +387,7 @@ export function RequirementWorkspace() {
             technicalJob={technicalJob}
             requirementMode={Boolean(requirement)}
           /> : null}
+          </div>
           </div>
           <div className="relative min-w-0">
             {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在读取字段口径与来源映射…</div> : null}

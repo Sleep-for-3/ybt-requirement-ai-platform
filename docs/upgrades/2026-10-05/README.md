@@ -17,7 +17,10 @@
 | N11 | 中高 | broker 投递失败后无补投/outbox | **已修复 / 已验证**（`dispatched_at` + `_publish` + `dispatch_undelivered`；真实 broker 待授权） | 同上 |
 | N04 | 高 | UAT 签署后仍可改人工结果且原 approved 保留 | **已修复 / 已验证**（4 例反例：签署后 409 + 撤销重签） | [N04-N05-uat-signoff-freeze.md](N04-N05-uat-signoff-freeze.md) |
 | N05 | 高 | UAT 证据包每次读当前环境，未固定轮次 manifest | **已修复 / 已验证**（轮次冻结 manifest；两次下载字节一致） | 同上 |
-| N06–N10 | 高/中高 | 前端取消切换错配、Skill/路由 dirty、草稿恢复、历史范围、三处异步表单、移动展开、进度口径、错误缓存、引用定位、指标解释 | 待实施 | — |
+| F01 | P1 | 取消需求切换后左侧面板已切到 B，父级/正文仍 A | **已修复**（决策先于子状态变更）；真实浏览器待测 | [F01-F05-F10-frontend-editing.md](F01-F05-F10-frontend-editing.md) |
+| F05 | P1 | `admin/users`、`admin/institutions`、`mart` 三处 await 后 `currentTarget.reset()` | **已修复**（await 前捕获节点）；真实浏览器待测 | 同上 |
+| F10 | P2 | 移动端折叠后展开按钮随容器一起隐藏 | **已修复**（切换器移出可折叠容器）；三档宽度待实测 | 同上 |
+| F02/F03/F04/F06–F09 | P1/P2 | dirty 全局登记、草稿恢复、当前需求进度、历史范围、错误缓存、引用定位、指标解释 | 待实施 | — |
 | N12 | 中高 | 备份缺关键项仍 `ok=true`/exit 0，逐文件 SHA 与配置/向量副本缺失 | 待实施 | — |
 
 ## 已完成工作包

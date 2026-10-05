@@ -30,7 +30,9 @@ export default function Page() {
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!projectId) return;
-    const form = new FormData(event.currentTarget);
+    // B10/F05: capture the form node before awaiting; `currentTarget` is cleared afterwards.
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setFormError("");
     setCreating(true);
     try {
@@ -41,7 +43,7 @@ export default function Page() {
         table_comment: form.get("comment"),
         is_existing: form.get("existing") === "on"
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setMessage("监管集市表已创建");
       setDirty(false);
       setCreateOpen(false);

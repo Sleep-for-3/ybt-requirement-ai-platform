@@ -46,7 +46,10 @@ export default function Page() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    // B10/F05: `currentTarget` is nulled after the event dispatch ends, so it must be captured
+    // before the first await or the reset silently does nothing (and can throw).
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setFormError("");
     setCreating(true);
     try {
@@ -58,7 +61,7 @@ export default function Page() {
         institution_id: Number(form.get("institution_id")),
         institution_role: form.get("role")
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setUsers(await apiGet<AdminUser[]>("/admin/users"));
       setDirty(false);
       setCreateOpen(false);
