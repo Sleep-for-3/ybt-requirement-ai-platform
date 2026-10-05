@@ -32,6 +32,7 @@
 | P3 (N12) | 中高 | 同一 TAG 重发会覆盖上一版 `db.dump`（回滚唯一依据） | **已修复 / 已验证**（目录带时间戳+PID，已存在则拒绝；新增 `release-identity.txt`；`BACKUP_UNIQUENESS_OK`） | 同上 |
 | P5 | 高 | `schema_head` 探针吞异常不回滚，PostgreSQL 下中止整个事务 → 同请求后续语句 500 | **已修复 / 已验证**（savepoint 隔离；真实 PG `FOLLOWUP_SELECT_OK`；端到端 16/16 ok） | [P5-schema-probe-transaction-poisoning.md](P5-schema-probe-transaction-poisoning.md) |
 | 阶段5-1 | 高 | 评测数据集无版本绑定/无失败样本对比；备份工具不执行恢复 | **已验证**（版本化数据集 8/8、标注复核、批量重跑、case 级失败对比；真实 dump→restore 7/7，实测 RTO 2.384s） | [phase5-eval-and-backup.md](phase5-eval-and-backup.md) |
+| 阶段5-2 | 高 | 多 worker 故障恢复/容量基线长期记为“受本机约束阻塞” | **已验证**（10/10：跨进程租约围栏、陈旧 attempt `rowcount=0`、6 进程竞争仅 1 赢家、实测容量基线）；真实 broker/多机待验收 | [phase5-multiworker-recovery.md](phase5-multiworker-recovery.md) |
 
 ## 已完成工作包
 
