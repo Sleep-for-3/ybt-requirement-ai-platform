@@ -77,20 +77,74 @@ def test_the_reported_schema_head_is_the_real_migration_head():
         def scalar_one_or_none(self):
             return heads[0]
 
+    class _Savepoint:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
     class _Db:
+        def begin_nested(self):
+            # The probe runs inside a savepoint so a failure cannot abort the caller's transaction.
+            return _Savepoint()
+
         def execute(self, _statement):
             return _Result()
-
     assert schema_head(_Db()) == heads[0]
 
 
 def test_a_missing_schema_table_does_not_break_the_probe():
+    """The probe must swallow the failure *and* leave the caller's transaction usable.
+
+    On PostgreSQL a failing statement aborts the whole transaction, so a bare ``except`` that only
+    returned ``None`` left every later statement in the same request failing with
+    ``InFailedSqlTransaction`` (observed as a 500 from UAT run creation and /api/version).  The probe
+    therefore runs inside a SAVEPOINT; this stub fails if that contract is dropped, because the
+    savepoint is what the assertion below actually observes.
+    """
+
+    class _Failed(Exception):
+        pass
+
     class _Db:
-        def execute(self, _statement):
-            raise RuntimeError("no such table: alembic_version")
+        def __init__(self) -> None:
+            self.savepoints = 0
 
-    assert schema_head(_Db()) is None
+        def begin_nested(self):
+            self.savepoints += 1
+            raise _Failed("no such table: alembic_version")
 
+    db = _Db()
+    assert schema_head(db) is None
+    assert db.savepoints == 1, "schema_head must isolate the probe in a savepoint"
+
+
+def test_the_schema_probe_keeps_the_session_usable_after_it_fails():
+    """Behavioural proof on the real engine: a failed probe must not poison the session.
+
+    SQLite does not abort a transaction on a failed statement, so this runs against PostgreSQL when it
+    is reachable and is skipped otherwise (the container/local-pg cases in docs/upgrades cover it).
+    """
+
+    import os
+
+    url = os.environ.get("PHASE4_VERIFY_DATABASE_URL")
+    if not url:
+        import pytest
+
+        pytest.skip("set PHASE4_VERIFY_DATABASE_URL to a throw-away PostgreSQL database")
+
+    from sqlalchemy import text
+
+    engine = create_engine(url)
+    factory = sessionmaker(bind=engine)
+    try:
+        with factory() as db:
+            assert schema_head(db) is None  # no alembic_version table in this isolated schema
+            assert db.execute(text("SELECT 1")).scalar() == 1
+    finally:
+        engine.dispose()
 
 def test_mixed_component_versions_are_detected():
     api = {"component": "api", "app_commit": "abc1234", "build_time": "t1", "schema_head": "202610030001"}

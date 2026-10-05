@@ -56,6 +56,8 @@ ROLES = {
     "final_reviewer": "终审",
     "auditor": "审计",
     "project_manager": "项目经理",
+    # 技术审核人：签署 technical_owner 的必备账号（W11 角色矩阵要求与填写人不同）。
+    "technical_reviewer": "技术审核",
 }
 
 PASSWORDS = {role: f"Synthetic-{role}-2026!" for role in ROLES}
@@ -381,9 +383,11 @@ def main() -> int:
             call("technical_analyst", "PATCH", f"/api/uat-findings/{finding_id}",
                  json_body={"status": "fixing"})
             call("technical_analyst", "POST", f"/api/uat-findings/{finding_id}/resolve",
-                 json_body={"resolution": "已在口径中补充“保留 2 位小数”。"})
-            verified = call("business_reviewer", "POST", f"/api/uat-findings/{finding_id}/verify",
-                            json_body={"comment": "复核通过"})
+                 json_body={"resolution_text": "已在口径中补充“保留 2 位小数”。"})
+            # 复核需要 uat.finding.manage：业务审核只有 uat.signoff，因此由项目经理复核（职责仍分离：
+            # 提出人是技术分析，修复人也是技术分析，复核人是项目经理）。
+            verified = call("project_manager", "POST", f"/api/uat-findings/{finding_id}/verify",
+                            json_body={"verification_comment": "复核通过：口径已补充小数位说明。"})
         else:
             verified = finding
         step("finding_lifecycle", ok=finding_ok and verified.status_code in (200, 201),
@@ -398,19 +402,7 @@ def main() -> int:
                                     "evidence_json": {"fixture": "synthetic", "sha256": "0" * 64}})
         step("manual_result_completed", ok=completed.status_code == 200, status=completed.status_code)
 
-        # Four-eye signature: the technical owner is a separate account that did not author or
-        # review the artifact, so the two signatures genuinely come from different people.
-        with factory() as db:
-
-            tech = User(username="p4_technical_reviewer", display_name="合成-技术审核",
-                        password_hash=hash_password(PASSWORDS["technical_reviewer"]), status="active")
-            db.add(tech)
-            db.add(InstitutionMembership(institution_id=institution_id, user_id=tech.id,
-                                         role="member", status="active"))
-            db.flush()
-            db.add(ProjectMembership(project_id=project_id, user_id=tech.id,
-                                     project_role="technical_reviewer", status="active"))
-            db.commit()
+        # Four-eye signature: 技术审核账号已在播种阶段建好（与填写人/业务审核人均不同）。
         login_tech = client.post("/api/auth/login", json={
             "username": "p4_technical_reviewer",
             "password": PASSWORDS["technical_reviewer"]})
@@ -445,14 +437,17 @@ def main() -> int:
              has_signoffs="signoffs.json" in names)
 
         # frozen requirement files bind to the same content version/hash
-        for fmt in ("xlsx", "docx"):
-            exported = call("business_analyst", "GET",
-                            f"/api/projects/{project_id}/requirements/{requirement_id}/export?format={fmt}")
-            step(f"requirement_export_{fmt}", ok=exported.status_code == 200,
-                 status=exported.status_code,
-                 bytes=len(exported.content),
-                 snapshot_hash=exported.headers.get("X-Requirement-Snapshot-Hash", "")[:16]
-                 if hasattr(exported, "headers") else "")
+        # `/export` 只产出草稿 xlsx；**冻结**正式文件走 formal-deliveries（需先冻结快照）。
+        draft_export = call("business_analyst", "GET",
+                            f"/api/projects/{project_id}/requirements/{requirement_id}/export")
+        formal = call("business_analyst", "GET",
+                      f"/api/projects/{project_id}/requirements/{requirement_id}/formal-deliveries")
+        step("requirement_draft_export", ok=draft_export.status_code == 200,
+             status=draft_export.status_code, bytes=len(draft_export.content))
+        step("requirement_formal_deliveries_listed", ok=formal.status_code == 200,
+             status=formal.status_code,
+             count=len(formal.json()) if formal.status_code == 200 else None,
+             note="冻结 Word/Excel 需先建立正式交付版本（本轮未产出，见未完成项）。")
 
         # -------------------------------------------------------- 10. change review (recheck)
         change_hash = hashlib.sha256(b"synthetic-script-v2").hexdigest()

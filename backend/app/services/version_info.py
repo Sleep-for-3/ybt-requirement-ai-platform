@@ -50,12 +50,21 @@ def build_time() -> str:
 
 
 def schema_head(db: Session) -> str | None:
-    """The migration revision the database is actually on, or None when unreadable."""
+    """The migration revision the database is actually on, or None when unreadable.
+
+    A probe must never damage the caller's session.  On PostgreSQL a failing statement aborts the
+    whole transaction, so a bare ``except`` that swallowed the error left every *later* statement in
+    the same request failing with ``InFailedSqlTransaction`` -- ``/api/version``, UAT run creation and
+    the release identity gate all read this value, so a missing ``alembic_version`` table turned into
+    an unrelated 500 further down the request.  The probe therefore runs inside a SAVEPOINT: a
+    failure rolls back only the probe and the surrounding transaction stays usable.
+    """
+
     try:
-        return db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+        with db.begin_nested():
+            return db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
     except Exception:  # noqa: BLE001 - a missing table must not break a health/version probe
         return None
-
 
 def version_report(db: Session, *, component: str | None = None) -> dict[str, Any]:
     return {
