@@ -54,10 +54,21 @@ def assert_dedicated_redis(client, queue_name: str, *, allow_shared_broker: bool
 
     Returns a dict of observations for the report.
     """
+    # R07: 只把**真正的队列**（Redis list）当成队列。
+    # celery 的结果后端会写入 `celery-task-meta-<uuid>` 字符串键，对它们调用 LLEN 会报
+    # WRONGTYPE（Operation against a key holding the wrong kind of value）；正常结果键的存在
+    # 不应该阻断后续验收。
+    observed: dict[str, str] = {}
+    queues: list[str] = []
+    for raw in client.keys("*"):
+        key = raw.decode() if isinstance(raw, bytes) else str(raw)
+        raw_type = client.type(key)
+        key_type = raw_type.decode() if isinstance(raw_type, bytes) else str(raw_type or "")
+        observed[key] = key_type
+        if key_type == "list" and (key == "celery" or key.startswith("celery")):
+            queues.append(key)
 
-    keys = [key.decode() if isinstance(key, bytes) else str(key) for key in client.keys("*")]
-    foreign_queues = [key for key in keys if key == "celery" or (key.startswith("celery")
-                      and key != queue_name)]
+    foreign_queues = [key for key in queues if key != queue_name]
     foreign_depth = {key: client.llen(key) for key in foreign_queues}
     busy = {key: depth for key, depth in foreign_depth.items() if depth > 0}
     if busy and not allow_shared_broker:
@@ -66,9 +77,32 @@ def assert_dedicated_redis(client, queue_name: str, *, allow_shared_broker: bool
             + json.dumps(busy, ensure_ascii=False)
             + "（如确为专用测试实例，请显式加 --allow-shared-broker）"
         )
-    return {"queue_name": queue_name, "key_count": len(keys),
+    return {"queue_name": queue_name, "key_count": len(observed),
+            "key_types": observed, "queues": queues,
             "foreign_queues": foreign_depth, "foreign_non_empty": busy}
+def _make_domain_models(audit_log, notification, stored_file):
+    """R07: 判定“真实领域结果”的对象（审计 / 通知 / 已存文件）。"""
 
+    class _DomainModels:
+        pass
+
+    models = _DomainModels()
+    models.audit_log = audit_log
+    models.notification = notification
+    models.stored_file = stored_file
+    return models
+
+
+def _domain_counts(db, models) -> dict:
+    """R07: 真实可观测的领域结果计数（代替不存在的 `attempt_count`）。"""
+
+    from sqlalchemy import func, select
+
+    return {
+        "stored_files": db.scalar(select(func.count()).select_from(models.stored_file)) or 0,
+        "notifications": db.scalar(select(func.count()).select_from(models.notification)) or 0,
+        "audit_logs": db.scalar(select(func.count()).select_from(models.audit_log)) or 0,
+    }
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", default="ybt_iso_phase5_workers")
@@ -93,9 +127,12 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "2026-10-03"))
     from isolated_pg_guard import require_isolated_target
 
+    # R07: `--allow-reset-existing` 必须**真正**用于保护既有隔离库。
+    # 旧实现硬编码 allow_existing=True，于是即使没有传 flag，一个既有（非空）隔离库也会被
+    # drop_all 重建 —— 声明了参数却不生效。现在只有显式传入 flag 才允许重置既有隔离库。
     require_isolated_target(
         args.database, script="phase5_real_queue_acceptance.py", host=args.host, port=args.port,
-        user=args.user, password=password, allow_existing=True,
+        user=args.user, password=password, allow_existing=args.allow_reset_existing,
     )
 
     # C10: 队列名在构造子进程环境之前就必须确定，否则 env 无法携带默认队列。
@@ -130,6 +167,15 @@ def main() -> int:
     # C10: 不允许子进程继承真实模型/代理配置。
     child_env["LLM_PROVIDER"] = "mock"
     child_env["EMBEDDING_PROVIDER"] = "mock"
+    # R07: 父子必须使用**同一份** mock 配置与存储根，否则子进程会写到别的存储或调到真模型。
+    import tempfile as _tempfile
+
+    storage_dir = _tempfile.mkdtemp(prefix="p5q-storage-")
+    env["STORAGE_DIR"] = storage_dir
+    env["STORAGE_PROVIDER"] = "local"
+    child_env["STORAGE_DIR"] = storage_dir
+    child_env["STORAGE_PROVIDER"] = "local"
+    child_env["VECTOR_STORE_PROVIDER"] = env["VECTOR_STORE_PROVIDER"]
     os.environ.update({k: v for k, v in env.items() if k in {
         "DATABASE_URL", "TASK_QUEUE_PROVIDER", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND",
         "CELERY_TASK_DEFAULT_QUEUE", "AUTH_MODE", "APP_SECRET_KEY", "JWT_SECRET_KEY",
@@ -144,6 +190,12 @@ def main() -> int:
 
     # ---- 1. real broker reachable -----------------------------------------------------------
     import redis
+
+    # R07: 导入真实领域模型，用于统计“真实领域结果”（存储文件 / 通知 / 审计）。
+    from app.models import AuditLog as _AuditLog
+    from app.models import Notification as _Notification
+    from app.models import StoredFile as _StoredFile
+    DomainModels = _make_domain_models(_AuditLog, _Notification, _StoredFile)
 
     client = redis.Redis.from_url(args.redis_url, socket_connect_timeout=5)
     try:
@@ -218,6 +270,8 @@ def main() -> int:
             db.add(project)
             db.flush()
         db.commit()
+        # R07: 记录本轮开始前的基线，断言用**增量**而不是绝对值（绝对值会受历史运行污染）。
+        baseline_counts = _domain_counts(db, DomainModels)
         queue = get_task_queue()
         # C10: 让发布者与子进程 worker 都只使用**本轮专用队列**。
         # 必须在 enqueue 之前设置，否则消息会落到默认 `celery` 队列（即共享队列）。
@@ -228,15 +282,18 @@ def main() -> int:
 
         # ``enqueue`` requires an ``idempotency_key`` and ``created_by`` (see CeleryTaskQueue.enqueue),
         # and the payload argument is ``payload_summary`` -- not ``payload_summary_json``.
-        # C10: 用一个**真实注册了 handler** 的 job_type，这样“首次成功”才是真的业务成功，
-        # 而不是“因为没有 handler 所以立刻失败”。metadata_sync 已注册。
-        job = queue.enqueue(db, job_type="metadata_sync", institution_id=institution.id,
-                            project_id=None, created_by=int(actor.id),
-                            idempotency_key="real-queue-acceptance-1",
+        # R07: 用**真实注册了 handler** 且**有真实可观测领域结果**的 job_type。
+        # 复核指出旧夹具用了 `metadata_sync` 但缺 `datasource_id`，handler 实际必 failed，
+        # 而脚本却把 failed 当成通过。`project_manifest_export` 只需 project，
+        # 成功后留下 StoredFile + 审计 + 通知 —— 这就是“真实领域结果”。
+        job = queue.enqueue(db, job_type="project_manifest_export", institution_id=institution.id,
+                            project_id=project.id, created_by=int(actor.id),
+                            idempotency_key=f"real-queue-acceptance-{queue_name}",
                             payload_summary={"source": "real-queue-acceptance"})
         db.commit()
         job_id = int(job.id)
-        step("job_enqueued_via_broker", ok=True, job_id=job_id, job_status=job.status)
+        step("job_enqueued_via_broker", ok=True, job_id=job_id, job_status=job.status,
+             baseline_counts=baseline_counts)
 
     depth_after_enqueue = client.llen(queue_name)
     step("broker_holds_message", ok=depth_after_enqueue >= 1, queue_depth=depth_after_enqueue)
@@ -271,8 +328,19 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             worker.kill()
 
-    step("job_reached_terminal_state", ok=final_status in {"completed", "failed"},
-         job_id=job_id, final_status=final_status)
+    # R07: 首次必须**真正成功**，且留下真实领域结果。
+    # 旧断言接受 `failed`，而夹具实际必 failed（缺 datasource_id），于是 0→0 的空断言也算通过。
+    with factory() as db:
+        _row = db.get(BackgroundJob, job_id)
+        first_result = dict((_row.result_summary_json or {}) if _row else {})
+        first_counts = _domain_counts(db, DomainModels)
+    step("job_completed_with_domain_result", ok=final_status == "completed",
+         job_id=job_id, final_status=final_status, result_summary=first_result,
+         domain_counts=first_counts)
+    step("first_attempt_created_one_result",
+         ok=all(first_counts.get(key, 0) - baseline_counts.get(key, 0) == 1
+                for key in ("stored_files", "notifications", "audit_logs")),
+         baseline_counts=baseline_counts, result_summary=first_result, domain_counts=first_counts)
 
     depth_after_consume = client.llen(queue_name)
     step("broker_queue_drained", ok=depth_after_consume == 0, queue_depth=depth_after_consume)
@@ -284,9 +352,10 @@ def main() -> int:
     # 这里再发一次同一 job_id 的消息到**同一专用队列**，再由第二个 worker 进程消费。
     with factory() as db:
         row = db.get(BackgroundJob, job_id)
-        first_attempts = int(getattr(row, "attempt_count", 0) or 0)
+        # R07: BackgroundJob 没有 `attempt_count`；用**真实可观测领域计数**判断重投是否产生新效果。
         first_status = row.status
         first_result = dict(row.result_summary_json or {})
+        first_counts = _domain_counts(db, DomainModels)
 
     from app.workers import execute_background_job
 
@@ -314,18 +383,18 @@ def main() -> int:
 
     with factory() as db:
         row = db.get(BackgroundJob, job_id)
-        second_attempts = int(getattr(row, "attempt_count", 0) or 0)
         second_status = row.status
         second_result = dict(row.result_summary_json or {})
+        second_counts = _domain_counts(db, DomainModels)
 
+    # R07: 用真实领域计数与结果证明“只执行一次”，不再用不存在的 attempt_count 做 0→0 空断言。
     step("duplicate_delivery_fenced",
-         ok=(second_attempts == first_attempts and second_status == first_status
-             and second_result == first_result),
-         attempts_before=first_attempts, attempts_after=second_attempts,
+         ok=(second_status == first_status and second_result == first_result
+             and second_counts == first_counts),
          status_before=first_status, status_after=second_status,
+         counts_before=first_counts, counts_after=second_counts,
          queue_depth=client.llen(queue_name),
-         note="第二次投递经真实 broker 与真实 worker，业务状态与结果必须完全不变")
-
+         note="第二次投递经真实 broker 与真实 worker；领域结果计数必须不变")
     # C10: 只清理**本轮自己的**队列；绝不触碰其他队列/其他 DB。
     removed = client.delete(queue_name)
     step("own_queue_cleaned", ok=True, queue_name=queue_name, deleted_keys=removed)
