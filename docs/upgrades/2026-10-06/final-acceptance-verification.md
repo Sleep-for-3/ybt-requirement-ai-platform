@@ -46,9 +46,20 @@ runtime = evidence_runtime(
 → 44 passed, 1 warning（含此前失败的 3 例）
 ```
 
-### 第二次（最终）
+### 第二次（最终，通过）
+```
+cd backend
+$env:TASK_QUEUE_PROVIDER='inline'; $env:AUTH_MODE='optional'
+$env:PHASE4_VERIFY_DATABASE_URL=postgresql+psycopg://...@127.0.0.1:5432/ybt_iso_phase4_synthetic
+<py> -m pytest -q
+→ 1507 passed, 13 warnings in 1185.44s（0:19:45）
+→ PYTEST_EXIT=0
+```
 
-见第 5 节。
+**1507 passed / 0 failed / 0 skipped**。基线 `fd7a532` 为 1480 passed / **1 skipped**；
+本轮新增 **27 条后端用例**（C03/C04/C05 共 9 条 + C06/C07/C08 共 17 条 + 其他 1 条），
+且此前那 1 例 skipped 在设置 `PHASE4_VERIFY_DATABASE_URL` 后**执行并通过**（因此 skipped 归零）。
+完整输出：`.local-run/c-round-final-regression2.log`。
 
 ## 2. 前端验证（最终提交）
 
@@ -90,7 +101,7 @@ runtime = evidence_runtime(
 
 | 项 | 结果 |
 | --- | --- |
-| 后端全量回归（最终） | 见 `.local-run/c-round-final-regression2.log` |
+| **后端全量回归（最终）** | **1507 passed / 0 failed / 0 skipped**（19:45，`PYTEST_EXIT=0`） |
 | 前端单元测试 | **267 passed / 0 failed** |
 | 前端 tsc / lint / build | **全部 exit 0** |
 | `npm audit --omit=dev` | **0 漏洞** |

@@ -17,6 +17,7 @@
 | C10 | P1 | Redis 验收隔离 | `1ea7440` | 修复前无守卫（源码确认）→ 修复后 **12/12** + 负例拒绝 |
 | C11 | P2 | 轮询故障恢复 | `639166e` | 修复前 8 passed/2 failed → 修复后 **10/10** |
 | — | — | 依赖安全（新公告） | `7d11b62` | `source-map-js` 1 high → **0** |
+| — | — | 全量回归暴露的 C06 回归 | `eb10b28` | 3 failed → **0**（1507 passed） |
 
 逐项详情见同目录下 `C01-…md` … `C11-…md` 与 `security-source-map-js.md`。
 
@@ -99,11 +100,20 @@
    `DuplicateColumn` —— 判定为环境未就绪而非产品缺陷，脚本现在自行迁到 head。
 
 ## 四、依赖安全（本轮新增发现）
-
 最终验收重跑 `npm audit --omit=dev` 时由 0 变 **1 high**：`source-map-js` GHSA-68fv-2mgg-jv7q
 （区间 1.0.0–1.2.1，来源 `postcss`）。
 **这不是本轮改动引入的**（本轮未触碰 postcss/source-map-js，属新公布公告），但已修复：
-override 到 `^1.2.2` → 实际安装 **1.2.2**，审计回到 **total 0**，测试 267/0，tsc/lint/build 均 exit 0。
+override 到 `^1.2.2` → 实际安装 **1.2.2**，审计回到 **total 0**。
+
+## 四之二、全量回归暴露的**本轮自己引入**的回归（已修复）
+
+第一次最终回归 3 failed / 1503 passed，全部是 `test_resources_data_contract.py::
+test_invented_claim_is_not_grounded`，报
+`TypeError: … got an unexpected keyword argument 'model_profile_id'`：
+C06 为了让评测选中的模型真正到达 runtime，把 `grounded_answer` 改成**总是**传该关键字参数，
+而该测试用两参数 lambda 替换了 `get_prompt_runtime`。
+**修复**：只在**确实选中了** profile 时才传，“未指定”保持原有两参数调用形状（`eb10b28`）。
+复验：定向 44 passed，全量 **1507 passed / 0 failed / 0 skipped**。
 
 ## 五、本轮**未验证 / 待验收**（不得当作通过）
 
