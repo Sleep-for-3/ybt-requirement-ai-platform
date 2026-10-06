@@ -31,6 +31,66 @@ from app.models import (
     RetrievalLog,
 )
 from app.services.evaluation import rag_evaluator
+
+
+def _answer_payload(db, query, kwargs, *, unit_id, answer, status, reason=None,
+                    execution_metadata=None):
+    """构造一条 grounded_answer 返回值（只替模型边界，其余走真实评测代码）。"""
+
+    log = RetrievalLog(
+        project_id=kwargs.get("project_id") or 0,
+        query_text=query, query_type=kwargs.get("retrieval_mode", "hybrid"), filters_json={},
+        retrieval_strategy=kwargs.get("retrieval_mode", "hybrid"),
+        keyword_result_count=1, vector_result_count=1, final_result_count=1,
+        result_ids_json=[unit_id], latency_ms=5,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    metadata = {"execution_kind": "mock_model", "model_name": "model-A",
+                "model_profile_id": kwargs.get("model_profile_id")}
+    if execution_metadata:
+        metadata.update(execution_metadata)
+    if reason:
+        metadata["degraded_reason"] = reason
+    return {
+        "retrieval_log_id": log.id,
+        "answer": answer,
+        "citations": [{"knowledge_unit_id": unit_id, "quoted_content": "余额规则"}],
+        "unsupported_claims": [],
+        "open_questions": [],
+        "answer_status": status,
+        "degraded_reason": reason,
+        "execution_metadata": metadata,
+    }
+
+
+def _answer_with_citation_keyword(answer_text: str, quoted: str, unit_id: int):
+    """回答文本不含关键词、只有**引文**含关键词的模型边界替身（R04 触发条件）。"""
+
+    async def fake(db, project_id, query, **kwargs):
+        log = RetrievalLog(
+            project_id=project_id, query_text=query, query_type=kwargs.get("retrieval_mode", "hybrid"),
+            filters_json={}, retrieval_strategy=kwargs.get("retrieval_mode", "hybrid"),
+            keyword_result_count=1, vector_result_count=1, final_result_count=1,
+            result_ids_json=[unit_id], latency_ms=5,
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        return {
+            "retrieval_log_id": log.id,
+            "answer": answer_text,
+            "citations": [{"knowledge_unit_id": unit_id, "quoted_content": quoted}],
+            "unsupported_claims": [], "open_questions": [],
+            "answer_status": "grounded", "degraded_reason": None,
+            "execution_metadata": {"execution_kind": "mock_model",
+                                   "model_profile_id": kwargs.get("model_profile_id")},
+        }
+
+    return fake
+
+
 from app.services.llm.prompt_runtime import get_prompt_runtime
 
 
@@ -360,3 +420,233 @@ def test_c08_an_edited_annotation_does_not_change_already_recorded_evidence(env,
             "already-recorded run evidence must keep pointing at the snapshot it actually used")
         assert rag_evaluator._dataset_version([case]) != recorded, (
             "the dataset version itself must move when the annotation changes")
+
+
+# --------------------------------------------------------------------------- R03 / R04 / R05
+
+
+def test_r03_默认模型摘要必须与实际执行的档案一致(env, monkeypatch):
+    """复核 R03：不指定 profile 时，摘要写 null/环境默认，而实际跑 A。"""
+
+    with env() as db:
+        profile_a, _profile_b = _profiles(db)
+        # 前端默认不指定 profile。
+        _, run = _seed_run(db, cases=[1], profile_id=None)
+        captured = _install_fake_answer(monkeypatch, status="grounded", answer="余额规则")
+
+        completed = asyncio.run(rag_evaluator.run_evaluation(db, run))
+        config = completed.retrieval_config_json
+
+        # 实际执行的档案（模型边界看到的就是它）。
+        assert captured["calls"], "应确实调用过模型边界"
+        assert all(call.get("model_profile_id") == profile_a.id for call in captured["calls"])
+        # 摘要、固定档案、逐条元数据三者必须一致。
+        assert completed.model_profile_id == profile_a.id, "运行开始时应固定实际采用的档案"
+        assert config["chat_profile_id"] == profile_a.id, config.get("chat_profile_id")
+        assert config["chat_model"] == profile_a.model_name, config.get("chat_model")
+        rows = list(db.scalars(select(RagEvaluationResult).where(
+            RagEvaluationResult.evaluation_run_id == run.id)))
+        assert rows
+        assert all(row.execution_metadata_json.get("model_profile_id") == profile_a.id
+                   for row in rows), [row.execution_metadata_json for row in rows]
+
+
+def test_r03_运行中修改默认配置不会偷偷换模型(env, monkeypatch):
+    """开始运行后固定档案；后续新建更小 id 的启用档案也不得改变本次执行。"""
+
+    with env() as db:
+        profile_a, _b = _profiles(db)
+        _, run = _seed_run(db, cases=[1, 2], profile_id=None)
+        captured = _install_fake_answer(monkeypatch, status="grounded", answer="余额规则")
+        # 运行期间出现一个 id 更小、优先级更高的启用档案。
+        late = ModelProfile(profile_name="late", provider_type="mock", model_name="model-LATE",
+                            enabled=True, local_only=True, supports_structured_output=True,
+                            max_context_tokens=8192, temperature=0.0, config_json={}, created_by="r03")
+        db.add(late)
+        db.commit()
+
+        asyncio.run(rag_evaluator.run_evaluation(db, run))
+        assert all(call.get("model_profile_id") == profile_a.id for call in captured["calls"]), (
+            "运行中新增的默认档案不得影响本次已固定的选择")
+
+
+def test_r04_仅引文命中不得取得回答满分(env, monkeypatch):
+    """复核 R04：回答“请确认其他业务”不含预期“余额”，仅引文含“余额”，旧实现仍满分。"""
+
+    with env() as db:
+        _profiles(db, count=1)
+        _, run = _seed_run(db, cases=[1], profile_id=None)
+        # 答案故意不含“余额”，引文含“余额”。
+        _install_fake_answer(monkeypatch, status="grounded", answer="请确认其他业务")
+        # 让引文包含预期关键词。
+        monkeypatch.setattr(
+            rag_evaluator, "grounded_answer",
+            _answer_with_citation_keyword("请确认其他业务", "余额规则 ECIF", 1))
+
+        completed = asyncio.run(rag_evaluator.run_evaluation(db, run))
+        metrics = completed.summary_metrics_json
+
+        # 回答代理：回答文本不含“余额” → 0；证据代理：引文含“余额” → 1。
+        assert metrics["keyword_coverage"] == 0.0, metrics["keyword_coverage"]
+        assert metrics["evidence_keyword_coverage"] == 1.0, metrics["evidence_keyword_coverage"]
+        # 回答正确率代理不得因引文命中而虚高（只剩引文覆盖 0.3 权重）。
+        assert metrics["answer_correctness"] < 1.0, metrics["answer_correctness"]
+        assert metrics["answer_correctness_denominator"] == 1, metrics
+
+
+def test_r04_部分降级展示覆盖率与逐条状态(env, monkeypatch):
+    """一正常 + 一 timeout：必须给出分母、覆盖率与逐条状态，而不是无分母的 100%。"""
+
+    with env() as db:
+        _profiles(db, count=1)
+        _, run = _seed_run(db, cases=[1, 2], profile_id=None)
+        state = {"n": 0}
+
+        async def fake(db, project_id, query, **kwargs):
+            state["n"] += 1
+            degraded = state["n"] == 2
+            return _answer_payload(db, query, kwargs, unit_id=int(query.rsplit("-", 1)[1]),
+                                   answer="模型生成暂时不可用" if degraded else "余额规则",
+                                   status="degraded" if degraded else "grounded",
+                                   reason="timeout" if degraded else None)
+
+        monkeypatch.setattr(rag_evaluator, "grounded_answer", fake)
+        completed = asyncio.run(rag_evaluator.run_evaluation(db, run))
+        metrics = completed.summary_metrics_json
+
+        assert metrics["case_count"] == 2
+        assert metrics["successful_query_count"] == 1, metrics
+        assert metrics["degraded_query_count"] == 1, metrics
+        assert metrics["answer_coverage_denominator"] == 2, metrics
+        assert metrics["generation_coverage"] == 0.5, metrics
+        assert metrics["status_counts"]["grounded"] == 1, metrics["status_counts"]
+        assert metrics["status_counts"]["degraded"] == 1, metrics["status_counts"]
+        # 结果页所需的实际模型与解释必须存在。
+        assert metrics["actual_chat_model"], metrics
+        assert metrics["actual_chat_profile_id"] is not None, metrics
+        assert metrics["metric_notes"]["not_expert_accuracy"], metrics["metric_notes"]
+
+        rows = list(db.scalars(select(RagEvaluationResult).where(
+            RagEvaluationResult.evaluation_run_id == run.id)))
+        statuses = sorted(str(row.execution_metadata_json.get("answer_status")) for row in rows)
+        assert statuses == ["degraded", "grounded"], statuses
+        degraded_row = next(row for row in rows
+                            if row.execution_metadata_json.get("answer_status") == "degraded")
+        assert degraded_row.execution_metadata_json.get("degraded_reason") == "timeout"
+
+
+def test_r04_策略拒绝原因不得被顶层缺失值覆盖(env, monkeypatch):
+    """复核 R04：execution_metadata 里已有拒绝原因，又被顶层 null 覆盖。"""
+
+    with env() as db:
+        _profiles(db, count=1)
+        _, run = _seed_run(db, cases=[1], profile_id=None)
+
+        async def fake(db, project_id, query, **kwargs):
+            return _answer_payload(
+                db, query, kwargs, unit_id=1,
+                answer="模型生成暂时不可用，以下为检索到的证据，结论待确认。",
+                status="degraded", reason=None,
+                execution_metadata={"execution_kind": "degraded",
+                                     "degraded_reason": "confidentiality_policy"})
+
+        monkeypatch.setattr(rag_evaluator, "grounded_answer", fake)
+        asyncio.run(rag_evaluator.run_evaluation(db, run))
+        rows = list(db.scalars(select(RagEvaluationResult).where(
+            RagEvaluationResult.evaluation_run_id == run.id)))
+        assert rows[0].execution_metadata_json.get("degraded_reason") == "confidentiality_policy", (
+            rows[0].execution_metadata_json)
+
+
+def test_r04_全部不可生成时回答指标不适用(env, monkeypatch):
+    """全部降级：生成覆盖率 0、回答质量分母 0（不适用），检索指标仍保留。"""
+
+    with env() as db:
+        _profiles(db, count=1)
+        _, run = _seed_run(db, cases=[1, 2], profile_id=None)
+
+        async def fake(db, project_id, query, **kwargs):
+            return _answer_payload(db, query, kwargs, unit_id=int(query.rsplit("-", 1)[1]),
+                                   answer="模型生成暂时不可用", status="degraded", reason="timeout")
+
+        monkeypatch.setattr(rag_evaluator, "grounded_answer", fake)
+        completed = asyncio.run(rag_evaluator.run_evaluation(db, run))
+        metrics = completed.summary_metrics_json
+        assert metrics["generation_coverage"] == 0.0, metrics
+        assert metrics["answer_correctness_denominator"] == 0, metrics
+        assert metrics["successful_query_count"] == 0, metrics
+        # 无生成样本 → 不适用（而不是 0 分或 100%）
+        assert metrics["groundedness"] == 0.0 and metrics["answer_correctness"] == 0.0
+        # 检索质量仍然有效。
+        assert metrics["recall_at_5"] == 1.0, metrics
+
+
+def test_r05_运行中修改用例不改变已冻结的输入与真值(env, monkeypatch):
+    """复核 R05：第一例执行期间另一 Session 改了第二例，实际执行了新 query/真值。"""
+
+    with env() as db:
+        _profiles(db, count=1)
+        project_id, run = _seed_run(db, cases=[1, 2], profile_id=None)
+        executed: list[str] = []
+        case2_id = db.scalar(select(RagEvaluationCase.id).where(
+            RagEvaluationCase.project_id == project_id).order_by(RagEvaluationCase.id.desc()))
+
+        async def fake(db, project_id, query, **kwargs):
+            executed.append(query)
+            # （并发编辑由下方的 fake_with_edit 在首例执行期间触发）
+            return _answer_payload(db, query, kwargs, unit_id=int(query.rsplit("-", 1)[1]),
+                                   answer="余额规则", status="grounded")
+
+        # 直接在独立 Session 中修改第二例（模拟并发编辑）。
+        engine = db.get_bind()
+        other_factory = sessionmaker(bind=engine, expire_on_commit=False)
+        first_done = {"v": False}
+        real_fake = fake
+
+        async def fake_with_edit(db, project_id, query, **kwargs):
+            if not first_done["v"]:
+                first_done["v"] = True
+                with other_factory() as other:
+                    row = other.get(RagEvaluationCase, case2_id)
+                    row.query_text = "并发修改后的第二个问题"
+                    row.expected_knowledge_unit_ids_json = [999]
+                    other.commit()
+            return await real_fake(db, project_id, query, **kwargs)
+
+        monkeypatch.setattr(rag_evaluator, "grounded_answer", fake_with_edit)
+        completed = asyncio.run(rag_evaluator.run_evaluation(db, run))
+
+        # 执行使用的是**冻结快照**里的原始 query，不是并发修改后的新 query。
+        assert "问题-1" in executed and "问题-2" in executed, executed
+        assert "并发修改后的第二个问题" not in executed, executed
+        config = completed.retrieval_config_json
+        snapshot = config["dataset_snapshot"]
+        assert snapshot["cases"][1]["query_text"] == "问题-2", snapshot["cases"][1]
+        assert snapshot["cases"][1]["expected_knowledge_units"] == [2], snapshot["cases"][1]
+        # 可以从快照重算版本，且与运行时记录一致。
+        assert rag_evaluator.dataset_version_from_snapshot(snapshot) == config["dataset_version"]
+        # 快照是自包含的：不再只回指可变的 case id。
+        assert config.get("dataset_snapshot"), "必须保存完整用例快照"
+
+
+def test_r05_运行后修改用例不影响该运行且版本可从快照重算(env, monkeypatch):
+    with env() as db:
+        _profiles(db, count=1)
+        project_id, run = _seed_run(db, cases=[1, 2], profile_id=None)
+        _install_fake_answer(monkeypatch, status="grounded", answer="余额规则")
+        completed = asyncio.run(rag_evaluator.run_evaluation(db, run))
+        snapshot = completed.retrieval_config_json["dataset_snapshot"]
+        recorded = completed.retrieval_config_json["dataset_version"]
+
+        rows = list(db.scalars(select(RagEvaluationCase).where(
+            RagEvaluationCase.project_id == project_id)))
+        for row in rows:
+            row.query_text = "运行后改写"
+            row.expected_answer_keywords_json = ["另一个词"]
+        db.commit()
+
+        # 已记录的版本与快照不受影响，且仍可重算。
+        assert rag_evaluator.dataset_version_from_snapshot(snapshot) == recorded
+        assert completed.retrieval_config_json["dataset_snapshot"] == snapshot
+        # 而行本身已经变了（证明本用例确实改了库）。
+        assert rag_evaluator._dataset_version(rows) != recorded
