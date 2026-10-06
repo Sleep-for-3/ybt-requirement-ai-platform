@@ -29,8 +29,18 @@ function currentSessionEpoch(): number {
   return sessionEpoch;
 }
 
+// C01/R01: 写入令牌与“会话身份是否切换”是两件事，必须分开：
+//   * saveSession —— **身份转换**（登录、切换账号）：自增身份代次并作废在飞续期；
+//   * writeTokens —— 同一身份内的**令牌轮换**（正常续期）：只条件更新令牌，不动身份代次。
+// 旧实现让续期也走 saveSession，于是续期成功后外层 `epoch === currentSessionEpoch()` 必然不相等，
+// 原请求永远不会被重放 —— 正常 401→refresh 200 之后仍然返回 401。
 export function saveSession(accessToken: string, refreshToken: string) {
   sessionEpoch += 1;
+  refreshInFlight = null;
+  writeTokens(accessToken, refreshToken);
+}
+
+function writeTokens(accessToken: string, refreshToken: string) {
   sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
 }
@@ -72,7 +82,7 @@ function readRefreshToken(): string | null {
  */
 let refreshInFlight: { epoch: number; promise: Promise<boolean> } | null = null;
 
-async function performSessionRefresh(epoch: number, refreshToken: string): Promise<boolean> {
+async function performSessionRefresh(identityEpoch: number, refreshToken: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
@@ -83,9 +93,10 @@ async function performSessionRefresh(epoch: number, refreshToken: string): Promi
     const session = (await response.json()) as { access_token?: string; refresh_token?: string };
     if (!session?.access_token || !session?.refresh_token) return false;
     // C01 核心：晚到的续期响应不得覆盖已切换/已退出的新会话。
-    if (epoch !== sessionEpoch) return false;
+    if (identityEpoch !== sessionEpoch) return false;
     if (readRefreshToken() !== refreshToken) return false;
-    saveSession(session.access_token, session.refresh_token);
+    // R01: 同一身份内的令牌轮换 —— 不改变身份代次，续期成功后原请求仍可重放。
+    writeTokens(session.access_token, session.refresh_token);
     return true;
   } catch {
     return false;
@@ -100,7 +111,8 @@ export async function refreshSession(): Promise<boolean> {
   // 只复用同一代次、同一刷新令牌的飞行中续期；代次变了必须重新发起。
   if (!refreshInFlight || refreshInFlight.epoch !== epoch) {
     const pending = performSessionRefresh(epoch, refreshToken).then((ok) => {
-      if (!ok) refreshInFlight = null;
+      // R01: 只清理**自己**的飞行记录；若期间已有别的续期在飞，不得把它一起清掉。
+      if (refreshInFlight?.promise === pending) refreshInFlight = null;
       return ok;
     });
     refreshInFlight = { epoch, promise: pending };
@@ -141,6 +153,8 @@ async function fetchWithSessionRetry(path: string, buildInit: () => RequestInit,
   const epoch = currentSessionEpoch();
   const response = await fetchWithTimeout(`${API_BASE}${path}`, buildInit(), timeoutMs);
   if (allowRefresh && shouldRefreshSession(path, response, Boolean(readRefreshToken()))) {
+    // R01: 旧身份（A）发起的请求晚到 401 时，绝不能为此启动新会话（B）的续期。
+    if (epoch !== currentSessionEpoch()) return response;
     if (await refreshSession()) {
       // 续期可能因代次变化而失败（已退出/已切账号），此时不得以旧身份重放。
       if (epoch === currentSessionEpoch()) return fetchWithSessionRetry(path, buildInit, false);
