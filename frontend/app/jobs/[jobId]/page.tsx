@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { JobProgressPanel, jobTypeLabel } from "@/components/jobs/JobProgressPanel";
 import { JobStatusBadge } from "@/components/jobs/JobStatusBadge";
-import { useJobPolling } from "@/hooks/useJobPolling";
+import { useJobPolling, useJobPollingStatus } from "@/hooks/useJobPolling";
 import { apiGet, BackgroundJobSummary } from "@/lib/api";
 import { normalizeRequestError } from "@/lib/http-response.mjs";
 
@@ -78,6 +78,8 @@ export default function JobDetailsPage() {
     enabled: Boolean(initialJob),
     initialJob
   });
+  // C11: 连续失败停轮询时，界面必须可见并可手动恢复。
+  const { unavailable, resume } = useJobPollingStatus(jobId);
   const job = polledJob || initialJob;
   const resultEntries = useMemo(() => {
     if (!job?.result_summary_json) return [];
@@ -87,8 +89,16 @@ export default function JobDetailsPage() {
       .filter((item): item is { key: string; label: string; value: string } => item.value !== null);
   }, [job]);
 
+  const pollingNotice = unavailable ? (
+    <div className="panel mt-3 flex flex-wrap items-center justify-between gap-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="status">
+      <span>后台任务状态暂时无法更新（{unavailable}）。当前显示的是最后一次成功读取的状态。</span>
+      <button className="underline" onClick={resume} type="button">立即重试</button>
+    </div>
+  ) : null;
+
   return (
     <main>
+      {pollingNotice}
       <WorkspaceHeader
         title={job ? `任务详情 #${job.id}` : "任务详情"}
         meta={job ? jobTypeLabel(job.job_type) : "查看后台任务状态和执行结果"}
