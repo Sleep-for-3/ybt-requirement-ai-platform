@@ -82,11 +82,20 @@ if [[ "$APP_COMMIT" == unknown ]]; then
   exit 1
 fi
 
-# C09: remember the identity the *previous* release left in .env, so a rollback can restore both the
-# image tag and the reported identity instead of leaving .env describing the release being undone.
-PREVIOUS_TAG="$(printf '%s' "${YBT_RELEASE_TAG:-}")"
+# C09/R06: remember the identity the *previous* release left in .env, so a rollback can restore both
+# the image tag and the reported identity instead of leaving .env describing the release being undone.
+#
+# R06 修复：三个值都必须从 **.env 文件**读，不能读 `YBT_RELEASE_TAG` 变量 —— 脚本前面已经
+# `export YBT_RELEASE_TAG="$TAG"`（本次标签），读变量会把「上一版」记成「当前版」，
+# 回滚提示因此指向错误标签。这里在覆盖 .env 之前快照旧 manifest。
+PREVIOUS_TAG="$(grep -E '^YBT_RELEASE_TAG=' ./.env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
 PREVIOUS_APP_COMMIT="$(grep -E '^APP_COMMIT=' ./.env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
 PREVIOUS_BUILD_TIME="$(grep -E '^BUILD_TIME=' ./.env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+# 本次标签必须与「上一版」不同，否则“回滚”没有意义，且说明调用方将旧标签当新版本发布。
+if [[ -n "$PREVIOUS_TAG" && "$PREVIOUS_TAG" == "$TAG" ]]; then
+  echo "本次标签与 .env 中的上一版标签相同（${TAG}）；回滚将无法区分两版，请使用新的标签" >&2
+  exit 1
+fi
 log() { printf '\n[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 # C09: ``docker compose up -d`` selects images by ``YBT_RELEASE_TAG`` from .env, so the tag must be
