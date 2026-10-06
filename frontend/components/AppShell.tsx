@@ -39,6 +39,7 @@ import { useEffect, useState } from "react";
 import { ProjectProvider, ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ReleaseIdentityNotice } from "@/components/ReleaseIdentityNotice";
+import { resetJobPollingState } from "@/hooks/useJobPolling";
 import { ProjectJobsSummary, apiGet, logoutSession } from "@/lib/api";
 import {
   isResourcesPath,
@@ -243,6 +244,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
   function logout() {
     // C01: 本地退出同步生效（自增会话代次），服务端吊销尽力而为，不阻塞跳转。
+    // R08: 同时清空轮询状态（各 job 的错误提示与最后成功时间），不得带到下一个会话。
+    resetJobPollingState();
     void logoutSession();
     router.replace("/login");
   }

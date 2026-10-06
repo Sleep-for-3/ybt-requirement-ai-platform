@@ -47,14 +47,16 @@ export function createJobPollingRegistry(options) {
     }
   }
 
-  function resumeStalled() {
-    for (const [jobId, entry] of entries) {
-      if (entry.failed && !entry.inFlight && !entry.timer && entry.listeners.size > 0) {
-        entry.failed = false;
-        entry.errors = 0;
-        void poll(jobId, entry);
-      }
-    }
+  // R08: 一致的恢复入口（visibility / online / 手动重试 共用）。
+  // 供可见性与网络恢复回调直接调用。
+  function recover(jobId) {
+    const entry = entries.get(jobId);
+    if (!entry || entry.inFlight || entry.listeners.size === 0 || isHidden()) return false;
+    entry.failed = false;
+    entry.errors = 0;
+    if (entry.timer) { clearTimer(entry.timer); entry.timer = undefined; }
+    void poll(jobId, entry);
+    return true;
   }
 
   function handleVisibilityChange() {
@@ -65,15 +67,22 @@ export function createJobPollingRegistry(options) {
       }
       return;
     }
+    // R08: visibility 恢复也走**同一条**恢复流程（不再自己写一套 poll 分支）。
     for (const [jobId, entry] of entries) {
-      if (!entry.inFlight && !entry.timer && entry.listeners.size > 0) void poll(jobId, entry);
+      if (entry.failed) {
+        recover(jobId);
+      } else if (!entry.inFlight && !entry.timer && entry.listeners.size > 0) {
+        void poll(jobId, entry);
+      }
     }
   }
 
   function ensureVisibilityListener() {
     if (!unsubscribeVisibility) unsubscribeVisibility = subscribeVisibility(handleVisibilityChange);
-    // C11: 网络恢复后必须重新拉取，否则断网期间的失败就成了永久停轮询。
-    if (!unsubscribeOnline) unsubscribeOnline = subscribeOnline(resumeStalled);
+    // C11/R08: 网络恢复后走同一条恢复流程，否则断网期间的失败就成了永久停轮询。
+    if (!unsubscribeOnline) unsubscribeOnline = subscribeOnline(() => {
+      for (const jobId of entries.keys()) recover(jobId);
+    });
   }
 
 
@@ -100,6 +109,12 @@ export function createJobPollingRegistry(options) {
       entry.errors = 0;
       entry.pollCount += 1;
       for (const listener of entry.listeners) listener(job);
+      // R08: 拿到任何状态都说明轮询已恢复 —— 必须清 failed，否则下面的 schedule 会直接 return，
+      // 于是“visibility 恢复读到 running 后仍会停轮询”（复核的剩余问题）。
+      entry.failed = false;
+      entry.lastError = null;
+      entry.lastSuccessAt = Date.now();
+      notifyState(jobId);
       if (isTerminalJobStatus(job.status)) {
         remove(jobId, entry);
         return;
@@ -109,9 +124,11 @@ export function createJobPollingRegistry(options) {
     } catch {
       entry.errors += 1;
       if (entry.errors >= maxErrors) {
-        // C11: 不删除条目；标记为 failed（有界退避已用尽），保留 listeners 供恢复。
+        // C11/R08: 不删除条目；记录本次失败（**按 job**）并通知界面，保留 listeners 供恢复。
         entry.failed = true;
-        options.onPollingError?.(new Error("后台任务状态暂时无法更新"), { jobId, canResume: true });
+        entry.lastError = "后台任务状态暂时无法更新";
+        notifyState(jobId);
+        options.onPollingError?.(new Error(entry.lastError), { jobId, canResume: true });
         return;
       }
       // C11: 有界退避（上限仍为 5s），不允许无限高频重试。
@@ -121,15 +138,44 @@ export function createJobPollingRegistry(options) {
     }
   }
 
+  // R08: 状态变化通知（按 job）。界面不再靠 1s 轮询去读模块全局变量。
+  const stateListeners = new Set();
+
+  function notifyState(jobId) {
+    for (const listener of stateListeners) listener(jobId);
+  }
+
+  function clearState(jobId) {
+    const entry = entries.get(jobId);
+    if (!entry) return;
+    entry.failed = false;
+    entry.lastError = null;
+    notifyState(jobId);
+  }
+
   return {
     size: () => entries.size,
-    // C11: 供界面"重试"按钮/状态查询使用。
+    subscribeState(listener) {
+      stateListeners.add(listener);
+      return () => { stateListeners.delete(listener); };
+    },
+    // C11: 供界面“重试”按钮/状态查询使用（**按 job**）。
     isStalled: (jobId) => Boolean(entries.get(jobId)?.failed),
+    errorFor: (jobId) => entries.get(jobId)?.lastError ?? null,
+    lastSuccessAt: (jobId) => entries.get(jobId)?.lastSuccessAt ?? null,
+    clearError(jobId) { clearState(jobId); },
+    // R08: 一致恢复 —— visibility / online / 手动重试 都走这里（不再各写一套）。
+    recover(jobId) { return recover(jobId); },
+    // R08: 身份变化（登录/退出）时清空全部轮询状态，防止旧会话的错误提示污染新会话。
+    reset() {
+      for (const jobId of entries.keys()) clearState(jobId);
+    },
     resume(jobId) {
       const entry = entries.get(jobId);
       if (!entry || !entry.failed || entry.inFlight || entry.listeners.size === 0) return false;
       entry.failed = false;
       entry.errors = 0;
+      entry.lastError = null;
       void poll(jobId, entry);
       return true;
     },
@@ -139,6 +185,8 @@ export function createJobPollingRegistry(options) {
         entry = {
           errors: 0,
           failed: false,
+          lastError: null,
+          lastSuccessAt: null,
           inFlight: false,
           listeners: new Set(),
           pollCount: 0,

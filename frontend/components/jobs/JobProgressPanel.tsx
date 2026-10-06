@@ -1,9 +1,12 @@
+"use client";
+
 import Link from "next/link";
 
 import { StatefulLink } from "@/components/StatefulLink";
 import { JobStatusBadge } from "@/components/jobs/JobStatusBadge";
 import { BackgroundJobSummary } from "@/lib/api";
 import { formatApiErrorText } from "@/lib/http-response.mjs";
+import { useJobPollingStatus } from "@/hooks/useJobPolling";
 import { jobDetailsHref } from "@/lib/job-links.mjs";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
@@ -58,6 +61,9 @@ export function JobProgressPanel({
   showDetailsLink?: boolean;
 }) {
   const result = job.result_summary_json || {};
+  // R08: 公共进度区统一接入“断连/恢复”提示 —— 所有渲染本组件的页面自动获得，
+  // 不再只给主任务详情页单独接线。状态按 job 归属，互不污染。
+  const { unavailable, lastSuccessAt, resume } = useJobPollingStatus(job.id);
   const completed = Number(result.success_count ?? 0);
   const total = Number(result.total_count ?? 0);
   const hasProgress = Number.isFinite(job.progress) && job.progress > 0;
@@ -68,6 +74,18 @@ export function JobProgressPanel({
   return (
     <section aria-live="polite" className="rounded-xl border border-line bg-white p-4" data-job-id={job.id}>
       <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* R08: 断连与恢复入口（可见、可操作）。 */}
+        {unavailable ? (
+          <div className="w-full rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" role="status">
+            <span>后台任务状态暂时无法更新（{unavailable}）。显示的是最后一次成功读取的状态。</span>
+            {lastSuccessAt ? (
+              <span className="ml-1 text-amber-700">
+                最后成功：{new Date(lastSuccessAt).toLocaleTimeString("zh-CN", { hour12: false })}
+              </span>
+            ) : null}
+            <button className="ml-2 underline" onClick={resume} type="button">立即重试</button>
+          </div>
+        ) : null}
         <div>
           <div className="text-sm font-semibold text-ink">{jobTypeLabel(job.job_type)} <span className="font-normal text-slate-400">#{job.id}</span></div>
           {!compact ? <div className="mt-1 text-xs text-slate-500">创建：{dateText(job.created_at)} · 开始：{dateText(job.started_at)}</div> : null}

@@ -4,8 +4,20 @@ export type PollingRegistry<T extends JobLike> = {
   subscribe(jobId: number, listener: (job: T) => void): () => void;
   /** C11: 连续失败是否已停止轮询（订阅仍保留，可恢复）。 */
   isStalled(jobId: number): boolean;
+  /** R08: 该 job 自己的错误消息（不与他 job 混淆），无错误时为 null。 */
+  errorFor(jobId: number): string | null;
+  /** R08: 该 job 最后一次成功拉取的时间戳。 */
+  lastSuccessAt(jobId: number): number | null;
   /** C11: 手动恢复被停止的轮询；返回是否真的重新发起。 */
   resume(jobId: number): boolean;
+  /** R08: 一致的恢复入口（visibility / online / 手动共用）。 */
+  recover(jobId: number): boolean;
+  /** R08: 清除该 job 的错误状态。 */
+  clearError(jobId: number): void;
+  /** R08: 身份变化（登录/退出）时清空全部状态。 */
+  reset(): void;
+  /** R08: 订阅状态变化（按 job），替代 1s 轮询读取全局变量。 */
+  subscribeState(listener: (jobId: number) => void): () => void;
 };
 
 export function isTerminalJobStatus(status: string): boolean;

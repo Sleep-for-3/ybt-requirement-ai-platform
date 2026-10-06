@@ -293,3 +293,162 @@ test("C11 取消订阅后晚到的结果被丢弃", async () => {
   assert.deepEqual(seen, [], "取消订阅后晚到的结果不得再通知旧界面");
   assert.equal(registry.size(), 0);
 });
+
+// --------------------------------------------------------------------------- R08
+
+test("R08 三次失败后：visibility 读到 running 必须继续轮询并最终 completed", async () => {
+  const timers = fakeTimers();
+  let hidden = false;
+  let visibilityListener = () => undefined;
+  let fail = true;
+  let status = "running";
+  const seen = [];
+  const registry = createJobPollingRegistry({
+    ...timers,
+    maxErrors: 3,
+    isHidden: () => hidden,
+    fetchJob: async () => {
+      if (fail) throw new TypeError("Failed to fetch");
+      return { id: 41, status };
+    },
+    subscribeVisibility: (listener) => {
+      visibilityListener = listener;
+      return () => { visibilityListener = () => undefined; };
+    },
+  });
+
+  registry.subscribe(41, (job) => seen.push(job.status));
+  for (let i = 0; i < 3; i += 1) {
+    await Promise.resolve();
+    await Promise.resolve();
+    if (timers.pending.length > 0) await timers.flush();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(registry.isStalled(41), true, "三次失败后应已停轮询");
+  assert.equal(timers.pending.length, 0);
+
+  // 网络恢复：visibility 现在能读到 running。旧的 bug 是 failed 仍为 true，
+  // 于是本次读到的状态被当成“已恢复”但**不重新排程**，轮询又停了。
+  fail = false;
+  visibilityListener();
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+  assert.deepEqual(seen, ["running"], "应读到 running");
+  assert.equal(registry.isStalled(41), false, "读到状态后必须清掉 stalled");
+  assert.equal(timers.pending.length, 1, "必须重新排程，继续轮询");
+
+  // 继续轮询直到终态。
+  status = "completed";
+  await timers.flush();
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+  assert.deepEqual(seen, ["running", "completed"]);
+  assert.equal(registry.size(), 0, "终态后应停止");
+});
+
+test("R08 两个 job 的故障状态不得互相污染", async () => {
+  const timers = fakeTimers();
+  let onlineListener = () => undefined;
+  let fail42 = true;
+  const registry = createJobPollingRegistry({
+    ...timers,
+    maxErrors: 2,
+    fetchJob: async (jobId) => {
+      if (jobId === 42 && fail42) throw new TypeError("Failed to fetch");
+      return { id: jobId, status: "running" };
+    },
+    subscribeOnline: (listener) => {
+      onlineListener = listener;
+      return () => { onlineListener = () => undefined; };
+    },
+  });
+
+  // job 42 失败到 stalled；job 43 正常。
+  registry.subscribe(42, () => undefined);
+  registry.subscribe(43, () => undefined);
+  for (let i = 0; i < 3; i += 1) {
+    await Promise.resolve();
+    await Promise.resolve();
+    if (timers.pending.length > 0) await timers.flush();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(registry.isStalled(42), true, "job 42 应已停轮询");
+  assert.equal(registry.isStalled(43), false, "job 43 不得被 job 42 的错误污染");
+  assert.equal(registry.errorFor(43), null, "job 43 不应有自己的错误");
+  assert.ok(registry.errorFor(42), "job 42 应有自己的错误消息");
+
+  // 42 的故障不得把 43 的提示也点亮（旧的全局 pollingUnavailable 会）。
+  assert.equal(registry.errorFor(42) === registry.errorFor(43), false);
+
+  fail42 = false;
+  onlineListener();
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+  assert.equal(registry.isStalled(42), false, "重连后 42 自行恢复");
+  assert.equal(registry.errorFor(42), null, "恢复后 42 的错误提示必须消失");
+  assert.equal(registry.errorFor(43), null);
+});
+
+test("R08 身份变化时清空全部轮询状态", async () => {
+  const timers = fakeTimers();
+  const registry = createJobPollingRegistry({
+    ...timers,
+    maxErrors: 2,
+    fetchJob: async () => { throw new TypeError("Failed to fetch"); },
+  });
+
+  registry.subscribe(51, () => undefined);
+  registry.subscribe(52, () => undefined);
+  for (let i = 0; i < 3; i += 1) {
+    await Promise.resolve();
+    await Promise.resolve();
+    if (timers.pending.length > 0) await timers.flush();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(registry.errorFor(51));
+
+  // 退出/切换账号：不得把旧会话的错误带到新会话。
+  registry.reset();
+  assert.equal(registry.errorFor(51), null);
+  assert.equal(registry.errorFor(52), null);
+});
+
+test("R08 终态与解除订阅后不再有故障提示", async () => {
+  const timers = fakeTimers();
+  let fail = true;
+  let status = "running";
+  const registry = createJobPollingRegistry({
+    ...timers,
+    maxErrors: 2,
+    fetchJob: async () => {
+      if (fail) throw new TypeError("Failed to fetch");
+      return { id: 61, status };
+    },
+  });
+
+  const unsubscribe = registry.subscribe(61, () => undefined);
+  for (let i = 0; i < 3; i += 1) {
+    await Promise.resolve();
+    await Promise.resolve();
+    if (timers.pending.length > 0) await timers.flush();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(registry.errorFor(61));
+
+  // 手动恢复：成功后提示消失，并记录最后一次成功时间。
+  fail = false;
+  registry.recover(61);
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+  assert.equal(registry.errorFor(61), null, "恢复后提示必须消失");
+  assert.ok(registry.lastSuccessAt(61), "应记录最后一次成功时间");
+
+  // 终态：条目被移除，状态随之消失。
+  status = "completed";
+  await timers.flush();
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+  assert.equal(registry.errorFor(61), null);
+  assert.equal(registry.size(), 0, "终态后应停止并清理");
+  unsubscribe();
+  assert.equal(registry.errorFor(61), null);
+});
