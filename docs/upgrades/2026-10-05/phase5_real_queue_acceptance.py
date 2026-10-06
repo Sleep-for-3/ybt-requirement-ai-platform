@@ -410,6 +410,10 @@ def main() -> int:
     }
     if args.report:
         Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    # R07: 清理本轮自己的临时存储根（否则验收会在工作区累积 p5q-storage-* 目录）。
+    import shutil as _shutil
+
+    _shutil.rmtree(storage_dir, ignore_errors=True)
     print(json.dumps({"ok": report["ok"], "steps": len(steps)}, ensure_ascii=False))
     return 0 if report["ok"] else 1
 
