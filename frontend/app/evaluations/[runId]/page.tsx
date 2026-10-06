@@ -6,6 +6,12 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
+import {
+  buildEvaluationView,
+  caseDegradedReason,
+  caseStatusLabel,
+  statusBadgeClass as evaluationStatusBadgeClass
+} from "@/lib/evaluation-results-view.mjs";
 
 type EvaluationRun = {
   id?: number;
@@ -14,8 +20,25 @@ type EvaluationRun = {
   started_at?: string | null;
   finished_at?: string | null;
   created_by?: string | null;
-  retrieval_config_json?: { top_k?: number } | null;
-  summary_metrics_json?: Record<string, number | undefined> | null;
+  retrieval_config_json?: {
+    top_k?: number;
+    chat_model?: string | null;
+    chat_profile_id?: number | null;
+    chat_provider?: string | null;
+    dataset_version?: string | null;
+  } | null;
+  summary_metrics_json?: Record<string, number | string | undefined> & {
+    status_counts?: Record<string, number>;
+    metric_notes?: Record<string, string>;
+    generation_coverage?: number | null;
+    answer_coverage_denominator?: number | null;
+    answer_correctness_denominator?: number | null;
+    successful_query_count?: number | null;
+    degraded_query_count?: number | null;
+    failed_query_count?: number | null;
+    actual_chat_model?: string | null;
+    actual_chat_profile_id?: number | null;
+  } | null;
 };
 
 type EvaluationResult = {
@@ -30,7 +53,26 @@ type EvaluationResult = {
   groundedness_score?: number;
   keyword_coverage?: number;
   latency_ms?: number;
+  // R04: 逐条执行事实（状态与降级原因）。
+  execution_metadata_json?: { answer_status?: string | null; degraded_reason?: string | null } | null;
 };
+
+// R04: 结果页必须能区分“正常 / 降级 / 异常 / 待确认”，而不是只显示一个绿色 completed。
+const STATUS_COPY: Record<string, string> = {
+  grounded: "正常生成",
+  degraded: "已降级（生成不可用）",
+  needs_confirmation: "待确认",
+  error: "执行异常",
+};
+
+function statusBadge(status?: string | null) {
+  const value = String(status || "").toLowerCase();
+  if (value === "grounded") return "badge-success";
+  if (value === "needs_confirmation") return "badge-info";
+  if (value === "degraded") return "badge-warning";
+  if (value === "error") return "badge-danger";
+  return "badge-neutral";
+}
 
 function statusBadgeClass(status?: unknown) {
   const value = String(status || "").toLowerCase();
@@ -76,6 +118,9 @@ export default function Page() {
   }, [id]);
 
   const metrics = run?.summary_metrics_json;
+  // R04: 展示口径来自共用 view-model（页面与回归跑的是同一份逻辑）。
+  const view = buildEvaluationView(run, results);
+  const answerProxyNotApplicable = view.answerCorrectnessText === "不适用";
 
   return (
     <main>
@@ -142,8 +187,69 @@ export default function Page() {
             <div className="stat-label">平均耗时</div>
             <div className="stat-value">{formatMs(metrics?.average_latency_ms)}</div>
           </div>
+          {/* R04: 生成覆盖率与分母必须明示，不能只给一个无分母的 100%。 */}
+          <div className="stat-card">
+            <div className="stat-label">生成覆盖率</div>
+            <div className="stat-value">
+              {view.coverageText}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">回答代理（关键词×0.7+引文×0.3）</div>
+            <div className="stat-value">
+              {view.answerCorrectnessText}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">回答关键词命中率</div>
+            <div className="stat-value">
+              {view.keywordCoverageText}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">证据关键词命中率（单列）</div>
+            <div className="stat-value">{view.evidenceKeywordCoverageText}</div>
+          </div>
         </div>
 
+        {/* R04: 运行级状态总览 + 实际模型 + 指标口径说明。 */}
+        <section className="panel">
+          <div className="panel-header">
+            <h2 className="text-[15px] font-semibold text-ink">生成状态与指标口径</h2>
+          </div>
+          <div className="panel-body space-y-3 text-sm">
+            <div className="flex flex-wrap gap-x-6 gap-y-2">
+              {view.statusRows.map((row) => (
+                <span key={row.key} className="flex items-center gap-2">
+                  <span className={evaluationStatusBadgeClass(row.key)}>{row.label}</span>
+                  <span className="text-ink">{row.count}</span>
+                </span>
+              ))}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <p><span className="text-slate-500">实际执行模型：</span>
+                <span className="text-ink">{view.actualModel || "—"}</span></p>
+              <p><span className="text-slate-500">模型档案 ID：</span>
+                <span className="text-ink">{view.actualProfileId ?? "—"}</span></p>
+              <p><span className="text-slate-500">Provider：</span>
+                <span className="text-ink">{view.provider || "—"}</span></p>
+              <p><span className="text-slate-500">用例总数（分母）：</span>
+                <span className="text-ink">{view.coverageDenominator ?? "—"}</span></p>
+              <p><span className="text-slate-500">数据集版本：</span>
+                <span className="break-all text-ink">{view.datasetVersion || "—"}</span></p>
+            </div>
+            {view.noGeneratedSamples ? (
+              <p className="text-amber-700" role="status">
+                本次运行没有任何生成回答，回答类指标均不适用（检索质量仍然有效）。
+              </p>
+            ) : null}
+            {view.metricNotes.length ? (
+              <ul className="list-disc space-y-1 pl-5 text-xs text-slate-600">
+                {view.metricNotes.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+            ) : null}
+          </div>
+        </section>
         <section className="panel">
           <div className="panel-header flex items-center gap-2">
             <h2 className="text-[15px] font-semibold text-ink">逐条案例结果</h2>
@@ -152,19 +258,19 @@ export default function Page() {
           {results.length ? (
             <div className="overflow-x-auto">
               <div className="min-w-[900px]">
-                <div className="grid-head grid grid-cols-[minmax(0,2fr)_repeat(6,minmax(0,1fr))_88px] gap-3">
+                <div className="grid-head grid grid-cols-[minmax(0,2fr)_repeat(5,minmax(0,1fr))_120px_88px] gap-3">
                   <span>案例</span>
                   <span>Recall@K</span>
                   <span>MRR</span>
                   <span>来源命中</span>
                   <span>引用覆盖</span>
-                  <span>Groundedness</span>
-                  <span>关键词覆盖</span>
+                  <span>回答关键词覆盖</span>
+                  <span>生成状态</span>
                   <span>耗时</span>
                 </div>
                 {results.map((item, index) => (
                   <div
-                    className="grid-row grid grid-cols-[minmax(0,2fr)_repeat(6,minmax(0,1fr))_88px] items-center gap-3"
+                    className="grid-row grid grid-cols-[minmax(0,2fr)_repeat(5,minmax(0,1fr))_120px_88px] items-center gap-3"
                     key={item?.id ?? index}
                   >
                     <div className="min-w-0">
@@ -179,11 +285,24 @@ export default function Page() {
                     <span className="tabular-nums text-slate-600">{formatRatio(item?.recall_at_k)}</span>
                     <span className="tabular-nums text-slate-600">{formatScore(item?.reciprocal_rank)}</span>
                     <div>
-                      {item?.source_hit ? <span className="badge-success">命中</span> : <span className="badge-neutral">未命中</span>}
+                      {item?.source_hit
+                        ? <span className="badge-success">命中</span>
+                        : <span className="badge-neutral">未命中</span>}
                     </div>
                     <span className="tabular-nums text-slate-600">{formatRatio(item?.citation_coverage)}</span>
-                    <span className="tabular-nums text-slate-600">{formatRatio(item?.groundedness_score)}</span>
-                    <span className="tabular-nums text-slate-600">{formatRatio(item?.keyword_coverage)}</span>
+                    <span className="tabular-nums text-slate-600">
+                      {caseStatusLabel(item) === "正常生成" ? formatRatio(item?.keyword_coverage) : "不适用"}
+                    </span>
+                    <div className="min-w-0">
+                      <span className={evaluationStatusBadgeClass(item?.execution_metadata_json?.answer_status)}>
+                        {caseStatusLabel(item)}
+                      </span>
+                      {caseDegradedReason(item) ? (
+                        <p className="mt-0.5 truncate text-xs text-slate-500">
+                          原因：{caseDegradedReason(item)}
+                        </p>
+                      ) : null}
+                    </div>
                     <span className="tabular-nums text-slate-600">{formatMs(item?.latency_ms)}</span>
                   </div>
                 ))}
