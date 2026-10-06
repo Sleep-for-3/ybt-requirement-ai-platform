@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import BackgroundJob
 from app.services.governance.audit import redact_summary
+from app.services.task_queue.attempt import (
+    AttemptAuthority,
+    AttemptLeaseLost,
+    bind_attempt,
+    release_attempt,
+)
 from app.services.task_queue.base import JobHandler
 from app.services.task_queue.idempotency import create_or_get_job
 
@@ -301,6 +307,11 @@ class InlineTaskQueue:
         # attempt has taken over, so this one must not write state or claim success afterwards.
         lease_lost = threading.Event()
         stop_heartbeat = _start_lease_heartbeat(db, job.id, owner=owner, lost=lease_lost)
+        # R02/C05: 把不可变 attempt token 与失租信号绑定到本次运行的 Session，使领域提交
+        # 边界（_complete / _require_attempt）能在同一事务内校验执行权，
+        # 而不是等 handler 返回之后才检查（那时领域写入已经落库）。
+        authority = AttemptAuthority(job_id=job.id, owner=owner, lost=lease_lost)
+        bind_attempt(db, authority)
         try:
             result = handler(db, job)
             db.refresh(job)
@@ -321,6 +332,12 @@ class InlineTaskQueue:
             job.progress = 100
             job.result_summary_json = redact_summary(result)
             job.error_message = None if job.status != "failed" else str(result.get("error", "All items failed"))[:2000]
+        except AttemptLeaseLost:
+            # R02: 本尝试在领域提交前已失租。领域写入已在栅栏处回滚、外部对象也已清理，
+            # 因此不能写 failed（那会与接管者的结果矛盾），而是如实上报接管者的状态。
+            db.rollback()
+            db.refresh(job)
+            return job
         except Exception as exc:  # worker boundary records failure instead of leaking it through HTTP
             db.rollback()
             job = db.get(BackgroundJob, job.id)
@@ -329,6 +346,8 @@ class InlineTaskQueue:
             job.progress = 100
         finally:
             stop_heartbeat.set()
+            # R02: 解绑，避免后续同 Session 的调用误用已结束的尝试身份。
+            release_attempt(db)
         # Fencing (B07/W10): only the runner that still holds the lease may record the terminal
         # state. A long run whose lease expired can already have been taken over by another worker;
         # that newer owner's state must not be overwritten by this stale runner, and the stale
