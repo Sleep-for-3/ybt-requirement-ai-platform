@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
@@ -18,12 +19,16 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    Institution,
     MartField,
     MartTable,
     MartToYbtMapping,
     Project,
     ProjectMembership,
+    ScriptFile,
+    ScriptFileVersion,
     SourceToMartMapping,
+    StoredFile,
     TargetField,
     TargetTable,
     User,
@@ -40,6 +45,7 @@ from app.services.mapping.generator_context import (
     GenerationStaleError,
 )
 from app.services.governance.double_layer_review import MappingGenerationNotEditable
+from app.services.governance import workflow as governance_workflow
 
 
 def test_double_layer_mapping_end_to_end_api() -> None:
@@ -184,7 +190,7 @@ def test_double_layer_mapping_end_to_end_api() -> None:
             json={"reviewed_by": "tester"},
         )
         assert no_evidence_approval.status_code == 400
-        assert "evidence" in no_evidence_approval.json()["detail"].lower()
+        assert "证据" in no_evidence_approval.json()["detail"]
 
         for kind, mapping, manual in (
             ("source-to-mart", source_to_mart, source_manual),
@@ -239,7 +245,10 @@ def test_double_layer_mapping_end_to_end_api() -> None:
             assert "参考依据" in markdown
             assert "待确认问题" in markdown
             assert "审核状态" in markdown
-
+            # 导出正文里的口径状态必须是中文字，不能直出 draft/approved 这类枚举值
+            assert not re.search(r"口径状态：(?:[A-Za-z_]|\s|$)", markdown), (
+                f"导出文档直出了英文口径状态：{markdown[markdown.find('口径状态'):][:60]!r}"
+            )
 
 def test_source_to_mart_route_passes_exact_authorized_boundary(
     tmp_path: Path,
@@ -1714,3 +1723,112 @@ def _get(client: TestClient, path: str) -> dict:
     response = client.get(path)
     response.raise_for_status()
     return response.json()
+
+
+def _lineage_fixture(db: Session, *, with_edge: bool):
+    """A source_to_mart mapping plus the persisted lineage graph around its mart field."""
+
+    institution = Institution(institution_code="lineage-bank", institution_name="血缘测试银行",
+                              institution_type="bank", status="active")
+    db.add(institution)
+    db.flush()
+    project = Project(institution_id=institution.id, name="血缘回写项目", project_status="active",
+                      confidentiality_level="internal", governance_workflow_enabled=True)
+    db.add(project)
+    db.flush()
+    reviewer = User(username="lineage_final_reviewer", display_name="血缘最终复核人", status="active")
+    db.add(reviewer)
+    db.flush()
+    db.add(ProjectMembership(project_id=project.id, user_id=reviewer.id,
+                             project_role="final_reviewer", status="active"))
+    mart_table = MartTable(project_id=project.id, table_code="DWD_CUSTOMER", table_name="dwd_customer",
+                           schema_name="dm")
+    db.add(mart_table)
+    db.flush()
+    mart_field = MartField(project_id=project.id, mart_table_id=mart_table.id, field_code="AGE",
+                           field_name="age", field_type="integer")
+    db.add(mart_field)
+    db.flush()
+    mapping = SourceToMartMapping(
+        project_id=project.id, mart_field_id=mart_field.id,
+        mapping_name="Source-to-Mart lineage",
+        source_system_summary="客户核心系统",
+        ai_generated_content="AI 草稿", final_content="APPROVED_CONTEXT_RULE",
+        mapping_status="draft", confidence_level="medium", lineage_status="not_linked",
+    )
+    db.add(mapping)
+    db.flush()
+    from app.models import LineageEdge, LineageNode, MappingEvidenceReference
+
+    db.add(MappingEvidenceReference(project_id=project.id, mapping_type="source_to_mart",
+                                    mapping_id=mapping.id, evidence_type="document",
+                                    evidence_id="evidence-1", source_name="源系统文档"))
+    target_node = LineageNode(project_id=project.id, node_type="mart_field", mart_field_id=mart_field.id,
+                              logical_name="dwd_customer.age", table_name="dwd_customer",
+                              column_name="age", unresolved_flag=False)
+    db.add(target_node)
+    db.flush()
+    if with_edge:
+        stored = StoredFile(institution_id=institution.id, storage_key=f"projects/{project.id}/load.sql",
+                            original_file_name="load.sql", content_type="text/plain", byte_size=10,
+                            content_hash="a" * 64, classification="internal", created_by=reviewer.id,
+                            enabled=True)
+        db.add(stored)
+        db.flush()
+        script = ScriptFile(project_id=project.id, relative_path="load.sql", file_name="load.sql",
+                            file_type="sql", enabled=True, current_version_no=1)
+        db.add(script)
+        db.flush()
+        version = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=1,
+                                    file_hash="b" * 64, normalized_hash="c" * 64,
+                                    raw_content_storage_file_id=stored.id, parse_status="parsed",
+                                    warnings_json=[])
+        db.add(version)
+        db.flush()
+        source_node = LineageNode(project_id=project.id, node_type="source_field",
+                                  logical_name="ods_crm_customer.birth_date", table_name="ods_crm_customer",
+                                  column_name="birth_date", unresolved_flag=False)
+        db.add(source_node)
+        db.flush()
+        db.add(LineageEdge(project_id=project.id, script_file_version_id=version.id,
+                           source_node_id=source_node.id,
+                           target_node_id=target_node.id, edge_type="derives_from",
+                           confidence_level="high", enabled=True))
+    db.commit()
+    return {"project": project, "mapping": mapping, "reviewer": reviewer, "target_node": target_node}
+
+
+def test_final_approval_advances_lineage_when_the_graph_proves_it(db_session: Session) -> None:
+    # P0-2 regression: approval reviews the mapping content, but the persisted graph is what
+    # proves the path. A resolved mart field that is the target of an enabled edge makes the
+    # mapping "verified" on approval; without it the status must stay untouched (no fabricated
+    # trust). Before the fix an approved mapping stayed not_linked forever.
+    fixture = _lineage_fixture(db_session, with_edge=True)
+    mapping = fixture["mapping"]
+
+    governance_workflow._finalize_double_layer_target(
+        db_session, "source_to_mart", mapping.id, fixture["reviewer"].username,
+    )
+    db_session.commit()
+    db_session.refresh(mapping)
+
+    assert mapping.mapping_status == "approved"
+    assert mapping.lineage_status == "verified"
+    assert mapping.lineage_last_verified_at is not None
+
+
+def test_final_approval_never_fabricates_lineage_without_graph_evidence(db_session: Session) -> None:
+    # The negative half of P0-2: an isolated field node (no inbound enabled edge) proves nothing,
+    # so approval must leave the lineage state and its timestamp exactly as they were.
+    fixture = _lineage_fixture(db_session, with_edge=False)
+    mapping = fixture["mapping"]
+
+    governance_workflow._finalize_double_layer_target(
+        db_session, "source_to_mart", mapping.id, fixture["reviewer"].username,
+    )
+    db_session.commit()
+    db_session.refresh(mapping)
+
+    assert mapping.mapping_status == "approved"
+    assert mapping.lineage_status == "not_linked"
+    assert mapping.lineage_last_verified_at is None

@@ -32,14 +32,14 @@ router = APIRouter(tags=["agent"])
 def _task_or_404(db: Session, task_id: int) -> AgentTask:
     task = db.get(AgentTask, task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail="Agent task not found")
+        raise HTTPException(status_code=404, detail="智能体任务不存在")
     return task
 
 
 def _step_or_404(db: Session, task_id: int, step_id: int) -> AgentStep:
     step = db.get(AgentStep, step_id)
     if step is None or step.task_id != task_id:
-        raise HTTPException(status_code=404, detail="Agent step not found")
+        raise HTTPException(status_code=404, detail="智能体步骤不存在")
     return step
 
 @router.post("/projects/{project_id}/agent/sql-change-events", status_code=status.HTTP_202_ACCEPTED)

@@ -48,6 +48,8 @@ from app.services.mapping.context_adapters import (
     audit_scenario_physical_coverage,
     build_physical_source_whitelist,
     context_projection_block_reasons,
+    projection_char_limit,
+    projection_fact_limit,
     redacted_generation_output_trace,
 )
 from app.services.mapping.generation_readiness import (
@@ -198,7 +200,7 @@ def test_source_to_mart_tracer_builds_one_candidate_context_and_bounded_projecti
     assert envelope.actor == actor
     assert envelope.context.scope.mode is ContextMode.CANDIDATE
     assert envelope.projection.task_type == "source_to_mart"
-    assert 0 < len(envelope.projection.prompt_text) <= 6000
+    assert 0 < len(envelope.projection.prompt_text) <= projection_char_limit()
     assert envelope.trace.resolved_as_of == AS_OF
     assert envelope.trace.as_of_source == "explicit"
     assert envelope.trace.context_schema_version == "1.0"
@@ -442,7 +444,7 @@ def test_all_four_task_projections_are_distinct_and_mart_uses_approved_context_r
         "scenario_technical",
     ]
     assert len({projection.projection_hash for projection in projections}) == 4
-    assert all(0 < len(projection.prompt_text) <= 6000 for projection in projections)
+    assert all(0 < len(projection.prompt_text) <= projection_char_limit() for projection in projections)
     mart_projection = projections[1]
     assert mart_projection.upstream_rule_summaries == ["APPROVED_CONTEXT_RULE"]
     assert "FORBIDDEN_DRAFT_FALLBACK" not in mart_projection.prompt_text
@@ -854,7 +856,7 @@ def test_context_projection_budget_distinguishes_exact_limit_and_truncation() ->
         warnings=[],
     )
     exact = SourceToMartProjection(
-        prompt_text="x" * 6000,
+        prompt_text="x" * projection_char_limit(),
         confidentiality_levels=["internal"],
         selected_fact_refs=[],
         context_questions=[],
@@ -862,25 +864,25 @@ def test_context_projection_budget_distinguishes_exact_limit_and_truncation() ->
         projection_hash="exact",
         truncated=False,
         context_budget=ContextProjectionBudget(
-            limit=6000,
-            used=6000,
+            limit=projection_char_limit(),
+            used=projection_char_limit(),
             remaining=0,
             complete=True,
-            facts_available=30,
-            facts_included=30,
+            facts_available=projection_fact_limit(),
+            facts_included=projection_fact_limit(),
         ),
     )
     truncated = exact.model_copy(
         update={
-            "prompt_text": "x" * 6000,
+            "prompt_text": "x" * projection_char_limit(),
             "truncated": True,
             "context_budget": ContextProjectionBudget(
-                limit=6000,
-                used=6000,
+                limit=projection_char_limit(),
+                used=projection_char_limit(),
                 remaining=0,
                 complete=False,
-                facts_available=30,
-                facts_included=30,
+                facts_available=projection_fact_limit(),
+                facts_included=projection_fact_limit(),
                 truncation_reason="prompt_limit_reached",
             ),
             "context_gaps": ["prompt_limit_reached"],
@@ -889,12 +891,12 @@ def test_context_projection_budget_distinguishes_exact_limit_and_truncation() ->
     facts_omitted = exact.model_copy(
         update={
             "context_budget": ContextProjectionBudget(
-                limit=6000,
+                limit=projection_char_limit(),
                 used=100,
                 remaining=5900,
                 complete=False,
                 facts_available=35,
-                facts_included=30,
+                facts_included=projection_fact_limit(),
                 facts_omitted=5,
                 truncation_reason="fact_limit_reached",
             ),
@@ -929,7 +931,7 @@ def test_source_to_mart_blocks_incomplete_context_before_model_call(
         warnings=[],
     )
     projection = SourceToMartProjection(
-        prompt_text="x" * 6000,
+        prompt_text="x" * projection_char_limit(),
         confidentiality_levels=["internal"],
         selected_fact_refs=[],
         context_questions=[],
@@ -937,12 +939,12 @@ def test_source_to_mart_blocks_incomplete_context_before_model_call(
         projection_hash="truncated",
         truncated=True,
         context_budget=ContextProjectionBudget(
-            limit=6000,
-            used=6000,
+            limit=projection_char_limit(),
+            used=projection_char_limit(),
             remaining=0,
             complete=False,
-            facts_available=30,
-            facts_included=30,
+            facts_available=projection_fact_limit(),
+            facts_included=projection_fact_limit(),
             truncation_reason="prompt_limit_reached",
         ),
         context_gaps=["prompt_limit_reached"],
@@ -982,7 +984,7 @@ def test_source_to_mart_blocks_incomplete_context_before_model_call(
         )
 
     assert raised.value.reasons == ("CONTEXT_PROMPT_LIMIT_EXCEEDED",)
-    assert raised.value.context_budget["used"] == 6000
+    assert raised.value.context_budget["used"] == projection_char_limit()
     assert raised.value.context_gaps == ("prompt_limit_reached",)
     assert model_calls == 0
 

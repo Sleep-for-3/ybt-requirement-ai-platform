@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { HistoricalCaliberImport, HistoricalCaliberItem, ProductScenario, TargetField, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError } from "@/lib/user-message.mjs";
 
 type Preview = HistoricalCaliberImport & { items: HistoricalCaliberItem[] };
 
@@ -15,6 +16,12 @@ const MATCH_BADGE: Record<string, string> = {
   ambiguous: "badge-warning",
   unmatched: "badge-neutral"
 };
+const MATCH_LABEL: Record<string, string> = {
+  matched: "已匹配",
+  ambiguous: "存在歧义",
+  unmatched: "未匹配"
+};
+const matchLabel = (value?: string | null) => MATCH_LABEL[(value || "").trim()] || "未知匹配状态";
 
 export default function Page() {
   const importId = Number(useParams().importId);
@@ -95,9 +102,9 @@ export default function Page() {
           <span className="text-sm font-medium text-ink">匹配状态</span>
           <select className="control max-w-48" value={filter} onChange={(event) => setFilter(event.target.value)}>
             <option value="">全部</option>
-            <option value="matched">matched</option>
-            <option value="ambiguous">ambiguous</option>
-            <option value="unmatched">unmatched</option>
+            <option value="matched">已匹配</option>
+            <option value="ambiguous">存在歧义</option>
+            <option value="unmatched">未匹配</option>
           </select>
           <span className="ml-auto text-xs text-slate-500">复用只写建议区，不覆盖人工最终口径。</span>
         </section>
@@ -119,7 +126,7 @@ export default function Page() {
                     来源：{item.source_sheet_name}!{item.source_cell_range}
                   </p>
                 </div>
-                <span className={MATCH_BADGE[item.match_status] || "badge-neutral"}>{item.match_status}</span>
+                <span className={MATCH_BADGE[item.match_status] || "badge-neutral"}>{matchLabel(item.match_status)}</span>
               </div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <div className="rounded-lg bg-mist/60 p-3">
@@ -191,5 +198,5 @@ export default function Page() {
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
+  return describeError(error, "操作未完成，请稍后重试。");
 }

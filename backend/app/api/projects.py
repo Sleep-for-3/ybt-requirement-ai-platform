@@ -28,7 +28,7 @@ def create_project(payload: ProjectCreate, principal: CurrentPrincipal, db: Sess
         pass
     else:
         if payload.institution_id is None:
-            raise HTTPException(status_code=400, detail="institution_id is required")
+            raise HTTPException(status_code=400, detail="必须填写 institution_id")
         PermissionService(db, principal).require_institution_role(payload.institution_id, {"institution_admin", "security_admin"})
 
     if payload.client_request_id:
@@ -75,7 +75,7 @@ def update_project_status(
 ) -> Project:
     project = db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="项目不存在")
     if principal.is_legacy_system:
         pass
     elif project.institution_id is None:

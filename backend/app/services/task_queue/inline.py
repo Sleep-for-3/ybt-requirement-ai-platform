@@ -250,6 +250,64 @@ class InlineTaskQueue:
         db.commit()
         return self._execute(db, job, _resolve_handler(job.job_type))
 
+    def stage(self, db: Session, *, job_type: str, institution_id: int | None, project_id: int | None, created_by: int, idempotency_key: str, payload_summary: dict[str, Any]) -> tuple[BackgroundJob, bool]:
+        """Insert the job row into the caller's transaction without executing it.
+
+        Outbox semantics: the row is flushed but not committed, so a caller can make
+        "this job exists" and its own state change atomic. The caller commits and then
+        calls :meth:`dispatch_staged`; a crash in between leaves a queued row that
+        :meth:`dispatch_undelivered` picks up later.
+        """
+        return create_or_get_job(
+            db,
+            job_type=job_type,
+            institution_id=institution_id,
+            project_id=project_id,
+            created_by=created_by,
+            idempotency_key=idempotency_key,
+            payload_summary=payload_summary,
+            commit=False,
+        )
+
+    def dispatch_staged(self, db: Session, job: BackgroundJob, handler: JobHandler | None = None) -> BackgroundJob:
+        # A deduplicated job belongs to the caller that won the row: running it here would execute
+        # the same work twice, and possibly before the winner's transaction is committed.
+        if getattr(job, "submission_deduplicated", False):
+            return job
+        return self._execute(db, job, _resolve_handler(job.job_type, handler))
+
+    def dispatch_undelivered(self, db: Session, *, limit: int = 50) -> dict[str, Any]:
+        """Execute queued jobs that were committed but never started (crash recovery).
+
+        Inline delivery executes the handler inside :meth:`enqueue`, so a job that is still
+        ``queued`` with no start time means the process died between the committing
+        transaction and the dispatch. Re-delivery is safe because :meth:`_execute` claims
+        the job atomically first.
+        """
+        stale_before = datetime.now(UTC) - timedelta(seconds=self.retry_dispatch_grace_seconds)
+        candidates = db.scalars(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.status == "queued",
+                BackgroundJob.started_at.is_(None),
+                (BackgroundJob.queued_at.is_(None) & (BackgroundJob.created_at < stale_before))
+                | (BackgroundJob.queued_at < stale_before),
+            )
+            .order_by(BackgroundJob.id)
+            .limit(limit)
+        ).all()
+        dispatched: list[int] = []
+        failed: list[dict[str, Any]] = []
+        for job in candidates:
+            try:
+                self.dispatch_staged(db, job)
+                dispatched.append(job.id)
+            except Exception as exc:  # noqa: BLE001 - one bad job must not stop the sweep
+                failed.append({"job_id": job.id, "error": str(exc)[:500]})
+        return {"candidates": len(candidates), "dispatched": dispatched, "failed": failed}
+
+    retry_dispatch_grace_seconds = 60
+
     def execute_existing(self, db: Session, job: BackgroundJob, handler: JobHandler | None = None) -> BackgroundJob:
         return self._execute(db, job, _resolve_handler(job.job_type, handler))
 

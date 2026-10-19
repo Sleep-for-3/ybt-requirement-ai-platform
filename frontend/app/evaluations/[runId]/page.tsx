@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
+import { describeUserMessage } from "@/lib/user-message.mjs";
 import {
   buildEvaluationView,
   caseDegradedReason,
@@ -92,7 +93,7 @@ function formatScore(value?: unknown) {
 }
 
 function formatMs(value?: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)} ms` : "—";
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)} 毫秒` : "—";
 }
 
 function formatTime(value?: unknown) {
@@ -160,15 +161,15 @@ export default function Page() {
             <div className="stat-value">{typeof metrics?.case_count === "number" ? metrics?.case_count : results.length}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Recall@5</div>
+            <div className="stat-label">召回率（前 5 条）</div>
             <div className="stat-value">{formatRatio(metrics?.recall_at_5)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Recall@10</div>
+            <div className="stat-label">召回率（前 10 条）</div>
             <div className="stat-value">{formatRatio(metrics?.recall_at_10)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">MRR</div>
+            <div className="stat-label">平均倒数排名</div>
             <div className="stat-value">{formatScore(metrics?.mrr)}</div>
           </div>
           <div className="stat-card">
@@ -180,7 +181,7 @@ export default function Page() {
             <div className="stat-value">{formatRatio(metrics?.citation_coverage)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Groundedness</div>
+            <div className="stat-label">依据充分度</div>
             <div className="stat-value">{formatRatio(metrics?.groundedness)}</div>
           </div>
           <div className="stat-card">
@@ -231,7 +232,7 @@ export default function Page() {
                 <span className="text-ink">{view.actualModel || "—"}</span></p>
               <p><span className="text-slate-500">模型档案 ID：</span>
                 <span className="text-ink">{view.actualProfileId ?? "—"}</span></p>
-              <p><span className="text-slate-500">Provider：</span>
+              <p><span className="text-slate-500">服务商：</span>
                 <span className="text-ink">{view.provider || "—"}</span></p>
               <p><span className="text-slate-500">用例总数（分母）：</span>
                 <span className="text-ink">{view.coverageDenominator ?? "—"}</span></p>
@@ -260,8 +261,8 @@ export default function Page() {
               <div className="min-w-[900px]">
                 <div className="grid-head grid grid-cols-[minmax(0,2fr)_repeat(5,minmax(0,1fr))_120px_88px] gap-3">
                   <span>案例</span>
-                  <span>Recall@K</span>
-                  <span>MRR</span>
+                  <span>召回率（前 K 条）</span>
+                  <span>平均倒数排名</span>
                   <span>来源命中</span>
                   <span>引用覆盖</span>
                   <span>回答关键词覆盖</span>
@@ -279,7 +280,7 @@ export default function Page() {
                         <p className="mt-0.5 truncate text-xs text-slate-500">{item.generated_answer}</p>
                       ) : null}
                       {item?.error_message ? (
-                        <p className="mt-0.5 truncate text-xs text-coral-600">{item.error_message}</p>
+                        <p className="mt-0.5 truncate text-xs text-coral-600">{describeUserMessage(item.error_message, "该案例未生成回答，请稍后重试。")}</p>
                       ) : null}
                     </div>
                     <span className="tabular-nums text-slate-600">{formatRatio(item?.recall_at_k)}</span>

@@ -1,0 +1,136 @@
+......................F..                                                [100%]
+================================== FAILURES ===================================
+_ test_uat_permissions_hide_cross_institution_resources_and_block_viewer_execution _
+
+    def test_uat_permissions_hide_cross_institution_resources_and_block_viewer_execution() -> None:
+        with _client() as client:
+            password = "test-only-platform-admin-password"
+            bootstrap = client.post("/api/admin/bootstrap", json={
+                "institution_code": "PLATFORM",
+                "institution_name": "公开测试平台",
+                "institution_type": "platform_operator",
+                "username": "uat_platform_admin",
+                "display_name": "UAT 平台管理员",
+                "email": "uat-platform-admin@example.invalid",
+                "password": password,
+            })
+            assert bootstrap.status_code == 201, bootstrap.text
+            admin_token = _post(client, "/api/auth/login", {"username": "uat_platform_admin", "password": password})["access_token"]
+            admin_headers = {"Authorization": f"Bearer {admin_token}"}
+            bank = client.post("/api/admin/institutions", headers=admin_headers, json={
+                "institution_code": "UAT_BANK",
+                "institution_name": "UAT 示例银行",
+                "institution_type": "bank",
+            })
+            assert bank.status_code == 201, bank.text
+            other_bank = client.post("/api/admin/institutions", headers=admin_headers, json={
+                "institution_code": "OTHER_UAT_BANK",
+                "institution_name": "其他 UAT 示例银行",
+                "institution_type": "bank",
+            })
+            assert other_bank.status_code == 201, other_bank.text
+            project = client.post("/api/projects", headers=admin_headers, json={
+                "name": "UAT 权限隔离项目",
+                "institution_id": bank.json()["id"],
+            })
+            assert project.status_code == 200, project.text
+            suite = client.post(f"/api/projects/{project.json()['id']}/uat-suites", headers=admin_headers, json={
+                "suite_name": "权限验证套件",
+                "suite_type": "custom",
+                "cases": [_case("PASS", "只读验证", "automatic", "always_pass", "medium", 1)],
+            })
+            assert suite.status_code == 201, suite.text
+            run = client.post(f"/api/uat-suites/{suite.json()['id']}/runs", headers=admin_headers, json={"run_name": "权限验证轮次"})
+            assert run.status_code == 201, run.text
+    
+            viewer_password = "test-only-viewer-password"
+            viewer = client.post("/api/admin/users", headers=admin_headers, json={
+                "username": "uat_viewer",
+                "display_name": "UAT 只读用户",
+                "email": "uat-viewer@example.invalid",
+                "password": viewer_password,
+                "institution_id": bank.json()["id"],
+                "institution_role": "member",
+            })
+            assert viewer.status_code == 201, viewer.text
+            membership = client.post(f"/api/projects/{project.json()['id']}/members", headers=admin_headers, json={
+                "user_id": viewer.json()["id"],
+                "project_role": "viewer",
+            })
+            assert membership.status_code == 201, membership.text
+            viewer_token = _post(client, "/api/auth/login", {"username": "uat_viewer", "password": viewer_password})["access_token"]
+            viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+            assert client.get(f"/api/uat-suites/{suite.json()['id']}", headers=viewer_headers).status_code == 200
+            assert client.post(f"/api/uat-runs/{run.json()['id']}/execute", headers=viewer_headers, json={}).status_code == 403
+    
+            outsider_password = "test-only-outsider-password"
+            outsider = client.post("/api/admin/users", headers=admin_headers, json={
+                "username": "uat_outsider",
+                "display_name": "UAT 跨机构用户",
+                "email": "uat-outsider@example.invalid",
+                "password": outsider_password,
+                "institution_id": other_bank.json()["id"],
+                "institution_role": "member",
+            })
+            assert outsider.status_code == 201, outsider.text
+>           outsider_token = _post(client, "/api/auth/login", {"username": "uat_outsider", "password": outsider_password})["access_token"]
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_uat.py:398: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+client = <starlette.testclient.TestClient object at 0x000001999452FA40>
+path = '/api/auth/login'
+payload = {'password': 'test-only-outsider-password', 'username': 'uat_outsider'}
+
+    def _post(client: TestClient, path: str, payload: dict) -> dict:
+        response = client.post(path, json=payload)
+>       assert response.status_code in {200, 201}, response.text
+E       AssertionError: {"detail":"Invalid username or password","error_code":"authentication_required","user_message":"登录状态已失效","technical_message":null,"trace_id":"7e26a21668344b8b937792e2286a25b9","retryable":false,"suggested_actions":["重新登录"]}
+E       assert 401 in {200, 201}
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_uat.py:479: AssertionError
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_uat.py::test_demo_uat_pack_generator_is_repeatable
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-25 (_readerthread)
+  
+  Traceback (most recent call last):
+    File "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\subprocess.py", line 1599, in _readerthread
+      buffer.append(fh.read())
+                    ^^^^^^^^^
+  UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 737: illegal multibyte sequence
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+tests/test_uat.py::test_demo_uat_pack_generator_is_repeatable
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-23 (_readerthread)
+  
+  Traceback (most recent call last):
+    File "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\threading.py", line 1075, in _bootstrap_inner
+      self.run()
+    File "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\threading.py", line 1012, in run
+      self._target(*self._args, **self._kwargs)
+    File "C:\Users\admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\subprocess.py", line 1599, in _readerthread
+      buffer.append(fh.read())
+                    ^^^^^^^^^
+  UnicodeDecodeError: 'gbk' codec can't decode byte 0x80 in position 737: illegal multibyte sequence
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_uat.py::test_uat_permissions_hide_cross_institution_resources_and_block_viewer_execution
+1 failed, 24 passed, 3 warnings in 13.54s

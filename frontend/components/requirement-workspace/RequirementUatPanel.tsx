@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ListChecks } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { statusLabel } from "@/lib/product-language";
+import { describeError } from "@/lib/user-message.mjs";
 
 type LinkRecord = {id:number;suite_id:number;content_version:number;status:string;pending_review:boolean;issue:string|null};
 const labels:Record<string,string>={draft:"待送审",in_review:"审核中",returned:"已退回",approved:"已审核"};
@@ -23,7 +25,7 @@ export function RequirementUatPanel({projectId,requirementId,contentVersion,dirt
     if(flight.current||dirty)return;
     flight.current=true;setBusy(true);setError("");
     try{await apiPost(base,{expected_content_version:contentVersion});await links.refetch();}
-    catch(e){setError(e instanceof Error?e.message:"测试项生成失败");}
+    catch(e){setError(describeError(e,"测试项生成未完成，请稍后重试。"));}
     finally{flight.current=false;setBusy(false);}
   }
   if(!permissions.can("uat.view"))return null;
@@ -33,7 +35,7 @@ export function RequirementUatPanel({projectId,requirementId,contentVersion,dirt
     {error&&<p role="alert" className="text-red-700">{error}</p>}
     {links.isError&&<p role="alert">无法读取关联测试项。<button onClick={()=>void links.refetch()}>重试</button></p>}
     {links.data?.map(link=><div key={link.id} className="space-y-1 border-t pt-2">
-      <Link className="text-teal-800 underline" href={`/uat/suites/${link.suite_id}`}>内容 v{link.content_version} · {labels[link.status]??link.status}</Link>
+      <Link className="text-teal-800 underline" href={`/uat/suites/${link.suite_id}`}>内容 v{link.content_version} · {labels[link.status]??statusLabel(link.status)}</Link>
       {link.pending_review&&<p className="text-amber-800">待复核：{link.issue}</p>}
     </div>)}
   </section>;

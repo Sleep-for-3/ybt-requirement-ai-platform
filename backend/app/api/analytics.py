@@ -16,4 +16,4 @@ def analytics_overview(project_id: int, principal: RealPrincipal, cycle_id: int 
     try:
         return build_project_overview(db, project_id, cycle_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Reporting cycle not found for project") from exc
+        raise HTTPException(status_code=404, detail="该项目没有对应的报送周期") from exc

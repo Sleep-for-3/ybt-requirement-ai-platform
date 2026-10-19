@@ -8,6 +8,7 @@ import { useRef, useState } from "react";
 import { apiDownload, apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, statusLabel, workflowStepLabel } from "@/lib/product-language";
 import { classifyQueryState, isRetryable } from "@/lib/query-state.mjs";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 type Readiness = {
   eligible: boolean;
@@ -103,7 +104,7 @@ export function RequirementDeliveryPanel({
       setMessage("已提交三阶段审核。对应角色可在审核任务中领取并处理。");
       await refresh();
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "送审失败，请刷新后核对阻断项。 ");
+      setMessage(describeError(cause, "送审失败，请刷新后核对阻断项。"));
     } finally {
       flight.current = false;
       setBusy(false);
@@ -120,7 +121,7 @@ export function RequirementDeliveryPanel({
       setMessage("正式交付版本已固定，后续修订不会改变该文件。");
       await refresh();
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "固定正式交付失败，请核对终审状态。 ");
+      setMessage(describeError(cause, "固定正式交付失败，请核对终审状态。"));
     } finally {
       flight.current = false;
       setBusy(false);
@@ -143,7 +144,7 @@ export function RequirementDeliveryPanel({
       link.remove();
       URL.revokeObjectURL(url);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "正式交付下载失败。 ");
+      setMessage(describeError(cause, "正式交付下载失败。"));
     } finally {
       flight.current = false;
       setBusy(false);
@@ -176,7 +177,7 @@ export function RequirementDeliveryPanel({
       {ready && !ready.eligible ? <div className="border-l-2 border-gold-400 pl-3 text-xs text-slate-600">
         <p className="font-semibold text-ink">正式交付暂不可用</p>
         <ul className="mt-1 space-y-1">{ready.reasons.slice(0, 5).map((reason) =>
-          <li key={`${reason.code}:${reason.field_id || 0}`}>· {reason.message}</li>)}</ul>
+          <li key={`${reason.code}:${reason.field_id || 0}`}>· {describeUserMessage(reason.message, "该原因说明待补充，请人工核验。")}</li>)}</ul>
         {ready.blocking_count > 5 ? <p className="mt-1">另有 {ready.blocking_count - 5} 项，请在待确认视图处理。</p> : null}
       </div> : null}
       {dirty ? <p className="flex items-center gap-1 text-xs text-amber-700"><AlertTriangle size={14} />请先保存当前编辑再送审。</p> : null}

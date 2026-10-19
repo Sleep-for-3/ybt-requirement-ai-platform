@@ -1361,7 +1361,7 @@ def test_scenario_mappings_adopt_drafts_quality_checks_and_knowledge_search() ->
             {},
             expected_status=404,
         )
-        assert empty_business["detail"] == "Scenario not found"
+        assert empty_business["detail"] == "场景不存在"
 
         assert client.post(f"/api/scenario-business-mappings/{business['id']}/confirm", json={}).status_code == 400
         assert client.post(f"/api/scenario-technical-lineages/{lineage['id']}/confirm", json={}).status_code == 400

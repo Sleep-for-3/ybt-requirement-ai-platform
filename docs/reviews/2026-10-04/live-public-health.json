@@ -1,0 +1,29 @@
+{
+  "/api/version": {
+    "component": "api",
+    "app_commit": "9b5d00cada0b640aaa139aa5d234f064d9e11f25",
+    "build_time": "2026-10-04T13:29:05Z",
+    "schema_head": "202610030001",
+    "image_digest": "unknown"
+  },
+  "/api/health/live": {
+    "status": "healthy",
+    "application": "YBT Requirement AI Platform"
+  },
+  "/api/health/ready": {
+    "status": "not_ready",
+    "checks": {
+      "application": "healthy",
+      "database": "healthy",
+      "alembic_revision": "healthy",
+      "storage": "healthy",
+      "redis": "healthy",
+      "task_queue": "unhealthy",
+      "vector_store": "healthy",
+      "llm_provider": "healthy",
+      "embedding_provider": "healthy",
+      "semantic_index": "healthy",
+      "disk_space": "healthy"
+    }
+  }
+}

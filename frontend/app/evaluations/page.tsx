@@ -10,7 +10,7 @@ import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { apiGet, apiPost } from "@/lib/api";
 import { detailHrefWithReturnTo } from "@/lib/navigation-contract.mjs";
-
+import { describeError } from "@/lib/user-message.mjs";
 type EvaluationCase = {
   id?: number;
   case_name?: string | null;
@@ -79,7 +79,7 @@ export default function Page() {
       setMessage("反馈已转为回归样例");
       await reload();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "转换失败");
+      setMessage(describeError(error, "反馈转换为回归样例失败，请稍后重试。"));
     } finally {
       setConvertingId(null);
     }
@@ -87,7 +87,7 @@ export default function Page() {
 
   return (
     <main>
-      <WorkspaceHeader title="RAG 评测" meta="Recall@K、MRR、来源字段命中与 groundedness" />
+      <WorkspaceHeader title="RAG 评测" meta="召回率、平均倒数排名、来源字段命中与依据充分度" />
       <div className="mx-auto max-w-5xl space-y-4 p-4 lg:p-6">
         {message ? <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p> : null}
         <div className="grid gap-3 sm:grid-cols-3">

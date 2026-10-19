@@ -8,6 +8,8 @@ import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { HistoricalCaliberImport, apiGet, uploadForm } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError } from "@/lib/user-message.mjs";
+import { documentTypeLabel, statusLabel } from "@/lib/product-language";
 
 const STATUS_BADGE: Record<string, string> = {
   approved: "badge-success",
@@ -109,9 +111,9 @@ export default function Page() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <b className="text-sm font-semibold text-ink">{item.import_name}</b>
-                  <span className={STATUS_BADGE[item.status] || "badge-neutral"}>{item.status}</span>
+                  <span className={STATUS_BADGE[item.status] || "badge-neutral"}>{statusLabel(item.status)}</span>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">{item.document_type}</p>
+                <p className="mt-2 text-sm text-slate-500">{documentTypeLabel(item.document_type)}</p>
                 <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
                   <div>
                     <div className="stat-label">记录</div>
@@ -150,5 +152,5 @@ export default function Page() {
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
+  return describeError(error, "操作未完成，请稍后重试。");
 }

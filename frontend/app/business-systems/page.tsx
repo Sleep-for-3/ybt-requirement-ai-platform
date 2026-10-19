@@ -10,6 +10,7 @@ import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { PageState } from "@/components/feedback/PageState";
 import { useToast } from "@/components/feedback/ToastProvider";
 import { BusinessSystem, apiGet, apiPost } from "@/lib/api";
+import { describeError } from "@/lib/user-message.mjs";
 
 type LoadState = "idle" | "loading" | "error" | "ready";
 
@@ -37,7 +38,7 @@ export default function Page() {
       .then((next) => { if (!controller.signal.aborted) { setItems(next); setState("ready"); } })
       .catch((error) => {
         if (controller.signal.aborted) return;
-        setItems([]); setState("error"); toast.error(error instanceof Error ? error.message : "业务系统加载失败");
+        setItems([]); setState("error"); toast.error(describeError(error, "业务系统加载失败"));
       });
     return () => controller.abort();
   }, [projectId, reloadVersion, toast]);
@@ -57,7 +58,7 @@ export default function Page() {
       await apiPost(`/projects/${projectId}/business-systems`, { system_code: form.get("code"), system_name: form.get("name"), owner_department: form.get("owner"), description: form.get("description"), enabled: true });
       setDirty(false); setCreateOpen(false); toast.success("业务系统已创建。"); reload();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "业务系统创建失败");
+      toast.error(describeError(error, "业务系统创建失败"));
     } finally { setCreating(false); }
   }
 

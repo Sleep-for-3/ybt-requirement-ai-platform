@@ -7,6 +7,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { UatStatus, readError } from "@/components/uat/UatUi";
 import { UatFinding, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { findingTypeLabel, severityLabel } from "@/lib/product-language";
 
 export default function FindingPage() {
   const { findingId } = useParams<{ findingId: string }>();
@@ -45,7 +46,7 @@ export default function FindingPage() {
     }
     try {
       await apiPost(`/uat-findings/${findingId}/resolve`, { resolution_text: resolution.trim() });
-      setMessage("Finding 已解决，等待验证");
+      setMessage("问题已解决，等待验证");
       await load();
     } catch (reason) {
       setMessage(readError(reason));
@@ -55,7 +56,7 @@ export default function FindingPage() {
   async function verify() {
     try {
       await apiPost(`/uat-findings/${findingId}/verify`, { verification_comment: resolution.trim() || "复测通过" });
-      setMessage("Finding 已验证关闭");
+      setMessage("问题已验证关闭");
       await load();
     } catch (reason) {
       setMessage(readError(reason));
@@ -64,7 +65,7 @@ export default function FindingPage() {
 
   return (
     <main>
-      <WorkspaceHeader title={item ? `Finding #${item.finding_no}` : "Finding 详情"} meta={item?.title || "正在加载"} />
+      <WorkspaceHeader title={item ? `问题记录 #${item.finding_no}` : "问题详情"} meta={item?.title || "正在加载"} />
       <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
         {message ? (
           <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</p>
@@ -76,7 +77,7 @@ export default function FindingPage() {
                 <div>
                   <b className="text-lg">{item.title}</b>
                   <p className="mt-1 text-sm text-slate-500">
-                    {item.finding_type} · {item.severity}
+                    {findingTypeLabel(item.finding_type)} · {severityLabel(item.severity)}
                   </p>
                 </div>
                 <UatStatus value={item.status} />
@@ -109,7 +110,7 @@ export default function FindingPage() {
             ) : null}
           </>
         ) : !message ? (
-          <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">正在读取 Finding…</p>
+          <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">正在读取问题记录…</p>
         ) : null}
       </div>
     </main>

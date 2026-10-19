@@ -196,7 +196,7 @@ def adopt_source_to_mart_draft(mapping_id: int, principal: CurrentPrincipal, pay
     mapping = _get_source_to_mart_or_404(db, mapping_id)
     _guard_adoption(db, principal, "source_to_mart", mapping)
     if not _has_text(mapping.ai_generated_content):
-        raise HTTPException(status_code=400, detail="AI draft is empty")
+        raise HTTPException(status_code=400, detail="AI 草稿内容为空")
     _guard_confirmed_draft(mapping, payload)
     mapping.final_content = mapping.ai_generated_content
     mapping.mapping_status = "draft"
@@ -240,7 +240,7 @@ def create_mart_to_ybt_mapping(field_id: int, payload: MartToYbtMappingCreate, d
     if payload.mart_field_id is not None:
         mart_field = _get_mart_field_or_404(db, payload.mart_field_id)
         if mart_field.project_id != target_field.project_id:
-            raise HTTPException(status_code=400, detail="Mart field belongs to another project")
+            raise HTTPException(status_code=400, detail="监管集市字段属于其他项目")
     mapping = MartToYbtMapping(project_id=target_field.project_id, target_field_id=target_field.id, **payload.model_dump())
     db.add(mapping)
     db.commit()
@@ -269,7 +269,7 @@ def update_mart_to_ybt_mapping(mapping_id: int, payload: MartToYbtMappingUpdate,
     if updates.get("mart_field_id") is not None:
         mart_field = _get_mart_field_or_404(db, updates["mart_field_id"])
         if mart_field.project_id != mapping.project_id:
-            raise HTTPException(status_code=400, detail="Mart field belongs to another project")
+            raise HTTPException(status_code=400, detail="监管集市字段属于其他项目")
     if _guard_double_layer_write(db, "mart_to_ybt", mapping, updates):
         _invalidate_approval(mapping)
     _apply_updates(mapping, updates)
@@ -340,7 +340,7 @@ def adopt_mart_to_ybt_draft(mapping_id: int, principal: CurrentPrincipal, payloa
     mapping = _get_mart_to_ybt_or_404(db, mapping_id)
     _guard_adoption(db, principal, "mart_to_ybt", mapping)
     if not _has_text(mapping.ai_generated_content):
-        raise HTTPException(status_code=400, detail="AI draft is empty")
+        raise HTTPException(status_code=400, detail="AI 草稿内容为空")
     _guard_confirmed_draft(mapping, payload)
     mapping.final_content = mapping.ai_generated_content
     mapping.mapping_status = "draft"
@@ -381,14 +381,14 @@ def save_mart_to_ybt_version(mapping_id: int, payload: MappingVersionCreate | No
 def _get_mart_field_or_404(db: Session, field_id: int) -> MartField:
     field = db.get(MartField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Mart field not found")
+        raise HTTPException(status_code=404, detail="监管集市字段不存在")
     return field
 
 
 def _get_target_field_or_404(db: Session, field_id: int) -> TargetField:
     field = db.get(TargetField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Target field not found")
+        raise HTTPException(status_code=404, detail="目标字段不存在")
     return field
 
 
@@ -400,7 +400,7 @@ def _get_source_to_mart_or_404(db: Session, mapping_id: int, *, for_update: bool
         statement = statement.with_for_update().execution_options(populate_existing=True)
     mapping = db.scalar(statement)
     if mapping is None:
-        raise HTTPException(status_code=404, detail="Source-to-mart mapping not found")
+        raise HTTPException(status_code=404, detail="业务系统到监管集市映射不存在")
     return mapping
 
 
@@ -410,7 +410,7 @@ def _get_mart_to_ybt_or_404(db: Session, mapping_id: int, *, for_update: bool = 
         statement = statement.with_for_update().execution_options(populate_existing=True)
     mapping = db.scalar(statement)
     if mapping is None:
-        raise HTTPException(status_code=404, detail="Mart-to-YBT mapping not found")
+        raise HTTPException(status_code=404, detail="监管集市到一表通映射不存在")
     return mapping
 
 
@@ -421,14 +421,14 @@ def _apply_updates(model: object, values: dict) -> None:
 
 def _validate_status(status: str | None) -> None:
     if status is not None and status not in VALID_STATUSES:
-        raise HTTPException(status_code=400, detail="Invalid mapping_status")
+        raise HTTPException(status_code=400, detail="mapping_status 取值不合法")
 
 
 def _approve_mapping(db: Session, mapping_type: str, mapping: SourceToMartMapping | MartToYbtMapping, payload: MappingReviewRequest) -> None:
     if payload.final_content is not None:
         mapping.final_content = payload.final_content
     if not _has_text(mapping.final_content):
-        raise HTTPException(status_code=400, detail="final_content is required before approval")
+        raise HTTPException(status_code=400, detail="审批前必须填写 final_content")
     evidence_id = db.scalar(
         select(MappingEvidenceReference.id).where(
             MappingEvidenceReference.mapping_type == mapping_type,
@@ -436,7 +436,7 @@ def _approve_mapping(db: Session, mapping_type: str, mapping: SourceToMartMappin
         ).limit(1)
     )
     if evidence_id is None:
-        raise HTTPException(status_code=400, detail="At least one evidence reference is required before approval")
+        raise HTTPException(status_code=400, detail="审批前至少需要一条证据引用")
     mapping.mapping_status = "approved"
     mapping.reviewed_by = payload.reviewed_by
     mapping.reviewed_at = datetime.now(UTC)
@@ -521,4 +521,4 @@ def _has_text(value: str | None) -> bool:
 def _reject_legacy_review(db: Session, project_id: int) -> None:
     project = db.get(Project, project_id)
     if get_settings().auth_mode == "required" or bool(project and project.governance_workflow_enabled):
-        raise HTTPException(status_code=409, detail="Mapping review must be completed through the current review task")
+        raise HTTPException(status_code=409, detail="映射审核必须通过当前审核任务完成")

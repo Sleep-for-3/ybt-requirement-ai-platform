@@ -22,8 +22,8 @@ function traversal(overrides = {}) {
 test("a bounded traversal reports root, direction, depth and view", () => {
   const info = describeTraversal({ traversal: traversal(), truncated: false });
   assert.equal(info.label, "有界遍历");
-  assert.match(info.detail, /target_field#42/);
-  assert.match(info.detail, /upstream/);
+  assert.match(info.detail, /报送目标字段#42/);
+  assert.match(info.detail, /上游/);
   assert.match(info.detail, /2\/3/);
   assert.equal(info.truncated, false);
   assert.equal(info.truncationReason, null);
@@ -36,7 +36,8 @@ test("a revision snapshot never claims direction or depth was applied", () => {
   });
   assert.equal(info.label, "血缘版本全量快照");
   assert.match(info.detail, /未应用/);
-  assert.doesNotMatch(info.detail, /方向 upstream/);
+  assert.doesNotMatch(info.detail, /方向 上游/);
+  assert.doesNotMatch(info.detail, /upstream/);
 });
 
 test("truncation reasons are translated and flagged", () => {

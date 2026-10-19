@@ -9,6 +9,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { StructuredDetails, UatStatus, readError } from "@/components/uat/UatUi";
 import { UatRun, UatSuite, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { severityLabel, statusLabel, suiteTypeLabel } from "@/lib/product-language";
 
 export default function SuitePage() {
   const { suiteId } = useParams<{ suiteId: string }>();
@@ -68,8 +69,8 @@ export default function SuitePage() {
   return (
     <main>
       <WorkspaceHeader
-        title={suite?.suite_name || "UAT 套件"}
-        meta={suite ? `${suite.cases.length} 个测试案例 · ${suite.suite_type}` : "正在加载"}
+        title={suite?.suite_name || "验收套件"}
+        meta={suite ? `${suite.cases.length} 个测试案例 · ${suiteTypeLabel(suite.suite_type)}` : "正在加载"}
       />
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
         {review&&<section aria-label="需求规则测试项审核" className="space-y-3 border-b border-line pb-4 text-sm">
@@ -77,18 +78,18 @@ export default function SuitePage() {
           <p className="break-all text-xs text-slate-500">内容摘要：{review.content_hash}</p>
           {review.pending_review&&<p role="alert" className="text-amber-800">待复核：{review.issue}</p>}
           {permissions.can("uat.manage")&&review.status==="draft"&&<button className="button-secondary" disabled={reviewBusy||review.pending_review} onClick={()=>void submitReview()}>提交测试项审核</button>}
-          <div className="flex flex-wrap gap-3">{review.tasks.map(task=><Link key={task.id} className="text-teal-800 underline" href={`/tasks/${task.id}`}>{task.step_key==="technical_review"?"技术审核":"终审"} · {task.status}</Link>)}</div>
+          <div className="flex flex-wrap gap-3">{review.tasks.map(task=><Link key={task.id} className="text-teal-800 underline" href={`/tasks/${task.id}`}>{task.step_key==="technical_review"?"技术审核":"终审"} · {statusLabel(task.status)}</Link>)}</div>
         </section>}
         {message ? (
           <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{message}</p>
         ) : null}
         {suite && permissions.can("uat.execute") ? (
           <section className="panel flex flex-wrap gap-3 p-4">
-            <input className="control min-w-64 flex-1" value={name} onChange={event => setName(event.target.value)} placeholder="本轮 UAT 名称" />
+            <input className="control min-w-64 flex-1" value={name} onChange={event => setName(event.target.value)} placeholder="本轮验收名称" />
             {/* F08: the operator names the environment; the release identity is captured automatically so
                 a run can never claim a blank app version while the page held the real one. */}
             <input aria-label="执行环境" className="control w-48" value={environment} onChange={event => setEnvironment(event.target.value)} placeholder="执行环境" />
-            <p className="w-full text-xs text-slate-500">{release ? `将绑定发布标识 commit ${release.app_commit} · 构建 ${release.build_time} · schema ${release.schema_head ?? "未知"}` : "未读取到发布标识：本轮次将不绑定 commit，请核对后端 /api/version。"}</p>
+            <p className="w-full text-xs text-slate-500">{release ? `将绑定发布标识 ${release.app_commit} · 构建 ${release.build_time} · 数据结构版本 ${release.schema_head ?? "未知"}` : "未读取到发布标识：本轮次将不绑定发布标识，请核对服务端版本信息。"}</p>
             <button className="button-primary" disabled={suite.suite_type==="requirement_rules"&&(!review||review.status!=="approved"||review.pending_review)} onClick={createRun}>
               <Play size={15} />
               创建执行轮次
@@ -122,7 +123,7 @@ export default function SuitePage() {
                     <UatStatus value={item.execution_mode === "automatic" ? "queued" : "pending"} />
                   </span>
                   <span>
-                    <span className="badge-neutral">{item.severity}</span>
+                    <span className="badge-neutral">{severityLabel(item.severity)}</span>
                   </span>
                 </div>
               ))}

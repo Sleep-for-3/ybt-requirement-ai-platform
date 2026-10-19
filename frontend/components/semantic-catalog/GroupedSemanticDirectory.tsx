@@ -39,7 +39,7 @@ function DirectoryRow({ item, returnTo }: { item:SemanticCatalogItem;returnTo:st
         <Cell label="类型">{semanticConceptTypeLabel(item.concept_type)}</Cell>
         <Cell label="生效版本"><span className="font-mono text-xs">{item.effective_version ? `v${item.effective_version.version_no}` : "暂无正式版本"}</span></Cell>
         <Cell label="治理状态"><SemanticGovernanceStatus status={item.status} review={item.review} /></Cell>
-        <Cell label="Owner">{item.owner_department || "未提供"}</Cell>
+        <Cell label="责任部门">{item.owner_department || "未提供"}</Cell>
         <Cell label="已确认资产">{item.related_asset_count} 个</Cell>
         <Cell label="更新时间"><time dateTime={item.updated_at}>{formatDate(item.updated_at)}</time></Cell>
       </div>

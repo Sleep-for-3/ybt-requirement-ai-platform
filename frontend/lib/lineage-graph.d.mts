@@ -9,6 +9,10 @@
 
 export declare const TRUNCATION_LABELS: Readonly<Record<string, string>>;
 
+export declare const ROOT_TYPE_LABELS: Readonly<Record<string, string>>;
+
+export declare const DIRECTION_LABELS: Readonly<Record<string, string>>;
+
 export interface TraversalInfo {
   mode: string;
   label: string;

@@ -953,6 +953,96 @@ def _deterministic_document_content(
 # --------------------------------------------------------------------------------------
 # 5. generate_requirement_candidate
 # --------------------------------------------------------------------------------------
+REQUIREMENT_INPUT_GAP_CODES = frozenset({"requirement_input_missing", "requirement_input_invalid"})
+
+
+def _requirement_block_todo(
+    ctx: ToolContext,
+    skill_key: str,
+    gaps: list[SkillGap],
+    document: bool = False,
+) -> tuple[str, dict[str, Any]] | None:
+    """Map an unmet requirement *precondition* to the todo that unblocks it.
+
+    Both classes handled here are configuration gaps, not model failures: the run may not
+    substitute a deterministic draft for them.  ``None`` means the failure is a genuine
+    execution problem and the caller keeps its labelled degraded path.
+
+    A document run first needs a fixed revision, so a missing requirement-input row is
+    reported as that missing revision rather than as a requirement to create.
+    """
+
+    codes = {item.code for item in gaps}
+    field_id = ctx.tool_input.get("target_field_id")
+    for code in ("requirement_input_invalid", "requirement_input_missing"):
+        if code in codes:
+            if document:
+                # A document run needs a fixed revision before anything can be drafted; the
+                # missing/invalid input row means that revision is not available yet.
+                return code, {
+                    "code": "prepare_document_revision",
+                    "label": "先准备需求文档修订",
+                    "detail": (
+                        "当前任务没有固定的需求文档修订可用：先确认需求及其内容版本，"
+                        "再重新运行本步骤生成文档候选。"
+                    ),
+                    "api": f"/projects/{ctx.project.id}/requirements",
+                    "requirement_id": ctx.tool_input.get("requirement_id"),
+                }
+            return code, {
+                "code": "create_requirement_input",
+                "label": "先建需求输入",
+                "detail": (
+                    "该项目尚未具备可用的需求生成输入：先创建需求并为目标字段准备生成输入"
+                    "（Requirement + 草稿修订 + generation input），再重新运行本步骤。"
+                ),
+                "api": f"/projects/{ctx.project.id}/requirements",
+                "follow_up_api": (
+                    f"/projects/{ctx.project.id}/requirements/{{requirement_id}}/generation-inputs"
+                ),
+                "target_field_id": field_id,
+            }
+    if "skill_binding_missing" in codes:
+        return "skill_binding_missing", {
+            "code": "bind_skill_version",
+            "label": "固定采用已发布的技能版本",
+            "detail": (
+                "该项目（或其上级范围）尚未固定采用任何已发布版本：到配置中心为该范围显式绑定后重试。"
+                "系统不会自动跟随最新发布版。"
+            ),
+            "skill_key": skill_key,
+            "api": f"/ai-skills/{skill_key}/binding-options",
+            "bind_api": f"/ai-skills/{skill_key}/bindings",
+        }
+    return None
+
+
+def _blocked_requirement_result(
+    *,
+    subject: dict[str, Any],
+    skill_key: str,
+    code: str,
+    todo: dict[str, Any],
+    gaps: list[SkillGap],
+) -> ToolResult:
+    """Block the step with an actionable todo instead of drafting a result."""
+
+    return ToolResult(
+        status="blocked",
+        facts=[subject],
+        gaps=_gap_dicts(gaps),
+        evidence_refs=[subject["id"]],
+        output={
+            "skill_key": skill_key,
+            "blocked_reason": code,
+            "next_action": todo,
+            "gap_codes": [item.code for item in gaps],
+            "requires_human_confirmation": True,
+        },
+        step_output={"blocked_reason": code, "next_action": todo},
+    )
+
+
 def _generate_requirement_candidate(ctx: ToolContext) -> ToolResult:
     _require(ctx, "deliverable.generate")
     scope = project_scope(ctx.task)
@@ -977,6 +1067,12 @@ def _generate_requirement_candidate(ctx: ToolContext) -> ToolResult:
             envelope = None
             gaps.append(gap("evidence_contract_violation", "证据信封构建失败，已改为确定性草稿。"))
         if envelope is not None:
+            blocked = _requirement_block_todo(ctx, skill_key, gaps)
+            if blocked is not None:
+                return _blocked_requirement_result(
+                    subject=subject, skill_key=skill_key,
+                    code=blocked[0], todo=blocked[1], gaps=gaps,
+                )
             result = _execute_requirement_skill(ctx, envelope, gaps)
             if result is not None:
                 model_metadata = dict(result.get("execution_metadata") or {})
@@ -996,10 +1092,19 @@ def _generate_requirement_candidate(ctx: ToolContext) -> ToolResult:
 
     degraded_path: str | None = None
     if candidate is None:
+        # A missing binding is a configuration gap too.  It must stop the step with an
+        # explicit "pin a published version" todo rather than be papered over by a draft
+        # that looks like a deliverable.
+        blocked = _requirement_block_todo(ctx, skill_key, gaps)
+        if blocked is not None:
+            return _blocked_requirement_result(
+                subject=subject, skill_key=skill_key,
+                code=blocked[0], todo=blocked[1], gaps=gaps,
+            )
         candidate = _deterministic_requirement_content(
             ctx, facts, policy, [item.code for item in gaps]
         )
-        degraded_path = "deterministic_draft"
+        degraded_path = "model_output_unavailable"
 
     evidence_ids = [item["id"] for item in collected][:MAX_ARTIFACT_EVIDENCE_IDS]
     draft_hash = stable_hash({"task": ctx.task.id, "step": ctx.step.step_key, "candidate": candidate})[:16]
@@ -1131,8 +1236,15 @@ def _generate_requirement_document(ctx: ToolContext) -> ToolResult:
                         )
     else:
         gaps.append(gap("skill_binding_missing", "未指定需求文档 Skill，使用确定性草稿。"))
-
     if candidate is None:
+        # Both insufficient evidence and a missing binding are unmet preconditions: the step
+        # must stop with an actionable todo rather than persist a draft disguised as a result.
+        blocked = _requirement_block_todo(ctx, skill_key, gaps, document=True)
+        if blocked is not None:
+            return _blocked_requirement_result(
+                subject=subject, skill_key=skill_key,
+                code=blocked[0], todo=blocked[1], gaps=gaps,
+            )
         if not has_evidence and not binding_available:
             return ToolResult(
                 status="blocked",
@@ -1165,7 +1277,7 @@ def _generate_requirement_document(ctx: ToolContext) -> ToolResult:
                 step_output={"blocked_reason": "insufficient_evidence"},
             )
         candidate = _deterministic_document_content(ctx, facts, policy, subject["id"])
-        degraded_path = "deterministic_draft"
+        degraded_path = "model_output_unavailable"
         if not any(item.code == "model_output_unavailable" for item in gaps):
             gaps.append(
                 gap("model_output_unavailable", "模型文档候选不可用，已改为确定性草稿。")

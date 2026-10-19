@@ -1,0 +1,18 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_obsolete_composite_constructor_has_no_production_module_or_reference __
+tests\test_legacy_mapping_retirement.py:153: in test_obsolete_composite_constructor_has_no_production_module_or_reference
+    assert offenders == []
+E   AssertionError: assert ['app\\servic...apping_draft'] == []
+E     
+E     Left contains 4 more items, first extra item: 'app\\services\\agent\\observability.py:generate_mapping_draft'
+E     Use -v to get more diff
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_legacy_mapping_retirement.py::test_obsolete_composite_constructor_has_no_production_module_or_reference
+1 failed, 1 warning in 2.97s

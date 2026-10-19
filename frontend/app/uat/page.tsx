@@ -17,7 +17,7 @@ export default function UatPage() {
   const [runs, setRuns] = useState<UatRun[]>([]);
   const [packs, setPacks] = useState<UatPack[]>([]);
   const [files, setFiles] = useState<File[]>([]);
-  const [packName, setPackName] = useState("脱敏 UAT 材料包");
+  const [packName, setPackName] = useState("脱敏验收材料包");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -65,7 +65,7 @@ export default function UatPage() {
   return (
     <main>
       <WorkspaceHeader
-        title="UAT 验收工作台"
+        title="验收工作台"
         meta="材料、套件、执行轮次、问题闭环与签署"
         actions={
           <button className="button-secondary" onClick={load}>
@@ -84,7 +84,7 @@ export default function UatPage() {
         {projectId ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              <UatMetric label="总 Case" value={summary.total_count || 0} />
+              <UatMetric label="用例总数" value={summary.total_count || 0} />
               <UatMetric label="通过" value={summary.passed_count || 0} />
               <UatMetric label="失败" value={summary.failed_count || 0} />
               <UatMetric label="阻断" value={summary.blocked_count || 0} />
@@ -96,7 +96,7 @@ export default function UatPage() {
               {permissions.can("uat.manage") ? (
                 <div className="panel h-fit">
                   <div className="panel-header">
-                    <h2 className="text-[15px] font-semibold text-ink">上传脱敏 UAT 材料</h2>
+                    <h2 className="text-[15px] font-semibold text-ink">上传脱敏验收材料</h2>
                   </div>
                   <div className="panel-body">
                     <p className="text-xs text-slate-500">支持受控 XLSX、SQL、Shell、Markdown、JSON 或 ZIP；服务端执行整包限额、路径穿越和可执行文件检查。</p>
@@ -138,7 +138,7 @@ export default function UatPage() {
                 ) : !loading ? (
                   <div className="empty-state">
                     <Package className="text-slate-300" size={28} />
-                    <p>尚未上传材料包，先在左侧上传脱敏 UAT 材料</p>
+                    <p>尚未上传材料包，先在左侧上传脱敏验收材料</p>
                   </div>
                 ) : null}
               </div>
@@ -152,7 +152,7 @@ export default function UatPage() {
                     <StatefulLink className="panel p-4 transition hover:border-pine" href={`/uat/suites/${item.id}`} key={item.id}>
                       <div className="flex justify-between gap-3">
                         <b>{item.suite_name}</b>
-                        <span className="text-xs text-slate-500">{item.cases.length} Cases</span>
+                        <span className="text-xs text-slate-500">{item.cases.length} 个用例</span>
                       </div>
                       <p className="mt-2 line-clamp-2 text-sm text-slate-500">{item.description || "未填写说明"}</p>
                       <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-pine">
@@ -189,13 +189,13 @@ export default function UatPage() {
               ) : !loading ? (
                 <div className="empty-state">
                   <History className="text-slate-300" size={28} />
-                  <p>尚未执行 UAT，进入套件创建第一轮执行</p>
+                  <p>尚未执行验收，进入套件创建第一轮执行</p>
                 </div>
               ) : null}
             </section>
           </>
         ) : null}
-        {loading ? <p className="text-sm text-slate-500">正在加载 UAT 状态…</p> : null}
+        {loading ? <p className="text-sm text-slate-500">正在加载验收状态…</p> : null}
       </div>
     </main>
   );

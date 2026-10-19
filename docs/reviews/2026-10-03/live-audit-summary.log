@@ -1,0 +1,587 @@
+{
+  "observed_at": "2026-10-03T18:41:24.686385+08:00",
+  "base": "http://127.0.0.1:8000",
+  "scope": "aggregate-only; no business writes or model calls",
+  "probes": [
+    {
+      "path": "/health/live",
+      "authenticated": false,
+      "http_status": 200,
+      "elapsed_ms": 27.8,
+      "resource_status": "healthy"
+    },
+    {
+      "path": "/health/ready",
+      "authenticated": false,
+      "http_status": 200,
+      "elapsed_ms": 2321.0,
+      "resource_status": "ready",
+      "checks": {
+        "application": "healthy",
+        "database": "healthy",
+        "alembic_revision": "healthy",
+        "storage": "healthy",
+        "redis": "healthy",
+        "task_queue": "healthy",
+        "vector_store": "healthy",
+        "llm_provider": "healthy",
+        "embedding_provider": "healthy",
+        "semantic_index": "healthy",
+        "disk_space": "healthy"
+      }
+    },
+    {
+      "path": "/api/projects",
+      "authenticated": false,
+      "http_status": 401,
+      "elapsed_ms": 24.9
+    },
+    {
+      "path": "/api/agent/tools",
+      "authenticated": false,
+      "http_status": 401,
+      "elapsed_ms": 14.9
+    },
+    {
+      "path": "/api/ai-skills",
+      "authenticated": false,
+      "http_status": 401,
+      "elapsed_ms": 17.9
+    },
+    {
+      "path": "/api/audit",
+      "authenticated": false,
+      "http_status": 401,
+      "elapsed_ms": 4.0
+    },
+    {
+      "path": "/api/jobs",
+      "authenticated": false,
+      "http_status": 401,
+      "elapsed_ms": 3.9
+    },
+    {
+      "path": "/openapi.json",
+      "authenticated": false,
+      "http_status": 200,
+      "elapsed_ms": 18.2
+    },
+    {
+      "path": "/api/auth/login",
+      "authenticated": false,
+      "http_status": 200,
+      "elapsed_ms": 77.6
+    },
+    {
+      "path": "/api/auth/me",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 26.4,
+      "resource_status": "active"
+    },
+    {
+      "path": "/api/ai-runtime/status",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 47.7
+    },
+    {
+      "path": "/api/projects",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 23.9,
+      "returned_count": 11,
+      "status_counts": {
+        "unspecified": 11
+      }
+    },
+    {
+      "path": "/api/target-tables?project_id=1",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 17.7,
+      "returned_count": 2,
+      "status_counts": {
+        "unspecified": 2
+      }
+    },
+    {
+      "path": "/api/projects/1/readiness",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 83.1,
+      "score": 0.7174
+    },
+    {
+      "path": "/api/projects/1/requirements",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.0,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/1/catalog/tables",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 34.6,
+      "total": 108,
+      "items_returned_count": 50
+    },
+    {
+      "path": "/api/projects/1/deliverables",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 13.4,
+      "returned_count": 1,
+      "status_counts": {
+        "approved": 1
+      }
+    },
+    {
+      "path": "/api/projects/1/questions",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 8.7,
+      "returned_count": 2,
+      "status_counts": {
+        "unspecified": 2
+      }
+    },
+    {
+      "path": "/api/projects/1/agent/tasks?limit=200",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 24.1,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/1/agent/metrics",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 7.7,
+      "metrics": {
+        "task_success_rate": null,
+        "avg_steps": null,
+        "avg_retries": null,
+        "avg_replans": null,
+        "tool_success_rate": null,
+        "human_reject_rate": null,
+        "evidence_coverage": null,
+        "unsupported_claim_rate": null,
+        "hallucination_guard_failure_rate": null,
+        "final_artifact_acceptance_rate": null,
+        "scenario_accuracy": null,
+        "subject_resolution_accuracy": null,
+        "planner_valid_rate": null,
+        "planner_fallback_rate": null,
+        "average_plan_length": null,
+        "unnecessary_tool_call_rate": null,
+        "missing_required_tool_rate": null,
+        "replan_success_rate": null,
+        "evidence_recall": null,
+        "evidence_precision": null,
+        "policy_citation_accuracy": null,
+        "historical_case_usage_rate": null,
+        "case_adoption_rate": null,
+        "human_edit_rate": null,
+        "sql_semantic_detection_recall": null,
+        "sql_semantic_false_positive_rate": null,
+        "impact_propagation_accuracy": null,
+        "task_completion_rate": null,
+        "incomplete_task_rate": null
+      },
+      "metric_denominators": {
+        "task_success_rate": 0,
+        "avg_steps": 0,
+        "avg_retries": 0,
+        "avg_replans": 0,
+        "tool_success_rate": 0,
+        "human_reject_rate": 0,
+        "evidence_coverage": 0,
+        "unsupported_claim_rate": 0,
+        "hallucination_guard_failure_rate": 0,
+        "final_artifact_acceptance_rate": 0,
+        "scenario_accuracy": 0,
+        "subject_resolution_accuracy": 0,
+        "planner_valid_rate": 0,
+        "planner_fallback_rate": 0,
+        "average_plan_length": 0,
+        "unnecessary_tool_call_rate": 0,
+        "missing_required_tool_rate": 0,
+        "replan_success_rate": 0,
+        "evidence_recall": 0,
+        "evidence_precision": 0,
+        "policy_citation_accuracy": 0,
+        "historical_case_usage_rate": 0,
+        "case_adoption_rate": 0,
+        "human_edit_rate": 0,
+        "sql_semantic_detection_recall": 0,
+        "sql_semantic_false_positive_rate": 0,
+        "impact_propagation_accuracy": 0,
+        "task_completion_rate": 0,
+        "incomplete_task_rate": 0
+      },
+      "missing_metric_keys_vs_current_source": [
+        "deterministic_fallback_rate",
+        "human_reanalysis_rate",
+        "model_execution_rate"
+      ]
+    },
+    {
+      "path": "/api/projects/1/knowledge/documents",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 9.6,
+      "returned_count": 6,
+      "status_counts": {
+        "unspecified": 6
+      }
+    },
+    {
+      "path": "/api/projects/1/uat-suites",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 82.2,
+      "returned_count": 9,
+      "status_counts": {
+        "unspecified": 9
+      }
+    },
+    {
+      "path": "/api/projects/1/uat-runs",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 39.1,
+      "returned_count": 9,
+      "status_counts": {
+        "passed": 2,
+        "blocked": 7
+      }
+    },
+    {
+      "path": "/api/target-tables?project_id=11",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 6.7,
+      "returned_count": 1,
+      "status_counts": {
+        "unspecified": 1
+      }
+    },
+    {
+      "path": "/api/projects/11/readiness",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 60.7,
+      "score": 0.4565
+    },
+    {
+      "path": "/api/projects/11/requirements",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 24.6,
+      "returned_count": 1,
+      "status_counts": {
+        "unspecified": 1
+      }
+    },
+    {
+      "path": "/api/projects/11/requirements/1/formal-deliveries",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 11.0,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/11/requirements/1/review-submissions",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.0,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/11/requirements/1/review-readiness?content_version=1",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 29.0
+    },
+    {
+      "path": "/api/projects/11/requirements/1/snapshots",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.8,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/11/requirements/1/revisions",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.0,
+      "returned_count": 1,
+      "status_counts": {
+        "draft": 1
+      }
+    },
+    {
+      "path": "/api/projects/11/catalog/tables",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 21.1,
+      "total": 1,
+      "items_returned_count": 1
+    },
+    {
+      "path": "/api/projects/11/deliverables",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 8.0,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/11/questions",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 7.8,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/projects/11/agent/tasks?limit=200",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.1,
+      "returned_count": 22,
+      "status_counts": {
+        "completed": 16,
+        "failed": 1,
+        "blocked": 1,
+        "waiting_human": 2,
+        "running": 2
+      }
+    },
+    {
+      "path": "/api/projects/11/agent/metrics",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 93.0,
+      "metrics": {
+        "task_success_rate": 0.9412,
+        "avg_steps": 19.1818,
+        "avg_retries": 0.4091,
+        "avg_replans": 1.5909,
+        "tool_success_rate": 0.9308,
+        "human_reject_rate": 0.012,
+        "evidence_coverage": 0.6452,
+        "unsupported_claim_rate": null,
+        "hallucination_guard_failure_rate": 0.0,
+        "final_artifact_acceptance_rate": 1.0,
+        "task_completion_rate": 0.9412,
+        "incomplete_task_rate": 1.0,
+        "human_edit_rate": 0.0,
+        "planner_valid_rate": 1.0,
+        "planner_fallback_rate": 0.0,
+        "average_plan_length": 14.4091,
+        "scenario_accuracy": null,
+        "subject_resolution_accuracy": null,
+        "unnecessary_tool_call_rate": 0.0,
+        "missing_required_tool_rate": 0.3565,
+        "replan_success_rate": 0.7778,
+        "evidence_recall": null,
+        "evidence_precision": 0.8947,
+        "policy_citation_accuracy": 0.0,
+        "historical_case_usage_rate": null,
+        "case_adoption_rate": null,
+        "sql_semantic_detection_recall": null,
+        "sql_semantic_false_positive_rate": null,
+        "impact_propagation_accuracy": null
+      },
+      "metric_denominators": {
+        "task_success_rate": 17,
+        "avg_steps": 22,
+        "avg_retries": 22,
+        "avg_replans": 22,
+        "tool_success_rate": 289,
+        "human_reject_rate": 83,
+        "evidence_coverage": 279,
+        "unsupported_claim_rate": 0,
+        "hallucination_guard_failure_rate": 99,
+        "final_artifact_acceptance_rate": 49,
+        "task_completion_rate": 17,
+        "incomplete_task_rate": 1,
+        "human_edit_rate": 83,
+        "planner_valid_rate": 32,
+        "planner_fallback_rate": 32,
+        "average_plan_length": 22,
+        "scenario_accuracy": 0,
+        "subject_resolution_accuracy": 0,
+        "unnecessary_tool_call_rate": 269,
+        "missing_required_tool_rate": 359,
+        "replan_success_rate": 18,
+        "evidence_recall": 0,
+        "evidence_precision": 57,
+        "policy_citation_accuracy": 19,
+        "historical_case_usage_rate": 0,
+        "case_adoption_rate": 0,
+        "sql_semantic_detection_recall": 0,
+        "sql_semantic_false_positive_rate": 0,
+        "impact_propagation_accuracy": 0
+      },
+      "missing_metric_keys_vs_current_source": [
+        "deterministic_fallback_rate",
+        "human_reanalysis_rate",
+        "model_execution_rate"
+      ]
+    },
+    {
+      "path": "/api/projects/11/knowledge/documents",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 8.3,
+      "returned_count": 1,
+      "status_counts": {
+        "unspecified": 1
+      }
+    },
+    {
+      "path": "/api/projects/11/uat-suites",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 64.6,
+      "returned_count": 8,
+      "status_counts": {
+        "unspecified": 8
+      }
+    },
+    {
+      "path": "/api/projects/11/uat-runs",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 7.4,
+      "returned_count": 0,
+      "status_counts": {}
+    },
+    {
+      "path": "/api/jobs",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 11.2,
+      "returned_count": 123,
+      "status_counts": {
+        "completed": 113,
+        "failed": 9,
+        "partially_completed": 1
+      }
+    },
+    {
+      "path": "/api/me/notifications",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 6.5,
+      "returned_count": 17,
+      "status_counts": {
+        "unspecified": 17
+      }
+    },
+    {
+      "path": "/api/agent/tools",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 4.2,
+      "returned_count": 17,
+      "status_counts": {
+        "unspecified": 17
+      }
+    },
+    {
+      "path": "/api/audit",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.1,
+      "returned_count": 100,
+      "status_counts": {
+        "unspecified": 100
+      }
+    },
+    {
+      "path": "/api/auth/logout",
+      "authenticated": true,
+      "http_status": 200,
+      "elapsed_ms": 10.6,
+      "resource_status": "logged_out"
+    }
+  ],
+  "openapi": {
+    "path_count": 421,
+    "operation_count": 500,
+    "tag_operation_counts": {
+      "projects": 4,
+      "project-readiness": 2,
+      "authentication": 4,
+      "administration": 6,
+      "AI runtime": 10,
+      "AI Skills": 29,
+      "AI Skill tests": 3,
+      "governance": 2,
+      "review tasks": 14,
+      "agent": 11,
+      "notifications": 3,
+      "background jobs": 11,
+      "secure storage": 2,
+      "audit": 1,
+      "project dashboard": 1,
+      "analytics": 1,
+      "reporting cycles": 2,
+      "institution cockpit": 1,
+      "health and observability": 4,
+      "templates": 11,
+      "target tables": 2,
+      "fields": 6,
+      "documents": 2,
+      "sql files": 2,
+      "retrieval": 1,
+      "coze": 1,
+      "db profile": 1,
+      "datasources": 9,
+      "natural language tasks": 4,
+      "business systems": 15,
+      "mart": 10,
+      "mapping rules": 20,
+      "mapping evidence": 4,
+      "mapping export": 3,
+      "product scenarios": 5,
+      "scenario mappings": 18,
+      "regulatory knowledge": 3,
+      "knowledge rag": 29,
+      "resource governance": 1,
+      "traceability templates": 5,
+      "traceability export": 2,
+      "source recommendations": 3,
+      "metadata sync": 4,
+      "catalog": 9,
+      "metadata imports": 3,
+      "column profiling": 4,
+      "lineage": 34,
+      "deliverables": 39,
+      "uat": 28,
+      "regulatory semantics": 26,
+      "semantic catalog": 8,
+      "data quality expectations": 5,
+      "regulatory-context": 1,
+      "global search": 1,
+      "requirement workspace": 6,
+      "resource imports": 7,
+      "data architecture": 8,
+      "requirements": 48
+    }
+  },
+  "sample_project_ids": [
+    1,
+    11
+  ]
+}

@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "backend": "native",
+  "rasterEngine": "libreoffice",
+  "source": "saved",
+  "inputPath": "C:\\Users\\admin\\Desktop\\银行智能平台-高呼声AI技能与可嵌入开源项目选型建议-2026-10-17.docx",
+  "sourceSha256": "614ee250edd27924373045f60b3521917cc4f271ed57debe4db2999e6841041b",
+  "dpi": 120,
+  "pageCount": 16,
+  "images": [
+    {
+      "index": 1,
+      "page": 1,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0001.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 128755
+    },
+    {
+      "index": 2,
+      "page": 2,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0002.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 129202
+    },
+    {
+      "index": 3,
+      "page": 3,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0003.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 101319
+    },
+    {
+      "index": 4,
+      "page": 4,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0004.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 85835
+    },
+    {
+      "index": 5,
+      "page": 5,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0005.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 93135
+    },
+    {
+      "index": 6,
+      "page": 6,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0006.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 73238
+    },
+    {
+      "index": 7,
+      "page": 7,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0007.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 74320
+    },
+    {
+      "index": 8,
+      "page": 8,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0008.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 81099
+    },
+    {
+      "index": 9,
+      "page": 9,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0009.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 75572
+    },
+    {
+      "index": 10,
+      "page": 10,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0010.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 82142
+    },
+    {
+      "index": 11,
+      "page": 11,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0011.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 82216
+    },
+    {
+      "index": 12,
+      "page": 12,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0012.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 75169
+    },
+    {
+      "index": 13,
+      "page": 13,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0013.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 80066
+    },
+    {
+      "index": 14,
+      "page": 14,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0014.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 79804
+    },
+    {
+      "index": 15,
+      "page": 15,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0015.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 104122
+    },
+    {
+      "index": 16,
+      "page": 16,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-v2\\page-0016.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 104138
+    }
+  ],
+  "missingFonts": [
+    "Courier"
+  ]
+}

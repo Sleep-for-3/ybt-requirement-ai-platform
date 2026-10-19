@@ -26,7 +26,7 @@ def create_mapping_evidence(
     db: Session = Depends(get_db),
 ) -> MappingEvidenceReference:
     if payload.evidence_type not in MappingEvidenceReference.supported_types():
-        raise HTTPException(status_code=400, detail="Unsupported evidence_type")
+        raise HTTPException(status_code=400, detail="不支持的 evidence_type")
     project_id = _mapping_project_id(db, mapping_type, mapping_id)
     evidence = MappingEvidenceReference(
         project_id=project_id,
@@ -59,7 +59,7 @@ def list_mapping_evidence(mapping_type: str, mapping_id: int, db: Session = Depe
 def delete_mapping_evidence(evidence_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     evidence = db.get(MappingEvidenceReference, evidence_id)
     if evidence is None:
-        raise HTTPException(status_code=404, detail="Mapping evidence not found")
+        raise HTTPException(status_code=404, detail="映射证据不存在")
     db.delete(evidence)
     db.commit()
     return {"status": "deleted"}
@@ -67,7 +67,7 @@ def delete_mapping_evidence(evidence_id: int, db: Session = Depends(get_db)) -> 
 
 def _mapping_project_id(db: Session, mapping_type: str, mapping_id: int) -> int:
     if mapping_type not in VALID_MAPPING_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid mapping_type")
+        raise HTTPException(status_code=400, detail="mapping_type 取值不合法")
     if mapping_type == "source_to_mart":
         mapping = db.get(SourceToMartMapping, mapping_id)
     elif mapping_type == "mart_to_ybt":
@@ -77,5 +77,5 @@ def _mapping_project_id(db: Session, mapping_type: str, mapping_id: int) -> int:
     else:
         mapping = db.get(ScenarioTechnicalLineage, mapping_id)
     if mapping is None:
-        raise HTTPException(status_code=404, detail="Mapping not found")
+        raise HTTPException(status_code=404, detail="映射关系不存在")
     return mapping.project_id

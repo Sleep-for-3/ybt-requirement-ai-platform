@@ -1,0 +1,97 @@
+npm notice run ybt-requirement-ai-platform-frontend@0.1.0 lint
+npm notice run next lint --no-cache
+
+./app/datasources/[datasourceId]/catalog/page.tsx
+63:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/deliverable-templates/page.tsx
+27:37  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/deliverable-templates/[templateId]/page.tsx
+47:88  Warning: React Hook useEffect has a missing dependency: 'loadDetail'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/deliverables/page.tsx
+38:37  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/deliverables/[packageId]/page.tsx
+36:52  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/evaluations/page.tsx
+59:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/fields/[fieldId]/scenarios/page.tsx
+113:52  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/historical-calibers/page.tsx
+46:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/historical-calibers/[importId]/page.tsx
+46:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/jobs/page.tsx
+28:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+33:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/knowledge/search/page.tsx
+24:135  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./app/lineage/impacts/[impactId]/page.tsx
+35:39  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/lineage/scripts/page.tsx
+54:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/lineage/unresolved/page.tsx
+31:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/mart/page.tsx
+28:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/projects/[projectId]/members/page.tsx
+41:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/questions/page.tsx
+63:37  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/tasks/page.tsx
+39:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/tasks/[taskId]/page.tsx
+66:39  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/templates/page.tsx
+40:6  Warning: React Hook useEffect has a missing dependency: 'reload'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/templates/[templateId]/page.tsx
+25:55  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/uat/findings/[findingId]/page.tsx
+29:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/uat/page.tsx
+61:37  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/uat/runs/[runId]/page.tsx
+50:6  Warning: React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+56:6  Warning: React Hook useEffect has missing dependencies: 'load' and 'run'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+82:9  Warning: The 'summary' logical expression could make the dependencies of useMemo Hook (at line 88) change on every render. To fix this, wrap the initialization of 'summary' in its own useMemo() Hook.  react-hooks/exhaustive-deps
+
+./components/knowledge/KnowledgeCitations.tsx
+12:123  Warning: The ref value 'generation.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'generation.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./lib/knowledge-contract.d.mts
+2:128  Error: Parsing error: Missing initializer in const declaration. (2:128)
+
+./lib/lineage-nebula.d.mts
+1:44  Error: Parsing error: Missing initializer in const declaration. (1:44)
+
+./lib/navigation-contract.d.mts
+43:53  Error: Parsing error: Missing initializer in const declaration. (43:53)
+
+./lib/navigation-contract.mjs
+95:5  Error: Do not assign to the variable `module`. See: https://nextjs.org/docs/messages/no-assign-module-variable  @next/next/no-assign-module-variable
+
+./lib/request-timeout.d.mts
+1:47  Error: Parsing error: Missing initializer in const declaration. (1:47)
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules

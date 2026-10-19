@@ -60,7 +60,7 @@ def test_authorized_route_is_retired_without_generation_or_mutation(monkeypatch)
     assert response.status_code == 410
     assert response.json()["detail"] == {
         "code": "legacy-mapping-generator-retired",
-        "message": "Legacy field mapping generation has been retired",
+        "message": "旧版字段映射生成能力已下线",
         "replacement_routes": [
             "/api/source-to-mart-mappings/{mapping_id}/generate-draft",
             "/api/mart-to-ybt-mappings/{mapping_id}/generate-draft",
@@ -79,7 +79,7 @@ def test_missing_and_foreign_fields_do_not_disclose_retirement_detail() -> None:
             json={},
         )
         assert missing.status_code == 404
-        assert missing.json()["detail"] == "Target field not found"
+        assert missing.json()["detail"] == "目标字段不存在"
 
         viewer_id = _seed_viewer(sessions, fixture["project_id"])
         app.dependency_overrides[get_current_principal] = lambda: Principal(

@@ -11,6 +11,7 @@ import { PageState } from "@/components/feedback/PageState";
 import { apiGet, apiPost } from "@/lib/api";
 import { institutionRoleLabel } from "@/lib/permission-language.mjs";
 import { statusLabel } from "@/lib/product-language";
+import { describeError } from "@/lib/user-message.mjs";
 
 type Institution = { id: number; institution_name: string };
 type AdminUser = {
@@ -41,7 +42,7 @@ export default function Page() {
       setInstitutions(nextInstitutions);
       setUsers(nextUsers);
       setMsg("");
-    }).catch((error) => setMsg(error instanceof Error ? error.message : "用户目录加载失败"));
+    }).catch((error) => setMsg(describeError(error, "用户目录加载失败，请稍后重试。")));
   }, []);
 
   async function create(event: FormEvent<HTMLFormElement>) {
@@ -67,7 +68,7 @@ export default function Page() {
       setCreateOpen(false);
       setMsg("用户已创建，密码仅保存为 Argon2 哈希");
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "创建失败");
+      setFormError(describeError(error, "用户创建失败，请检查填写内容后重试。"));
     } finally {
       setCreating(false);
     }

@@ -32,6 +32,7 @@ from app.models import (
     TargetField,
 )
 from app.services.asset_display import AssetDisplayResolver, LAYER_NAMES
+from app.services.governance.labels import evidence_type_label
 from app.services.security import redact_content
 from app.services.lineage.view_projection import project_nodes, validate_view
 
@@ -269,7 +270,7 @@ class LineagePathResolver:
                     self._broken_mapping_gap(
                         "source_to_mart",
                         mapping.id,
-                        f"来源证据 {ref.evidence_type}:{ref.evidence_id} 不存在或越出项目范围",
+                        f"来源证据 {evidence_type_label(ref.evidence_type)}（编号 {ref.evidence_id}）不存在或越出项目范围",
                         [mart_id],
                     )
                     continue

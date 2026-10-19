@@ -13,7 +13,7 @@ router = APIRouter(tags=["product scenarios"])
 @router.post("/projects/{project_id}/scenarios", response_model=ProductScenarioRead)
 def create_scenario(project_id: int, payload: ProductScenarioCreate, db: Session = Depends(get_db)) -> ProductScenario:
     if db.get(Project, project_id) is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="项目不存在")
     scenario = ProductScenario(project_id=project_id, **payload.model_dump())
     db.add(scenario)
     _commit_or_conflict(db)
@@ -52,14 +52,14 @@ def delete_scenario(scenario_id: int, db: Session = Depends(get_db)) -> dict[str
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Scenario is already in use") from exc
+        raise HTTPException(status_code=409, detail="场景已被引用，无法删除") from exc
     return {"status": "deleted"}
 
 
 def _get_scenario_or_404(db: Session, scenario_id: int) -> ProductScenario:
     scenario = db.get(ProductScenario, scenario_id)
     if scenario is None:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+        raise HTTPException(status_code=404, detail="场景不存在")
     return scenario
 
 
@@ -68,4 +68,4 @@ def _commit_or_conflict(db: Session) -> None:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="scenario_code must be unique within a project") from exc
+        raise HTTPException(status_code=409, detail="同一项目内 scenario_code 不能重复") from exc

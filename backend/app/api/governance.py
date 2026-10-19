@@ -23,10 +23,10 @@ def list_project_members(project_id: int, principal: RealPrincipal, db: Session 
 def add_project_member(project_id: int, payload: ProjectMembershipCreate, principal: RealPrincipal, db: Session = Depends(get_db)) -> ProjectMembership:
     project = PermissionService(db, principal).require_project_permission(project_id, "project.manage")
     if payload.project_role not in PROJECT_ROLE_PERMISSIONS:
-        raise HTTPException(status_code=400, detail="Invalid project role")
+        raise HTTPException(status_code=400, detail="项目角色不合法")
     user = db.get(User, payload.user_id)
     if user is None or user.status != "active":
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="用户不存在")
     if project.institution_id is not None:
         institution_member = db.scalar(select(InstitutionMembership.id).where(
             InstitutionMembership.institution_id == project.institution_id,
@@ -34,7 +34,7 @@ def add_project_member(project_id: int, payload: ProjectMembershipCreate, princi
             InstitutionMembership.status == "active",
         ).limit(1))
         if institution_member is None:
-            raise HTTPException(status_code=400, detail="User is not an active member of the project institution")
+            raise HTTPException(status_code=400, detail="用户不是该项目所属机构的有效成员")
     membership = db.scalar(select(ProjectMembership).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == user.id))
     if membership is None:
         membership = ProjectMembership(project_id=project_id, user_id=user.id, project_role=payload.project_role, status="active", created_by=principal.user_id)

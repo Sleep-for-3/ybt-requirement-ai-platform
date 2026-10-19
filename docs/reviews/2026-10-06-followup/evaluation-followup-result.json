@@ -1,0 +1,197 @@
+{
+  "scope": "actual evaluator->grounded_answer->runtime, retriever/model boundary spies; memory SQLite",
+  "explicit_selection_fixed": {
+    "recorded": "model-B",
+    "calls": [
+      {
+        "model_profile_id": 2,
+        "model": "model-B"
+      },
+      {
+        "model_profile_id": 2,
+        "model": "model-B"
+      }
+    ],
+    "pass": true
+  },
+  "default_selection_metadata_mismatch": {
+    "recorded_chat_model": null,
+    "recorded_chat_profile_id": null,
+    "actual_runtime": [
+      {
+        "model_profile_id": 1,
+        "model": "model-A"
+      },
+      {
+        "model_profile_id": 1,
+        "model": "model-A"
+      }
+    ],
+    "result_metadata": {
+      "execution_kind": "mock_model",
+      "provider": "mock",
+      "provider_type": "mock",
+      "model_name": "model-A",
+      "model_profile_id": 1,
+      "prompt_key": "regulatory_field_explanation",
+      "prompt_version": 1,
+      "skill_key": "regulatory_field_explanation",
+      "skill_version": "v1",
+      "context_hash": null,
+      "context_complete": true,
+      "context_budget": null,
+      "output_hash": "a387db2e3fb2a88d36fa90643bf93eb48f5368d6416784ca26e8586d15059925",
+      "citations": [],
+      "rejected_claims": [],
+      "degraded_reason": null,
+      "answer_status": "grounded"
+    }
+  },
+  "partial_degrade_ui_missing_denominator": {
+    "status": "completed",
+    "metrics": {
+      "case_count": 2,
+      "successful_query_count": 1,
+      "retrieval_only_query_count": 1,
+      "degraded_query_count": 1,
+      "failed_query_count": 0,
+      "answer_coverage_denominator": 2,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "source_hit_rate": 1.0,
+      "table_hit_rate": 1.0,
+      "field_hit_rate": 1.0,
+      "citation_coverage": 1.0,
+      "groundedness": 1.0,
+      "answer_correctness": 1.0,
+      "answer_correctness_denominator": 1,
+      "keyword_coverage": 1.0,
+      "retrieval_latency_p50_ms": 1.0,
+      "retrieval_latency_p95_ms": 1.0,
+      "answer_latency_ms": 1.0,
+      "average_latency_ms": 2.0,
+      "indexing_throughput_chunks_per_second": 0.0,
+      "token_usage_total": 0
+    },
+    "result_statuses": [
+      "grounded",
+      "degraded"
+    ]
+  },
+  "citation_keyword_still_scores_as_answer": {
+    "metrics": {
+      "case_count": 2,
+      "successful_query_count": 2,
+      "retrieval_only_query_count": 0,
+      "degraded_query_count": 0,
+      "failed_query_count": 0,
+      "answer_coverage_denominator": 2,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "mrr": 1.0,
+      "source_hit_rate": 1.0,
+      "table_hit_rate": 1.0,
+      "field_hit_rate": 1.0,
+      "citation_coverage": 1.0,
+      "groundedness": 1.0,
+      "answer_correctness": 1.0,
+      "answer_correctness_denominator": 2,
+      "keyword_coverage": 1.0,
+      "retrieval_latency_p50_ms": 1.0,
+      "retrieval_latency_p95_ms": 1.0,
+      "answer_latency_ms": 1.0,
+      "average_latency_ms": 2.0,
+      "indexing_throughput_chunks_per_second": 0.0,
+      "token_usage_total": 0
+    },
+    "answer": "请确认其他业务",
+    "citation": [
+      {
+        "knowledge_unit_id": 1,
+        "document_id": 1,
+        "document_version_id": 1,
+        "chunk_id": null,
+        "content_hash": null,
+        "embedding_index_version_id": null,
+        "source_file_name": null,
+        "source_sheet_name": null,
+        "source_cell_range": null,
+        "source_page_no": null,
+        "source_heading": null,
+        "source_category": null,
+        "publisher": null,
+        "regulatory_version": null,
+        "internal_revision": null,
+        "effective_at": null,
+        "lifecycle_status": null,
+        "authority_rank": 6,
+        "historical": null,
+        "citation_id": "knowledge-unit-1",
+        "citation_type": "knowledge_document",
+        "source_type": "regulatory_policy",
+        "project_id": 1,
+        "label": "文档证据",
+        "quoted_content": "余额规则 ECIF CUSTOMER BALANCE",
+        "href": "/knowledge/documents/1/preview?project_id=1&version_id=1",
+        "locator": {
+          "block_id": "knowledge-unit-1",
+          "page_no": null,
+          "sheet_name": null,
+          "cell_range": null,
+          "text_quote": "余额规则 ECIF CUSTOMER BALANCE"
+        }
+      }
+    ]
+  },
+  "policy_denial_reason_is_overwritten": {
+    "answer": "模型生成暂时不可用，以下为检索到的证据，结论待确认。",
+    "result_execution_metadata": {
+      "execution_kind": "degraded",
+      "provider": "mock",
+      "provider_type": "mock",
+      "model_name": "model-A",
+      "model_profile_id": 1,
+      "prompt_key": "regulatory_field_explanation",
+      "prompt_version": 1,
+      "skill_key": "regulatory_field_explanation",
+      "skill_version": "v1",
+      "context_hash": null,
+      "context_complete": true,
+      "context_budget": null,
+      "output_hash": null,
+      "citations": [],
+      "rejected_claims": [],
+      "degraded_reason": null,
+      "answer_status": "degraded"
+    },
+    "degraded_count": 2
+  },
+  "dataset_snapshot_not_frozen": {
+    "initial_dataset_hash": "8be3d71d8e1fc30e0c95ab079bb805ec23ac5356f949ee27f88bc7f830e934d1",
+    "run_dataset_hash": "8be3d71d8e1fc30e0c95ab079bb805ec23ac5356f949ee27f88bc7f830e934d1",
+    "actual_executed_queries": [
+      "初始问题-1",
+      "并发修改后的第二个问题"
+    ],
+    "live_cases_hash": "75d0dd7de6775971531096921058b8ce8705cba97f51345abc98231099a0ae35",
+    "run_has_full_case_snapshot": false,
+    "result_points_to_mutable_case_id": 2,
+    "run_config_keys": [
+      "chat_model",
+      "chat_profile_id",
+      "chat_provider",
+      "dataset_version",
+      "embedding_model",
+      "embedding_provider",
+      "executed_at",
+      "index_version",
+      "keyword_weight",
+      "milvus_collection",
+      "retrieval_mode",
+      "top_k",
+      "vector_dimension",
+      "vector_weight"
+    ]
+  }
+}

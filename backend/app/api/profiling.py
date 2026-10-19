@@ -14,10 +14,10 @@ router=APIRouter(tags=["column profiling"])
 @router.post("/catalog/columns/{column_id}/profile")
 def profile(column_id:int,payload:ColumnProfileRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     column=db.get(CatalogColumn,column_id)
-    if column is None:raise HTTPException(404,"Catalog column not found")
+    if column is None:raise HTTPException(404,"数据目录字段不存在")
     recommendation=db.get(CandidateSourceRecommendation,payload.source_recommendation_id)
-    if recommendation is None or not recommendation.selected_flag:raise HTTPException(400,"Source recommendation must be selected before profiling")
-    if recommendation.catalog_column_id!=column.id or recommendation.target_field_id!=payload.target_field_id or recommendation.scenario_id!=payload.scenario_id:raise HTTPException(400,"Selected recommendation does not match the requested catalog field and scenario")
+    if recommendation is None or not recommendation.selected_flag:raise HTTPException(400,"请先选择来源推荐再执行数据探查")
+    if recommendation.catalog_column_id!=column.id or recommendation.target_field_id!=payload.target_field_id or recommendation.scenario_id!=payload.scenario_id:raise HTTPException(400,"所选推荐与请求的数据目录字段和场景不匹配")
     project=PermissionService(db,principal).require_project_permission(column.project_id,"profile.request")
     job=submit_project_job(db,project,principal,job_type="column_profile",payload={"column_id":column.id,"request":payload.model_dump(mode="json")},handler=column_profile_handler)
     task_id=(job.result_summary_json or {}).get("profile_task_id")
@@ -25,7 +25,7 @@ def profile(column_id:int,payload:ColumnProfileRequest,principal:CurrentPrincipa
 @router.get("/profile-tasks/{task_id}",response_model=ColumnProfileTaskRead)
 def task(task_id:int,db:Session=Depends(get_db)):
     item=db.get(ColumnProfileTask,task_id)
-    if item is None:raise HTTPException(404,"Profile task not found")
+    if item is None:raise HTTPException(404,"数据探查任务不存在")
     return item
 @router.get("/catalog/columns/{column_id}/profiles",response_model=list[ColumnProfileSnapshotRead])
 def profiles(column_id:int,db:Session=Depends(get_db)):

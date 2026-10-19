@@ -61,7 +61,7 @@ try {
   await panel.getByRole("button", { name: / · 业务$/ }).click();
   const dialog = page.getByRole("dialog", { name: "候选差异", exact: true });
   const provenance = dialog.getByRole("region", { name: "候选生成来源", exact: true });
-  await provenance.getByText(/Skill 固定版本 v1/).waitFor();
+  await provenance.getByText(/技能固定版本 v1/).waitFor();
   assert.match(await provenance.innerText(), /Mock/);
   await provenance.getByText("查看运行来源", { exact: true }).click();
   assert.match(await provenance.innerText(), /requirement_candidate_generation/);
@@ -104,7 +104,7 @@ try {
   await sources.nth(1).waitFor();
   assert.equal(await sources.count(), 2);
   for (const source of await sources.all()) {
-    assert.match(await source.innerText(), /Skill 固定版本 v1.*Mock/);
+    assert.match(await source.innerText(), /技能固定版本 v1.*模拟/);
     await source.getByText("查看运行来源", { exact: true }).click();
     assert.match(await source.innerText(), /mock-llm/);
   }

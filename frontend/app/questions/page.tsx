@@ -7,6 +7,8 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { PendingQuestion, ProjectMembership, TargetField, TargetTable, apiDownload, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError } from "@/lib/user-message.mjs";
+import { priorityLabel, projectRoleLabel, questionTypeLabel, sourceTypeLabel, statusLabel } from "@/lib/product-language";
 
 const ROLES = ["business_analyst","technical_analyst","business_reviewer","technical_reviewer","final_reviewer","project_manager","auditor"];
 
@@ -235,12 +237,12 @@ export default function Page() {
                 <div>
                   <b className="text-sm text-ink">{question.question_text}</b>
                   <p className="mt-1 text-xs text-slate-500">
-                    {question.question_type} · 表 #{question.target_table_id} · 字段 #{question.target_field_id || "-"} · 来源 {question.source_type || "人工"} #{question.source_id || "-"}
+                    {questionTypeLabel(question.question_type)} · 表 #{question.target_table_id} · 字段 #{question.target_field_id || "-"} · 来源 {question.source_type ? sourceTypeLabel(question.source_type) : "人工"} #{question.source_id || "-"}
                   </p>
                 </div>
                 <div className="flex items-start gap-1.5">
-                  <span className={priorityBadge(question.priority)}>{question.priority}</span>
-                  <span className={statusBadge(question.question_status)}>{question.question_status}</span>
+                  <span className={priorityBadge(question.priority)}>{priorityLabel(question.priority)}</span>
+                  <span className={statusBadge(question.question_status)}>{statusLabel(question.question_status)}</span>
                 </div>
               </div>
               {question.resolution_text ? (
@@ -285,7 +287,7 @@ export default function Page() {
                   >
                     <option value="">分派项目成员</option>
                     {members.map(member => (
-                      <option value={member.user_id} key={member.id}>用户 #{member.user_id} · {member.project_role}</option>
+                      <option value={member.user_id} key={member.id}>用户 #{member.user_id} · {projectRoleLabel(member.project_role)}</option>
                     ))}
                   </select>
                 ) : null}
@@ -329,5 +331,5 @@ function saveBlob(blob: Blob, name: string) {
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
+  return describeError(error, "操作未完成，请稍后重试。");
 }

@@ -7,6 +7,8 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost, apiPut } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError } from "@/lib/user-message.mjs";
+import { statusLabel } from "@/lib/product-language";
 
 type Layer = {key:string;name:string;active:boolean};
 type Definition = {layers:Layer[];relations:{from:string;to:string}[]};
@@ -35,7 +37,7 @@ export default function Page(){
   const [suggestion,setSuggestion]=useState<{id:number;key:string;sequence:number}|null>(null);
   useEffect(()=>{setDraft(query.data?.definition??{layers:[],relations:[]});setVersion(query.data?.version??0);setMessage("");},[query.data,projectId,scope]);
   useEffect(()=>{setScope("project");},[projectId]);
-  async function run(action:()=>Promise<unknown>){setBusy(true);setMessage("");try{await action();await query.refetch();setMessage("已保存");}catch(error){setMessage(error instanceof Error?error.message:"保存失败");}finally{setBusy(false);}}
+  async function run(action:()=>Promise<unknown>){setBusy(true);setMessage("");try{await action();await query.refetch();setMessage("已保存");}catch(error){setMessage(describeError(error,"保存未完成，请稍后重试。"));}finally{setBusy(false);}}
   function move(index:number,offset:number){const layers=[...draft.layers];[layers[index],layers[index+offset]]=[layers[index+offset],layers[index]];setDraft({...draft,layers});}
   return <main><WorkspaceHeader title="数据架构与表归属" meta="项目架构独立维护。未分类表保留原状，停用层级保留历史引用。"/><div className="mx-auto max-w-7xl space-y-5 p-4 lg:p-6">
     {query.isError?<p role="alert">架构加载失败。<button onClick={()=>void query.refetch()}>重试</button></p>:null}
@@ -71,7 +73,7 @@ function TableAssignment({table,layers,options,suggestion,disabled,apply}:{table
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <label className="min-w-0 text-xs">数据层级<select className="control mt-1" aria-label={`${table.table_name} 层级`} value={draft.layer_key??""} disabled={disabled} onChange={e=>setDraft({...draft,layer_key:e.target.value||null})}><option value="">未分类</option>{layers.map(layer=><option value={layer.key} key={layer.key} disabled={!layer.active}>{layer.name}{layer.active?"":"（停用）"}</option>)}</select></label>
       <label className="min-w-0 text-xs">业务系统<select className="control mt-1" aria-label={`${table.table_name} 业务系统`} value={draft.business_system_id??""} disabled={disabled} onChange={e=>setDraft({...draft,business_system_id:Number(e.target.value)||null})}><option value="">未关联</option>{options?.business_systems.map(s=><option value={s.id} key={s.id} disabled={!s.enabled}>{s.name} ({s.code}){s.enabled?"":"（停用）"}</option>)}</select></label>
-      <label className="min-w-0 text-xs">监管模板版本<select className="control mt-1" aria-label={`${table.table_name} 监管模板版本`} value={draft.template_version_id??""} disabled={disabled} onChange={e=>setDraft({...draft,template_version_id:Number(e.target.value)||null,target_table_id:null})}><option value="">未关联</option>{options?.templates.map(t=><option value={t.id} key={t.id}>{t.code} · v{t.version_no} · {t.status}</option>)}</select></label>
+      <label className="min-w-0 text-xs">监管模板版本<select className="control mt-1" aria-label={`${table.table_name} 监管模板版本`} value={draft.template_version_id??""} disabled={disabled} onChange={e=>setDraft({...draft,template_version_id:Number(e.target.value)||null,target_table_id:null})}><option value="">未关联</option>{options?.templates.map(t=><option value={t.id} key={t.id}>{t.code} · v{t.version_no} · {statusLabel(t.status)}</option>)}</select></label>
       <label className="min-w-0 text-xs">监管标准表<select className="control mt-1" aria-label={`${table.table_name} 监管标准表`} value={draft.target_table_id??""} disabled={disabled||!template} onChange={e=>setDraft({...draft,target_table_id:Number(e.target.value)||null})}><option value="">未关联</option>{options?.targets.filter(t=>template?.target_ids.includes(t.id)).map(t=><option value={t.id} key={t.id}>{t.code} · {t.name}</option>)}</select></label>
     </div>
     <button className="button-secondary" disabled={disabled||Boolean(draft.template_version_id)!==Boolean(draft.target_table_id)} onClick={()=>void apply(draft)}>确认归属</button>
@@ -82,9 +84,9 @@ function ClassificationSuggestions({projectId,layers,onSelect}:{projectId:number
   const [rule,setRule]=useState({database_name:"",schema_name:"",table_prefix:"",layer_key:""});
   const [rows,setRows]=useState<(Table&{suggested_layer_keys:string[]})[]>([]);
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
-  async function preview(){setBusy(true);setError("");setRows([]);try{setRows(await apiPost(`/projects/${projectId}/data-architecture/suggestions`,{rules:[rule]}));}catch(e){setError(e instanceof Error?e.message:"建议读取失败");}finally{setBusy(false);}}
+  async function preview(){setBusy(true);setError("");setRows([]);try{setRows(await apiPost(`/projects/${projectId}/data-architecture/suggestions`,{rules:[rule]}));}catch(e){setError(describeError(e,"分类建议读取未完成，请稍后重试。"));}finally{setBusy(false);}}
   return <details className="mb-4 border-y py-3"><summary className="text-sm font-medium">分类建议</summary><div className="my-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-    {(["database_name","schema_name","table_prefix"] as const).map((key,index)=><label className="text-xs" key={key}>{["数据库","Schema","表名前缀"][index]}<input className="control mt-1" value={rule[key]} disabled={busy} onChange={e=>{setRule({...rule,[key]:e.target.value});setRows([]);}}/></label>)}
+    {(["database_name","schema_name","table_prefix"] as const).map((key,index)=><label className="text-xs" key={key}>{["数据库","数据模式","表名前缀"][index]}<input className="control mt-1" value={rule[key]} disabled={busy} onChange={e=>{setRule({...rule,[key]:e.target.value});setRows([]);}}/></label>)}
     <label className="text-xs">建议层级<select className="control mt-1" value={rule.layer_key} disabled={busy} onChange={e=>{setRule({...rule,layer_key:e.target.value});setRows([]);}}><option value="">选择层级</option>{layers.filter(l=>l.active).map(l=><option key={l.key} value={l.key}>{l.name}</option>)}</select></label>
   </div><button className="button-secondary" disabled={busy||!rule.layer_key||!(rule.database_name||rule.schema_name||rule.table_prefix)} onClick={()=>void preview()}>预览分类建议</button>
     {error&&<p role="alert">{error}</p>}{rows.map(row=><div className="my-2 flex flex-wrap items-center gap-2 text-xs" key={row.catalog_table_id}><span className="break-all">{[row.database_name,row.schema_name,row.table_name].filter(Boolean).join(".")}</span>{row.suggested_layer_keys.map(key=><button className="button-secondary" key={key} onClick={()=>onSelect(row.catalog_table_id,key)}>选择 {layers.find(l=>l.key===key)?.name}（待确认）</button>)}</div>)}

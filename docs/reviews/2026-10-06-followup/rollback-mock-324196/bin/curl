@@ -1,0 +1,9 @@
+#!/bin/bash
+printf '%s\n' "$*" >> "$FAKE_STATE/curl-trace.log"
+if [[ "$*" == *'/health/ready'* ]]; then exit 22; fi
+if [[ "$*" == *'/version'* ]]; then
+  printf '{"app_commit":"SYNTHETIC_A","build_time":"2026-01-01T00:00:00Z","schema_head":"202610060001"}\n'
+  exit 0
+fi
+echo 'unsupported fake curl call' >&2
+exit 92

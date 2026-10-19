@@ -211,6 +211,25 @@ FORBIDDEN_PLANNER_INPUT_KEYS: frozenset[str] = frozenset({
 MAX_REASON_CHARS = 2000
 
 
+def _contract_input(step: PlannedStep, spec, subject: dict[str, Any] | None) -> dict[str, Any]:
+    """The payload a step's own input contract is checked against.
+
+    A step's input may omit a value the plan resolves from the subject (the tool would
+    then be executed with the subject-supplied value, and the missing key is not a
+    defect). Only keys the tool actually declares are filled, so the check stays inside
+    the registry contract and cannot mask an unknown key.
+    """
+
+    payload = dict(step.input or {})
+    declared = spec.input_schema.get("properties") or {}
+    resolved = {
+        key: value for key, value in (subject or {}).items()
+        if key in declared and payload.get(key) is None
+    }
+    payload.update(resolved)
+    return payload
+
+
 def validate_plan_draft_detailed(
     draft: PlanDraft,
     *,
@@ -251,7 +270,11 @@ def validate_plan_draft_detailed(
             continue
 
         # 2-4: the tool's own input contract (required keys, unknown keys, types).
-        for message in validate_input(spec.input_schema, step.input):
+        # The subject is the authoritative source for the field a step works on, and the
+        # registry contract is checked against what the step will actually be executed
+        # with. Validating the bare step.input instead rejected plans whose field came
+        # from the subject, then fell back to a weaker plan for no reason.
+        for message in validate_input(spec.input_schema, _contract_input(step, spec, draft.subject)):
             issues.append(PlanValidationIssue(code="tool_input_invalid", step_key=step.step_key,
                                               message=f"{step.step_key}: {message}"))
         # 15-19: no shell / raw SQL execution / HTTP / dynamic registration / evidence bypass.

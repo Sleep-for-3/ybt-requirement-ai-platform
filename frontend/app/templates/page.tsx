@@ -9,6 +9,8 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { TemplateDocument, TemplateUploadResponse, apiGet, uploadForm } from "@/lib/api";
+import { describeError } from "@/lib/user-message.mjs";
+import { parseStatusLabel } from "@/lib/product-language";
 
 const PARSE_BADGE: Record<string, string> = {
   success: "badge-success",
@@ -54,7 +56,7 @@ export default function Page() {
       setUploadOpen(false);
       await reload();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "上传失败");
+      setFormError(describeError(error, "模板上传失败，请检查文件后重试。"));
     } finally {
       setUploading(false);
     }
@@ -87,7 +89,7 @@ export default function Page() {
               <Link className="grid-row grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_160px_150px_32px] sm:items-center" href={`/templates/${item.id}?returnTo=${encodeURIComponent("/templates")}`} key={item.id}>
                 <div className="min-w-0"><div className="truncate font-medium text-ink">{item.display_name || item.file_name}</div><div className="mt-1 truncate text-xs text-slate-500">{item.template_code || "历史导入 · 待补稳定标识"}</div></div>
                 <div>
-                  <span className={PARSE_BADGE[item.parse_status] || "badge-neutral"}>{item.parse_status}</span>
+                  <span className={PARSE_BADGE[item.parse_status] || "badge-neutral"}>{parseStatusLabel(item.parse_status)}</span>
                 </div>
                 <div className="text-sm">{item.current_version_id?"已有生效版本":"尚未激活"}</div><ArrowRight aria-label="查看详情" size={18}/>
               </Link>
@@ -101,7 +103,7 @@ export default function Page() {
           </div>
         )}
       </div>
-      <ModalDialog description="上传后进入草稿，需完成差异预览、人工审核和激活，才允许 Apply。" onClose={requestCloseUpload} open={uploadOpen} title="上传一表通模板版本">
+      <ModalDialog description="上传后进入草稿，需完成差异预览、人工审核和激活，才允许应用。" onClose={requestCloseUpload} open={uploadOpen} title="上传一表通模板版本">
         <form className="max-h-[72vh] space-y-4 overflow-auto pr-1" onChange={() => setDirty(true)} onSubmit={upload}>
           {formError ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{formError}</p> : null}
           <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm font-medium text-ink">稳定模板代码<input className="control mt-1.5" name="template_code" placeholder="例如 YBT_CUSTOMER" required /></label><label className="block text-sm font-medium text-ink">模板名称<input className="control mt-1.5" name="display_name" placeholder="例如 客户信息监管模板" required /></label></div>

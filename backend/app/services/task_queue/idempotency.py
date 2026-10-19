@@ -59,10 +59,17 @@ def create_or_get_job(
     created_by: int,
     idempotency_key: str,
     payload_summary: dict[str, Any],
+    commit: bool = True,
 ) -> tuple[BackgroundJob, bool]:
     """
     Insert behind the existing unique constraint and recover from a concurrent
     winner. The savepoint keeps the caller's transaction usable after conflict.
+
+    ``commit=False`` keeps the new job row inside the caller's transaction: the row is
+    inserted and flushed, but not committed, so a caller can make "this job exists" and
+    its own state change atomic (the outbox pattern). The row is still visible to the
+    caller's session and the savepoint still isolates a concurrent unique-constraint
+    loser. Callers that pass ``commit=False`` own the commit and the refresh.
     """
     scoped_key = scoped_idempotency_key(
         institution_id=institution_id,
@@ -103,8 +110,14 @@ def create_or_get_job(
         return existing, True
     else:
         savepoint.commit()
-        db.commit()
-        db.refresh(job)
+        if commit:
+            db.commit()
+            db.refresh(job)
+        else:
+            # Outbox mode: the row stays pending so the caller can commit it together with
+            # the state that motivated it. It is already flushed, so the id is assigned and
+            # the unique key is reserved for the rest of the transaction.
+            db.flush()
         setattr(job, "submission_deduplicated", False)
         return job, False
 

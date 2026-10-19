@@ -9,7 +9,7 @@ import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { NaturalLanguageTask, NaturalLanguageTaskCreateResponse, apiGet, apiPost } from "@/lib/api";
 import { statusLabel, workflowStepLabel } from "@/lib/product-language";
-
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 function statusBadge(status: string) {
   if (["approved", "success", "completed", "enabled"].includes(status)) return "badge-success";
   if (["failed", "rejected", "error"].includes(status)) return "badge-danger";
@@ -50,7 +50,7 @@ export default function Page() {
       setMessage(result.message);
       await reload();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建失败");
+      setMessage(describeError(error, "任务创建失败，请检查输入后重试。"));
     } finally {
       setCreating(false);
     }
@@ -62,7 +62,7 @@ export default function Page() {
       setMessage("安全查询任务已执行");
       await reload();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "执行失败");
+      setMessage(describeError(error, "任务执行未完成，请稍后重试。"));
     }
   }
 
@@ -144,7 +144,7 @@ export default function Page() {
                       <span className={statusBadge(item.status)}>{statusLabel(item.status)}</span>
                       <span className="text-sm text-slate-500">{item.datasource_name || "数据源待识别"}</span>
                     </div>
-                    {item.error_message ? <p className="mt-1.5 text-sm text-slate-500">{item.error_message}</p> : null}
+                    {item.error_message ? <p className="mt-1.5 text-sm text-slate-500">{describeUserMessage(item.error_message, "任务未完成，请稍后重试。")}</p> : null}
                   </div>
                   <button className="button-secondary" disabled={item.status === "completed"} onClick={() => run(item.id)}>
                     <Play size={16} />

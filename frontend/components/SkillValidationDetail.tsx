@@ -5,6 +5,8 @@ const GATES: Record<string, string> = {
   release_gate_failed: "缺少当前版本的有效测试，或测试未通过。请重新运行确定性及对应模型测试。",
   test_project_required: "请选择测试项目", skill_dependency_changed: "依赖已变化，请恢复为新草稿重新测试。",
 };
+import { describeErrorCode } from "@/lib/user-message.mjs";
+
 const ASSERTIONS: Record<string, string> = {
   schema: "输入结构", scope: "项目范围", budget: "上下文预算", unknown_reference_rejected: "拒绝未知引用",
   native_unknown_reference_rejected: "拒绝未知业务引用", native_unknown_physical_source_rejected: "拒绝未知物理来源",
@@ -23,7 +25,7 @@ export function SkillValidationDetail({ value }: { value: unknown }) {
     {detail.gate && <><h3 className="font-semibold">发布条件</h3><p>{GATES[detail.gate] || detail.gate}</p><p>{detail.release_ready ? "已具备提交给独立审批人的发布条件。" : "当前尚不能发布；请完成测试并提交独立审批。"}</p></>}
     {detail.metrics && <><h3 className="font-semibold">测试结果</h3><p>{detail.metrics.passed} / {detail.metrics.total} 个用例通过{detail.status === "pending_review" ? "，等待独立人工评审" : ""}。</p></>}
     {detail.results?.map(result => <div key={result.case_id} className="rounded border bg-white p-2"><p className={result.passed === null ? "text-amber-800" : result.passed ? "text-emerald-800" : "text-red-800"}>用例 #{result.case_id} · {result.passed === null ? "待人工评审" : result.passed ? "通过" : "未通过"}</p>
-      {result.error_code && <p>错误：{result.error_code}</p>}
+      {result.error_code && <p>错误：{describeErrorCode(result.error_code, "测试用例未通过")}</p>}
       <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">{Object.entries(result.assertions).map(([key, passed]) => <li key={key}>{ASSERTIONS[key] || key}：{passed ? "通过" : "未通过"}</li>)}</ul></div>)}
     {detail.changes && <><h3 className="font-semibold">版本对比：v{detail.from_version} → v{detail.to_version}</h3>
       {!detail.changes.length && <p>两个版本的配置内容相同。</p>}

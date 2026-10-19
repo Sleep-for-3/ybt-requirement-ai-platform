@@ -42,7 +42,7 @@ def list_notifications(principal: RealPrincipal, unread_only: bool = False, db: 
 def mark_read(notification_id: int, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
     notification = db.get(Notification, notification_id)
     if notification is None or notification.user_id != principal.user_id:
-        raise HTTPException(status_code=404, detail="Notification not found")
+        raise HTTPException(status_code=404, detail="通知不存在")
     notification.read_at = datetime.now(UTC)
     db.commit()
     return {"status": "read"}

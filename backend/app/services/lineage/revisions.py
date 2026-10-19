@@ -31,7 +31,7 @@ from app.models import (
     ScriptFileVersion,
 )
 from app.services.asset_display import AssetDisplayResolver
-
+from app.services.governance.labels import parse_status_label
 
 PARSER_VERSION = "lineage-revision-v1"
 _PARSE_WARNING_STATUSES = {"pending", "failed", "partially_parsed"}
@@ -529,7 +529,7 @@ class LineageRevisionService:
     @staticmethod
     def _warnings(versions: list[ScriptFileVersion], nodes: list[LineageNode], edges: list[LineageEdge]) -> list[str]:
         warnings = [
-            f"脚本版本 {version.id} 解析状态为 {version.parse_status}，当前血缘版本需要审核"
+            f"脚本版本 {version.id} 解析状态为{parse_status_label(version.parse_status)}，当前血缘版本需要审核"
             for version in versions if version.parse_status in _PARSE_WARNING_STATUSES
         ]
         if versions and not nodes and not edges:

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { EvidenceDisclosure } from "@/components/semantic-catalog/EvidenceDisclosure";
 import { SemanticLifecycle, SemanticReview, semanticConceptTypeLabel } from "@/components/semantic-catalog/SemanticStatus";
 import { conflictSourceCollectionModel } from "@/lib/semantic-detail-contract.mjs";
+import { authorityLabel, sourceTypeLabel, statusLabel } from "@/lib/product-language";
 import type { SemanticDetailConflict } from "@/lib/semantic-catalog-view-model.mjs";
 import type { DetailQueryState, SemanticDetailShell } from "@/lib/semantic-catalog-view-model.mjs";
 
@@ -44,7 +45,7 @@ export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: 
 
         {query.as_of ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold-200 bg-gold-50 px-4 py-3 text-sm text-gold-900" role="status">
-            <span>Viewing as of <time dateTime={query.as_of}>{query.as_of}</time> · 当前正在查看历史语义版本</span>
+            <span>当前查看的是 <time dateTime={query.as_of}>{query.as_of}</time> 时点的历史语义版本</span>
             <button className="button-secondary min-h-11" onClick={onReturnCurrent} type="button">返回当前版本</button>
           </div>
         ) : null}
@@ -66,8 +67,8 @@ export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: 
           {version ? <p className="mt-3 max-w-5xl whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{version.definition || "该正式版本未提供定义文本。"}</p> : <p className="mt-3 text-sm text-slate-600">暂无正式版本</p>}
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Meta label="业务域" value={version?.business_domain || "未分类"} />
-            <Meta label="Owner" value={version?.owner_department || "未提供"} />
-            <Meta label="来源类型" value={version?.source_type || "暂无正式来源"} />
+            <Meta label="责任部门" value={version?.owner_department || "未提供"} />
+            <Meta label="来源类型" value={version?.source_type ? sourceTypeLabel(version.source_type) : "暂无正式来源"} />
             <Meta label="确认人 / 时间" value={version ? `${version.confirmed_by || "未记录"} / ${formatDateTime(version.confirmed_at)}` : "不适用"} />
           </dl>
         </section>
@@ -75,7 +76,7 @@ export function SemanticDetailHeader({ shell, query, onAsOf, onReturnCurrent }: 
         {!version && shell.candidate_versions.length ? (
           <section className="rounded-lg border border-gold-200 bg-gold-50 p-4" aria-labelledby="semantic-candidate-heading">
             <h2 className="text-base font-semibold text-gold-900" id="semantic-candidate-heading">候选建议，尚未成为正式监管语义</h2>
-            <div className="mt-3 space-y-3">{shell.candidate_versions.map((candidate) => <article className="border-t border-gold-200 pt-3 first:border-0 first:pt-0" key={candidate.id}><div className="font-mono text-xs text-gold-800">v{candidate.version_no} · {candidate.status}</div><p className="mt-1 whitespace-pre-wrap break-words text-sm text-gold-900">{candidate.definition || candidate.description || "候选版本未提供定义文本。"}</p></article>)}</div>
+            <div className="mt-3 space-y-3">{shell.candidate_versions.map((candidate) => <article className="border-t border-gold-200 pt-3 first:border-0 first:pt-0" key={candidate.id}><div className="font-mono text-xs text-gold-800">v{candidate.version_no} · {statusLabel(candidate.status)}</div><p className="mt-1 whitespace-pre-wrap break-words text-sm text-gold-900">{candidate.definition || candidate.description || "候选版本未提供定义文本。"}</p></article>)}</div>
           </section>
         ) : null}
       </div>
@@ -94,7 +95,7 @@ function ConflictSources({ conflict }: { conflict:SemanticDetailConflict }) {
         <ul className="mt-2 space-y-3">
           {model.visibleSources.map((source, index) => (
             <li className="border-l-2 border-coral-200 pl-3" key={`${source.source_type}-${source.source_id ?? index}`}>
-              <div className="flex flex-wrap gap-2 text-xs text-coral-700"><span>{source.source_type}</span>{source.authority ? <span>· {source.authority}</span> : null}</div>
+              <div className="flex flex-wrap gap-2 text-xs text-coral-700"><span>{sourceTypeLabel(source.source_type)}</span>{source.authority ? <span>· {authorityLabel(source.authority)}</span> : null}</div>
               <EvidenceDisclosure className="mt-1 text-coral-800" disclosureType={`${conflict.conflict_key}-${source.source_type}`} itemId={source.source_id ?? index} lines={3} scope="conflict-source" text={source.summary} />
             </li>
           ))}

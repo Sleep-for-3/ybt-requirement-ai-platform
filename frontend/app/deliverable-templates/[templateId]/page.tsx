@@ -7,6 +7,16 @@ import { CheckCircle2, Download, Plus, ShieldCheck, Table2, Trash2, Upload } fro
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { DeliverableTemplateVersion, ValidationResult, apiGet, apiPost, apiPostDownload, uploadForm } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
+import { roleLabel, severityLabel } from "@/lib/product-language";
+
+const ISSUE_LABELS: Record<string, string> = {
+  missing_sheet: "缺少工作表", missing_column: "缺少列", sheet_not_found: "未找到工作表", column_not_mapped: "列尚未映射", required_column_missing: "必填列缺失", header_row_missing: "缺少表头行", template_changed: "模板已变化", unsupported_type: "不支持的文件类型", parse_failed: "解析失败"
+};
+function describeIssue(code?: string | null) {
+  const key = String(code || "").trim();
+  return ISSUE_LABELS[key] || "其他校验问题";
+}
 
 type Detail = { id: number; project_id: number; template_name: string; template_type: string; enabled: boolean; is_default: boolean; versions: DeliverableTemplateVersion[] };
 type ColumnDraft = { business_field: string; excel_column: string; write_mode: string; merge_strategy: string; required: boolean };
@@ -122,7 +132,7 @@ export default function Page() {
 
   return (
     <main>
-      <WorkspaceHeader title={detail?.template_name || "模板配置"} meta="Sheet、业务字段、校验与版本激活" />
+      <WorkspaceHeader title={detail?.template_name || "模板配置"} meta="工作表、业务字段、校验与版本激活" />
       <div className="mx-auto max-w-7xl space-y-5 p-4 lg:p-6">
         <section className="panel grid gap-4 p-4 lg:grid-cols-[220px_1fr_auto]">
           <label className="text-xs font-medium text-slate-500">
@@ -141,7 +151,7 @@ export default function Page() {
           </label>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <Stat label="业务区域" value={`${configuredSections}/10`} />
-            <Stat label="Sheet 映射" value={String(version?.enabled_sheet_mapping_count ?? mappings.filter(item => item.enabled).length)} />
+            <Stat label="工作表映射" value={String(version?.enabled_sheet_mapping_count ?? mappings.filter(item => item.enabled).length)} />
             <Stat label="校验错误" value={String(validation?.error_count ?? 0)} />
             <Stat label="版本状态" value={statusLabel(version?.parse_status)} />
           </div>
@@ -173,7 +183,7 @@ export default function Page() {
           </p>
         ) : !permissions.can("template.manage") ? (
           <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">
-            当前角色为 {permissions.role || "只读角色"}，只能查看模板配置。
+            当前角色为 {roleLabel(permissions.role)}，只能查看模板配置。
           </p>
         ) : null}
         {message ? (
@@ -195,10 +205,10 @@ export default function Page() {
                 className="grid-row grid items-center gap-2 md:grid-cols-[80px_180px_1fr]"
                 key={`${issue.code}-${index}`}
               >
-                <span className={issue.severity === "error" ? "badge-danger" : "badge-warning"}>{issue.severity}</span>
-                <code className="text-xs text-slate-600">{issue.code}</code>
+                <span className={issue.severity === "error" ? "badge-danger" : "badge-warning"}>{severityLabel(issue.severity)}</span>
+                <span className="text-xs text-slate-600">{describeIssue(issue.code)}</span>
                 <span>
-                  {issue.message}
+                  {describeUserMessage(issue.message, "该问题说明待补充，请人工核验。")}
                   {issue.sheet_name ? ` · ${issue.sheet_name}${issue.cell ? `!${issue.cell}` : ""}` : ""}
                 </span>
               </div>
@@ -220,7 +230,7 @@ export default function Page() {
                 />
               </label>
               <label className="text-xs font-medium text-slate-500 md:col-span-2">
-                Sheet
+                工作表
                 <input className="control mt-1" readOnly value={sheet.sheet_name} />
               </label>
               <label className="text-xs font-medium text-slate-500">
@@ -354,7 +364,7 @@ export default function Page() {
         {!mappings.length ? (
           <div className="empty-state">
             <Table2 className="text-slate-300" size={28} />
-            <p>暂无可配置的 Sheet 映射，上传并解析模板后在此配置业务区域。</p>
+            <p>暂无可配置的工作表映射，上传并解析模板后在此配置业务区域。</p>
           </div>
         ) : null}
 
@@ -406,11 +416,11 @@ function NumberField({ label, value, disabled, onChange }: { label: string; valu
 }
 
 function statusLabel(status?: string | null) {
-  return ({ parsed: "待配置", configured: "已配置", active: "已激活" } as Record<string, string>)[status || ""] || status || "未知";
+  return ({ parsed: "待配置", configured: "已配置", active: "已激活" } as Record<string, string>)[status || ""] || "未知状态";
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
+  return describeError(error, "操作未完成，请稍后重试。");
 }
 
 function saveBlob(blob: Blob, name: string) {

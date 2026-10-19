@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -68,10 +69,13 @@ from app.services.agent.tools.registry import (
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit, redact_summary
+from app.services.governance.labels import replan_reason_label
 from app.services.governance.workflow import claim_task, decide_task, start_workflow
 from app.services.llm.execution_metadata import stable_hash
-from app.services.mapping.generator_context import recover_queued_actor
+from app.services.mapping.generator_context import GenerationActorError, recover_queued_actor
 from app.services.task_queue import get_task_queue
+
+log = logging.getLogger(__name__)
 
 AGENT_JOB_TYPE = "agent_task_run"
 AGENT_HUMAN_WORKFLOW_KEY = "agent_human_confirmation"
@@ -969,6 +973,118 @@ async def _execute_step(db, task: AgentTask, project: Project, actor: Principal,
     return "failed"
 
 
+def _continuation_job_key(task: AgentTask, record: AgentHumanDecision, decision: str) -> str:
+    """A stable idempotency key for the run a single human decision asks for.
+
+    Keyed on the decision row's own id, so redelivering the *same* decision deduplicates
+    to one job while a later, different decision (an edit-and-approve retry, or a second
+    gate in the same plan version) legitimately gets its own run.
+    """
+
+    from app.services.task_queue.idempotency import semantic_idempotency_key
+
+    return semantic_idempotency_key(
+        job_type=AGENT_JOB_TYPE,
+        payload={
+            "agent_task_id": task.id,
+            "plan_version": task.plan_version,
+            "decision_id": record.id,
+            "decision": decision,
+        },
+    )
+
+
+def _stage_continuation(
+    db, task: AgentTask, principal: Principal, record: AgentHumanDecision, decision: str
+) -> BackgroundJob | None:
+    """Stage the continuation job inside the caller's transaction.
+
+    Outbox semantics: the row is inserted and flushed but not committed, so the decision
+    and "work is queued" commit or roll back together. A failure here propagates and
+    aborts the decision, leaving the gate open to be decided again. The caller commits and
+    then calls :func:`_dispatch_staged`; a crash in between leaves a queued job that the
+    compensating dispatcher picks up.
+
+    The permission boundary was already crossed by the human gate check in :func:`decide`
+    (the gate's own permission set). Dispatching is not a second boundary for a
+    continuation, which is why the reviewer does not need ``task.manage`` here.
+    """
+
+    if record.id is None:
+        db.flush()
+    project = db.get(Project, task.project_id)
+    if project is None:
+        return None
+    dispatcher = _dispatch_actor(db, task, principal)
+    job, _deduplicated = get_task_queue().stage(
+        db,
+        job_type=AGENT_JOB_TYPE,
+        institution_id=project.institution_id,
+        project_id=project.id,
+        created_by=int(dispatcher.user_id or 0),
+        idempotency_key=_continuation_job_key(task, record, decision),
+        payload_summary={
+            "agent_task_id": task.id,
+            "plan_version": task.plan_version,
+            "objective": task.objective[:200],
+            "resumed_by_decision": decision,
+        },
+    )
+    return job
+
+
+def _dispatch_staged(db, task: AgentTask, job: BackgroundJob) -> None:
+    """Deliver a job whose row is already committed, downgrading a failure to an alert.
+
+    The job is durable at this point, so a failed delivery is recoverable: ``celery``
+    leaves ``dispatched_at`` NULL for the compensating sweep, and ``inline`` leaves the
+    row ``queued`` for the same sweep. Neither case justifies parking the task.
+    """
+
+    try:
+        get_task_queue().dispatch_staged(db, job, run_agent_task)
+    except Exception as error:  # noqa: BLE001 - delivery is recoverable, the decision is not
+        _record_dispatch_failure(db, task, error)
+
+
+def _dispatch_actor(db, task: AgentTask, principal: Principal) -> Principal:
+    """The identity a continuation is dispatched under.
+
+    Dispatching a task is a ``task.manage`` action; a human reviewer approving a gate is
+    not. The task's creator is the accountable owner of the run, so the continuation is
+    submitted under that identity. When the creator cannot be recovered (or already *is*
+    the caller) the caller keeps the dispatch, and ``submit_task`` still enforces the
+    permission contract for it.
+    """
+
+    if not task.created_by or int(task.created_by) == int(principal.user_id or 0):
+        return principal
+    try:
+        return recover_queued_actor(db, int(task.created_by))
+    except GenerationActorError:
+        return principal
+
+
+def _record_dispatch_failure(db, task: AgentTask, error: Exception) -> None:
+    """Record a failed delivery as an alert; the job row stays the recovery source.
+
+    The staging transaction is already committed when this runs, so the job exists and the
+    compensating sweep can still deliver it. Parking the task here would turn a recoverable
+    delivery miss into a human-visible failure, so this only annotates the run and logs.
+    """
+
+    task.error_code = "resume_dispatch_failed"
+    task.error_message = str(error)[:2000]
+    task.result_summary_json = {
+        **(task.result_summary_json or {}), "dispatch_failed": True, "dispatch_alert": True,
+    }
+    log.warning("agent continuation dispatch failed for task %s: %s", task.id, error)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001 - the original dispatch error must still surface
+        db.rollback()
+
+
 def _reload(db, task_id: int, step_id: int, call_id: int) -> tuple[AgentStep, AgentToolCall, AgentTask]:
     return db.get(AgentStep, step_id), db.get(AgentToolCall, call_id), db.get(AgentTask, task_id)
 
@@ -1124,6 +1240,13 @@ def _open_human_gate(db, task: AgentTask, step: AgentStep, project: Project, gat
     ).order_by(ReviewTask.id.desc()))
     if review_task is None:
         raise HTTPException(status_code=409, detail={"error_code": "human_gate_creation_failed"})
+    if review_task.status == "returned":
+        # 重开门：上一轮“要求重新分析”把审核单留在了 returned。复用同一行时
+        # 必须把可决策状态交还给审核台，否则后续决策会被 decide() 的
+        # “已决策”守卫跳过，审计链上永远不会再写 ReviewDecision。
+        review_task.status = "pending"
+        review_task.completed_at = None
+        db.flush()
     spec_policy = None
     try:
         spec_policy = require_tool(step.tool_key).review_policy
@@ -1249,21 +1372,21 @@ def replan(db, task: AgentTask, *, reason_code: str, failed_step: AgentStep | No
                 if fallback:
                     rebuilt.append(planned.model_copy(update={
                         "tool_key": fallback, "required": True,
-                        "reason": f"原步骤失败（{reason_code}），重规划为回退能力 {fallback}。",
+                        "reason": f"原步骤失败（{replan_reason_label(reason_code)}），重规划为回退能力 {fallback}。",
                         "input": {"query": task.objective, **({"target_field_id": subject["target_field_id"]}
                                                               if subject.get("target_field_id") else {})},
                     }))
                 else:
                     rebuilt.append(planned.model_copy(update={
                         "required": False,
-                        "reason": f"原步骤失败（{reason_code}），重规划标记为可选并以缺口形式记录。",
+                        "reason": f"原步骤失败（{replan_reason_label(reason_code)}），重规划标记为可选并以缺口形式记录。",
                     }))
                 continue
             rebuilt.append(planned)
         draft = draft.model_copy(update={"steps": rebuilt})
         _transition_step(failed_step, sm.STEP_SKIPPED)
         failed_step.error_code = "replanned"
-        _step_gap(failed_step, "step_replanned", f"步骤失败后进入重规划（{reason_code}）。")
+        _step_gap(failed_step, "step_replanned", f"步骤失败后进入重规划（{replan_reason_label(reason_code)}）。")
     plan = materialize_plan(db, task, draft, planner_source="replan", degraded_reason=reason_code,
                             created_by=task.created_by)
     task.replanning_count = int(task.replanning_count or 0) + 1
@@ -1423,7 +1546,7 @@ def decide(
             review_task.status = "approved"
             review_task.completed_at = _now()
     elif review_task.status not in {"approved", "rejected", "returned"}:
-        decide_task(db, review_task, principal, DECISION_TO_REVIEW_STATUS[decision], comment)
+        decide_task(db, review_task, principal, mapped, comment)
     review_decision = db.scalar(select(ReviewDecision).where(
         ReviewDecision.review_task_id == review_task.id).order_by(ReviewDecision.id.desc()))
 
@@ -1472,11 +1595,12 @@ def decide(
             artifact.confirmed_by = principal.user_id
             artifact.confirmed_at = _now()
         if clarification:
-            # The human picked the subject: rebuild the plan for the chosen field and continue.
+            # The human picked the subject: rebuild the plan for the chosen field.  Control then
+            # falls through to the shared tail so the gate is cleared, the decision is audited
+            # and the continuation is staged - all in this one transaction.  An early return
+            # here (the pre-outbox shape) committed the replan and left the task RUNNING with
+            # nothing queued, so the gate looked closed while no work was scheduled.
             replan(db, task, reason_code="subject_clarified")
-            db.commit()
-            db.refresh(task)
-            return task_snapshot(db, task)
     elif decision == sm.DECISION_REJECT:
         _transition_step(step, sm.STEP_BLOCKED)
         step.error_code = "human_rejected"
@@ -1503,15 +1627,25 @@ def decide(
         after={"decision": decision, "step_status": step.status, "review_task_id": review_task.id,
                "review_decision_id": record.review_decision_id},
     )
+    # Outbox: stage the continuation job in the *same* transaction as the decision, then
+    # dispatch it after the commit. Previously the decision committed here and the job was
+    # created in a second, independent transaction (which itself committed internally); a
+    # crash or a permission/actor error in between left the step decided with nothing
+    # scheduled to run it. Staging first makes "decision recorded" and "work queued" one
+    # unit of change, so a crash before the commit keeps the task in waiting_human (the gate
+    # is still open and can be decided again) instead of silently stranding it.
+    staged: BackgroundJob | None = None
+    if decision != sm.DECISION_REJECT:
+        staged = _stage_continuation(db, task, principal, record, decision)
+        if staged is not None:
+            task.background_job_id = staged.id
     db.commit()
     # Closed learning loop: only an approving human decision (never a model suggestion)
     # becomes enterprise case memory. A memory failure must never break the decision.
     _record_case_memory(db, task, step, decision, record, principal)
 
-    job = db.get(BackgroundJob, task.background_job_id) if task.background_job_id else None
-    if decision == sm.DECISION_REJECT:
-        return task_snapshot(db, task)
-    resume_task(db, principal, task, job=job)
+    if staged is not None:
+        _dispatch_staged(db, task, staged)
     return task_snapshot(db, db.get(AgentTask, task.id))
 
 
@@ -1519,9 +1653,13 @@ def resume_task(db, principal: Principal, task: AgentTask, *, job: BackgroundJob
     PermissionService(db, principal).require_project_permission(task.project_id, READ_PERMISSION)
     if task.status in sm.TASK_TERMINAL:
         return {"task_status": task.status, "resumed": False}
+    # The actor that *resumes* a governed task need not be the actor that *runs* it. A human
+    # reviewer may approve a gate without holding task.manage, so the continuation is
+    # dispatched under the task's own creator instead of the caller's identity.
+    dispatcher = _dispatch_actor(db, task, principal)
     if task.background_job_id is None:
         project = db.get(Project, task.project_id)
-        submit_task(db, project, principal, task)
+        submit_task(db, project, dispatcher, task)
         return {"task_status": task.status, "resumed": True, "submitted": True}
     job = job or db.get(BackgroundJob, task.background_job_id)
     queue = get_task_queue()
@@ -1540,7 +1678,7 @@ def resume_task(db, principal: Principal, task: AgentTask, *, job: BackgroundJob
         project = db.get(Project, task.project_id)
         latest_decision = db.scalar(select(func.max(AgentHumanDecision.id)).where(
             AgentHumanDecision.task_id == task.id)) or 0
-        submit_task(db, project, principal, task,
+        submit_task(db, project, dispatcher, task,
                     resume_token=f"decision:{latest_decision}:plan:{task.plan_version}")
     db.refresh(task)
     return {"task_status": task.status, "resumed": True}

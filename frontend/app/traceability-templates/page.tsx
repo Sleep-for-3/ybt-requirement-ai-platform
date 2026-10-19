@@ -8,7 +8,8 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { TraceabilityTemplateDocument, apiGet, apiPost, uploadForm } from "@/lib/api";
-
+import { describeError } from "@/lib/user-message.mjs";
+import { parseStatusLabel } from "@/lib/product-language";
 const PARSE_BADGE: Record<string, string> = {
   success: "badge-success",
   completed: "badge-success",
@@ -49,7 +50,7 @@ export default function TraceabilityTemplatesPage() {
       setUploadOpen(false);
       setDocuments(await apiGet(`/projects/${projectId}/traceability-templates`));
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "上传失败");
+      setFormError(describeError(error, "溯源模板上传失败，请检查文件后重试。"));
     } finally {
       setUploading(false);
     }
@@ -70,10 +71,10 @@ export default function TraceabilityTemplatesPage() {
     try {
       const result = await apiPost<Record<string, number>>(`/traceability-templates/${id}/apply`, {});
       setMessage(
-        `apply 完成：字段 ${result.created_fields || 0}，场景 ${result.created_scenarios || 0}，业务口径 ${result.created_business_mappings || 0}，技术溯源 ${result.created_technical_lineages || 0}`
+        `应用完成：字段 ${result.created_fields || 0}，场景 ${result.created_scenarios || 0}，业务口径 ${result.created_business_mappings || 0}，技术溯源 ${result.created_technical_lineages || 0}`
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "apply 失败");
+      setMessage(describeError(error, "应用溯源模板失败，请稍后重试。"));
     }
   }
 
@@ -98,7 +99,7 @@ export default function TraceabilityTemplatesPage() {
                     </div>
                   </div>
                   <div>
-                    <span className={PARSE_BADGE[document.parse_status] || "badge-neutral"}>{document.parse_status}</span>
+                    <span className={PARSE_BADGE[document.parse_status] || "badge-neutral"}>{parseStatusLabel(document.parse_status)}</span>
                   </div>
                   <div className="flex justify-end gap-2">
                     <button
@@ -114,7 +115,7 @@ export default function TraceabilityTemplatesPage() {
                       onClick={() => apply(document.id)}
                     >
                       <Check size={16} />
-                      Apply
+                      应用
                     </button>
                   </div>
                 </div>
@@ -139,7 +140,7 @@ export default function TraceabilityTemplatesPage() {
             </section>
           ) : null}
       </div>
-      <ModalDialog description="解析不会自动覆盖现有口径，预览确认后仍需显式 Apply。" onClose={requestCloseUpload} open={uploadOpen} title="上传业务口径及溯源表">
+      <ModalDialog description="解析不会自动覆盖现有口径，预览确认后仍需显式应用。" onClose={requestCloseUpload} open={uploadOpen} title="上传业务口径及溯源表">
         <form className="space-y-4" onChange={() => setDirty(true)} onSubmit={upload}>
           {formError ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{formError}</p> : null}
           <label className="block text-sm font-medium text-ink" htmlFor="traceability-file">业务口径及溯源 Excel<input accept=".xlsx" className="control mt-1.5" id="traceability-file" name="file" required type="file" /></label>

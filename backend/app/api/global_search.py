@@ -24,6 +24,12 @@ from app.models import (
 )
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.services.governance.labels import (
+    knowledge_type_label,
+    lineage_node_type_label,
+    mapping_status_label,
+    semantic_status_label,
+)
 
 
 router = APIRouter(tags=["global search"])
@@ -57,7 +63,7 @@ def global_search(
     permissions = permission_service.effective_project_permissions(project_id)
     query = q.strip()
     if len(query) < 2:
-        raise HTTPException(status_code=422, detail="Search query must contain at least 2 non-whitespace characters")
+        raise HTTPException(status_code=422, detail="搜索关键词至少需要 2 个非空白字符")
     pattern = _pattern(query)
     per_type = min(8, max(3, limit // 6))
     items: list[GlobalSearchItem] = []
@@ -98,7 +104,7 @@ def global_search(
         _matches(pattern, SemanticConcept.concept_code, SemanticConcept.concept_name, SemanticConcept.definition, SemanticConcept.description),
     ).order_by(SemanticConcept.concept_name).limit(per_type)).all()
     for row in semantic_concepts:
-        add("监管语义", "semantic_concept", row.id, row.concept_name, f"{row.concept_code} · {row.status}", f"/semantics/{row.id}")
+        add("监管语义", "semantic_concept", row.id, row.concept_name, f"{row.concept_code} · {semantic_status_label(row.status)}", f"/semantics/{row.id}")
 
     can_search_catalog = bool({"catalog.search", "catalog.manage", "technical.edit", "technical.review"} & permissions)
     if can_search_catalog:
@@ -118,20 +124,20 @@ def global_search(
             _matches(pattern, TargetField.field_code, TargetField.field_name, ScenarioBusinessMapping.business_definition, ScenarioBusinessMapping.final_content),
         ).order_by(TargetField.field_code).limit(per_type)).all()
         for row, field in requirement_rows:
-            add("需求与映射", "requirement", row.id, field.field_name, f"业务口径 · {row.business_confirm_status}", f"/fields/{field.id}/scenarios")
+            add("需求与映射", "requirement", row.id, field.field_name, f"业务口径 · {mapping_status_label(row.business_confirm_status)}", f"/fields/{field.id}/scenarios")
 
         mart_mapping_rows = db.execute(select(MartToYbtMapping, TargetField).join(TargetField, TargetField.id == MartToYbtMapping.target_field_id).where(
             MartToYbtMapping.project_id == project_id,
             _matches(pattern, TargetField.field_code, TargetField.field_name, MartToYbtMapping.mapping_name, MartToYbtMapping.final_content),
         ).order_by(TargetField.field_code).limit(per_type)).all()
         for row, field in mart_mapping_rows:
-            add("需求与映射", "mart_to_ybt_mapping", row.id, row.mapping_name or field.field_name, f"集市到目标 · {row.mapping_status}", f"/fields/{field.id}/scenarios")
+            add("需求与映射", "mart_to_ybt_mapping", row.id, row.mapping_name or field.field_name, f"集市到目标 · {mapping_status_label(row.mapping_status)}", f"/fields/{field.id}/scenarios")
 
         for row in db.scalars(select(SourceToMartMapping).where(
             SourceToMartMapping.project_id == project_id,
             _matches(pattern, SourceToMartMapping.mapping_name, SourceToMartMapping.source_system_summary, SourceToMartMapping.source_tables_summary, SourceToMartMapping.source_fields_summary, SourceToMartMapping.final_content),
         ).order_by(SourceToMartMapping.id.desc()).limit(per_type)).all():
-            add("需求与映射", "source_to_mart_mapping", row.id, row.mapping_name or f"来源到集市映射 #{row.id}", row.mapping_status, f"/mart?sourceToMartMappingId={row.id}")
+            add("需求与映射", "source_to_mart_mapping", row.id, row.mapping_name or f"来源到集市映射 #{row.id}", mapping_status_label(row.mapping_status), f"/mart?sourceToMartMappingId={row.id}")
 
     if {"knowledge.search", "knowledge.manage"} & permissions:
         for row in db.scalars(select(RegulatoryKnowledgeItem).where(
@@ -139,13 +145,13 @@ def global_search(
             _matches(pattern, RegulatoryKnowledgeItem.target_table_code, RegulatoryKnowledgeItem.target_field_code, RegulatoryKnowledgeItem.target_field_name, RegulatoryKnowledgeItem.question_text, RegulatoryKnowledgeItem.answer_text, RegulatoryKnowledgeItem.source_document_name),
         ).order_by(RegulatoryKnowledgeItem.id.desc()).limit(per_type)).all():
             title = row.target_field_name or row.question_text or row.source_document_name or f"知识条目 #{row.id}"
-            add("知识与证据", "knowledge", row.id, title, row.knowledge_type, f"/knowledge/search?q={quote(query, safe='')}")
+            add("知识与证据", "knowledge", row.id, title, knowledge_type_label(row.knowledge_type), f"/knowledge/search?q={quote(query, safe='')}")
 
     if "lineage.view" in permissions:
         for row in db.scalars(select(ScriptFile).where(ScriptFile.project_id == project_id, _matches(pattern, ScriptFile.file_name, ScriptFile.relative_path, ScriptFile.logical_target_name)).order_by(ScriptFile.file_name).limit(per_type)).all():
             add("技术血缘", "script_file", row.id, row.file_name, row.relative_path, f"/lineage/scripts/{row.id}")
         for row in db.scalars(select(LineageNode).where(LineageNode.project_id == project_id, _matches(pattern, LineageNode.logical_name, LineageNode.database_name, LineageNode.schema_name, LineageNode.table_name, LineageNode.column_name)).order_by(LineageNode.logical_name).limit(per_type)).all():
-            add("技术血缘", "lineage_node", row.id, row.logical_name, row.node_type, f"/lineage?node_id={row.id}")
+            add("技术血缘", "lineage_node", row.id, row.logical_name, lineage_node_type_label(row.node_type), f"/lineage?node_id={row.id}")
 
     normalized = query.casefold()
     items.sort(key=lambda item: (_rank(item, normalized), item.category, item.title.casefold(), item.entity_id))

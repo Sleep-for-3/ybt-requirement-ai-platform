@@ -138,7 +138,11 @@ def test_regulatory_field_analysis_reaches_gates_with_governed_evidence(db_sessi
     candidate = artifacts["requirement_candidate"]
     assert (candidate.summary_json or {}).get("evidence_ids"), "the candidate must carry its evidence ids"
     gap_summary = artifacts["gap_report"].summary_json or {}
-    assert {"gap_count", "conflict_count", "unsupported_basis_count"} <= set(gap_summary)
+    assert {"gap_count", "conflict_count", "missing_implementation_count", "not_compared_count",
+            "unsupported_basis_count"} <= set(gap_summary)
+    assert gap_summary["missing_implementation_count"] == 0, \
+        "no clause was ever concluded to lack an implementation, so the count must stay zero"
+    assert gap_summary["gap_count"] >= gap_summary["not_compared_count"]
     assert task.evidence_count > 0
     assert task.artifact_count == len(artifacts)
 

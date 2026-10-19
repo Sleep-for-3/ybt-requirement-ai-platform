@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
-import { entityLabel, severityLabel } from "@/lib/product-language";
+import { entityLabel, resourceTypeLabel, severityLabel } from "@/lib/product-language";
 
 type Notice = {
   id: number;
@@ -88,7 +88,7 @@ export default function Page() {
                 <div className="mt-1 text-sm text-slate-600">{item.content}</div>
                 <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
                   <span className={category === "风险" ? "badge-danger" : category === "审核" ? "badge-warning" : "badge-neutral"}>{category}</span>
-                  <span>{entityLabel(item.resource_type)}</span>
+                  <span>{resourceTypeLabel(item.resource_type)}</span>
                   <span>{severityLabel(severity)}</span>
                   <span>{item.created_at}</span>
                 </div>

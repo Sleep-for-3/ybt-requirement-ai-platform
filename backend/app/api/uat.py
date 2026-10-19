@@ -60,7 +60,7 @@ def list_uat_suites(project_id: int, principal: CurrentPrincipal, db: Session = 
 def create_uat_suite(project_id: int, payload: UatSuiteCreate, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     project = PermissionService(db, principal).require_project_permission(project_id, "uat.manage")
     if db.scalar(select(UatSuite.id).where(UatSuite.project_id == project_id, UatSuite.suite_name == payload.suite_name)):
-        raise HTTPException(409, "A UAT suite with this name already exists")
+        raise HTTPException(409, "已存在同名的 UAT 测试套件")
     suite = UatSuite(institution_id=project.institution_id, project_id=project.id, suite_name=payload.suite_name, suite_type=payload.suite_type, description=payload.description, enabled=payload.enabled, is_system=False, created_by=principal.user_id)
     db.add(suite); db.flush()
     for item in payload.cases:
@@ -84,7 +84,7 @@ def clone_uat_suite(suite_id: int, payload: UatSuiteCloneRequest, principal: Cur
         raise HTTPException(409, "需求规则套件请从新需求修订生成，不能复制以绕过审核")
     clone_name = payload.suite_name or f"{source.suite_name} - 自定义副本"
     if db.scalar(select(UatSuite.id).where(UatSuite.project_id == source.project_id, UatSuite.suite_name == clone_name)):
-        raise HTTPException(409, "A UAT suite with this name already exists")
+        raise HTTPException(409, "已存在同名的 UAT 测试套件")
     clone = UatSuite(institution_id=source.institution_id, project_id=source.project_id, suite_name=clone_name, suite_type="custom", description=source.description, enabled=True, is_system=False, created_by=principal.user_id)
     db.add(clone); db.flush()
     for case in db.scalars(select(UatCase).where(UatCase.uat_suite_id == source.id).order_by(UatCase.display_order, UatCase.id)).all():
@@ -129,7 +129,7 @@ def get_uat_run(run_id: int, principal: CurrentPrincipal, db: Session = Depends(
 def execute_run(run_id: int, payload: EmptyRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     run = PermissionService(db, principal).load_project_resource_or_404(UatRun, run_id, "uat.execute")
     if run.status not in {"draft", "blocked", "failed"}:
-        raise HTTPException(409, "Only draft, blocked or failed UAT runs can be executed")
+        raise HTTPException(409, "只有草稿、阻塞或失败的 UAT 执行才能运行")
     return _enqueue_run(db, run, principal.user_id, retry_statuses=None)
 
 
@@ -137,7 +137,7 @@ def execute_run(run_id: int, payload: EmptyRequest, principal: CurrentPrincipal,
 def retry_failed_run(run_id: int, payload: EmptyRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     run = PermissionService(db, principal).load_project_resource_or_404(UatRun, run_id, "uat.execute")
     if run.status not in {"failed", "blocked", "cancelled"}:
-        raise HTTPException(409, "Only failed, blocked or cancelled UAT runs can be retried")
+        raise HTTPException(409, "只有失败、阻塞或已取消的 UAT 执行才能重试")
     return _enqueue_run(db, run, principal.user_id, retry_statuses={"failed", "blocked"})
 
 
@@ -145,7 +145,7 @@ def retry_failed_run(run_id: int, payload: EmptyRequest, principal: CurrentPrinc
 def cancel_uat_run(run_id: int, payload: EmptyRequest, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     run = PermissionService(db, principal).load_project_resource_or_404(UatRun, run_id, "uat.execute")
     if run.status not in {"draft", "queued", "running"}:
-        raise HTTPException(409, "Only active UAT runs can be cancelled")
+        raise HTTPException(409, "只有进行中的 UAT 执行才能取消")
     run.status = "cancelled"
     job = db.get(BackgroundJob, run.background_job_id) if run.background_job_id else None
     if job and job.status in {"queued", "running"}:
@@ -163,11 +163,11 @@ def complete_manual_result(result_id: int, payload: UatManualResultComplete, pri
     case = db.get(UatCase, result.uat_case_id)
     run = db.get(UatRun, result.uat_run_id)
     if case is None or run is None or case.project_id != result.project_id or run.project_id != result.project_id:
-        raise HTTPException(404, "UAT case result not found")
+        raise HTTPException(404, "UAT 用例结果不存在")
     if case.execution_mode not in {"manual", "hybrid"}:
-        raise HTTPException(409, "Only manual or hybrid UAT cases can be completed manually")
+        raise HTTPException(409, "只有人工或混合模式的 UAT 用例才能人工完成")
     if run.status == "cancelled":
-        raise HTTPException(409, "Cancelled UAT runs cannot be modified")
+        raise HTTPException(409, "已取消的 UAT 执行不可修改")
     # N04: an approved signoff freezes the run; the caller must revoke it or open a new run.
     from app.services.uat.freeze import assert_run_mutable
 
@@ -188,7 +188,7 @@ def attach_result_evidence(result_id: int, payload: UatEvidenceAttach, principal
     result = PermissionService(db, principal).load_project_resource_or_404(UatCaseResult, result_id, "uat.execute")
     run = db.get(UatRun, result.uat_run_id)
     if run is None or run.project_id != result.project_id:
-        raise HTTPException(404, "UAT case result not found")
+        raise HTTPException(404, "UAT 用例结果不存在")
     # N04: attaching evidence changes what a signature approved, so it is refused after signoff.
     from app.services.uat.freeze import assert_run_mutable
 
@@ -216,9 +216,9 @@ async def upload_uat_pack(project_id: int, principal: CurrentPrincipal, files: l
             content.extend(chunk)
             total_compressed_bytes += len(chunk)
             if len(content) > settings.max_upload_bytes:
-                raise HTTPException(400, "Uploaded UAT file exceeds the compressed upload limit")
+                raise HTTPException(400, "上传的 UAT 文件超出压缩包大小上限")
             if total_compressed_bytes > settings.uat_zip_max_total_bytes:
-                raise HTTPException(400, "Combined UAT uploads exceed the total size limit")
+                raise HTTPException(400, "UAT 上传文件总大小超出限制")
         uploads.append((file.filename or "unnamed", bytes(content)))
     try:
         pack = create_uat_pack(db, project, pack_name, uploads, principal.user_id)
@@ -258,7 +258,7 @@ def create_uat_finding(run_id: int, payload: UatFindingCreate, principal: Curren
     if payload.uat_case_result_id:
         result = db.get(UatCaseResult, payload.uat_case_result_id)
         if result is None or result.project_id != run.project_id or result.uat_run_id != run.id:
-            raise HTTPException(404, "UAT case result not found")
+            raise HTTPException(404, "UAT 用例结果不存在")
     _validate_assignee(db, run.project_id, payload.assigned_user_id)
     finding_no = (db.scalar(select(func.max(UatFinding.finding_no)).where(UatFinding.uat_run_id == run.id)) or 0) + 1
     finding = UatFinding(institution_id=run.institution_id, project_id=run.project_id, uat_run_id=run.id, finding_no=finding_no, status="assigned" if payload.assigned_user_id or payload.assigned_role else "open", created_by=principal.user_id, **payload.model_dump())
@@ -296,7 +296,7 @@ def get_uat_finding(finding_id: int, principal: CurrentPrincipal, db: Session = 
 def resolve_uat_finding(finding_id: int, payload: UatFindingResolve, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     finding = PermissionService(db, principal).load_project_resource_or_404(UatFinding, finding_id, "uat.finding.manage")
     if finding.status not in {"open", "assigned", "fixing", "rejected"}:
-        raise HTTPException(409, "Only an active UAT finding can be resolved")
+        raise HTTPException(409, "只有处理中的 UAT 问题才能解决")
     finding.status = "resolved"; finding.resolution_text = payload.resolution_text.strip(); finding.resolved_by = principal.user_id; finding.resolved_at = datetime.now(UTC)
     record_audit(db, action="resolve_uat_finding", resource_type="uat_finding", resource_id=finding.id, actor_user_id=principal.user_id, institution_id=finding.institution_id, project_id=finding.project_id, after={"status": finding.status})
     db.commit()
@@ -307,7 +307,7 @@ def resolve_uat_finding(finding_id: int, payload: UatFindingResolve, principal: 
 def verify_uat_finding(finding_id: int, payload: UatFindingVerify, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     finding = PermissionService(db, principal).load_project_resource_or_404(UatFinding, finding_id, "uat.finding.manage")
     if finding.status != "resolved":
-        raise HTTPException(409, "Only a resolved UAT finding can be verified")
+        raise HTTPException(409, "只有已解决的 UAT 问题才能验证")
     finding.status = "verified"; finding.verified_by = principal.user_id; finding.verified_at = datetime.now(UTC)
     record_audit(db, action="verify_uat_finding", resource_type="uat_finding", resource_id=finding.id, actor_user_id=principal.user_id, institution_id=finding.institution_id, project_id=finding.project_id, after={"status": finding.status, "verification_comment": payload.verification_comment})
     db.commit()
@@ -320,10 +320,10 @@ def create_uat_signoff(run_id: int, payload: UatSignoffCreate, principal: Curren
     run = permissions.load_project_resource_or_404(UatRun, run_id, "uat.signoff")
     permissions.require_uat_signoff_role(run.project_id, payload.signoff_role)
     if run.status != "passed":
-        raise HTTPException(409, "Only a completed and passed UAT run can be signed off")
+        raise HTTPException(409, "只有已完成且通过的 UAT 执行才能签署")
     blocking = db.scalar(select(UatFinding.id).where(UatFinding.project_id == run.project_id, UatFinding.uat_run_id == run.id, UatFinding.severity == "critical", UatFinding.status.not_in(("verified", "closed"))).limit(1))
     if blocking is not None:
-        raise HTTPException(409, "Critical UAT findings must be verified or closed before signoff")
+        raise HTTPException(409, "签署前必须先验证或关闭严重级别的 UAT 问题")
     # N04: bind the signature to the evidence it approves (frozen manifest + results).
     from app.services.uat.freeze import freeze_run_manifest, signoff_evidence_hash
 
@@ -417,4 +417,4 @@ def _validate_assignee(db: Session, project_id: int, user_id: int | None) -> Non
         return
     membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == user_id, ProjectMembership.status == "active"))
     if membership is None:
-        raise HTTPException(400, "Assigned user is not an active project member")
+        raise HTTPException(400, "指派的用户不是该项目的有效成员")

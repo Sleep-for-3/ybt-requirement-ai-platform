@@ -51,8 +51,9 @@ test("login API 401 remains a normal error for the login form", async () => {
 
   await assert.rejects(
     readApiResponse(unauthorizedResponse(), "/auth/login", environment),
-    /Authenticated user required/
+    /登录状态已失效/
   );
+  // 英文实现文本（Authenticated user required）绝不向前台用户展示。
   assert.deepEqual(redirects, []);
 });
 
@@ -74,8 +75,9 @@ test("FastAPI validation details become readable text instead of React child obj
 
   await assert.rejects(
     readApiResponse(response, "/model-profiles"),
-    /API Key 环境变量名：API key environment variable name is invalid/
+    /密钥环境变量名：取值不符合要求/
   );
+  // 字段位置翻成中文，但 pydantic 原文是英文实现文本，必须被丢弃。
 });
 
 test("HTTP conflicts without a safe backend detail use a clear Chinese message", () => {

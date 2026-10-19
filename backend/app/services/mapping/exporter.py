@@ -14,6 +14,7 @@ from app.models import (
     TargetField,
     TargetTable,
 )
+from app.services.governance.labels import mapping_status_label
 
 
 def export_project_mapping_document(db: Session, project_id: int) -> str:
@@ -231,11 +232,11 @@ def _split_questions(text: str | None) -> list[str]:
 def _status_lines(db: Session, source_mappings: list[SourceToMartMapping], ybt_mapping: MartToYbtMapping | None) -> list[str]:
     lines: list[str] = []
     for mapping in source_mappings:
-        lines.append(f"- 业务系统到监管集市口径状态：{mapping.mapping_status}")
+        lines.append(f"- 业务系统到监管集市口径状态：{mapping_status_label(mapping.mapping_status)}")
         lines.append(f"- 业务系统到监管集市当前版本：{_latest_version_no(db, 'source_to_mart', mapping.id)}")
         lines.append(f"- 业务系统到监管集市最近修改人：{mapping.reviewed_by or mapping.created_by or '-'}")
     if ybt_mapping:
-        lines.append(f"- 监管集市到一表通口径状态：{ybt_mapping.mapping_status}")
+        lines.append(f"- 监管集市到一表通口径状态：{mapping_status_label(ybt_mapping.mapping_status)}")
         lines.append(f"- 监管集市到一表通当前版本：{_latest_version_no(db, 'mart_to_ybt', ybt_mapping.id)}")
         lines.append(f"- 监管集市到一表通最近修改人：{ybt_mapping.reviewed_by or ybt_mapping.created_by or '-'}")
     if not lines:

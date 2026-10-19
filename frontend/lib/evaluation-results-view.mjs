@@ -8,6 +8,8 @@
  * 避免出现“测试写一套、页面写另一套”的假接线。
  */
 
+import { degradedReasonLabel } from "./user-message.mjs";
+
 export const STATUS_COPY = {
   grounded: "正常生成",
   degraded: "已降级（生成不可用）",
@@ -34,12 +36,14 @@ export function formatRatio(value) {
 export function caseStatusLabel(item) {
   const raw = item?.execution_metadata_json?.answer_status;
   const key = String(raw || "").toLowerCase();
-  return STATUS_COPY[key] || (raw ? String(raw) : "未知");
+  return STATUS_COPY[key] || "未知状态";
 }
 
+/** 逐条降级原因：码值一律收敛为中文，未登记值不得回显（含 RuntimeError 这类异常类名）。 */
 export function caseDegradedReason(item) {
   const reason = item?.execution_metadata_json?.degraded_reason;
-  return reason ? String(reason) : null;
+  if (!reason) return null;
+  return degradedReasonLabel(reason, "其他原因");
 }
 
 /**

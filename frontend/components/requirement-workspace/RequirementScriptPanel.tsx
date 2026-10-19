@@ -7,6 +7,8 @@ import {apiGet, apiPost} from "@/lib/api";
 import {RequirementPolicyPanel} from "./RequirementPolicyPanel";
 import {RequirementPathPanel} from "./RequirementPathPanel";
 import {ClassificationSummary, Classification} from "@/components/CatalogClassification";
+import { parseStatusLabel, sourceCategoryLabel, statusLabel } from "@/lib/product-language";
+import { describeUserMessage } from "@/lib/user-message.mjs";
 
 type Version = {id:number;path:string;version_no:number;script_file_id:number;parse_status:string};
 type Target = {key:string;database_name:string|null;schema_name:string|null;table_name:string;columns:string[]};
@@ -86,13 +88,13 @@ export function RequirementScriptPanel({projectId,requirementId,contentVersion,f
         <input type="checkbox" checked={selected.includes(v.id)} onChange={e=>{
           setSelected(ids=>e.target.checked?[...ids.filter(id=>!options.data?.versions.some(x=>x.id===id&&x.script_file_id===v.script_file_id)),v.id]:ids.filter(id=>id!==v.id));
           setPreview(null);setConfirmed(false);setTarget("");setBindings({});
-        }}/><span>{v.path} · v{v.version_no} · {v.parse_status}</span></label>)}</div>
+        }}/><span>{v.path} · v{v.version_no} · {parseStatusLabel(v.parse_status)}</span></label>)}</div>
       <button type="button" className="button-secondary" disabled={!selected.length} onClick={()=>void parse()}>预览所选脚本事实</button>
       {preview&&<>
         <label className="block">实际写入目标<select className="mt-1 w-full rounded border p-2" value={target} onChange={e=>changeTarget(e.target.value)}>
           <option value="">请明确选择</option>{preview.targets.map(t=><option key={t.key} value={t.key}>{[t.database_name,t.schema_name,t.table_name].filter(Boolean).join(".")}</option>)}</select></label>
         <label className="block">监管模板版本<select className="mt-1 w-full rounded border p-2" value={template} onChange={e=>{setTemplate(e.target.value);setConfirmed(false);}}>
-          <option value="">请明确选择</option>{options.data?.templates.map(t=><option key={t.id} value={t.id}>{t.template_code} · v{t.version_no} · {t.status}</option>)}</select></label>
+          <option value="">请明确选择</option>{options.data?.templates.map(t=><option key={t.id} value={t.id}>{t.template_code} · v{t.version_no} · {statusLabel(t.status)}</option>)}</select></label>
         {selectedTarget?.columns.map(column=><label key={column} className="block">{column} 对应需求字段
           <select className="mt-1 w-full rounded border p-2" value={bindings[column]||""} onChange={e=>{
             setBindings(old=>{const next={...old};if(e.target.value)next[column]=Number(e.target.value);else delete next[column];return next;});setConfirmed(false);
@@ -103,7 +105,7 @@ export function RequirementScriptPanel({projectId,requirementId,contentVersion,f
     </fieldset>}
     {error&&<p role="alert" className="mt-2 text-xs text-red-700">{error}</p>}
     {impact.data?.pending_review&&<div className="my-2 rounded border border-amber-300 p-2 text-xs text-amber-800" role="status">
-      <strong>待复核：固定依据发生变化</strong><ul>{impact.data.changes.map(change=><li key={change.code}>{change.message}</li>)}</ul>
+      <strong>待复核：固定依据发生变化</strong><ul>{impact.data.changes.map(change=><li key={change.code}>{describeUserMessage(change.message, "该变更说明待补充，请人工核验。")}</li>)}</ul>
       <p>历史内容保持不变。请通过修订流程重新选择并确认依据。</p>
     </div>}
     {active&&<details className="mt-3 text-xs"><summary>{preview?"预览脚本事实":"已固定的脚本事实"} · {active.rules.length} 条关系</summary>
@@ -121,7 +123,7 @@ export function RequirementScriptPanel({projectId,requirementId,contentVersion,f
     {basis&&<details className="mt-3 text-xs"><summary>已固定的制度依据原文</summary>
       {basis.policy_snapshot?.evidence.length?basis.policy_snapshot.evidence.map(unit=><div className="my-2 rounded border p-2" key={unit.unit_id}>
         <p>{unit.title||"制度条款"} · 文档版本 #{unit.document_version_id} · {unit.regulatory_version||"未标注监管版本"}</p>
-        <p className="my-1 whitespace-pre-wrap">{unit.content}</p><p>来源类别：{unit.source_category}；判断结果见下方逐条对照。</p>
+        <p className="my-1 whitespace-pre-wrap">{unit.content}</p><p>来源类别：{sourceCategoryLabel(unit.source_category)}；判断结果见下方逐条对照。</p>
       </div>):<p className="mt-2 text-amber-700">缺少依据。脚本现状不能自动成为监管要求。</p>}
     </details>}
     {basis&&<RequirementPathPanel projectId={projectId} requirementId={requirementId} contentVersion={contentVersion}

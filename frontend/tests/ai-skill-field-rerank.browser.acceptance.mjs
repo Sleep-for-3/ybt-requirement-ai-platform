@@ -80,10 +80,10 @@ try {
   assert.equal(body.execution_metadata.execution_kind, "mock_model");
   assert.equal(body.rerank.status, "applied");
   assert.equal(rerankRequests, 1, "exactly one explicit user action produced exactly one model call");
-  await panel.getByText(/当前列表来源：模型重排（Mock 模型（仅流程验证））/).waitFor();
+  await panel.getByText(/当前列表来源：模型重排（模拟模型（仅流程验证））/).waitFor();
   const text = await panel.innerText();
-  assert.match(text, /当前列表来源：模型重排（Mock 模型（仅流程验证））/);
-  assert.match(text, /固定 Skill：field_semantic_matching v1/);
+  assert.match(text, /当前列表来源：模型重排（模拟模型（仅流程验证））/);
+  assert.match(text, /固定技能：field_semantic_matching v1/);
   assert.match(text, /作用域 project:\d+:\d+/);
   assert.match(text, /运行编号 \d+/);
   assert.match(text, /模型 mock/);

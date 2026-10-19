@@ -11,6 +11,7 @@ import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, ScriptFile, apiGet, apiPost, uploadForm } from "@/lib/api";
+import { fileTypeLabel, parseStatusLabel } from "@/lib/product-language";
 
 type Repo = {
   id: number;
@@ -68,7 +69,7 @@ export default function Page() {
         setActiveJob(result);
         setMessage("文件已保存，正在后台解析和分析血缘");
       } else {
-        setMessage(`摄取完成：${String(result.status || result.parse_status || "completed")}`);
+        setMessage(`摄取完成：${parseStatusLabel(result.parse_status || result.status)}`);
       }
       element.reset();
       await load();
@@ -125,12 +126,12 @@ export default function Page() {
 
           <form className="panel h-fit" onSubmit={createRepo}>
             <div className="panel-header">
-              <h2 className="text-[15px] font-semibold text-ink">Git 仓库（bare clone，不 checkout）</h2>
+              <h2 className="text-[15px] font-semibold text-ink">Git 仓库（裸仓库克隆，不检出工作区）</h2>
             </div>
             <div className="panel-body grid gap-3 sm:grid-cols-2">
               <input className="control" name="repository_name" placeholder="仓库名称" required />
               <select className="control" name="repository_type">
-                <option value="git_repository">Git repository</option>
+                <option value="git_repository">Git 代码仓库</option>
                 <option value="github">GitHub</option>
                 <option value="gitee">Gitee</option>
               </select>
@@ -203,7 +204,7 @@ export default function Page() {
                   <div>
                     <strong className="text-ink">{item.relative_path}</strong>
                     <div className="text-xs text-slate-500">
-                      {item.file_type} · v{item.current_version_no}
+                      {fileTypeLabel(item.file_type)} · v{item.current_version_no}
                     </div>
                   </div>
                   <span className="justify-self-end">

@@ -1,0 +1,74 @@
+MIGRATION_STEP=['heads']
+202610020051 (head)
+MIGRATION_STEP=['upgrade', 'head']
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 202607070001, initial schema
+INFO  [alembic.runtime.migration] Running upgrade 202607070001 -> 202607070002, template datasource nl task
+INFO  [alembic.runtime.migration] Running upgrade 202607070002 -> 202607070003, double layer mapping
+INFO  [alembic.runtime.migration] Running upgrade 202607070003 -> 202607100004, scenario traceability
+INFO  [alembic.runtime.migration] Running upgrade 202607100004 -> 202607140005, metadata catalog and safe profiling
+INFO  [alembic.runtime.migration] Running upgrade 202607140005 -> 202607140006, knowledge rag evaluation
+INFO  [alembic.runtime.migration] Running upgrade 202607140006 -> 202607150007, production governance workflow
+INFO  [alembic.runtime.migration] Running upgrade 202607150007 -> 202607150008, scenario review package and cancellable celery jobs
+INFO  [alembic.runtime.migration] Running upgrade 202607150008 -> 202607150009, SQL and shell lineage, script versioning and change impact
+INFO  [alembic.runtime.migration] Running upgrade 202607150009 -> 202607200010, caliber document production
+INFO  [alembic.runtime.migration] Running upgrade 202607200010 -> 202607220011, uat productization and deployment readiness
+INFO  [alembic.runtime.migration] Running upgrade 202607220011 -> 202607230012, AI runtime profiles and model call observability.
+INFO  [alembic.runtime.migration] Running upgrade 202607230012 -> 202607270013, Allow knowledge units to reference a list of target field codes.
+INFO  [alembic.runtime.migration] Running upgrade 202607270013 -> 202607300014, Add persistent semantic index versions.
+INFO  [alembic.runtime.migration] Running upgrade 202607300014 -> 202608200015, Add the governed regulatory semantic layer.
+INFO  [alembic.runtime.migration] Running upgrade 202608200015 -> 202608200016, Add canonical temporal semantic concept versions.
+INFO  [alembic.runtime.migration] Running upgrade 202608200016 -> 202608260017, Add durable metadata drift events.
+INFO  [alembic.runtime.migration] Running upgrade 202608260017 -> 202608270018, Add governed, reusable data quality expectations.
+INFO  [alembic.runtime.migration] Running upgrade 202608270018 -> 202608270019, Extend impact analyses with semantic and requirement scope.
+INFO  [alembic.runtime.migration] Running upgrade 202608270019 -> 202608280020, Add reporting cycles and governed metric snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 202608280020 -> 202608290021, Add targeted requirement workspace performance indexes.
+INFO  [alembic.runtime.migration] Running upgrade 202608290021 -> 202609100022, Add immutable structured requirement working snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 202609100022 -> 202609100023, Harden structured requirement snapshot scope identity.
+INFO  [alembic.runtime.migration] Running upgrade 202609100023 -> 202609100024, Add immutable, project-level lineage revision snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 202609100024 -> 202609100025, Add controlled polling configuration for lineage repositories.
+INFO  [alembic.runtime.migration] Running upgrade 202609100025 -> 202609120026, Align migrated columns with the ORM nullability contract.
+INFO  [alembic.runtime.migration] Running upgrade 202609120026 -> 202609120027, Record provider HTTP status and error detail on model call logs.
+INFO  [alembic.runtime.migration] Running upgrade 202609120027 -> 202609130028, Add scoped requirements and immutable delivery records.
+INFO  [alembic.runtime.migration] Running upgrade 202609130028 -> 202609140029, Append-only isolated requirement content; do not backfill shared facts.
+INFO  [alembic.runtime.migration] Running upgrade 202609140029 -> 202609140030, Fixed, bounded requirement generation inputs.
+INFO  [alembic.runtime.migration] Running upgrade 202609140030 -> 202609140031, Leased generation items; AI output is a candidate, never a shared write.
+INFO  [alembic.runtime.migration] Running upgrade 202609140031 -> 202609140032, Bind requirement revisions to governed review and immutable formal delivery.
+INFO  [alembic.runtime.migration] Running upgrade 202609140032 -> 202609160033, Add governed template and knowledge document versions.
+INFO  [alembic.runtime.migration] Running upgrade 202609160033 -> 202609170034, Add architecture configuration without modifying existing catalog rows.
+INFO  [alembic.runtime.migration] Running upgrade 202609170034 -> 202609170035, Durable previews for unified imports; existing upload semantics unchanged.
+INFO  [alembic.runtime.migration] Running upgrade 202609170035 -> 202609180036, Group reverse-engineered single-target requirements without changing old scopes.
+INFO  [alembic.runtime.migration] Running upgrade 202609180036 -> 202609180037, Attach confirmed requirement rules to existing UAT suites and review workflows.
+INFO  [alembic.runtime.migration] Running upgrade 202609180037 -> 202609180038, Append-only change evidence and explicit replacement revisions.
+INFO  [alembic.runtime.migration] Running upgrade 202609180038 -> 202609180039, Add an optional client request key for idempotent project creation.
+INFO  [alembic.runtime.migration] Running upgrade 202609180039 -> 202609200040, Add backward-compatible AI execution, evidence, and feedback lineage fields.
+INFO  [alembic.runtime.migration] Running upgrade 202609200040 -> 202609200041, Add structured AI feedback regression fields to evaluation cases.
+INFO  [alembic.runtime.migration] Running upgrade 202609200041 -> 202609270042, Add scoped Skill definitions, immutable-version identities and event history.
+INFO  [alembic.runtime.migration] Running upgrade 202609270042 -> 202609270043, Skill test snapshots and nullable links from legacy runtime records.
+INFO  [alembic.runtime.migration] Running upgrade 202609270043 -> 202609270044, Enforce published Skill content and compatibility snapshot immutability.
+INFO  [alembic.runtime.migration] Running upgrade 202609270044 -> 202610010045, Durable agent orchestration state (tasks, plans, steps, tool calls, human
+decisions, artifacts).
+INFO  [alembic.runtime.migration] Running upgrade 202610010045 -> 202610020046, Agent step optional dependencies (V2 dependency semantics).
+INFO  [alembic.runtime.migration] Running upgrade 202610020046 -> 202610020047, Record planner validation errors and attempts on the plan (V2 strict planning).
+INFO  [alembic.runtime.migration] Running upgrade 202610020047 -> 202610020048, Retrieval-based decision / case memory (human-confirmed experience).
+INFO  [alembic.runtime.migration] Running upgrade 202610020048 -> 202610020049, Adaptive planning flag on the agent task (Observe -> Replan).
+INFO  [alembic.runtime.migration] Running upgrade 202610020049 -> 202610020050, SQL change events: the idempotency anchor for automatically triggered impact analysis.
+INFO  [alembic.runtime.migration] Running upgrade 202610020050 -> 202610020051, Single-runner lease on the agent task (duplicate workers must not execute steps twice).
+MIGRATION_STEP=['current']
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+202610020051 (head)
+MIGRATION_STEP=['downgrade', '-1']
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 202610020051 -> 202610020050, Single-runner lease on the agent task (duplicate workers must not execute steps twice).
+MIGRATION_STEP=['upgrade', 'head']
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 202610020050 -> 202610020051, Single-runner lease on the agent task (duplicate workers must not execute steps twice).
+MIGRATION_STEP=['current']
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+202610020051 (head)
+MIGRATION_EXIT_CODES=[0, 0, 0, 0, 0, 0]

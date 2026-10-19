@@ -85,7 +85,7 @@ def batch_create(project_id: int, payload: BatchReviewTaskCreate, principal: Rea
     for target in payload.targets:
         if payload.workflow_key == "scenario_mapping_review":
             if target.target_field_id is None or target.scenario_id is None or target.target_type is not None or target.target_id is not None:
-                raise HTTPException(status_code=422, detail="Scenario review targets require target_field_id and scenario_id only")
+                raise HTTPException(status_code=422, detail="场景审核的审核对象只能包含 target_field_id 和 scenario_id")
             package = get_or_create_review_package(
                 db, project_id=project_id, target_field_id=target.target_field_id,
                 scenario_id=target.scenario_id, created_by=principal.user_id,
@@ -94,7 +94,7 @@ def batch_create(project_id: int, payload: BatchReviewTaskCreate, principal: Rea
             package_ids.append(package.id)
         else:
             if target.target_type is None or target.target_id is None:
-                raise HTTPException(status_code=422, detail="Workflow target_type and target_id are required")
+                raise HTTPException(status_code=422, detail="必须填写工作流的 target_type 和 target_id")
             target_type, target_id = target.target_type, target.target_id
         instance = start_workflow(db, project_id=project_id, workflow_key=payload.workflow_key, target_type=target_type, target_id=target_id, created_by=principal.user_id, assignments=payload.assignments, due_at=payload.due_at)
         instance_ids.append(instance.id)
@@ -108,7 +108,7 @@ def get_scenario_review_package(target_field_id: int, scenario_id: int, principa
         ScenarioReviewPackage.scenario_id == scenario_id,
     ))
     if package is None:
-        raise HTTPException(status_code=404, detail="Scenario review package not found")
+        raise HTTPException(status_code=404, detail="场景审核包不存在")
     PermissionService(db, principal).require_project_permission(package.project_id, "project.view")
     result = _package_dict(package)
     instance = db.scalar(select(WorkflowInstance).where(
@@ -129,7 +129,7 @@ def submit_scenario_review_package(target_field_id: int, scenario_id: int, paylo
         from app.models import TargetField
         field = db.get(TargetField, target_field_id)
         if field is None:
-            raise HTTPException(status_code=404, detail="Target field not found")
+            raise HTTPException(status_code=404, detail="目标字段不存在")
         field_project_id = field.project_id
     PermissionService(db, principal).require_project_permission(field_project_id, "business.edit")
     package = get_or_create_review_package(
@@ -148,7 +148,7 @@ def submit_scenario_review_package(target_field_id: int, scenario_id: int, paylo
 def withdraw_scenario_review_package(package_id: int, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
     package = db.get(ScenarioReviewPackage, package_id)
     if package is None:
-        raise HTTPException(status_code=404, detail="Scenario review package not found")
+        raise HTTPException(status_code=404, detail="场景审核包不存在")
     if package.created_by != principal.user_id:
         PermissionService(db, principal).require_project_permission(package.project_id, "task.manage")
     instance = db.scalar(select(WorkflowInstance).where(
@@ -157,12 +157,12 @@ def withdraw_scenario_review_package(package_id: int, principal: RealPrincipal, 
         WorkflowInstance.status == "in_progress",
     ).order_by(WorkflowInstance.id.desc()))
     if instance is None:
-        raise HTTPException(status_code=409, detail="No active review application can be withdrawn")
+        raise HTTPException(status_code=409, detail="没有可撤回的有效审核申请")
     decision_id = db.scalar(select(ReviewDecision.id).join(ReviewTask, ReviewTask.id == ReviewDecision.review_task_id).where(
         ReviewTask.workflow_instance_id == instance.id,
     ).limit(1))
     if decision_id is not None:
-        raise HTTPException(status_code=409, detail="A review decision already exists; the application can no longer be withdrawn")
+        raise HTTPException(status_code=409, detail="审核结论已存在，该申请无法撤回")
     instance.status = "cancelled"
     instance.completed_at = datetime.now(UTC)
     package.status = "withdrawn"
@@ -203,9 +203,9 @@ def return_task(task_id: int, payload: TaskDecisionRequest, principal: RealPrinc
 def decide_lineage_impact(task_id: int, payload: ImpactTaskDecisionRequest, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
     task = _task_or_404(db, task_id)
     if task.target_type != "impact_analysis":
-        raise HTTPException(status_code=400, detail="Impact decisions require an impact_analysis review task")
+        raise HTTPException(status_code=400, detail="影响分析决策需要 impact_analysis 类型的审核任务")
     if payload.action in {"require_business_confirmation", "reject_script_version"} and not (payload.comment or "").strip():
-        raise HTTPException(status_code=400, detail="This impact decision requires a comment")
+        raise HTTPException(status_code=400, detail="该影响分析决策必须填写说明")
     decision = "approved"
     return_to_step = None
     if payload.action == "require_business_confirmation":
@@ -224,7 +224,7 @@ def decide_lineage_impact(task_id: int, payload: ImpactTaskDecisionRequest, prin
 def workflow(instance_id: int, principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
     instance = db.get(WorkflowInstance, instance_id)
     if instance is None:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+        raise HTTPException(status_code=404, detail="工作流不存在")
     PermissionService(db, principal).require_project_permission(instance.project_id, "project.view")
     decisions = db.execute(select(ReviewDecision, ReviewTask.step_key).join(ReviewTask, ReviewTask.id == ReviewDecision.review_task_id).where(ReviewTask.workflow_instance_id == instance.id).order_by(ReviewDecision.id)).all()
     result = {
@@ -242,7 +242,7 @@ def workflow(instance_id: int, principal: RealPrincipal, db: Session = Depends(g
 def _task_or_404(db: Session, task_id: int) -> ReviewTask:
     task = db.get(ReviewTask, task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail="Review task not found")
+        raise HTTPException(status_code=404, detail="审核任务不存在")
     return task
 
 

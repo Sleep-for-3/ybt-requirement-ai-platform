@@ -102,7 +102,7 @@ def adopt_business_draft(mapping_id: int, db: Session = Depends(get_db)) -> Scen
     mapping = _business_or_404(db, mapping_id)
     ensure_scenario_mapping_editable(db, "scenario_business", mapping.id)
     if not _has_text(mapping.ai_generated_content):
-        raise HTTPException(status_code=400, detail="AI draft is empty")
+        raise HTTPException(status_code=400, detail="AI 草稿内容为空")
     mapping.final_content = mapping.ai_generated_content
     mapping.business_confirm_status = "draft"
     db.commit()
@@ -161,9 +161,9 @@ def confirm_business_mapping(mapping_id: int, principal: CurrentPrincipal, paylo
     mapping = _business_or_404(db, mapping_id)
     _reject_legacy_confirmation(db, mapping.project_id)
     if principal.user_id is not None and mapping.created_by in {principal.username, str(principal.user_id)}:
-        raise HTTPException(status_code=409, detail="Business mapping author cannot confirm their own content")
+        raise HTTPException(status_code=409, detail="业务口径编写人不能确认自己编写的内容")
     if not (_has_text(mapping.business_definition) or _has_text(mapping.final_content)):
-        raise HTTPException(status_code=400, detail="Business definition or final content is required before confirmation")
+        raise HTTPException(status_code=400, detail="确认前必须填写业务定义或最终内容")
     _require_evidence(db, "scenario_business", mapping.id)
     mapping.business_confirm_status = "confirmed"
     mapping.business_confirm_at = datetime.now(UTC)
@@ -192,7 +192,7 @@ def create_technical_lineage(field_id: int, scenario_id: int, payload: ScenarioT
     if payload.business_mapping_id is not None:
         business = _business_or_404(db, payload.business_mapping_id)
         if business.target_field_id != field.id or business.scenario_id != scenario.id:
-            raise HTTPException(status_code=400, detail="Business mapping belongs to another field or scenario")
+            raise HTTPException(status_code=400, detail="业务口径属于其他字段或场景")
     values = payload.model_dump()
     if principal.user_id is not None: values["created_by"] = principal.username
     lineage = ScenarioTechnicalLineage(project_id=field.project_id, target_field_id=field.id, scenario_id=scenario.id, **values)
@@ -239,7 +239,7 @@ def adopt_technical_draft(lineage_id: int, db: Session = Depends(get_db)) -> Sce
     lineage = _lineage_or_404(db, lineage_id)
     ensure_scenario_mapping_editable(db, "scenario_technical", lineage.id)
     if not _has_text(lineage.ai_generated_content):
-        raise HTTPException(status_code=400, detail="AI draft is empty")
+        raise HTTPException(status_code=400, detail="AI 草稿内容为空")
     lineage.final_content = lineage.ai_generated_content
     lineage.tech_confirm_status = "draft"
     db.commit()
@@ -298,7 +298,7 @@ def confirm_technical_lineage(lineage_id: int, principal: CurrentPrincipal, payl
     lineage = _lineage_or_404(db, lineage_id)
     _reject_legacy_confirmation(db, lineage.project_id)
     if principal.user_id is not None and lineage.created_by in {principal.username, str(principal.user_id)}:
-        raise HTTPException(status_code=409, detail="Technical lineage author cannot confirm their own content")
+        raise HTTPException(status_code=409, detail="技术溯源编写人不能确认自己编写的内容")
     missing = []
     if not _has_text(lineage.source_system_name):
         missing.append("source_system_name")
@@ -307,7 +307,7 @@ def confirm_technical_lineage(lineage_id: int, principal: CurrentPrincipal, payl
     if not (_has_text(lineage.final_content) or _has_text(lineage.processing_logic)):
         missing.append("final_content_or_processing_logic")
     if missing:
-        raise HTTPException(status_code=400, detail=f"Missing fields before confirmation: {', '.join(missing)}")
+        raise HTTPException(status_code=400, detail=f"确认前缺少必填字段：{', '.join(missing)}")
     _require_evidence(db, "scenario_technical", lineage.id)
     lineage.tech_confirm_status = "confirmed"
     lineage.tech_confirm_at = datetime.now(UTC)
@@ -333,42 +333,42 @@ def _field_and_scenario(db: Session, field_id: int, scenario_id: int) -> tuple[T
     field = _field_or_404(db, field_id)
     scenario = db.get(ProductScenario, scenario_id)
     if scenario is None:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+        raise HTTPException(status_code=404, detail="场景不存在")
     if scenario.project_id != field.project_id:
-        raise HTTPException(status_code=400, detail="Scenario belongs to another project")
+        raise HTTPException(status_code=400, detail="场景属于其他项目")
     return field, scenario
 
 
 def _field_or_404(db: Session, field_id: int) -> TargetField:
     field = db.get(TargetField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Target field not found")
+        raise HTTPException(status_code=404, detail="目标字段不存在")
     return field
 
 
 def _business_or_404(db: Session, mapping_id: int) -> ScenarioBusinessMapping:
     mapping = db.get(ScenarioBusinessMapping, mapping_id)
     if mapping is None:
-        raise HTTPException(status_code=404, detail="Scenario business mapping not found")
+        raise HTTPException(status_code=404, detail="场景业务口径不存在")
     return mapping
 
 
 def _lineage_or_404(db: Session, lineage_id: int) -> ScenarioTechnicalLineage:
     lineage = db.get(ScenarioTechnicalLineage, lineage_id)
     if lineage is None:
-        raise HTTPException(status_code=404, detail="Scenario technical lineage not found")
+        raise HTTPException(status_code=404, detail="场景技术溯源不存在")
     return lineage
 
 
 def _validate_logic_type(value: str | None) -> None:
     if value is not None and value not in PROCESSING_LOGIC_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid processing_logic_type")
+        raise HTTPException(status_code=400, detail="processing_logic_type 取值不合法")
 
 
 def _reject_legacy_confirmation(db: Session, project_id: int) -> None:
     project = db.get(Project, project_id)
     if get_settings().auth_mode == "required" or bool(project and project.governance_workflow_enabled):
-        raise HTTPException(status_code=409, detail="Confirmation must be completed through the current review task")
+        raise HTTPException(status_code=409, detail="确认必须通过当前审核任务完成")
 
 
 def _apply(model: object, values: dict) -> None:
@@ -386,7 +386,7 @@ def _require_evidence(db: Session, mapping_type: str, mapping_id: int) -> None:
         MappingEvidenceReference.mapping_id == mapping_id,
     ).limit(1))
     if evidence_id is None:
-        raise HTTPException(status_code=400, detail="At least one evidence reference is required before confirmation")
+        raise HTTPException(status_code=400, detail="确认前至少需要一条证据引用")
 
 
 def _commit_unique(db: Session, detail: str) -> None:

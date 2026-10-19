@@ -7,6 +7,7 @@ import type { FieldWorkspaceRecord, SaveState } from "@/components/requirement-w
 import { apiPut } from "@/lib/api";
 import { MappingGenerationProvenance } from "@/components/MappingGenerationProvenance";
 import { isMappingLocked, mappingStatusLabel, mappingStatusTone } from "@/lib/workspace-view-model.mjs";
+import { describeError } from "@/lib/user-message.mjs";
 
 export function SelectedFieldEditor({
   record,
@@ -84,7 +85,7 @@ export function SelectedFieldEditor({
       onSaved();
     } catch (cause) {
       setSaveState("error");
-      onError(cause instanceof Error ? cause.message : "保存失败，当前输入仍保留在页面中");
+      onError(describeError(cause, "保存失败，当前输入仍保留在页面中。"));
     }
   }
 

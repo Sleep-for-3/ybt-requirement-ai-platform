@@ -8,7 +8,8 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { apiGet, apiPost } from "@/lib/api";
-
+import { describeError } from "@/lib/user-message.mjs";
+import { entityLabel, severityLabel } from "@/lib/product-language";
 type Binding = {
   id: number;
   scope_type: string;
@@ -29,6 +30,19 @@ type Expectation = {
   bindings: Binding[];
 };
 
+/** 质量规则首次绑定可选的对象类型：值与后端校验词表保持一致，界面只显示中文名。 */
+const QUALITY_ENTITY_OPTIONS = [
+  { value: "target_field", label: "报送目标字段" },
+  { value: "target_table", label: "报送目标表" },
+  { value: "field_mapping_draft", label: "字段映射草稿" },
+  { value: "scenario_business_mapping", label: "场景业务映射" },
+  { value: "source_to_mart_mapping", label: "来源到集市映射" },
+  { value: "mart_to_ybt_mapping", label: "集市到报送映射" },
+  { value: "scenario_technical_lineage", label: "场景技术血缘" },
+  { value: "uat_case", label: "验收用例" },
+  { value: "monitoring_target", label: "生产监控对象" }
+];
+
 const RULE_LABELS: Record<string, string> = {
   not_null: "非空",
   unique: "唯一",
@@ -41,7 +55,7 @@ const RULE_LABELS: Record<string, string> = {
 const SCOPE_LABELS: Record<string, string> = {
   requirement: "需求口径",
   mapping: "映射",
-  uat: "UAT",
+  uat: "验收",
   monitoring: "生产监控",
 };
 
@@ -69,7 +83,7 @@ export default function QualityExpectationsPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey }),
     onError: (error) =>
       setConfirmError(
-        error instanceof Error ? error.message : "无法确认质量期望",
+        describeError(error, "无法确认质量期望，请稍后重试。"),
       ),
   });
 
@@ -113,7 +127,7 @@ export default function QualityExpectationsPage() {
       setCreateOpen(false);
       await queryClient.invalidateQueries({ queryKey });
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "无法创建质量期望");
+      setFormError(describeError(error, "质量期望创建失败，请检查填写内容后重试。"));
     }
   }
 
@@ -135,7 +149,7 @@ export default function QualityExpectationsPage() {
     <main>
       <WorkspaceHeader
         title="质量期望"
-        meta="可复用到需求、映射、UAT 与生产监控；候选建议必须经人工确认"
+        meta="可复用到需求、映射、验收与生产监控；候选建议必须经人工确认"
         actions={actions}
       />
       <div className="mx-auto max-w-[1400px] space-y-4 p-4 lg:p-6">
@@ -180,7 +194,7 @@ export default function QualityExpectationsPage() {
             <h2 className="text-base font-semibold text-ink">
               当前项目还没有质量期望
             </h2>
-            <p>从可确认的规则开始，逐步复用到需求、映射、UAT 和生产监控。</p>
+            <p>从可确认的规则开始，逐步复用到需求、映射、验收和生产监控。</p>
           </section>
         ) : null}
         {expectations.data?.map((item) => (
@@ -201,7 +215,7 @@ export default function QualityExpectationsPage() {
                           : "badge-neutral"
                     }
                   >
-                    {item.severity}
+                    {severityLabel(item.severity)}
                   </span>
                 </div>
                 <h2 className="mt-3 text-base font-semibold text-ink">
@@ -235,7 +249,7 @@ export default function QualityExpectationsPage() {
                   >
                     {SCOPE_LABELS[binding.scope_type] || binding.scope_type} ·{" "}
                     {binding.entity_key ||
-                      `${binding.entity_type} #${binding.entity_id}`}
+                      `${entityLabel(binding.entity_type)} #${binding.entity_id}`}
                   </span>
                 ))
               ) : (
@@ -340,14 +354,17 @@ export default function QualityExpectationsPage() {
               >
                 <option value="requirement">需求口径</option>
                 <option value="mapping">映射</option>
-                <option value="uat">UAT</option>
+                <option value="uat">验收</option>
                 <option value="monitoring">生产监控</option>
               </select>
-              <input
-                className="control"
-                name="entity_type"
-                placeholder="实体类型，例如 target_field"
-              />
+              <select className="control" defaultValue="" name="entity_type">
+                <option value="">不绑定具体对象</option>
+                {QUALITY_ENTITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <input
@@ -401,7 +418,7 @@ function StatusBadge({ status }: { status: string }) {
         rejected: "已拒绝",
         retired: "已退役",
       } as Record<string, string>
-    )[status] || status;
+    )[status] || "未知状态";
   return <span className={className}>{label}</span>;
 }
 function parseParameters(value: string) {

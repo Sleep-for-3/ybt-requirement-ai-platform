@@ -46,7 +46,7 @@ async def upload_template(
 def get_template(template_id: int, db: Session = Depends(get_db)) -> TemplateDocument:
     template = db.get(TemplateDocument, template_id)
     if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise HTTPException(status_code=404, detail="模板不存在")
     return template
 
 
@@ -77,7 +77,7 @@ def apply_template_api(template_id: int, db: Session = Depends(get_db)) -> Templ
 def template_detail(template_id: int, db: Session = Depends(get_db)) -> dict:
     template = db.get(TemplateDocument, template_id)
     if not template:
-        raise HTTPException(404, "Template not found")
+        raise HTTPException(404, "模板不存在")
     versions = list(db.scalars(select(TemplateVersion).where(
         TemplateVersion.template_document_id == template_id).order_by(TemplateVersion.version_no.desc())).all())
     applications = list(db.scalars(select(TemplateApplication).where(
@@ -93,7 +93,7 @@ def template_detail(template_id: int, db: Session = Depends(get_db)) -> dict:
 def get_template_version(version_id: int, db: Session = Depends(get_db)) -> TemplateVersion:
     version = db.get(TemplateVersion, version_id)
     if not version:
-        raise HTTPException(404, "Template version not found")
+        raise HTTPException(404, "模板版本不存在")
     return version
 
 
@@ -109,11 +109,11 @@ def get_template_version_diff(version_id: int, compare_to_id: int | None = None,
 def template_version_content(version_id: int, db: Session = Depends(get_db)) -> Response:
     version = db.get(TemplateVersion, version_id)
     if not version:
-        raise HTTPException(404, "Template version not found")
+        raise HTTPException(404, "模板版本不存在")
     try:
         data = get_storage_service().read(version.storage_path)
     except Exception:
-        raise HTTPException(404, "Template version not found") from None
+        raise HTTPException(404, "模板版本不存在") from None
     name = PurePosixPath(version.file_name.replace("\\", "/")).name[:255] or "template.xlsx"
     return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition":f"attachment; filename=template.xlsx; filename*=UTF-8''{quote(name, safe='')}",

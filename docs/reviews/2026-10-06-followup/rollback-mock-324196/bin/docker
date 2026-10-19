@@ -1,0 +1,13 @@
+#!/bin/bash
+if [[ "$1" == image && "$2" == inspect ]]; then
+  if [[ "$*" == *org.ybt.app.commit* ]]; then printf 'SYNTHETIC_A\n'
+  elif [[ "$*" == *org.ybt.build.time* ]]; then printf '2026-01-01T00:00:00Z\n'; fi
+  exit 0
+fi
+if [[ "$1" == compose && "$2" == up ]]; then
+  [[ "${FAKE_COMPOSE_FAIL:-0}" == 1 ]] && exit 99
+  exit 0
+fi
+if [[ "$1" == compose && "$2" == ps ]]; then exit 0; fi
+echo 'unsupported fake Docker call' >&2
+exit 91

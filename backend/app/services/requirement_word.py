@@ -120,7 +120,8 @@ def export_word(content):
 
     heading("制度依据与差异")
     decisions = content.get("policy_comparisons", {}).get("decisions", {})
-    labels = {"matched": "人工判断匹配", "conflict": "存在冲突", "missing_implementation": "缺少实现", "pending": "待确认"}
+    labels = {"matched": "人工判断匹配", "conflict": "存在冲突", "missing_implementation": "缺少实现",
+              "pending": "待确认", "not_compared": "未对照"}
     for unit in basis.get("policy_snapshot", {}).get("evidence", []):
         heading(unit.get("title") or f"制度资料片段 {unit['unit_id']}", 2)
         paragraph("制度版本", f"资料版本 {unit['document_version_id']} 监管版本 {unit.get('regulatory_version') or '未标注'} 来源类别 {unit.get('source_category')}")

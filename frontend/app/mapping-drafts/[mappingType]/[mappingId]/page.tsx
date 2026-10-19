@@ -8,6 +8,8 @@ import { useProjectPermissions } from "@/lib/project-permissions";
 import { MappingGenerationProvenance } from "@/components/MappingGenerationProvenance";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ApiError } from "@/lib/http-response.mjs";
+import { statusLabel } from "@/lib/product-language";
+import { describeError } from "@/lib/user-message.mjs";
 
 const KINDS = {source_to_mart: {title: "源到集市", path: "source-to-mart-mappings"}, mart_to_ybt: {title: "集市到一表通", path: "mart-to-ybt-mappings"}};
 type Kind = keyof typeof KINDS;
@@ -33,7 +35,7 @@ function DraftEditor({kind, id}: {kind: Kind; id: number}) {
     const controller = new AbortController();
     setError(""); setMapping(null);
     apiGet<Mapping>(base, {signal: controller.signal}).then(setMapping).catch(cause => {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "读取失败");
+      if (!controller.signal.aborted) setError(describeError(cause, "映射草稿加载失败，请稍后重试。"));
     });
     return () => {alive.current = false;controller.abort();};
   }, [base, attempt]);
@@ -56,7 +58,7 @@ function DraftEditor({kind, id}: {kind: Kind; id: number}) {
         if (cause instanceof ApiError && cause.errorCode === "mapping_draft_changed") {
           setMapping(null);
           setError("候选草稿已变化，请重新读取并核对后采用。");
-        } else setError(cause instanceof Error ? cause.message : "操作失败");
+        } else setError(describeError(cause, "映射草稿操作未完成，请稍后重试。"));
       }
     }
     finally {flight.current = false;if (alive.current) setBusy(false);}
@@ -66,7 +68,7 @@ function DraftEditor({kind, id}: {kind: Kind; id: number}) {
       {error && <p role="alert" className="text-red-700">{error} <button className="underline" disabled={busy} onClick={() => {setConfirmed(false);setAttempt(value => value + 1);}}>重新读取</button></p>}
       {!mapping && !error && <p role="status">正在读取映射…</p>}
       {mapping && <>
-        <p className="text-sm">{mapping.mapping_name || `映射 #${id}`} · 状态：{mapping.mapping_status} · <Link className="underline" href={`/workspace?projectId=${mapping.project_id}`}>返回项目工作台</Link></p>
+        <p className="text-sm">{mapping.mapping_name || `映射 #${id}`} · 状态：{statusLabel(mapping.mapping_status)} · <Link className="underline" href={`/workspace?projectId=${mapping.project_id}`}>返回项目工作台</Link></p>
         <section className="panel p-4" aria-label="跨层映射草稿">
           <h2 className="font-semibold">AI 候选草稿</h2><p className="mt-2 whitespace-pre-wrap break-words text-sm">{mapping.ai_generated_content || "尚未生成候选。"}</p>
           <div className="mt-4"><MappingGenerationProvenance mappingType={kind} mappingId={id} draftText={mapping.ai_generated_content}/></div>

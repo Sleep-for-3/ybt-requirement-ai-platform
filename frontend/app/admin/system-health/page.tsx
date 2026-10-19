@@ -6,6 +6,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
 import { ApiError } from "@/lib/http-response.mjs";
 import { statusLabel } from "@/lib/product-language";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 type Check = { status?: string; message?: string; latency_ms?: number; details?: Record<string, unknown> };
 type Health = { status?: string; checks?: Record<string, Check>; summary?: Record<string, unknown> };
@@ -39,7 +40,7 @@ export default function SystemHealthPage() {
       else if (status === 403) setError("当前账号无平台健康查看权限。");
       else if (status === 500 || status === 503) setError("健康检查服务暂时不可用，请稍后重试。");
       else if (status === 0) setError("无法连接服务，请检查后端是否正常运行。");
-      else setError(cause instanceof Error ? cause.message : "无法读取系统健康详情，请稍后重试。");
+      else setError(describeError(cause, "无法读取系统健康详情，请稍后重试。"));
     }
   }
   useEffect(() => { void refresh(); }, []);
@@ -48,7 +49,7 @@ export default function SystemHealthPage() {
     <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
       <div className="flex items-center justify-between"><p className="text-xs text-slate-500">最近刷新：{updatedAt || "加载中…"}</p><button className="button-secondary" onClick={() => void refresh()} type="button">刷新健康状态</button></div>
       {error ? <div className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{error}</div> : null}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{checks.map(([checkName, check]) => <article className="stat-card" key={checkName}><div className="flex items-center justify-between"><strong className="text-sm text-ink">{CHECK_LABELS[checkName] || checkName}</strong><span className={check.status === "healthy" || check.status === "ready" ? "badge-success" : check.status === "degraded" ? "badge-warning" : "badge-danger"}>{statusLabel(check.status)}</span></div><p className="mt-3 text-xs text-slate-600">{check.message || "未提供详情"}</p>{typeof check.latency_ms === "number" ? <p className="mt-2 text-xs text-slate-400">延迟 {Math.round(check.latency_ms)} ms</p> : null}</article>)}</section>
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{checks.map(([checkName, check]) => <article className="stat-card" key={checkName}><div className="flex items-center justify-between"><strong className="text-sm text-ink">{CHECK_LABELS[checkName] || "其他检查项"}</strong><span className={check.status === "healthy" || check.status === "ready" ? "badge-success" : check.status === "degraded" ? "badge-warning" : "badge-danger"}>{statusLabel(check.status)}</span></div><p className="mt-3 text-xs text-slate-600">{describeUserMessage(check.message, "该检查项未提供可读说明。")}</p>{typeof check.latency_ms === "number" ? <p className="mt-2 text-xs text-slate-400">延迟 {Math.round(check.latency_ms)} 毫秒</p> : null}</article>)}</section>
       {!error && data && !checks.length ? <div className="empty-state"><p>服务未返回可展示的逐项检查结果</p></div> : null}
     </div>
   </main>;

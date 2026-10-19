@@ -12,6 +12,23 @@ import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, DeliverablePackage, DeliverablePackageVersion, ValidationResult, apiDownload, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
+import { priorityLabel, questionTypeLabel, roleLabel, severityLabel, statusLabel as sharedStatusLabel } from "@/lib/product-language";
+
+const ISSUE_LABELS: Record<string, string> = {
+  missing_sheet: "缺少工作表", missing_column: "缺少列", sheet_not_found: "未找到工作表",
+  column_not_mapped: "列尚未映射", required_column_missing: "必填列缺失", header_row_missing: "缺少表头行",
+  template_changed: "模板已变化", unsupported_type: "不支持的文件类型", parse_failed: "解析失败",
+  not_approved: "尚未批准", mapping_incomplete: "字段映射不完整", render_crashed: "工作表渲染失败"
+};
+function describeIssue(code?: string | null) {
+  const key = String(code || "").trim();
+  return ISSUE_LABELS[key] || "其他未完成原因";
+}
+/** 后台校验说明可能夹带异常类名或堆栈，统一收敛为可展示的中文。 */
+function issueText(code?: string | null, message?: string | null) {
+  return describeUserMessage(String(message || ""), `${describeIssue(code)}，请查看校验记录`);
+}
 
 type ActionResult = { package?:DeliverablePackage;job?:BackgroundJobSummary;error_count?:number;warning_count?:number;issues?:ValidationResult["issues"];workflow_instance?:{id:number;status:string;current_step?:string|null};version?:DeliverablePackageVersion;idempotent?:boolean };
 
@@ -38,7 +55,7 @@ export default function Page() {
   async function act(path:string, success:string) {
     const result = await action.run(() => apiPost<ActionResult>(`/deliverables/${packageId}/${path}`, {}));
     if (result) {
-      const suffix = result.job ? `任务 #${result.job.id}：${result.job.status}（${result.job.progress}%）` : result.version ? `正式版本 v${result.version.version_no}${result.idempotent ? "（幂等复用）" : ""}` : result.error_count !== undefined ? `${result.error_count} 个错误，${result.warning_count || 0} 个告警` : "";
+      const suffix = result.job ? `任务 #${result.job.id}：${statusLabel(result.job.status)}（${result.job.progress}%）` : result.version ? `正式版本 v${result.version.version_no}${result.idempotent ? "（幂等复用）" : ""}` : result.error_count !== undefined ? `${result.error_count} 个错误，${result.warning_count || 0} 个告警` : "";
       setMessage(`${success}${suffix ? `；${suffix}` : ""}`);
       if (result.job) setActiveJob(result.job);
       setConfirmation(null);
@@ -166,10 +183,10 @@ export default function Page() {
                 className="grid-row grid items-center gap-2 md:grid-cols-[90px_180px_1fr]"
                 key={`${issue.code}-${index}`}
               >
-                <span className={issue.severity === "error" ? "badge-danger" : "badge-warning"}>{issue.severity}</span>
-                <code className="text-xs text-slate-600">{issue.code}</code>
+                <span className={issue.severity === "error" ? "badge-danger" : "badge-warning"}>{severityLabel(issue.severity)}</span>
+                <span className="text-xs text-slate-600">{describeIssue(issue.code)}</span>
                 <span>
-                  {issue.message}
+                  {issueText(issue.code, issue.message)}
                   {issue.sheet_name ? ` · ${issue.sheet_name}${issue.cell ? `!${issue.cell}` : ""}` : ""}
                 </span>
               </div>
@@ -212,7 +229,7 @@ export default function Page() {
                   <ul className="mt-3 space-y-1 rounded-lg border border-coral-200 bg-coral-50 p-3 text-xs text-coral-800">
                     {readiness.blocking_reasons.map(reason => (
                       <li key={reason.code}>
-                        <code>{reason.code}</code>：{reason.message}
+                        <span>{describeIssue(reason.code)}</span>：{issueText(reason.code, reason.message)}
                       </li>
                     ))}
                   </ul>
@@ -237,10 +254,10 @@ export default function Page() {
               <div className="border-b border-line p-3 text-sm last:border-0" key={question.id}>
                 <div className="flex justify-between gap-3">
                   <b className="text-ink">{question.question_text}</b>
-                  <span className="shrink-0 text-xs text-slate-500">{question.priority} · {question.question_status}</span>
+                  <span className="shrink-0 text-xs text-slate-500">{priorityLabel(question.priority)} · {sharedStatusLabel(question.question_status)}</span>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  {question.question_type} · {question.assigned_role || "未分派"}
+                  {questionTypeLabel(question.question_type)} · {question.assigned_role ? roleLabel(question.assigned_role) : "未分派"}
                   {question.resolution_text ? ` · 回答：${question.resolution_text}` : ""}
                 </p>
               </div>
@@ -344,7 +361,7 @@ function JobCard({ title, job }: { title: string; job?: BackgroundJobSummary | n
       </div>
       <p className="mt-2 text-xs text-slate-500">
         {job?.current_step || "无运行阶段"}
-        {job?.error_message ? ` · ${job.error_message}` : ""}
+        {job?.error_message ? ` · ${describeUserMessage(job.error_message, "生成失败原因待确认。")}` : ""}
       </p>
     </div>
   );
@@ -367,7 +384,7 @@ function statusBadgeClass(value: string) {
 }
 
 function statusLabel(value: string) {
-  return ({not_started:"未开始",pending_business_confirmation:"待业务确认",pending_technical_confirmation:"待技术确认",pending_mapping_review:"待映射审核",blocked:"已阻断",approved:"已批准",draft:"草稿",generating:"生成中",generated:"已渲染",pending_review:"最终审核中",render_failed:"渲染失败",generation_failed:"生成失败",validation_failed:"校验失败",cancelled:"已取消",rejected:"已驳回"} as Record<string,string>)[value] || value;
+  return ({not_started:"未开始",pending_business_confirmation:"待业务确认",pending_technical_confirmation:"待技术确认",pending_mapping_review:"待映射审核",blocked:"已阻断",approved:"已批准",draft:"草稿",generating:"生成中",generated:"已渲染",pending_review:"最终审核中",render_failed:"渲染失败",generation_failed:"生成失败",validation_failed:"校验失败",cancelled:"已取消",rejected:"已驳回"} as Record<string,string>)[value] || "未知状态";
 }
 
 function saveBlob(blob: Blob, name: string) {
@@ -380,5 +397,5 @@ function saveBlob(blob: Blob, name: string) {
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
+  return describeError(error, "操作未完成，请稍后重试。");
 }

@@ -22,9 +22,9 @@ def list_reporting_cycles(project_id: int, principal: CurrentPrincipal, db: Sess
 def create_reporting_cycle(project_id: int, payload: ReportingCycleCreate, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> ReportingCycle:
     project = PermissionService(db, principal).require_project_permission(project_id, "project.manage")
     if payload.period_end <= payload.period_start:
-        raise HTTPException(status_code=422, detail="period_end must be after period_start")
+        raise HTTPException(status_code=422, detail="period_end 必须晚于 period_start")
     if payload.submission_deadline and payload.submission_deadline < payload.period_end:
-        raise HTTPException(status_code=422, detail="submission_deadline must not precede period_end")
+        raise HTTPException(status_code=422, detail="submission_deadline 不能早于 period_end")
     cycle = ReportingCycle(project_id=project.id, institution_id=project.institution_id, **payload.model_dump())
     db.add(cycle)
     db.commit()

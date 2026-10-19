@@ -240,7 +240,8 @@ def export_document(content):
         comparisons = workbook.create_sheet("制度逐条对照")
         comparisons.append(["条款编号", "资料版本", "关联规则", "人工判断", "核验理由", "差异", "确认人", "确认时间"])
         decisions = content.get("policy_comparisons", {}).get("decisions", {})
-        labels = {"matched": "匹配", "conflict": "存在冲突", "missing_implementation": "缺少实现", "pending": "待确认"}
+        labels = {"matched": "匹配", "conflict": "存在冲突", "missing_implementation": "缺少实现",
+                  "pending": "待确认", "not_compared": "未对照"}
         for unit in basis.get("policy_snapshot", {}).get("evidence", []):
             row = decisions.get(str(unit["unit_id"])) or {}
             comparisons.append([unit["unit_id"], unit["document_version_id"], "、".join(row.get("rule_ids", [])),

@@ -60,8 +60,8 @@ export function CatalogToolbar({ query, searchDraft, facets, onSearchDraft, onSe
           <LabeledSelect label="治理状态" value={query.status} onChange={changeStatus}>
             <option value="">全部状态</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </LabeledSelect>
-          <LabeledSelect label="Owner" value={query.owner} onChange={(value) => onChange({ owner: value })}>
-            <option value="">全部 Owner</option>{facetOptions(facets?.owners).map(([value, count]) => <option key={value} value={value}>{value}（{count}）</option>)}
+          <LabeledSelect label="责任部门" value={query.owner} onChange={(value) => onChange({ owner: value })}>
+            <option value="">全部责任部门</option>{facetOptions(facets?.owners).map(([value, count]) => <option key={value} value={value}>{value}（{count}）</option>)}
           </LabeledSelect>
           <div aria-label="视图模式" className="flex h-10 rounded-lg border border-line bg-white p-0.5" role="group">
             <ViewButton active={query.view === "directory"} icon={<ListTree aria-hidden size={16} />} label="目录" onClick={() => onChange({ view: "directory" })} />
@@ -101,10 +101,10 @@ function facetOptions(values?: Record<string, number>) { return Object.entries(v
 function filterChips(query: CatalogQueryState) {
   const chips: Array<{ key:string;label:string;clear:Partial<CatalogQueryState> }> = [];
   if (query.q) chips.push({ key: "q", label: `搜索：${query.q}`, clear: { q: "" } });
-  if (query.type) chips.push({ key: "type", label: `类型：${TYPE_LABELS[query.type] || query.type}`, clear: { type: "" } });
+  if (query.type) chips.push({ key: "type", label: `类型：${TYPE_LABELS[query.type] || "未配置中文名称"}`, clear: { type: "" } });
   if (query.domain) chips.push({ key: "domain", label: `业务域：${catalogDomainLabel(query.domain)}`, clear: { domain: "" } });
-  if (query.status) chips.push({ key: "status", label: `状态：${STATUS_LABELS[query.status] || query.status}`, clear: { status: "", audit: false } });
-  if (query.owner) chips.push({ key: "owner", label: `Owner：${query.owner}`, clear: { owner: "" } });
+  if (query.status) chips.push({ key: "status", label: `状态：${STATUS_LABELS[query.status] || "未配置中文名称"}`, clear: { status: "", audit: false } });
+  if (query.owner) chips.push({ key: "owner", label: `责任部门：${query.owner}`, clear: { owner: "" } });
   if (query.as_of) chips.push({ key: "as_of", label: `截至：${query.as_of}`, clear: { as_of: "" } });
   if (query.has_binding !== null) chips.push({ key: "has_binding", label: `有绑定：${query.has_binding ? "是" : "否"}`, clear: { has_binding: null } });
   if (query.has_relation !== null) chips.push({ key: "has_relation", label: `有关系：${query.has_relation ? "是" : "否"}`, clear: { has_relation: null } });

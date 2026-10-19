@@ -20,7 +20,7 @@ KNOWLEDGE_TYPES = {"regulatory_qa", "historical_mapping", "east_mapping", "busin
 @router.post("/projects/{project_id}/knowledge/items", response_model=RegulatoryKnowledgeItemRead)
 def create_knowledge_item(project_id: int, payload: RegulatoryKnowledgeItemCreate, db: Session = Depends(get_db)) -> RegulatoryKnowledgeItem:
     if db.get(Project, project_id) is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="项目不存在")
     _validate_payload(db, project_id, payload)
     item = RegulatoryKnowledgeItem(project_id=project_id, **payload.model_dump())
     db.add(item)
@@ -72,11 +72,11 @@ def search_knowledge(project_id: int, payload: KnowledgeSearchRequest, db: Sessi
 
 def _validate_payload(db: Session, project_id: int, payload: RegulatoryKnowledgeItemCreate) -> None:
     if payload.knowledge_type not in KNOWLEDGE_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid knowledge_type")
+        raise HTTPException(status_code=400, detail="knowledge_type 取值不合法")
     if payload.scenario_id is not None:
         scenario = db.get(ProductScenario, payload.scenario_id)
         if scenario is None or scenario.project_id != project_id:
-            raise HTTPException(status_code=400, detail="Scenario belongs to another project")
+            raise HTTPException(status_code=400, detail="场景属于其他项目")
 
 
 def _keyword_score(item: RegulatoryKnowledgeItem, query: str | None) -> float:

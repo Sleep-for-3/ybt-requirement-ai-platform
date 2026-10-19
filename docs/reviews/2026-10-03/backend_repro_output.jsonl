@@ -1,0 +1,11 @@
+{"case": "BA03_nested_limit", "requested_max_rows": 2, "actual_rows": 5, "prepared_sql": "SELECT n FROM sample WHERE n IN (SELECT n FROM sample LIMIT 1) OR n > 1", "defect_present": true}
+{"case": "BA03_literal_limit", "requested_max_rows": 2, "actual_rows": 5, "prepared_sql": "SELECT 'limit 1' AS marker, n FROM sample", "defect_present": true}
+{"case": "BA07_dialect", "dialect": "sqlserver", "prepared_sql": "SELECT n FROM sample LIMIT 2", "real_database_execution": "not_performed"}
+{"case": "BA07_dialect", "dialect": "oracle", "prepared_sql": "SELECT n FROM sample LIMIT 2", "real_database_execution": "not_performed"}
+{"case": "BA07_dialect", "dialect": "db2", "prepared_sql": "SELECT n FROM sample LIMIT 2", "real_database_execution": "not_performed"}
+{"case": "BA02_alias_redaction", "original_removed": true, "alias_preserves_sensitive_value": true}
+{"case": "BA04_refresh_rotation", "successful_rotations_of_same_original": 2, "active_replacements": 2, "replacements_are_distinct": true}
+{"case": "BA05_disabled_institution", "visible_project_ids": [], "direct_manage_still_allowed": true}
+{"case": "BA06_duplicate_delivery", "same_job_deliveries": 2, "handler_executions": 2, "status": "completed"}
+{"case": "BA01_approved_mapping_edit", "http_status": 200, "new_content_persisted": true, "mapping_status": "approved", "workflow_status": "approved", "version_count": 1}
+{"case": "BA08_backup_placeholder", "backup_keys": ["backup_scope", "project_id", "project_name"], "contains_mapping_data": false, "handler_reports_success": true}

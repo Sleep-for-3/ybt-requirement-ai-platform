@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useProjectWorkspace } from "@/components/ProjectContext";
+import { describeError } from "@/lib/user-message.mjs";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
@@ -76,7 +77,7 @@ export default function Page() {
 
   async function govern(version:DocumentVersion, action:"submit-review"|"review"|"activate"){
     try{await apiPost(`/knowledge/document-versions/${version.id}/${action}?project_id=${projectId}`,{});await load();}
-    catch(failure){setError(failure instanceof Error?failure.message:"版本治理操作失败");}
+    catch(failure){setError(describeError(failure,"版本治理操作未完成，请稍后重试。"));}
   }
   const parsedUnitCount=Number(doc?.parse_summary_json?.unit_count);
   const unitCount=Number.isFinite(parsedUnitCount)&&parsedUnitCount>0?parsedUnitCount:units.length;

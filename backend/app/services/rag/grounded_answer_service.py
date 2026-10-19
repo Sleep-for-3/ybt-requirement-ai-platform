@@ -16,7 +16,7 @@ from app.services.retrieval import HybridRetriever
 from app.services.semantic_index.reindex import build_corpus_snapshot
 from app.services.semantic_index.versioning import get_active_index_version
 
-from .citation_validator import validate_citations
+from .citation_validator import check_citation_support, validate_citations
 from app.services.knowledge_evidence import document_citation, evidence_runtime
 
 
@@ -143,8 +143,19 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
         project_id=project_id,
         institution_name=project.bank_name if project else None,
     )
+    # ⑤: opt-in entailment check. The switch defaults to "off", in which case nothing is added
+    # and the returned payload stays byte-for-byte the pre-existing shape.
+    citation_support = None
+    if get_settings().citation_support_check == "judge":
+        citation_support = await check_citation_support(
+            db,
+            citations,
+            answer=answer,
+            project_id=project_id,
+            confidentiality_levels=[_highest_confidentiality(items)],
+        )
     db.commit()
-    return {
+    result = {
         "answer": answer,
         "confidence_level": "low" if invalid_output else (output.get("confidence_level")
         or ("high" if items[0]["rerank_score"] >= 0.75 else "medium")),
@@ -161,6 +172,9 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
         "conflicts": conflicts,
         "execution_metadata": execution_metadata,
     }
+    if citation_support is not None:
+        result["citation_support"] = citation_support
+    return result
 
 
 def _degraded_answer(

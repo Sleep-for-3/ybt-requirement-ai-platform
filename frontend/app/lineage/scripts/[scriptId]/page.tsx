@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { LineageGraph } from "@/components/LineageGraph";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { LineageGraph as Graph, ScriptDependency, ScriptFile, ScriptVersion, apiDownload, apiGet } from "@/lib/api";
+import { confidenceLevelLabel, dependencyTypeLabel, parseStatusLabel } from "@/lib/product-language";
 
 type Detail = ScriptFile & { versions: ScriptVersion[]; dependencies: ScriptDependency[] };
 
@@ -71,7 +72,7 @@ export default function Page() {
                 <div className="grid-row grid grid-cols-[90px_140px_minmax(0,1fr)] items-center" key={v.id}>
                   <strong className="text-ink">v{v.version_no}</strong>
                   <span>
-                    <span className={statusBadge(v.parse_status)}>{v.parse_status}</span>
+                    <span className={statusBadge(v.parse_status)}>{parseStatusLabel(v.parse_status)}</span>
                   </span>
                   <span className="justify-self-end font-mono text-xs text-slate-500">
                     {v.git_commit_sha?.slice(0, 12) || v.file_hash.slice(0, 12)}
@@ -102,10 +103,10 @@ export default function Page() {
               </div>
               {data.dependencies.map((d) => (
                 <div className="grid-row grid grid-cols-[150px_minmax(0,1fr)_150px] items-center" key={d.id}>
-                  <strong className="text-ink">{d.dependency_type}</strong>
+                  <strong className="text-ink">{dependencyTypeLabel(d.dependency_type)}</strong>
                   <span className="font-mono text-xs">{d.call_expression}</span>
                   <span className="justify-self-end text-xs text-slate-500">
-                    行 {d.source_line_start || "-"} · {d.confidence_level}
+                    行 {d.source_line_start || "-"} · 置信度 {confidenceLevelLabel(d.confidence_level)}
                   </span>
                 </div>
               ))}

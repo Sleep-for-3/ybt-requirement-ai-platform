@@ -82,7 +82,19 @@ def capabilities(principal: RealPrincipal, scope: SkillScope = Depends(requested
             "can_edit": allowed(scope, write=True),
             "can_publish": allowed(scope, write=True, publish=True)}
 
+@router.get("/binding-todos")
+def binding_todos(principal: RealPrincipal, scope: SkillScope = Depends(requested_scope), db: Session = Depends(get_db)):
+    """Skills this scope has not pinned yet, with the newest published version to pin.
 
+    Declared before ``/{skill_key}`` so the literal path wins. Read-only: acting on
+    a todo still goes through ``POST /ai-skills/{skill_key}/bindings``, because a
+    published version is never adopted without an explicit human decision.
+    """
+
+    from app.services.ai_skills.binding_readiness import binding_todos as collect
+
+    control.authorize_scope(db, principal, scope)
+    return collect(db, scope)
 @router.get("/model-options")
 def model_options(principal: RealPrincipal, scope: SkillScope = Depends(requested_scope), db: Session = Depends(get_db)):
     control.authorize_scope(db, principal, scope)

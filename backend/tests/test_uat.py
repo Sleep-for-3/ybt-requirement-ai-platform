@@ -297,7 +297,7 @@ def test_uat_pack_enforces_combined_upload_limit_before_persistence(monkeypatch,
                 ],
             )
             assert response.status_code == 400
-            assert "total size limit" in response.text
+            assert "总大小超出限制" in response.text
             assert client.get(f"/api/projects/{project['id']}/uat-packs").json() == []
     finally:
         get_settings.cache_clear()

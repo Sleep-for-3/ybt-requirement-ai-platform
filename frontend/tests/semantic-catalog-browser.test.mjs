@@ -227,8 +227,8 @@ browserTest("production browser detail separates shell and lazy-region loading, 
   await browser.respond(shellRequest, jsonResponse(detailShell()));
   await browser.waitForText("详情测试概念");
   const regionRequest = await browser.waitForRequest((request) => request.kind === "detail-region" && request.region === "bindings");
-  await browser.waitFor(() => browser.exists('[role="status"][aria-busy="true"]'), undefined, "Bindings loading boundary");
-  assert.equal(await browser.attribute('[role="status"][aria-busy="true"]', "aria-label"), "正在加载Bindings");
+  await browser.waitFor(() => browser.exists('[role="status"][aria-busy="true"]'), undefined, "资产绑定 loading boundary");
+  assert.equal(await browser.attribute('[role="status"][aria-busy="true"]', "aria-label"), "正在加载资产绑定");
   await browser.respond(regionRequest, jsonResponse(emptyBindingRegion()));
   await browser.waitForText("当前语义尚未绑定数据资产。");
 
@@ -243,10 +243,10 @@ browserTest("production browser detail separates shell and lazy-region loading, 
   });
   await browser.navigate("/semantics/42?projectId=1&tab=bindings");
   await browser.waitForText("详情测试概念");
-  await browser.waitForText("Bindings加载失败");
+  await browser.waitForText("资产绑定加载失败");
   assert.equal((await browser.text()).includes("详情测试概念"), true);
-  await browser.clickText("重试加载Bindings");
-  await browser.waitForText("Confirmed Bindings");
+  await browser.clickText("重试加载资产绑定");
+  await browser.waitForText("已确认绑定");
   assert.equal(regionAttempts >= 2, true);
 
   await browser.resetScenario();
@@ -254,7 +254,7 @@ browserTest("production browser detail separates shell and lazy-region loading, 
   browser.setApiHandler("detail-region", () => jsonResponse({ detail: "bindings forbidden" }, 403));
   await browser.navigate("/semantics/42?projectId=1&tab=bindings");
   await browser.waitForText("详情测试概念");
-  await browser.waitForText("无权查看Bindings");
+  await browser.waitForText("无权查看资产绑定");
   assert.equal((await browser.text()).includes("详情测试概念"), true);
 });
 
@@ -267,8 +267,8 @@ browserTest("production browser detail drives real tab keyboard focus and retain
   await browser.key("#semantic-tab-overview", "ArrowRight");
   await browser.waitForUrl((href) => href.includes("tab=bindings"));
   const bindingsRequest = await browser.waitForRequest((request) => request.kind === "detail-region" && request.region === "bindings");
-  assert.deepEqual(await browser.activeElement(), { id: "semantic-tab-bindings", role: "tab", text: "Bindings" });
-  assert.deepEqual(await browser.elements('[role="tab"][aria-selected="true"]'), [{ id: "semantic-tab-bindings", text: "Bindings", disabled: false, expanded: null, selected: "true", controls: "semantic-panel-bindings", href: null }]);
+  assert.deepEqual(await browser.activeElement(), { id: "semantic-tab-bindings", role: "tab", text: "资产绑定" });
+  assert.deepEqual(await browser.elements('[role="tab"][aria-selected="true"]'), [{ id: "semantic-tab-bindings", text: "资产绑定", disabled: false, expanded: null, selected: "true", controls: "semantic-panel-bindings", href: null }]);
   assert.equal((await browser.elements('[role="tabpanel"]')).length, 1);
   assert.equal((await browser.elements('[role="tabpanel"]'))[0].id, "semantic-panel-bindings");
   await browser.respond(bindingsRequest, jsonResponse(emptyBindingRegion()));

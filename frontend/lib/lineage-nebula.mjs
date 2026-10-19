@@ -90,7 +90,7 @@ export function normalizeLayerCode(node) {
 export function layerLabel(code, node) {
   const explicit = firstText(node?.layer_name, isRecord(node?.display) ? node.display.layer_name : null);
   if (explicit && explicit !== code) return explicit;
-  return LAYER_LABELS[code] || code;
+  return LAYER_LABELS[code] || "未识别层级";
 }
 
 export function layerRank(code) {
@@ -158,7 +158,7 @@ export function relationLabel(relationSource) {
   const source = text(relationSource);
   if (source === "technical_lineage") return "脚本解析血缘";
   if (source === "business_mapping") return "已审核业务映射";
-  return source || "未标注关系";
+  return source ? `未登记关系（${source}）` : "未标注关系";
 }
 
 export function summarizeGaps(gaps) {

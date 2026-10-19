@@ -306,6 +306,32 @@ def test_c03_a_retry_whose_publish_fails_is_still_recoverable(env):
         assert recovered.calls == [("app.workers.execute_background_job", [job_id])]
 
 
+def test_a_deduplicated_job_can_still_be_retried_and_published(env):
+    """The deduplication marker says "another caller owns delivering this row", and it is stored
+    on the ORM instance. A retry performed by *the caller holding the instance* must publish:
+    leaving the marker set silently skipped the publish and left the job queued forever."""
+    factory, user_id = env
+    with factory() as db:
+        fake = _FakeCelery()
+        queue = CeleryTaskQueue(fake)
+        # One submission creates the row; a second submission of the same key returns the
+        # *same ORM instance* and stamps it as deduplicated -- no second session involved.
+        first = queue.enqueue(db, job_type="metadata_sync", institution_id=None, project_id=None,
+                              created_by=user_id, idempotency_key="dedup-retry", payload_summary={})
+        again = queue.enqueue(db, job_type="metadata_sync", institution_id=None, project_id=None,
+                              created_by=user_id, idempotency_key="dedup-retry", payload_summary={})
+        assert again is first and first.submission_deduplicated is True
+        first.status = "failed"
+        db.commit()
+
+        retried = queue.retry(db, first)
+        assert retried.status == "queued"
+        assert retried.celery_task_id is not None, (
+            "a retry from the instance that lost the deduplication race must still publish")
+        # One publish for the original submission, then this retry's own publish.
+        assert fake.calls == [("app.workers.execute_background_job", [first.id])] * 2, fake.calls
+        assert retried.celery_task_id == "celery-2"
+
 def test_c03_repeated_sweeps_do_not_publish_twice(env):
     factory, user_id = env
     with factory() as db:

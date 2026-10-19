@@ -10,6 +10,7 @@ import { PageState } from "@/components/feedback/PageState";
 import { apiGet, apiPost } from "@/lib/api";
 import { formatDateTime, statusLabel, targetTypeLabel, workflowStepLabel } from "@/lib/product-language";
 import type { Recheck } from "@/components/requirement-workspace/RequirementRecheckPanel";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 type Task = {
   id: number;
@@ -57,7 +58,7 @@ export default function Page() {
     try {
       setItem(await apiGet<Task>(`/review-tasks/${taskId}`));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "审核任务加载失败，请稍后重试");
+      setError(describeError(cause, "审核任务加载失败，请稍后重试。"));
     } finally {
       setLoading(false);
     }
@@ -83,7 +84,7 @@ export default function Page() {
       setMessage(action === "approve" ? "任务已通过。" : action === "reject" ? "任务已驳回并记录原因。" : "任务已退回修改。 ");
       await reload();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "处理失败，请检查任务状态后重试");
+      setError(describeError(cause, "处理失败，请检查任务状态后重试。"));
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +100,7 @@ export default function Page() {
           {item.recheck_context&&<section className="space-y-2 border-b border-line pb-3 text-sm">
             <Link className="text-teal-800 underline" href={`/workspace?projectId=${item.project_id}&requirementId=${item.recheck_context.requirement_id}&tableId=${item.recheck_context.target_table_id}&scenarioId=${item.recheck_context.scenario_id}`}>查看需求复核与修订</Link>
             <p>原内容 v{item.recheck_context.content_version} · 新修订 {item.recheck_context.replacement_content_version??"尚未关联"}</p>
-            <ul>{item.recheck_context.changes.map(change=><li key={change.code}>{change.message}</li>)}</ul>
+            <ul>{item.recheck_context.changes.map(change=><li key={change.code}>{describeUserMessage(change.message, "该变更说明待补充，请人工核验。")}</li>)}</ul>
             <p>{item.recheck_context.resolution||"尚未填写复核处理依据"}</p>
           </section>}
           {item.uat_context&&<section className="border-b border-line pb-3 text-sm">

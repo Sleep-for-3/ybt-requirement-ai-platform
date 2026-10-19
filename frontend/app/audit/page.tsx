@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
+import { auditEventLabel, resourceTypeLabel, statusLabel } from "@/lib/product-language";
 
 type Audit = {
   id: number;
@@ -46,13 +47,13 @@ export default function Page() {
             </div>
             {items.map((item) => (
               <div className="grid-row grid grid-cols-[160px_140px_1fr_100px] items-center" key={item.id}>
-                <span>{item.action}</span>
-                <span>{item.resource_type}</span>
+                <span>{auditEventLabel(item.action)}</span>
+                <span>{resourceTypeLabel(item.resource_type)}</span>
                 <span className="text-slate-600">
                   资源 #{item.resource_id || "-"} · 操作者 #{item.actor_user_id || "系统"}
                 </span>
                 <span>
-                  <span className={resultBadge(item.result)}>{item.result}</span>
+                  <span className={resultBadge(item.result)}>{statusLabel(item.result)}</span>
                 </span>
               </div>
             ))}

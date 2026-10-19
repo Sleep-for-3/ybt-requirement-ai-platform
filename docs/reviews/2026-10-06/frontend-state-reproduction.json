@@ -1,0 +1,48 @@
+{
+  "head": "fd7a532902da9fe696bdf51ded4873e8f283427c",
+  "boundary": "Review artifact; all fetch/storage/timers controlled in memory; no real HTTP, API, database, app source changes.",
+  "session_race": {
+    "sequence": [
+      "A request -> 401",
+      "A refresh pending",
+      "clearSession",
+      "login B saves B tokens",
+      "A refresh resolves late"
+    ],
+    "expected_access_token": "B-access",
+    "actual_access_token": "A-access-new",
+    "replayed_authorization": "Bearer A-access-new",
+    "mocked_calls": [
+      {
+        "path": "http://mock/api/isolated-mock-only",
+        "authorization": "Bearer A-access-old"
+      },
+      {
+        "path": "http://mock/api/auth/refresh"
+      },
+      {
+        "path": "http://mock/api/isolated-mock-only",
+        "authorization": "Bearer A-access-new"
+      }
+    ],
+    "reproduced": true
+  },
+  "actorless_draft": {
+    "actor_a": 17,
+    "actor_b": 18,
+    "actor_a_key": "skill-draft:project:11:none:requirement_candidate_generation",
+    "actor_b_key": "skill-draft:project:11:none:requirement_candidate_generation",
+    "actual_read_by_actor_b": "A unsaved private content",
+    "note": "Actual key expression and actual draft helpers; UI readDraft/pendingDraft path verified statically.",
+    "reproduced": true
+  },
+  "polling_stops": {
+    "failed_fetches": 3,
+    "fetches_after_network_and_visibility_recovery": 3,
+    "registry_size": 0,
+    "delivered_jobs": 0,
+    "hook_configures_onPollingError": false,
+    "note": "Actual registry with controlled timers/visibility. Hook has no onPollingError; rendered job state is a source conclusion.",
+    "reproduced": true
+  }
+}

@@ -139,7 +139,9 @@ def validate_claim_references(claim: SkillClaim, envelope: SkillInputEnvelope) -
 
 class SkillPolicyComparison(ContractModel):
     """An evidence-linked suggestion, never an adopted human decision."""
-    status: Literal["matched", "conflict", "missing_implementation", "pending"]
+    # ``not_compared`` is the skill saying it did not reach a comparison.  It is a state,
+    # not a finding, so it carries no difference explanation and no coverage claim.
+    status: Literal["matched", "conflict", "missing_implementation", "pending", "not_compared"]
     fact_ids: list[Reference] = Field(min_length=1, max_length=100)
     policy_clause_ids: list[Reference] = Field(min_length=1, max_length=100)
     rationale: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10000)]

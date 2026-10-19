@@ -13,6 +13,42 @@ export const TRUNCATION_LABELS = {
   edge_budget: "已达到边预算，结果被截断"
 };
 
+export const ROOT_TYPE_LABELS = {
+  target_field: "报送目标字段",
+  target_table: "报送目标表",
+  source_field: "来源字段",
+  source_table: "来源表",
+  mart_field: "集市字段",
+  mart_table: "集市表",
+  catalog_column: "目录字段",
+  knowledge_unit: "知识单元",
+  lineage: "血缘记录",
+  mart_to_ybt_mapping: "集市到报送映射",
+  source_to_mart_mapping: "来源到集市映射",
+  scenario: "业务场景",
+  scenario_business_mapping: "场景业务映射",
+  scenario_technical_lineage: "场景技术血缘",
+  semantic_concept: "语义概念"
+};
+
+export const DIRECTION_LABELS = {
+  upstream: "上游",
+  downstream: "下游",
+  both: "上下游",
+  incoming: "流入",
+  outgoing: "流出"
+};
+
+function rootTypeLabel(value) {
+  if (!value) return "未标注对象";
+  return ROOT_TYPE_LABELS[value] || "其他对象";
+}
+
+function directionLabel(value) {
+  if (!value) return "未标注方向";
+  return DIRECTION_LABELS[value] || "其他方向";
+}
+
 export function describeTraversal(graph) {
   const traversal = graph?.traversal;
   if (!traversal) {
@@ -28,8 +64,8 @@ export function describeTraversal(graph) {
   const mode = traversal.mode || "unknown";
   if (mode === "bounded_traversal") {
     const parts = [
-      `根对象 ${traversal.root?.root_type || "?"}#${traversal.root?.root_id ?? "?"}`,
-      `方向 ${traversal.direction}`,
+      `根对象 ${rootTypeLabel(traversal.root?.root_type)}#${traversal.root?.root_id ?? "?"}`,
+      `方向 ${directionLabel(traversal.direction)}`,
       `深度 ${traversal.depth_reached}/${traversal.depth}`,
       `视图 ${traversal.view === "technical" ? "技术" : "业务"}`
     ];

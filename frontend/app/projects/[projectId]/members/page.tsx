@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
+import { projectRoleLabel, statusLabel } from "@/lib/product-language";
 
 type Member = { id: number; user_id: number; project_role: string; status: string };
 
@@ -82,9 +83,9 @@ export default function Page() {
             {items.map((item) => (
               <div className="grid-row grid grid-cols-[120px_1fr_96px] items-center gap-3" key={item.id}>
                 <span className="font-medium text-ink">用户 #{item.user_id}</span>
-                <span className="truncate text-slate-600">{item.project_role}</span>
+                <span className="truncate text-slate-600">{projectRoleLabel(item.project_role)}</span>
                 <span>
-                  <span className={statusBadge(item.status)}>{item.status}</span>
+                  <span className={statusBadge(item.status)}>{statusLabel(item.status)}</span>
                 </span>
               </div>
             ))}

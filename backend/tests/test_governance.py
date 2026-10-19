@@ -2,6 +2,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
 
+import re
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -254,6 +256,14 @@ def test_global_search_returns_project_scoped_production_destinations(monkeypatc
         assert "甲行客户表" in (target_field_result.get("subtitle") or "")
         assert "监管字段" in (target_field_result.get("subtitle") or "")
         assert all("乙行" not in f"{item['title']} {item.get('subtitle') or ''}" for item in items)
+        # 副标题里的业务编码（field_code/table_code）是业务数据，不能当机器标识符；
+        # 但枚举状态值必须已中文化，副标题不得以裸枚举结尾。
+        raw_enum_values = {"draft", "confirmed", "ai_suggested", "deprecated", "table", "column",
+                           "manual_note", "semantic_concept", "data_dictionary", "regulatory_policy"}
+        for item in items:
+            subtitle = item.get("subtitle") or ""
+            tail = subtitle.rsplit("·", 1)[-1].strip()
+            assert tail not in raw_enum_values, f"全局搜索副标题直出了枚举值：{subtitle!r}"
 
         encoded = client.get(
             f"/api/projects/{project_a['id']}/global-search",
@@ -615,7 +625,7 @@ def test_login_failures_are_generic_and_temporarily_lock_account(monkeypatch) ->
         for _ in range(5):
             failed = client.post("/api/auth/login", json={"username": "platform_admin", "password": "wrong-password-value"})
             assert failed.status_code == 401
-            assert failed.json()["detail"] == "Invalid username or password"
+            assert failed.json()["detail"] == "用户名或密码错误"
         locked = client.post("/api/auth/login", json={"username": "platform_admin", "password": "test-only-platform-bootstrap-password"})
         assert locked.status_code == 401
 

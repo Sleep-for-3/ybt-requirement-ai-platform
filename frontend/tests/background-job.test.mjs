@@ -31,7 +31,7 @@ test("knowledge ingestion failure exposes only a safe worker error", () => {
       progress: 100,
       error_message: "Unsupported knowledge document format"
     }),
-    "索引失败：Unsupported knowledge document format"
+    "索引失败：服务器处理失败"
   );
   assert.equal(
     describeKnowledgeJob({

@@ -10,6 +10,7 @@ import { PageState } from "@/components/feedback/PageState";
 import { ChangeSetDetail, ImpactAnalysis, apiGet } from "@/lib/api";
 import { changeCategoryLabel, formatDateTime, severityLabel, statusLabel, targetTypeLabel, workflowStepLabel } from "@/lib/product-language";
 import { projectRoleLabel } from "@/lib/permission-language.mjs";
+import { describeError } from "@/lib/user-message.mjs";
 
 export default function Page() {
   const { impactId } = useParams<{ impactId: string }>();
@@ -26,7 +27,7 @@ export default function Page() {
       setData(impact);
       setChange(await apiGet<ChangeSetDetail>(`/lineage/changes/${impact.change_set_id}`));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "影响分析加载失败，请稍后重试");
+      setError(describeError(cause, "影响分析加载失败，请稍后重试。"));
     } finally {
       setLoading(false);
     }
@@ -91,7 +92,7 @@ export default function Page() {
               <div className="panel-header">
                 <div>
                   <h2 className="text-[15px] font-semibold text-ink">影响范围</h2>
-                  <p className="mt-1 text-xs text-slate-500">以下数量来自现有 Impact Engine 的真实关联，不复制或重新计算血缘。</p>
+                  <p className="mt-1 text-xs text-slate-500">以下数量来自现有影响分析引擎的真实关联，不复制或重新计算血缘。</p>
                 </div>
               </div>
               <div className="divide-y divide-line">

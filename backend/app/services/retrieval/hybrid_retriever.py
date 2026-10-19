@@ -10,7 +10,9 @@ from app.services.embeddings.observability import embed_with_observability
 from app.services.semantic_index.versioning import get_active_index_version
 from app.services.vector import get_vector_store
 
-from .keyword_index import tokenize, token_matches
+from .keyword_index import (DEFAULT_BM25_B, DEFAULT_BM25_K1, BM25Stats, compute_bm25_stats,
+                            load_unit_statistics, score_bm25, tokenize, token_matches)
+from .reranker import rerank_items
 from app.services.knowledge_evidence import unit_locator
 from app.services.knowledge_eligibility import governed_unit_predicates, governed_document_visible
 
@@ -18,6 +20,9 @@ from app.services.knowledge_eligibility import governed_unit_predicates, governe
 RETRIEVAL_MODES = {"keyword_only", "vector_only", "hybrid"}
 AUTHORITY_RANK = {"regulatory_formal": 6, "regulatory_qa": 5, "internal_policy": 4,
                   "internal_interpretation": 3, "business_material": 2, "technical_evidence": 1}
+DEFAULT_RRF_K = 60
+
+
 
 
 class HybridRetriever:
@@ -96,11 +101,35 @@ class HybridRetriever:
             candidates = list(self.db.scalars(
                 select(KnowledgeUnit).where(KnowledgeUnit.id.in_(candidate_ids))
             ).all()) if candidate_ids else []
-            keyword = {
-                unit.id: _keyword_score(unit, tokens, target, scenario_id)
-                for unit in candidates
-            }
-            keyword = {key: value for key, value in keyword.items() if value > 0}
+            if candidates:
+                # Real BM25: IDF and document lengths are aggregated live from the
+                # existing keyword rows, so no new table and no migration. The
+                # aggregation is skipped entirely when the token match produced no
+                # candidates: scoring an empty candidate set needs no statistics, and
+                # callers that count SQL statements keep their previous budget.
+                bm25_stats = compute_bm25_stats(
+                    self.db,
+                    predicates=predicates,
+                    tokens=tokens,
+                    k1=_setting_float(settings, "keyword_bm25_k1", DEFAULT_BM25_K1),
+                    b=_setting_float(settings, "keyword_bm25_b", DEFAULT_BM25_B),
+                )
+                lengths, frequencies = load_unit_statistics(
+                    self.db, [unit.id for unit in candidates], tokens
+                )
+                for unit in candidates:
+                    score = _keyword_score(
+                        unit,
+                        tokens,
+                        target,
+                        scenario_id,
+                        stats=bm25_stats,
+                        frequencies=frequencies.get(unit.id),
+                        document_length=lengths.get(unit.id),
+                    )
+                    if score > 0:
+                        keyword[unit.id] = score
+                candidates = [unit for unit in candidates if unit.id in keyword]
 
         vector: dict[int, float] = {}
         active_index = None
@@ -186,8 +215,36 @@ class HybridRetriever:
 
         normalized_keyword = _normalize_scores(keyword)
         normalized_vector = _normalize_scores(vector)
+        fusion_strategy = _fusion_strategy(settings)
+        rrf_k = _setting_int(settings, "rrf_k", DEFAULT_RRF_K)
+        source_modes = {
+            "keyword_only": ("keyword",),
+            "vector_only": ("vector",),
+        }.get(retrieval_mode, ("keyword", "vector"))
+        vector_weight = settings.hybrid_vector_weight
+        keyword_weight = settings.hybrid_keyword_weight
+        if retrieval_mode == "keyword_only":
+            keyword_weight, vector_weight = 1.0, 0.0
+        elif retrieval_mode == "vector_only":
+            keyword_weight, vector_weight = 0.0, 1.0
+        weight_total = keyword_weight + vector_weight
+        keyword_weight = keyword_weight / weight_total if weight_total else 0.5
+        vector_weight = vector_weight / weight_total if weight_total else 0.5
+        # ``weighted`` keeps the historical linear blend; ``rrf`` fuses by rank
+        # (settings.rrf_k) so the two sources stop competing on score scale. Rank
+        # contributions carry the configured source weights, so at equal rank the
+        # keyword source still outranks the vector source as weighted mode does.
+        fused = _fuse_scores(
+            keyword,
+            vector,
+            source_modes=source_modes,
+            fusion_strategy=fusion_strategy,
+            rrf_k=rrf_k,
+            keyword_weight=keyword_weight,
+            vector_weight=vector_weight,
+        )
         unit_by_id = {unit.id: unit for unit in candidates}
-        ids = set(normalized_keyword) | set(normalized_vector)
+        ids = set(fused) | set(normalized_keyword) | set(normalized_vector)
         missing_unit_ids = ids - set(unit_by_id)
         for unit_id in missing_unit_ids:
             unit = self.db.get(KnowledgeUnit, unit_id)
@@ -209,15 +266,6 @@ class HybridRetriever:
             ).all()
         } if candidate_units else {}
         items = []
-        vector_weight = settings.hybrid_vector_weight
-        keyword_weight = settings.hybrid_keyword_weight
-        if retrieval_mode == "keyword_only":
-            keyword_weight, vector_weight = 1.0, 0.0
-        elif retrieval_mode == "vector_only":
-            keyword_weight, vector_weight = 0.0, 1.0
-        weight_total = keyword_weight + vector_weight
-        keyword_weight = keyword_weight / weight_total if weight_total else 0.5
-        vector_weight = vector_weight / weight_total if weight_total else 0.5
         for unit_id in ids:
             unit = unit_by_id.get(unit_id)
             if not unit or not _visible(
@@ -255,12 +303,7 @@ class HybridRetriever:
             if authority_rank >= 5:
                 reasons.append("当前生效监管资料")
             rule_boost = 0.05 if reasons else 0.0
-            final_score = min(
-                1.0,
-                keyword_score * keyword_weight
-                + vector_score * vector_weight
-                + rule_boost,
-            )
+            final_score = min(1.0, fused.get(unit_id, 0.0) + rule_boost)
             items.append({
                 "knowledge_unit_id": unit.id,
                 "project_id": unit.project_id,
@@ -302,6 +345,12 @@ class HybridRetriever:
             key=lambda item: (item["authority_rank"], item["final_score"], -item["knowledge_unit_id"]),
             reverse=True,
         )[:top_k]
+        # The reranker is inert unless settings.reranker_enabled is True; when it
+        # is on it refines ordering inside an authority tier and degrades to the
+        # order above on any failure.
+        rerank_outcome = rerank_items(items, query, settings)
+        if rerank_outcome.applied:
+            items = rerank_outcome.items[:top_k]
         log = RetrievalLog(
             project_id=project_id,
             query_text=query,
@@ -314,6 +363,9 @@ class HybridRetriever:
                 "collection": active_index.collection_name if active_index else None,
                 "keyword_weight": keyword_weight,
                 "vector_weight": vector_weight,
+                "fusion_strategy": fusion_strategy,
+                "rrf_k": rrf_k if fusion_strategy == "rrf" else None,
+                "reranker": rerank_outcome.diagnostics(),
             },
             retrieval_strategy=effective_retrieval_mode,
             keyword_result_count=len(keyword),
@@ -345,25 +397,133 @@ def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:
     }
 
 
-def _keyword_score(unit, tokens, target, scenario):
-    text = f"{unit.title or ''} {unit.normalized_content}".lower()
-    unique_tokens = set(tokens)
-    total_weight = sum(_query_token_weight(token) for token in unique_tokens)
-    matched_weight = sum(
-        _query_token_weight(token)
-        for token in unique_tokens
-        if token_matches(text, token)
-    )
-    score = matched_weight / max(total_weight, 1.0) * 0.7
+def _keyword_score(unit, tokens, target, scenario, *, stats=None, frequencies=None, document_length=None):
+    """BM25 keyword score for one unit.
+
+    The retrieval path passes corpus statistics aggregated from
+    ``knowledge_keyword_indexes`` (real IDF + document length); the standalone
+    unit-level path used by direct callers and boundary tests derives term
+    frequencies from the unit text itself with the same field weights that
+    indexing applies (title 1.25, structured 1.5), and degenerates IDF to 1.0.
+    """
+    unique_tokens = list(dict.fromkeys(token for token in tokens if token))
+    if frequencies is None:
+        content_text = (
+            getattr(unit, "normalized_content", None)
+            or getattr(unit, "content", None)
+            or ""
+        )
+        local_frequencies: dict[str, float] = {}
+        length = 0.0
+        for text, field_weight in (
+            (content_text, 1.0),
+            (getattr(unit, "title", None) or "", 1.25),
+            (_structured_text(unit), 1.5),
+        ):
+            if not text:
+                continue
+            length += float(len(tokenize(text)))
+            for token in unique_tokens:
+                if token_matches(text, token):
+                    local_frequencies[token] = max(local_frequencies.get(token, 0.0), field_weight)
+        frequencies = local_frequencies
+        if document_length is None:
+            document_length = length
+        if stats is None:
+            stats = BM25Stats(
+                idf={token: 1.0 for token in frequencies},
+                average_length=length or 1.0,
+                corpus_size=1 if frequencies else 0,
+                k1=DEFAULT_BM25_K1,
+                b=DEFAULT_BM25_B,
+            )
+    if stats is None:  # pragma: no cover - callers either supply both or neither
+        stats = BM25Stats()
+    score = score_bm25(unique_tokens, frequencies or {}, float(document_length or 0.0), stats)
     if (
         target
-        and unit.target_field_code
+        and getattr(unit, "target_field_code", None)
         and unit.target_field_code.lower() == target.field_code.lower()
     ):
         score += 0.25
-    if scenario and unit.scenario_id == scenario:
+    if scenario and getattr(unit, "scenario_id", None) == scenario:
         score += 0.1
-    return min(score, 1.0)
+    return score
+
+
+def _structured_text(unit) -> str:
+    """The structured field identifiers that indexing weights at 1.5."""
+    return " ".join(
+        filter(
+            None,
+            [
+                getattr(unit, "target_table_code", None),
+                getattr(unit, "target_field_code", None),
+                getattr(unit, "target_field_name", None),
+                getattr(unit, "source_table_name", None),
+                getattr(unit, "source_field_name", None),
+            ],
+        )
+    )
+
+
+def _rank_scores(scores: dict[int, float]) -> dict[int, int]:
+    """1-based ranks, best score first; ties break on unit id for determinism."""
+    ordered = sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
+    return {unit_id: rank for rank, (unit_id, _value) in enumerate(ordered, start=1)}
+def _fuse_scores(
+    keyword: dict[int, float],
+    vector: dict[int, float],
+    *,
+    source_modes,
+    fusion_strategy: str,
+    rrf_k: int,
+    keyword_weight: float,
+    vector_weight: float,
+) -> dict[int, float]:
+    """Fuse the keyword and vector rankings into one score per unit.
+
+    ``weighted`` reproduces the historical linear blend of min-max normalised
+    source scores, so existing weight tuning keeps its exact meaning. ``rrf``
+    fuses by rank (``rrf_k``) and scales each rank contribution by the
+    configured source weight, so at equal rank the keyword source still
+    outranks the vector source exactly as the weighted blend does.
+    """
+    fused: dict[int, float] = {}
+    for source in source_modes:
+        raw = keyword if source == "keyword" else vector
+        source_weight = keyword_weight if source == "keyword" else vector_weight
+        if fusion_strategy == "rrf":
+            for unit_id, rank in _rank_scores(raw).items():
+                fused[unit_id] = fused.get(unit_id, 0.0) + source_weight / (rrf_k + rank)
+        else:
+            for unit_id, value in _normalize_scores(raw).items():
+                fused[unit_id] = fused.get(unit_id, 0.0) + value * source_weight
+    if fusion_strategy == "rrf":
+        # Rank fusion scores are tiny and source-count dependent; min-max keeps
+        # final_score on the same [0, 1] scale as the weighted blend.
+        fused = _normalize_scores(fused)
+    return fused
+
+
+def _fusion_strategy(settings) -> str:
+    strategy = str(getattr(settings, "fusion_strategy", "rrf") or "rrf").lower()
+    return strategy if strategy in {"rrf", "weighted"} else "weighted"
+
+
+def _setting_float(settings, name: str, default: float) -> float:
+    try:
+        return float(getattr(settings, name, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _setting_int(settings, name: str, default: int) -> int:
+    try:
+        value = int(getattr(settings, name, default))
+    except (TypeError, ValueError):
+        return int(default)
+    return value if value > 0 else int(default)
 
 
 def _query_token_weight(token: str) -> float:

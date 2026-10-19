@@ -61,10 +61,10 @@ def create_code_repository(project_id: int, payload: dict, principal: CurrentPri
     _validate_repository_location(repository_url)
     credential_env_name = payload.get("credential_env_name")
     if credential_env_name and not re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", str(credential_env_name)):
-        raise HTTPException(status_code=400, detail="credential_env_name must be an environment variable name")
+        raise HTTPException(status_code=400, detail="credential_env_name 必须是合法的环境变量名")
     repository_type = str(payload.get("repository_type") or "git_repository")
     if repository_type not in {"git_repository", "github", "gitee", "filesystem_snapshot"}:
-        raise HTTPException(status_code=400, detail="Unsupported repository type")
+        raise HTTPException(status_code=400, detail="不支持的仓库类型")
     row = CodeRepository(
         institution_id=project.institution_id, project_id=project.id,
         repository_name=str(payload.get("repository_name") or "").strip(),
@@ -74,7 +74,7 @@ def create_code_repository(project_id: int, payload: dict, principal: CurrentPri
         created_by=ensure_actor_user_id(db, principal.user_id),
     )
     if not row.repository_name or not row.repository_url:
-        raise HTTPException(status_code=400, detail="repository_name and repository_url are required")
+        raise HTTPException(status_code=400, detail="必须填写 repository_name 和 repository_url")
     db.add(row); db.commit(); db.refresh(row)
     return _repository_dict(row, db)
 
@@ -192,7 +192,7 @@ async def upload_script(
     project = PermissionService(db, principal).require_project_permission(project_id, "script.upload")
     data = await file.read(get_settings().max_upload_bytes + 1)
     if len(data) > get_settings().max_upload_bytes:
-        raise HTTPException(status_code=413, detail="Script is too large")
+        raise HTTPException(status_code=413, detail="脚本文件过大")
     try:
         result = ScriptIngestionService(db, get_storage_service()).ingest(
             project=project,
@@ -306,14 +306,14 @@ def project_lineage_graph(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if (root_type is None) != (root_id is None):
-        raise HTTPException(status_code=400, detail="root_type and root_id must be provided together")
+        raise HTTPException(status_code=400, detail="root_type 和 root_id 必须同时提供")
     if root_type is None and (direction is not None or depth is not None):
         # A full revision snapshot has no single root, so direction/depth
         # cannot be honoured.  Refuse the request instead of echoing
         # parameters that did not affect the result.
         raise HTTPException(
             status_code=400,
-            detail="direction and depth require root_type and root_id; omit them to read the full revision snapshot",
+            detail="指定 direction 和 depth 时必须同时提供 root_type 和 root_id；如需读取完整版本快照请省略这两个参数",
         )
     resolved_direction: str = direction or GRAPH_DEFAULT_DIRECTION
     resolved_depth = int(depth if depth is not None else GRAPH_DEFAULT_DEPTH)
@@ -325,7 +325,7 @@ def project_lineage_graph(
         LineageRevision.status == "published",
     ).order_by(LineageRevision.revision_no.desc()).limit(1))
     if revision_id is not None and revision is None:
-        raise HTTPException(status_code=404, detail="Lineage revision not found")
+        raise HTTPException(status_code=404, detail="血缘版本不存在")
     if revision is not None:
         try:
             nodes, edges, traversal = _revision_graph_payload(
@@ -360,7 +360,7 @@ def project_lineage_graph(
     if root_type is not None and root_id is not None:
         seeds = _live_root_node_ids(db, project_id, root_type, root_id)
         if not seeds:
-            raise HTTPException(status_code=404, detail="Lineage root is not present in the project facts")
+            raise HTTPException(status_code=404, detail="血缘根节点不在该项目的事实数据中")
         compat = _walk_graph(db, project_id, seeds, resolved_direction, resolved_depth, capped)
         project_nodes(compat["nodes"], view)
         compat["view"] = view
@@ -485,7 +485,7 @@ def diff_lineage_revision(
     revision = PermissionService(db, principal).load_project_resource_or_404(LineageRevision, revision_id, "lineage.view")
     baseline = LineageRevisionService(db).get(compare_to, project_id=revision.project_id)
     if baseline is None:
-        raise HTTPException(status_code=404, detail="Comparison lineage revision not found")
+        raise HTTPException(status_code=404, detail="用于对比的血缘版本不存在")
     result = LineageRevisionService(db).diff(revision, baseline)
     result.update({"warnings": list(revision.warnings_json or []), "confidence": "low" if revision.warnings_json else "high", "evidence_refs": _revision_evidence_refs(revision)})
     return result
@@ -497,7 +497,7 @@ def rebuild_lineage_revision(project_id: int, principal: CurrentPrincipal, paylo
     body = payload or {}
     raw_ids = body.get("script_version_ids")
     if raw_ids is not None and (not isinstance(raw_ids, list) or any(not isinstance(item, int) for item in raw_ids)):
-        raise HTTPException(status_code=400, detail="script_version_ids must be a list of integers")
+        raise HTTPException(status_code=400, detail="script_version_ids 必须是整数列表")
     actor_id = ensure_actor_user_id(db, principal.user_id)
     try:
         service = LineageRevisionService(db)
@@ -543,7 +543,7 @@ def publish_lineage_revision(project_id: int, revision_id: int, principal: Curre
     PermissionService(db, principal).require_project_permission(project_id, "lineage.manage")
     revision = LineageRevisionService(db).get(revision_id, project_id=project_id)
     if revision is None:
-        raise HTTPException(status_code=404, detail="Lineage revision not found")
+        raise HTTPException(status_code=404, detail="血缘版本不存在")
     service = LineageRevisionService(db)
     before = {"status": revision.status, "published_at": revision.published_at}
     publication_readiness = service.publication_readiness(revision)
@@ -611,7 +611,7 @@ def select_candidate(node_id: int, candidate_id: int, principal: CurrentPrincipa
     node = PermissionService(db, principal).load_project_resource_or_404(LineageNode, node_id, "lineage.manage")
     candidate = db.get(LineageResolutionCandidate, candidate_id)
     if candidate is None or candidate.project_id != node.project_id or candidate.lineage_node_id != node.id:
-        raise HTTPException(status_code=404, detail="Resolution candidate not found")
+        raise HTTPException(status_code=404, detail="解析候选不存在")
     try:
         select_resolution_candidate(db, node, candidate)
     except ValueError as exc:
@@ -1097,7 +1097,7 @@ def _validate_repository_location(repository_url: str) -> None:
 
 def _walk_graph(db: Session, project_id: int, seed_ids: list[int], direction: str, depth: int, limit: int) -> dict:
     if direction not in {"upstream", "downstream", "both"} or not 1 <= depth <= 10:
-        raise HTTPException(status_code=400, detail="Invalid graph direction or depth")
+        raise HTTPException(status_code=400, detail="图的遍历方向或深度不合法")
     capped = min(max(limit, 1), 2000)
     edge_budget = capped * 2
     visited = set(int(item) for item in seed_ids[:capped])

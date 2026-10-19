@@ -10,6 +10,9 @@ import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { buildModelProfileConfig } from "@/lib/model-profile-config.mjs";
+import { describeError } from "@/lib/user-message.mjs";
+import { providerTypeLabel, statusLabel, vectorStoreProviderLabel } from "@/lib/product-language";
+import { describeErrorCode } from "@/lib/user-message.mjs";
 type ProviderStatus = {
   provider: string;
   model?: string | null;
@@ -97,7 +100,7 @@ export default function Page() {
     const provider = String(form.get("provider_type"));
     const modelName = String(form.get("model_name") || "") || null;
     if (looksLikeApiKey(modelName)) {
-      setMessage("模型名称疑似填入了 API Key。请填写模型 ID，并把密钥放入 backend/.env。");
+      setMessage("模型名称疑似填入了 API Key。请填写模型 ID，并把密钥放入服务端环境变量配置文件。");
       setBusy(null);
       return;
     }
@@ -119,7 +122,7 @@ export default function Page() {
       else await apiPost("/model-profiles", payload);
       setEditing(null);
       formElement.reset();
-      setMessage(editing ? "Profile 已更新" : "Profile 已创建，连接测试不会自动激活");
+      setMessage(editing ? "模型档案已更新" : "模型档案已创建，连接测试不会自动激活");
       await reload();
     } catch (error) {
       setMessage(readError(error));
@@ -132,7 +135,7 @@ export default function Page() {
     setMessage("");
     const result = await profileAction.run(() => apiPost<Record<string, unknown>>(`/model-profiles/${profile.id}/${kind}`, {}));
     if (result) {
-      setMessage(kind === "test" ? `连接成功，耗时 ${result.latency_ms ?? "-"} ms` : `Profile 已${kind === "activate" ? "激活" : "停用"}`);
+      setMessage(kind === "test" ? `连接成功，耗时 ${result.latency_ms ?? "-"} 毫秒` : `模型档案已${kind === "activate" ? "激活" : "停用"}`);
       setConfirmation(null);
       await reload();
     }
@@ -140,7 +143,7 @@ export default function Page() {
 
   return (
     <main>
-      <WorkspaceHeader title="AI 运行环境" meta="聊天模型、Embedding、连接测试与调用可观测性；密钥只从 backend/.env 读取" />
+      <WorkspaceHeader title="AI 运行环境" meta="聊天模型、向量模型、连接测试与调用可观测性；密钥只从服务端环境变量读取" />
       <div className="mx-auto max-w-[1400px] space-y-5 p-4 lg:p-6">
         {message ? (
           <div className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">{message}</div>
@@ -149,13 +152,13 @@ export default function Page() {
         {runtime ? (
           <section className="grid gap-4 md:grid-cols-3">
             <StatusCard title="聊天模型" status={runtime.llm} icon={<Cloud size={18} />} />
-            <StatusCard title="Embedding" status={runtime.embedding} icon={<Cpu size={18} />} />
+            <StatusCard title="向量模型" status={runtime.embedding} icon={<Cpu size={18} />} />
             <div className="panel p-4">
               <div className="flex items-center gap-2 font-semibold text-ink">
                 <Activity size={18} />
                 向量存储
               </div>
-              <div className="mt-3 text-lg">{runtime.vector_store.provider}</div>
+              <div className="mt-3 text-lg">{vectorStoreProviderLabel(runtime.vector_store.provider)}</div>
               <Badge mock={runtime.vector_store.is_mock} configured={runtime.vector_store.configuration_status === "configured"} />
               {runtime.vector_store.is_mock ? (
                 <p className="mt-2 text-sm text-gold-700">当前向量语义能力为模拟模式，不代表生产向量检索。</p>
@@ -173,8 +176,8 @@ export default function Page() {
               <div className="grid gap-3 md:grid-cols-4">
                 <Metric label="最近成功" value={formatTime(runtime.observability.last_success_at)} />
                 <Metric label="最近失败" value={formatTime(runtime.observability.last_failure_at)} />
-                <Metric label="平均延迟" value={`${runtime.observability.average_latency_ms} ms`} />
-                <Metric label="最近 Token" value={tokenText(runtime.observability.recent_token_usage)} />
+                <Metric label="平均延迟" value={`${runtime.observability.average_latency_ms} 毫秒`} />
+                <Metric label="最近词元用量" value={tokenText(runtime.observability.recent_token_usage)} />
               </div>
               {runtime.issues.length ? (
                 <div className="mt-4 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">
@@ -189,20 +192,20 @@ export default function Page() {
         <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <form className="panel h-fit" onSubmit={save}>
             <div className="panel-header">
-              <h2 className="text-[15px] font-semibold text-ink">{editing ? "编辑 Profile" : "新建 Profile"}</h2>
+              <h2 className="text-[15px] font-semibold text-ink">{editing ? "编辑模型档案" : "新建模型档案"}</h2>
             </div>
             <div className="panel-body space-y-3">
-              <Field label="Profile 名称">
+              <Field label="模型档案名称">
                 <input className="control" name="profile_name" placeholder="例如：DeepSeek 正式模型" defaultValue={editing?.profile_name || ""} key={`name-${editing?.id || 0}`} required />
               </Field>
-              <Field label="Provider 类型">
+              <Field label="服务商类型">
                 <select className="control" name="provider_type" defaultValue={editing?.provider_type || "mock"} key={`provider-${editing?.id || 0}`}>
                   {providers.map((item) => (
                     <option key={item}>{item}</option>
                   ))}
                 </select>
               </Field>
-              <Field label="Base URL">
+              <Field label="接口地址">
                 <input className="control" name="base_url" placeholder="例如：https://api.deepseek.com" defaultValue={editing?.base_url || ""} key={`url-${editing?.id || 0}`} />
               </Field>
               <Field label="模型名称（模型 ID，不是密钥）">
@@ -220,7 +223,7 @@ export default function Page() {
                 />
               </Field>
               <p className="text-xs text-slate-500">
-                此处只填环境变量名，不能粘贴 API Key 本身。请在 <code>backend/.env</code> 中按“变量名=密钥”配置真实密钥。
+                此处只填环境变量名，不能粘贴 API Key 本身。请在服务端环境变量配置文件中按“变量名=密钥”配置真实密钥。
               </p>
               <Field label="需求生成输入预算（字节）">
                 <input
@@ -259,14 +262,14 @@ export default function Page() {
                         {profile.enabled ? <span className="badge-success">当前启用</span> : null}
                       </div>
                       <div className="mt-1 text-sm text-slate-600">
-                        {profile.provider_type} · {profile.model_name || "未配置模型"} · {profile.base_url_host || "无外部地址"}
+                        {providerTypeLabel(profile.provider_type)} · {profile.model_name || "未配置模型"} · {profile.base_url_host || "无外部地址"}
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
                         Key 环境变量：{profile.api_key_env_name || "不需要"} · {profile.api_key_present ? "已配置" : "未配置"} · {profile.local_only ? "本地模型" : "外部模型"}
                       </div>
                       {profile.config_json.last_connection_test ? (
                         <div className="mt-1 text-xs text-slate-500">
-                          最近测试：{profile.config_json.last_connection_test.status} / {formatTime(profile.config_json.last_connection_test.tested_at)}
+                          最近测试：{statusLabel(profile.config_json.last_connection_test.status)} / {formatTime(profile.config_json.last_connection_test.tested_at)}
                         </div>
                       ) : null}
                     </div>
@@ -296,7 +299,7 @@ export default function Page() {
             ) : (
               <div className="empty-state m-4">
                 <Settings2 className="text-slate-300" size={28} />
-                <p>暂无数据库 Profile，系统使用 backend/.env 的运行配置。</p>
+                <p>暂无数据库模型档案，系统使用服务端环境变量中的运行配置。</p>
               </div>
             )}
           </div>
@@ -305,12 +308,12 @@ export default function Page() {
           busy={profileAction.isRunning}
           danger={confirmation?.kind === "disable"}
           description={confirmation?.kind === "disable"
-            ? `停用“${confirmation?.profile.profile_name || ""}”后，系统将不再使用该 Profile。`
-            : `激活“${confirmation?.profile.profile_name || ""}”会停用当前活动 Profile。`}
+            ? `停用“${confirmation?.profile.profile_name || ""}”后，系统将不再使用该模型档案。`
+            : `激活“${confirmation?.profile.profile_name || ""}”会停用当前活动的模型档案。`}
           onCancel={() => setConfirmation(null)}
           onConfirm={() => confirmation ? action(confirmation.profile, confirmation.kind) : undefined}
           open={Boolean(confirmation)}
-          title={confirmation?.kind === "disable" ? "确认停用模型 Profile？" : "确认激活模型 Profile？"}
+          title={confirmation?.kind === "disable" ? "确认停用模型档案？" : "确认激活模型档案？"}
         />
 
         <section className="panel overflow-hidden">
@@ -321,7 +324,7 @@ export default function Page() {
             <table className="w-full min-w-[800px] text-left text-sm">
               <thead className="border-b border-line bg-slate-50/80 text-xs font-semibold text-slate-500">
                 <tr>
-                  {["时间", "Prompt", "Provider / 模型", "状态", "延迟", "Token / 错误"].map((item) => (
+                  {["时间", "提示词", "服务商 / 模型", "状态", "延迟", "令牌用量 / 错误"].map((item) => (
                     <th className="px-4 py-2.5 font-semibold" key={item}>{item}</th>
                   ))}
                 </tr>
@@ -331,12 +334,12 @@ export default function Page() {
                   <tr className="border-t border-line transition-colors hover:bg-mist/70" key={call.id}>
                     <td className="px-4 py-3">{formatTime(call.created_at)}</td>
                     <td className="px-4 py-3">{call.prompt_key}</td>
-                    <td className="px-4 py-3">{call.provider || "-"} / {call.model_name || "-"}</td>
+                    <td className="px-4 py-3">{call.provider ? providerTypeLabel(call.provider) : "-"} / {call.model_name || "-"}</td>
                     <td className="px-4 py-3">
-                      <span className={statusBadgeClass(call.status)}>{call.status}</span>
+                      <span className={statusBadgeClass(call.status)}>{statusLabel(call.status)}</span>
                     </td>
-                    <td className="px-4 py-3">{call.latency_ms} ms</td>
-                    <td className="px-4 py-3">{call.error_type || tokenText(call.token_usage)}</td>
+                    <td className="px-4 py-3">{call.latency_ms} 毫秒</td>
+                    <td className="px-4 py-3">{call.error_type ? describeErrorCode(call.error_type, "调用未成功，请查看服务商状态") : tokenText(call.token_usage)}</td>
                   </tr>
                 ))}
                 {!calls.length ? (
@@ -366,22 +369,22 @@ function StatusCard({ title, status, icon }: { title: string; status: ProviderSt
         {title}
       </div>
       <div className="mt-3 text-lg">{status.model || "未配置"}</div>
-      <div className="text-sm text-slate-500">{status.provider} · {status.base_url_host || "无外部地址"}</div>
+      <div className="text-sm text-slate-500">{status.provider ? providerTypeLabel(status.provider) : "服务商待确认"} · {status.base_url_host || "无外部地址"}</div>
       <div className="mt-2">
         <Badge mock={status.is_mock} configured={status.configuration_status === "configured"} />
       </div>
       <div className="mt-2 text-xs text-slate-500">
         {status.is_local ? "本地模型" : "外部模型"} · Key {status.api_key_present ? "已配置" : "未配置或不需要"}
       </div>
-      {status.is_mock && title === "Embedding" ? (
-        <p className="mt-2 text-sm text-gold-700">Embedding 仍为 Mock，可与真实聊天模型独立组合。</p>
+      {status.is_mock && title === "向量模型" ? (
+        <p className="mt-2 text-sm text-gold-700">向量模型仍为模拟实现，可与真实聊天模型独立组合。</p>
       ) : null}
     </div>
   );
 }
 
 function Badge({ mock, configured }: { mock: boolean; configured: boolean }) {
-  if (mock) return <span className="badge-warning">Mock 模式</span>;
+  if (mock) return <span className="badge-warning">模拟模式</span>;
   return configured ? (
     <span className="badge-success">
       <CheckCircle2 size={13} />
@@ -427,10 +430,9 @@ function formatTime(value?: string | null) {
 }
 
 function tokenText(usage: Record<string, unknown>) {
-  return usage.usage_available === false ? "usage unavailable" : String(usage.total_tokens ?? "usage unavailable");
+  return usage.usage_available === false ? "用量不可用" : String(usage.total_tokens ?? "用量不可用");
 }
 
 function readError(error: unknown) {
-  if (!(error instanceof Error)) return "操作失败";
-  return error.message;
+  return describeError(error, "操作未完成，请稍后重试。");
 }

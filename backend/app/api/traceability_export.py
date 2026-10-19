@@ -17,7 +17,7 @@ CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.shee
 def export_project_traceability(project_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
     project = db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="项目不存在")
     content = export_traceability_workbook(db, project_id); file_name = f"{project.name}-业务口径及技术溯源表.xlsx"
     record_audit(db, action="export", resource_type="traceability_workbook", resource_id=project_id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"file_name": file_name, "scope": "project", "byte_size": len(content)})
     db.commit(); return _response(content, file_name)
@@ -27,7 +27,7 @@ def export_project_traceability(project_id: int, principal: CurrentPrincipal, db
 def export_table_traceability(table_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
     table = db.get(TargetTable, table_id)
     if table is None:
-        raise HTTPException(status_code=404, detail="Target table not found")
+        raise HTTPException(status_code=404, detail="目标表不存在")
     project = db.get(Project, table.project_id);content = export_traceability_workbook(db, table.project_id, table_id);file_name=f"{table.table_name}-业务口径及技术溯源表.xlsx"
     record_audit(db, action="export", resource_type="traceability_workbook", resource_id=table_id, actor_user_id=principal.user_id, institution_id=project.institution_id if project else None, project_id=table.project_id, after={"file_name": file_name, "scope": "target_table", "byte_size": len(content)})
     db.commit();return _response(content,file_name)

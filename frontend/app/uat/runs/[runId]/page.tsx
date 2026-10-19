@@ -14,6 +14,8 @@ import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, UatCaseResult, UatFinding, UatRun, UatSignoff, apiDownload, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { executionModeLabel, findingTypeLabel, severityLabel } from "@/lib/product-language";
+import { describeUserMessage } from "@/lib/user-message.mjs";
 
 export default function RunPage() {
   const { runId } = useParams<{ runId: string }>();
@@ -24,8 +26,8 @@ export default function RunPage() {
   const [confirmation, setConfirmation] = useState<{ path: string; label: string; title: string; description: string; danger?: boolean } | null>(null);
   const actionRunner = useAsyncAction<UatRun | { run: UatRun; job: BackgroundJobSummary }>({
     successMessage: (result) => "job" in result
-      ? result.job.deduplicated ? "相同 UAT 任务正在执行，已打开当前任务" : "UAT 任务已提交"
-      : "UAT 状态已更新"
+      ? result.job.deduplicated ? "相同验收任务正在执行，已打开当前任务" : "验收任务已提交"
+      : "验收状态已更新"
   });
   const permissions = useProjectPermissions(run?.project_id);
 
@@ -90,7 +92,7 @@ export default function RunPage() {
   return (
     <main>
       <WorkspaceHeader
-        title={run?.run_name || "UAT 执行轮次"}
+        title={run?.run_name || "验收执行轮次"}
         meta={run ? `第 ${run.run_no} 轮 · ${run.environment_name}` : "正在加载"}
         actions={
           <button className="button-secondary" onClick={load}>
@@ -107,12 +109,12 @@ export default function RunPage() {
         {run ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              <UatMetric label="总 Case" value={summary.total_count || 0} />
+              <UatMetric label="用例总数" value={summary.total_count || 0} />
               <UatMetric label="通过" value={summary.passed_count || 0} />
               <UatMetric label="失败" value={summary.failed_count || 0} />
               <UatMetric label="阻断" value={summary.blocked_count || 0} />
               <UatMetric label="待确认" value={summary.pending_count || 0} />
-              <UatMetric label="严重 Finding" value={critical} />
+              <UatMetric label="严重问题" value={critical} />
             </section>
 
             <section className="panel p-4">
@@ -123,7 +125,7 @@ export default function RunPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {permissions.can("uat.execute") && ["draft", "failed", "blocked"].includes(run.status) ? (
-                    <AsyncActionButton actionStatus={actionRunner.status} className="button-primary" onClick={() => setConfirmation({ path: "execute", label: "已提交执行", title: "确认执行 UAT？", description: "将运行本轮启用的自动和人工验收用例，并记录结果与审计。" })}>
+                    <AsyncActionButton actionStatus={actionRunner.status} className="button-primary" onClick={() => setConfirmation({ path: "execute", label: "已提交执行", title: "确认执行 验收？", description: "将运行本轮启用的自动和人工验收用例，并记录结果与审计。" })}>
                       <Play size={15} />
                       执行
                     </AsyncActionButton>
@@ -135,7 +137,7 @@ export default function RunPage() {
                     </AsyncActionButton>
                   ) : null}
                   {permissions.can("uat.execute") && ["draft", "queued", "running"].includes(run.status) ? (
-                    <AsyncActionButton actionStatus={actionRunner.status} className="button-danger" onClick={() => setConfirmation({ path: "cancel", label: "已取消执行", title: "确认取消 UAT？", description: "正在排队或运行的任务将停止，已产生的结果和审计会保留。", danger: true })}>
+                    <AsyncActionButton actionStatus={actionRunner.status} className="button-danger" onClick={() => setConfirmation({ path: "cancel", label: "已取消执行", title: "确认取消 验收？", description: "正在排队或运行的任务将停止，已产生的结果和审计会保留。", danger: true })}>
                       <Square size={14} />
                       取消
                     </AsyncActionButton>
@@ -165,7 +167,7 @@ export default function RunPage() {
             />
 
             <section>
-              <h2 className="mb-3 font-semibold text-ink">Case 结果</h2>
+              <h2 className="mb-3 font-semibold text-ink">用例结果</h2>
               {run.results.length ? (
                 <div className="space-y-3">
                   {run.results.map(item => (
@@ -181,14 +183,14 @@ export default function RunPage() {
               ) : (
                 <div className="empty-state">
                   <ListChecks className="text-slate-300" size={28} />
-                  <p>执行后将在此显示 Case 结果</p>
+                  <p>执行后将在此显示用例结果</p>
                 </div>
               )}
             </section>
 
             <section className="grid gap-5 lg:grid-cols-2">
               <div>
-                <h2 className="mb-3 font-semibold text-ink">Finding</h2>
+                <h2 className="mb-3 font-semibold text-ink">问题记录</h2>
                 {findings.length ? (
                   <div className="panel divide-y divide-line overflow-hidden">
                     {findings.map(item => (
@@ -196,7 +198,7 @@ export default function RunPage() {
                         <div>
                           <b>#{item.finding_no} {item.title}</b>
                           <p className="mt-1 text-xs text-slate-500">
-                            {item.severity} · {item.finding_type}
+                            {severityLabel(item.severity)} · {findingTypeLabel(item.finding_type)}
                           </p>
                         </div>
                         <UatStatus value={item.status} />
@@ -206,7 +208,7 @@ export default function RunPage() {
                 ) : (
                   <div className="empty-state">
                     <Bug className="text-slate-300" size={28} />
-                    <p>暂无 Finding，可在 Case 结果中针对问题创建</p>
+                    <p>暂无问题记录，可在用例结果中针对问题创建</p>
                   </div>
                 )}
               </div>
@@ -268,7 +270,7 @@ function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: 
         assigned_role: null,
         assigned_user_id: null
       });
-      setMessage("Finding 已创建");
+      setMessage("问题记录已创建");
       await onChanged();
     } catch (reason) {
       setMessage(readError(reason));
@@ -284,7 +286,7 @@ function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: 
           <span className="mr-2 text-xs text-slate-400">{item.case.case_code}</span>
           <b>{item.case.case_name}</b>
           <p className="mt-1 text-xs text-slate-500">
-            {item.case.execution_mode} · {item.duration_ms ?? 0} ms
+            {executionModeLabel(item.case.execution_mode)} · {item.duration_ms ?? 0} 毫秒
           </p>
         </div>
         <UatStatus value={item.status} />
@@ -292,7 +294,7 @@ function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: 
       {item.error_message ? (
         <p className="mt-3 flex gap-2 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">
           <AlertTriangle className="shrink-0" size={16} />
-          {item.error_message}
+          {describeUserMessage(item.error_message, "该用例执行未完成，请稍后重试。")}
         </p>
       ) : null}
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -316,7 +318,7 @@ function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: 
             <label className="text-sm">样本实际值<input className="control mt-1" value={sampleActual} onChange={e=>setSampleActual(e.target.value)}/></label>
             <label className="text-sm sm:col-span-2">验证证据<textarea className="control mt-1" value={evidence} onChange={e=>setEvidence(e.target.value)}/></label>
           </div>}
-          <input className="control min-w-64 flex-1" value={actual} onChange={event => setActual(event.target.value)} placeholder="填写实际结果或 Finding 摘要" />
+          <input className="control min-w-64 flex-1" value={actual} onChange={event => setActual(event.target.value)} placeholder="填写实际结果或问题摘要" />
           {manual && canComplete ? (
             <>
               <button className="button-primary" onClick={() => complete("passed")}>确认通过</button>
@@ -325,7 +327,7 @@ function ResultCard({ item, canComplete, canCreateFinding, onChanged }: { item: 
             </>
           ) : null}
           {canCreateFinding ? (
-            <button className="button-secondary" onClick={finding}>创建 Finding</button>
+            <button className="button-secondary" onClick={finding}>创建问题记录</button>
           ) : null}
         </div>
       ) : null}
@@ -395,5 +397,5 @@ function SignoffPanel({ run, items, canSign, onChanged }: { run: UatRun; items: 
 }
 
 function roleLabel(value: string) {
-  return ({ business_owner: "业务负责人", technical_owner: "技术负责人", project_manager: "项目经理", final_acceptance: "最终验收" } as Record<string, string>)[value] || value;
+  return ({ business_owner: "业务负责人", technical_owner: "技术负责人", project_manager: "项目经理", final_acceptance: "最终验收" } as Record<string, string>)[value] || "其他签认角色";
 }

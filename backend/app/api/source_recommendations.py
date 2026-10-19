@@ -16,9 +16,9 @@ router = APIRouter(tags=["source recommendations"])
 def authorize_recommendation(db, principal, recommendation_id):
     item = db.get(CandidateSourceRecommendation, recommendation_id)
     if item is None:
-        raise HTTPException(404, "Source recommendation not found")
+        raise HTTPException(404, "来源推荐不存在")
     if item.recommendation_basis == "bounded_catalog_recall" and principal.user_id is None:
-        raise HTTPException(401, "Authenticated user required")
+        raise HTTPException(401, "需要登录后再操作")
     PermissionService(db, principal).require_project_permission(item.project_id, "technical.edit")
     project_entity(db, TargetField, item.target_field_id, item.project_id)
     scenario = project_entity(db, ProductScenario, item.scenario_id, item.project_id)

@@ -86,7 +86,7 @@ def execute_safe_query(datasource_id: int, payload: SafeSqlRequest, principal: C
 def _get_datasource_or_404(db: Session, datasource_id: int) -> DataSource:
     datasource = db.get(DataSource, datasource_id)
     if datasource is None:
-        raise HTTPException(status_code=404, detail="Data source not found")
+        raise HTTPException(status_code=404, detail="数据源不存在")
     return datasource
 
 

@@ -40,7 +40,7 @@ def list_tasks(project_id: int, db: Session = Depends(get_db)) -> list[NaturalLa
 def get_task(task_id: int, db: Session = Depends(get_db)) -> NaturalLanguageTask:
     task = db.get(NaturalLanguageTask, task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail="Natural language task not found")
+        raise HTTPException(status_code=404, detail="自然语言任务不存在")
     return task
 
 

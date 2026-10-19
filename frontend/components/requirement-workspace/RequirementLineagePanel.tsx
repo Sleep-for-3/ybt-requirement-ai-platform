@@ -6,6 +6,7 @@ import { useState } from "react";
 import { TableFieldGraph, type TableGraph } from "@/components/TableFieldGraph";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { apiGet, apiPost } from "@/lib/api";
+import { describeError } from "@/lib/user-message.mjs";
 
 export function RequirementLineagePanel({ tableId, fieldId, requirementId, scenarioId, onSelectField, contentVersion, onRevisionChange }: {
   tableId:number; fieldId:number|null; requirementId?:number; scenarioId?:number;
@@ -86,7 +87,7 @@ export function RequirementLineagePanel({ tableId, fieldId, requirementId, scena
     </div>
     {refreshMutation.isError && (
       <div role="alert" className="mb-2 rounded bg-red-50 p-3 text-sm text-red-800">
-        刷新失败：{refreshMutation.error instanceof Error ? refreshMutation.error.message : "未知错误"}
+        刷新失败：{describeError(refreshMutation.error, "血缘快照刷新未完成，请稍后重试。")}
       </div>
     )}
     {graph?.facts_mode==="requirement_fixed_scripts"&&graph.warnings.length>0&&<ul className="mb-2 text-xs text-amber-800">{graph.warnings.map((warning,i)=><li key={i}>{warning}</li>)}</ul>}

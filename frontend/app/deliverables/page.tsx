@@ -8,6 +8,8 @@ import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { DeliverablePackage, DeliverableTemplate, TargetTable, apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError } from "@/lib/user-message.mjs";
+import { roleLabel } from "@/lib/product-language";
 
 export default function Page() {
   const { projectId } = useProjectWorkspace();
@@ -84,7 +86,7 @@ export default function Page() {
           </section>
         ) : (
           <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">
-            当前角色为 {permissions.role || "只读角色"}，可查看交付状态，但不能创建交付包。
+            当前角色为 {roleLabel(permissions.role)}，可查看交付状态，但不能创建交付包。
           </p>
         )}
 
@@ -155,13 +157,13 @@ function statusBadgeClass(value: string) {
 }
 
 function statusLabel(value: string) {
-  return ({draft:"草稿",generating:"生成中",generated:"已渲染",pending_review:"审核中",approved:"已批准",render_failed:"渲染失败",generation_failed:"生成失败",validation_failed:"校验失败",cancelled:"已取消",rejected:"已驳回"} as Record<string,string>)[value] || value;
+  return ({draft:"草稿",generating:"生成中",generated:"已渲染",pending_review:"审核中",approved:"已批准",render_failed:"渲染失败",generation_failed:"生成失败",validation_failed:"校验失败",cancelled:"已取消",rejected:"已驳回"} as Record<string,string>)[value] || "未知状态";
 }
 
 function jobLabel(job: DeliverablePackage["generation_job"]) {
-  return job ? `${job.status} · ${job.progress}%${job.current_step ? ` · ${job.current_step}` : ""}` : "尚未启动";
+  return job ? `${statusLabel(job.status)} · ${job.progress}%${job.current_step ? ` · ${job.current_step}` : ""}` : "尚未启动";
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
+  return describeError(error, "操作未完成，请稍后重试。");
 }

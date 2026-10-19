@@ -15,6 +15,7 @@ from app.models import (
 )
 from app.services.llm.prompt_runtime import get_prompt_runtime
 from app.services.rag import grounded_answer
+from app.services.rag.citation_support import judge_faithfulness
 from app.services.semantic_index.versioning import get_active_index_version
 
 EVALUATION_PROMPT_KEY = "regulatory_field_explanation"
@@ -220,6 +221,31 @@ async def run_evaluation(db, run):
                 for item in call_logs
             )
             total_token_usage += token_usage
+            # ⑧: opt-in LLM-judge faithfulness. Switched off by default, in which case no judge
+            # call is made, no key is added, and every existing metric keeps its exact value.
+            judge_metrics: dict = {}
+            judge_metadata: dict = {}
+            if settings.ragas_judge_enabled:
+                judgement = await judge_faithfulness(
+                    db,
+                    answer=str(answer.get("answer") or ""),
+                    citations=list(answer.get("citations") or []),
+                    claims=list(answer.get("supported_claims") or []),
+                    project_id=run.project_id,
+                )
+                decisive_count = judgement["supported_count"] + judgement["unsupported_count"]
+                judge_metrics = {
+                    "faithfulness": float(judgement.get("faithfulness", 0.0)),
+                    "faithfulness_judged": float(judgement.get("judged", False)),
+                    "faithfulness_judged_count": float(decisive_count),
+                    "unsupported_citation_ratio": float(judgement.get("unsupported_ratio", 0.0)),
+                }
+                judge_metadata = {
+                    "faithfulness": judgement,
+                    "citation_support": answer.get("citation_support"),
+                }
+            execution_metadata = _merge_execution_metadata(answer, answer_status)
+            execution_metadata.update(judge_metadata)
             db.add(RagEvaluationResult(
                 evaluation_run_id=run.id,
                 evaluation_case_id=case.id,
@@ -236,7 +262,7 @@ async def run_evaluation(db, run):
                 # C07/R04: 持久化执行事实，并**保留已有的非空降级原因**。
                 # 旧实现用顶层 answer.get("degraded_reason") 直接写入，会把 execution_metadata
                 # 里已经有的策略拒绝/超时原因覆盖成 null。
-                execution_metadata_json=_merge_execution_metadata(answer, answer_status),
+                execution_metadata_json=execution_metadata,
             ))
             metrics.append({
                 "recall_at_5": recall_5,
@@ -257,6 +283,7 @@ async def run_evaluation(db, run):
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "answer_latency_ms": answer_latency_ms,
                 "total_latency_ms": total_latency_ms,
+                **judge_metrics,
             })
         except Exception as exc:
             # R04 修复：失败样本也要计入逐条状态统计（否则结果页的计数会与分母不一致）。
@@ -298,7 +325,7 @@ async def run_evaluation(db, run):
         "error": failed_query_count,
     }
     answer_latencies = [item["answer_latency_ms"] for item in metrics]
-    run.summary_metrics_json = {
+    summary_metrics = {
         "case_count": len(cases),
         # C07: denominators are explicit so a partially-degraded run cannot look perfect.
         "successful_query_count": sum(1 for item in metrics if item["generation_available"] == 1.0),
@@ -345,6 +372,19 @@ async def run_evaluation(db, run):
         "indexing_throughput_chunks_per_second": _indexing_throughput(active_index),
         "token_usage_total": total_token_usage,
     }
+    if settings.ragas_judge_enabled:
+        # ⑧: faithfulness is averaged over the answers the judge actually scored; the count is
+        # published next to it so a fully degraded judgement run cannot look like a clean 0.
+        judged_metrics = [item for item in metrics if item.get("faithfulness_judged_count", 0.0) > 0]
+        summary_metrics["faithfulness"] = _average(judged_metrics, "faithfulness")
+        summary_metrics["faithfulness_denominator"] = len(judged_metrics)
+        summary_metrics["unsupported_citation_ratio"] = _average(metrics, "unsupported_citation_ratio")
+        summary_metrics["metric_notes"] = {
+            **summary_metrics["metric_notes"],
+            "faithfulness": "忠实性：LLM 裁判按 supported/(supported+unsupported) 计算，仅在裁判实际打分的样本上求均值",
+            "unsupported_citation_ratio": "引用不支持率：裁判判定 unsupported 的断言占全部待判断言的比例",
+        }
+    run.summary_metrics_json = summary_metrics
     db.commit()
     db.refresh(run)
     return run

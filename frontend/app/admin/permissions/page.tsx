@@ -6,6 +6,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { PageState } from "@/components/feedback/PageState";
 import { apiGet } from "@/lib/api";
 import { groupPermissions, institutionRoleLabel, permissionLanguage, projectRoleDescription, projectRoleLabel } from "@/lib/permission-language.mjs";
+import { describeError } from "@/lib/user-message.mjs";
 
 type Matrix = { institution_roles: string[]; project_roles: Record<string, string[]> };
 type MatrixTab = "institution" | "project" | "dictionary";
@@ -15,7 +16,7 @@ export default function Page() {
   const [data, setData] = useState<Matrix | null>(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<MatrixTab>("project");
-  useEffect(() => { apiGet<Matrix>("/admin/permissions").then(setData).catch((cause) => setError(cause instanceof Error ? cause.message : "权限模型加载失败")); }, []);
+  useEffect(() => { apiGet<Matrix>("/admin/permissions").then(setData).catch((cause) => setError(describeError(cause, "权限模型加载失败，请稍后重试。"))); }, []);
   const permissionCodes = useMemo(() => Array.from(new Set(Object.values(data?.project_roles || {}).flat())).sort(), [data]);
   return <main><WorkspaceHeader title="角色与权限" meta="统一 PermissionService 的产品化只读视图" />
     <div className="mx-auto max-w-6xl space-y-4 p-4 lg:p-6">

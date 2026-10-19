@@ -21,7 +21,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     except AuthenticationError as exc:
         record_audit(db, action="login", resource_type="user_session", result="failed", request_id=getattr(request.state, "request_id", None), ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
         db.commit()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password") from exc
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误") from exc
     session = create_session(db, user)
     institution_id = db.scalar(select(InstitutionMembership.institution_id).where(InstitutionMembership.user_id == user.id, InstitutionMembership.status == "active").limit(1))
     record_audit(db, action="login", resource_type="user_session", resource_id=user.id, actor_user_id=user.id, institution_id=institution_id, request_id=getattr(request.state, "request_id", None), ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
@@ -34,7 +34,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> dict:
     try:
         return rotate_refresh_token(db, payload.refresh_token)
     except AuthenticationError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="刷新令牌无效") from exc
 
 
 @router.post("/logout")

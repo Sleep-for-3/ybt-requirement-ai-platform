@@ -3,7 +3,7 @@ export const MODES = {
   data_field: { label: "数据字段与血缘问答", description: "查询真实目录、来源字段、映射与血缘，不执行SQL或查询客户明细。", example: "CERT_TYPE 来自哪个系统和表？有哪些码值转换？", sections: ["目标字段", "来源路径", "Join/关联条件", "过滤和加工转换", "码值映射", "缺口和待确认事项"] }
 };
 const BUSINESS_LABELS={regulatory_qa:"监管答疑",regulatory_policy:"监管制度",field_explanation:"字段解释",historical_mapping:"历史业务口径",historical_traceability:"历史技术溯源",east_mapping:"EAST 映射",business_research:"业务调研",technical_research:"技术调研",data_dictionary:"数据字典",code_mapping:"码值映射",manual_note:"人工沉淀",sql_evidence:"SQL 证据",project:"项目",institution:"机构",global:"全局",indexed:"已建立索引",parsed:"已解析",parsing:"正在解析",pending:"等待处理",failed:"处理失败",archived:"已归档",partially_indexed:"部分建立索引",parsed_with_warnings:"已解析，有警告"};
-export function knowledgeLabel(value){return BUSINESS_LABELS[value]||value||"待确认";}
+export function knowledgeLabel(value){const mapped=BUSINESS_LABELS[value];if(mapped)return mapped;if(typeof value==="string"&&/[\u4e00-\u9fff]/.test(value))return value;return "其他状态或分类";}
 export function answerMode(value) { return value === "data_field" ? "data_field" : "regulatory"; }
 export function askErrorMessage(error) {
   if (error?.status === 401) return "登录状态已失效，请重新登录。";

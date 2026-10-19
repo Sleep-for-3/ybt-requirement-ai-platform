@@ -38,6 +38,7 @@ import {
   apiPost
 } from "@/lib/api";
 import { workspaceEvidenceOptions, workspaceFieldOptions, workspaceProjectionOptions, workspaceQueryKeys } from "@/lib/workspace-queries";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 export function RequirementWorkspace() {
   const { projectId, selectedProject } = useProjectWorkspace();
@@ -357,7 +358,7 @@ export function RequirementWorkspace() {
             {scopedDocument.isError ? <p role="alert">评估加载失败，不能判断是否可交付。<button onClick={()=>void scopedDocument.refetch()}>重试</button></p>
               : !scopedDocument.data ? <p role="status">正在评估需求范围…</p>
               : <><p className="my-2 text-xs">{scopedDocument.data.assessment === "unassessed" ? "尚未评估" : scopedDocument.data.gaps.length ? `发现 ${scopedDocument.data.gaps.length} 项待确认` : "本次完整性检查未发现缺口；仍需审核确认。"}</p>
-                <ul className="max-h-64 space-y-2 overflow-auto text-xs">{scopedDocument.data.gaps.map(gap=><li key={gap.id} className="rounded bg-amber-50 p-2"><span>{gap.origin === "manual" ? "人工问题" : "分析发现"}：</span><button className="text-left underline" onClick={()=>{if(gap.field_id)changeField(gap.field_id);}}>{gap.message}</button></li>)}</ul></>}
+                <ul className="max-h-64 space-y-2 overflow-auto text-xs">{scopedDocument.data.gaps.map(gap=><li key={gap.id} className="rounded bg-amber-50 p-2"><span>{gap.origin === "manual" ? "人工问题" : "分析发现"}：</span><button className="text-left underline" onClick={()=>{if(gap.field_id)changeField(gap.field_id);}}>{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</button></li>)}</ul></>}
           </section> : null}
           {requirement ? <RequirementDeliveryPanel key={`delivery:${projectId}:${requirement.id}`} projectId={projectId}
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
@@ -509,6 +510,5 @@ function mergeSelectedDetail(records:FieldWorkspaceRecord[], detail:RequirementW
 }
 
 function readError(error: unknown, fallback: string) {
-  if (!(error instanceof Error) || !error.message) return fallback;
-  return error.message.includes("Internal Server Error") ? fallback : error.message;
+  return describeError(error, fallback);
 }

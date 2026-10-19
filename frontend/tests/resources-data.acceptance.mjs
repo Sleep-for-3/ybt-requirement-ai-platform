@@ -68,8 +68,8 @@ try {
   await browser.clickText("人工审核通过");await browser.waitForText("版本已审核");
   await browser.waitFor(()=>browser.evaluate("Array.from(document.querySelectorAll('main button')).some(e=>e.textContent.includes('激活生效'))"));
   await browser.clickText("激活生效");await browser.waitForText("版本已激活");
-  await browser.waitFor(()=>browser.evaluate("Array.from(document.querySelectorAll('main button')).some(e=>e.textContent.includes('Apply 当前版本'))"));
-  await browser.clickText("Apply 当前版本");await browser.waitForText("写入审计变更集");
+  await browser.waitFor(()=>browser.evaluate("Array.from(document.querySelectorAll('main button')).some(e=>e.textContent.includes('应用当前版本'))"));
+  await browser.clickText("应用当前版本");await browser.waitForText("写入审计变更集");
   result.checks.push("template row detail / two versions / diff / review / activation / apply audit");
   await navigate("/knowledge/documents/1?projectId=1");await browser.waitForText("当前生效内部版本 1");await browser.clickText("版本记录");
   await browser.waitForText("2026修订版");await browser.waitForText("待审核");await browser.clickText("审核通过");await browser.waitForText("已审核");

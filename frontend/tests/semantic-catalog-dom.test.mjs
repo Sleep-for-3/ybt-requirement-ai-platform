@@ -21,21 +21,21 @@ import {
 } from "../lib/semantic-catalog-view-model.mjs";
 
 test("SUI-11..SUI-13 shell and lazy loading, 403, and errors remain visibly distinct", () => {
-  const loading = renderToStaticMarkup(SemanticContractFixture({ kind: "loading", label: "Evidence" }));
-  const forbidden = renderToStaticMarkup(SemanticContractFixture({ kind: "forbidden", label: "Evidence" }));
-  const error = renderToStaticMarkup(SemanticContractFixture({ kind: "error", label: "Evidence" }));
+  const loading = renderToStaticMarkup(SemanticContractFixture({ kind: "loading", label: "证据与知识" }));
+  const forbidden = renderToStaticMarkup(SemanticContractFixture({ kind: "forbidden", label: "证据与知识" }));
+  const error = renderToStaticMarkup(SemanticContractFixture({ kind: "error", label: "证据与知识" }));
   assert.match(loading, /aria-busy="true"/);
-  assert.match(loading, /正在加载Evidence/);
+  assert.match(loading, /正在加载证据与知识/);
   assert.match(forbidden, /role="alert"/);
-  assert.match(forbidden, /无权查看Evidence/);
+  assert.match(forbidden, /无权查看证据与知识/);
   assert.doesNotMatch(forbidden, /无数据|空数据/);
   assert.match(error, /role="alert"/);
-  assert.match(error, /重试加载Evidence/);
+  assert.match(error, /重试加载证据与知识/);
 });
 
 test("SUI-14..SUI-18 no binding, candidate-only, conflict, AI-only, and pending review stay separate", () => {
   assert.equal(resolveFormalDefinition({ effective_version: null, candidate_versions: [{ definition: "AI secret" }] }), null);
-  const candidate = renderToStaticMarkup(SemanticContractFixture({ kind: "candidate", label: "Bindings" }));
+  const candidate = renderToStaticMarkup(SemanticContractFixture({ kind: "candidate", label: "资产绑定" }));
   const conflict = renderToStaticMarkup(SemanticContractFixture({ kind: "conflict", label: "capital rule" }));
   const pending = renderToStaticMarkup(SemanticContractFixture({ kind: "pending-review", label: "confirmed" }));
   assert.match(candidate, /待治理候选/);
@@ -116,10 +116,10 @@ test("SUI-25 tabs directly exercise ArrowLeft, ArrowRight, Home, End, focus, and
 });
 
 test("SUI-25 retry is object-specific and transitions error to a fresh loading attempt", () => {
-  const failed = { phase: "error", attempt: 2, objectLabel: "Evidence" };
+  const failed = { phase: "error", attempt: 2, objectLabel: "证据与知识" };
   const retrying = transitionRetryContract(failed, "retry");
-  assert.deepEqual(retrying, { phase: "loading", attempt: 3, objectLabel: "Evidence", accessibleName: "重试加载Evidence" });
-  assert.deepEqual(transitionRetryContract(retrying, "resolve"), { phase: "success", attempt: 3, objectLabel: "Evidence", accessibleName: "" });
+  assert.deepEqual(retrying, { phase: "loading", attempt: 3, objectLabel: "证据与知识", accessibleName: "重试加载证据与知识" });
+  assert.deepEqual(transitionRetryContract(retrying, "resolve"), { phase: "success", attempt: 3, objectLabel: "证据与知识", accessibleName: "" });
 });
 
 test("SUI-24, SUI-26..SUI-28 long text, return navigation, questions, temporal labels, and current-only lineage remain safe", () => {

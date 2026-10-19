@@ -24,6 +24,8 @@ from app.models import (
     SourceToMartMapping,
     WorkflowDefinition,
     WorkflowInstance,
+    LineageEdge,
+    LineageNode,
     SemanticBinding,
     SemanticConcept,
     SemanticConceptVersion,
@@ -32,6 +34,7 @@ from app.models import (
 from app.services.auth.dependencies import Principal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit
+from app.services.governance.labels import workflow_step_label
 from app.services.governance.notifications import notify_user
 from app.services.governance.scenario_review import (
     finalize_review_package,
@@ -40,6 +43,12 @@ from app.services.governance.scenario_review import (
 )
 from app.services.semantic.version_service import transition_concept_status, transition_version_status
 from app.models.requirement import RequirementUatLink, RequirementRecheck
+
+
+# 驳回（人类明确否定）是终态：不重置审核链、不把审核单改写成“已退回”。
+# 只有“退回修改”（returned）才把任务重置到目标步骤，重新进入待办。
+# 这个区分必须在服务层强制，否则单证展示层无从判断单据到底是被驳回还是被退回。
+TERMINAL_REJECT_DECISIONS: frozenset[str] = frozenset({"rejected"})
 
 
 DEFAULT_WORKFLOWS: dict[str, tuple[str, list[dict[str, str]]]] = {
@@ -209,7 +218,7 @@ def start_workflow(
         )
         db.add(task)
         db.flush()
-        notify_user(db, assignee, "task_assigned", "新审核任务", f"已分派 {step['step_key']} 任务", project_id=project_id, resource_type="review_task", resource_id=task.id)
+        notify_user(db, assignee, "task_assigned", "新审核任务", f"已分派{workflow_step_label(step['step_key'])}任务", project_id=project_id, resource_type="review_task", resource_id=task.id)
     record_audit(db, action="assign", resource_type="workflow_instance", resource_id=instance.id, actor_user_id=created_by, project_id=project_id, after={"workflow_key": workflow_key, "target_type": target_type, "target_id": target_id})
     if commit:
         db.commit()
@@ -324,6 +333,12 @@ def decide_task(
     ))
     task.status = decision
     task.completed_at = datetime.now(UTC)
+    # 驳回分两种，必须区分（TERMINAL_REJECT_DECISIONS）：
+    # 1. 不带 return_to_step 的驳回是终态——不重置审核链、不把审核单改写成“已退回”。
+    #    过去驳回与退回共用一套重置逻辑，导致驳回单变成假待办、审核台分不清两者。
+    # 2. 带 return_to_step 的驳回是“驳回并要求回到某一步重做”，调用方已明确要求重开
+    #    审核链，因此仍走退回分支（影响分析驳回脚本版本、场景审核打回起草步都依赖此语义）。
+    terminal = decision in TERMINAL_REJECT_DECISIONS and not return_to_step
     if task.target_type == "impact_analysis" and decision == "rejected":
         impact = db.get(ImpactAnalysis, task.target_id)
         if impact is not None:
@@ -356,7 +371,22 @@ def decide_task(
             instance.status = "in_progress"
             instance.current_step = next_step
             next_task = db.scalar(select(ReviewTask).where(ReviewTask.workflow_instance_id == instance.id, ReviewTask.step_key == next_step))
-            notify_user(db, next_task.assignee_user_id if next_task else None, "task_assigned", "待办任务已到达", f"请处理 {next_step}", project_id=task.project_id, resource_type="review_task", resource_id=next_task.id if next_task else None)
+            notify_user(db, next_task.assignee_user_id if next_task else None, "task_assigned", "待办任务已到达", f"请处理{workflow_step_label(next_step)}", project_id=task.project_id, resource_type="review_task", resource_id=next_task.id if next_task else None)
+    elif terminal:
+        # 终态驳回：不重置审核链、不把审核单改写成“已退回”。实例停在本步并标记驳回，
+        # 目标单据同步为驳回，通知直达提交人。再次推进需要新建审核申请，而不是复活旧单。
+        instance.status = "rejected"
+        instance.current_step = task.step_key
+        instance.completed_at = datetime.now(UTC)
+        if instance.workflow_key == "requirement_uat_review":
+            db.get(RequirementUatLink, task.target_id).status = "rejected"
+        if package is not None:
+            package.status = "rejected"
+        if instance.workflow_key == "requirement_document_review":
+            from app.services.requirement_review import return_review
+
+            return_review(db, task.target_id, decision)
+        notify_user(db, task.assignee_user_id, "review_rejected", "审核已驳回", comment or "审核已被驳回", project_id=task.project_id, resource_type="review_task", resource_id=task.id)
     else:
         target_step = return_to_step or steps[0]["step_key"]
         valid_steps = {item["step_key"] for item in steps}
@@ -526,11 +556,50 @@ def _validate_double_layer_target(db: Session, target_type: str, target_id: int)
     return mapping
 
 
+def _proven_lineage_state(db: Session, mapping, target_type: str) -> tuple[str, datetime] | None:
+    """Return the lineage state the persisted graph proves for an approved mapping.
+
+    Approving a mapping reviews its *content*; it is not by itself evidence that a path
+exists. The lineage graph is the authority on that, so a mapping is only advanced when a
+resolved node for the mapped field is the target of an enabled edge. When nothing is
+persisted there is no evidence either way: the mapping keeps its existing status, because
+inventing "linked" would fabricate trust the graph does not support.
+    """
+
+    bindings: list[tuple[str, int]] = []
+    if getattr(mapping, "mart_field_id", None):
+        bindings.append(("mart_field_id", int(mapping.mart_field_id)))
+    if target_type == "mart_to_ybt" and getattr(mapping, "target_field_id", None):
+        bindings.append(("target_field_id", int(mapping.target_field_id)))
+    for column_name, value in bindings:
+        node_ids = list(db.scalars(select(LineageNode.id).where(
+            LineageNode.project_id == mapping.project_id,
+            getattr(LineageNode, column_name) == value,
+            LineageNode.unresolved_flag.is_(False),
+        )).all())
+        if not node_ids:
+            continue
+        has_inbound = db.scalar(select(LineageEdge.id).where(
+            LineageEdge.project_id == mapping.project_id,
+            LineageEdge.enabled.is_(True),
+            LineageEdge.target_node_id.in_(node_ids),
+        ).limit(1))
+        if has_inbound is not None:
+            return ("verified", datetime.now(UTC))
+    return None
+
+
 def _finalize_double_layer_target(db: Session, target_type: str, target_id: int, reviewed_by: str) -> None:
     mapping = _validate_double_layer_target(db, target_type, target_id)
     mapping.mapping_status = "approved"
     mapping.reviewed_by = reviewed_by
     mapping.reviewed_at = datetime.now(UTC)
+    # P0-2: approval reviews the mapping's content; it must also advance the lineage state the
+    # persisted graph already proves, otherwise an approved mapping stays not_linked forever and
+    # every downstream context keeps reporting a lineage gap that the graph can actually close.
+    proven = _proven_lineage_state(db, mapping, target_type)
+    if proven is not None:
+        mapping.lineage_status, mapping.lineage_last_verified_at = proven
     current_no = db.scalar(select(func.max(MappingVersion.version_no)).where(
         MappingVersion.mapping_type == target_type,
         MappingVersion.mapping_id == target_id,

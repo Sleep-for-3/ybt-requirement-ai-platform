@@ -135,28 +135,28 @@ def delete_source_field(field_id: int, db: Session = Depends(get_db)) -> dict[st
 def _get_project_or_404(db: Session, project_id: int) -> Project:
     project = db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="项目不存在")
     return project
 
 
 def _get_business_system_or_404(db: Session, system_id: int) -> BusinessSystem:
     system = db.get(BusinessSystem, system_id)
     if system is None:
-        raise HTTPException(status_code=404, detail="Business system not found")
+        raise HTTPException(status_code=404, detail="业务系统不存在")
     return system
 
 
 def _get_source_table_or_404(db: Session, table_id: int) -> SourceTable:
     table = db.get(SourceTable, table_id)
     if table is None:
-        raise HTTPException(status_code=404, detail="Source table not found")
+        raise HTTPException(status_code=404, detail="源表不存在")
     return table
 
 
 def _get_source_field_or_404(db: Session, field_id: int) -> SourceField:
     field = db.get(SourceField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Source field not found")
+        raise HTTPException(status_code=404, detail="源字段不存在")
     return field
 
 

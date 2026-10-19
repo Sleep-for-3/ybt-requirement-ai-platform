@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "backend": "native",
+  "rasterEngine": "libreoffice",
+  "source": "saved",
+  "inputPath": "C:\\Users\\admin\\Desktop\\银行智能平台-8项落地建议实施说明-2026-10-17.docx",
+  "sourceSha256": "2bdd343a099c8ff419cc4bf94bfd81b83a355c4f7830410faf86b2b1c29100fa",
+  "dpi": 120,
+  "pageCount": 9,
+  "images": [
+    {
+      "index": 1,
+      "page": 1,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0001.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 94645
+    },
+    {
+      "index": 2,
+      "page": 2,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0002.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 131349
+    },
+    {
+      "index": 3,
+      "page": 3,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0003.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 126652
+    },
+    {
+      "index": 4,
+      "page": 4,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0004.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 128330
+    },
+    {
+      "index": 5,
+      "page": 5,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0005.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 110408
+    },
+    {
+      "index": 6,
+      "page": 6,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0006.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 111156
+    },
+    {
+      "index": 7,
+      "page": 7,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0007.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 102979
+    },
+    {
+      "index": 8,
+      "page": 8,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0008.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 83310
+    },
+    {
+      "index": 9,
+      "page": 9,
+      "path": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\docs\\research\\preview-8item\\page-0009.png",
+      "width": 1020,
+      "height": 1320,
+      "rectangle": {
+        "x": 0,
+        "y": 0,
+        "width": 816,
+        "height": 1056
+      },
+      "byteLength": 63289
+    }
+  ],
+  "missingFonts": [
+    "Courier"
+  ]
+}

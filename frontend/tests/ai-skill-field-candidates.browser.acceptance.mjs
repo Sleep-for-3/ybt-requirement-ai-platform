@@ -55,7 +55,7 @@ try {
   assert.equal(body.candidates.length, 2);
   await panel.getByRole("heading", { name: "fixture_bank.public.fixture_account.balance", exact: true }).waitFor();
   assert.equal(await panel.locator("article").count(), 2);
-  assert.doesNotMatch(await panel.innerText(), /disabled_secret|NEVER_CONNECT|NEVER_EXPOSE|真实模型|Skill 固定版本/);
+  assert.doesNotMatch(await panel.innerText(), /disabled_secret|NEVER_CONNECT|NEVER_EXPOSE|真实模型|技能固定版本/);
   result.checks.push("real_http_scoped_catalog_candidates_render_with_deterministic_label");
   await panel.getByText("查看目录出处", { exact: true }).first().click();
   assert.match(await panel.innerText(), /目录版本：[a-f0-9]{64}/);

@@ -9,6 +9,8 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
+import { describeError } from "@/lib/user-message.mjs";
+import { statusLabel } from "@/lib/product-language";
 import type { ScriptBasis } from "@/components/requirement-workspace/RequirementScriptPanel";
 
 type RegulatoryOption = { target_table_id:number; table_code:string; table_name:string;
@@ -53,7 +55,7 @@ function ReverseRequirements() {
     if(flight.current)return;
     flight.current=true;setBusy(true);setError("");
     const project=identity;
-    try {await work();} catch(e) {if(owner.current===project)setError(e instanceof Error?e.message:"操作失败");}
+    try {await work();} catch(e) {if(owner.current===project)setError(describeError(e,"操作未完成，请稍后重试。"));}
     finally {flight.current=false;setBusy(false);}
   }
   function selectTarget(key:string,value:string) {
@@ -98,7 +100,7 @@ function ReverseRequirements() {
         <div className="max-h-72 space-y-2 overflow-auto">{options.data?.versions.filter(v=>!importId||imported.data?.script_version_ids.includes(v.id)).map(v=><label key={v.id} className="flex items-start gap-2 text-sm">
           <input type="checkbox" checked={selected.includes(v.id)} onChange={e=>{setSelected(old=>e.target.checked?[...old.filter(id=>!options.data?.versions.some(x=>x.id===id&&x.script_file_id===v.script_file_id)),v.id]:old.filter(id=>id!==v.id));setPreview(null);setConfirmed(false);}}/>
           <span className="break-all">{v.path} · v{v.version_no}</span></label>)}</div>
-        {imported.data?.excluded_items.length?<details><summary>未纳入脚本选择的批次项（{imported.data.excluded_items.length}）</summary>{imported.data.excluded_items.map(i=><p key={i.id} className="break-all text-sm">{i.path} · {i.status}</p>)}</details>:null}
+        {imported.data?.excluded_items.length?<details><summary>未纳入脚本选择的批次项（{imported.data.excluded_items.length}）</summary>{imported.data.excluded_items.map(i=><p key={i.id} className="break-all text-sm">{i.path} · {statusLabel(i.status)}</p>)}</details>:null}
         <button className="button-secondary" disabled={!selected.length||!!imported.isError} onClick={()=>void run(parse)}><Search size={16}/>预览写入目标</button>
       </fieldset>
       {preview&&<fieldset disabled={busy||!!created} className="space-y-4">
@@ -111,7 +113,7 @@ function ReverseRequirements() {
           return <section key={target.key} className="space-y-3 border-b border-line py-4">
             <h2 className="break-all text-sm font-semibold">{[target.database_name,target.schema_name,target.table_name].filter(Boolean).join(".")}</h2>
             <label className="block text-sm">监管表与模板版本<select aria-label={`${target.table_name}监管表与模板版本`} className="control mt-1" value={choice?.option??""} onChange={e=>selectTarget(target.key,e.target.value)}>
-              <option value="">本次不建需</option>{preview.regulatory_targets.options.map(o=><option key={optionKey(o)} value={optionKey(o)}>{o.table_name} ({o.table_code}) · 模板 v{o.template_version_no} · {o.template_status}{suggestions.some(s=>s.target_table_id===o.target_table_id&&s.template_version_id===o.template_version_id)?" · 名称匹配建议":""}</option>)}</select></label>
+              <option value="">本次不建需</option>{preview.regulatory_targets.options.map(o=><option key={optionKey(o)} value={optionKey(o)}>{o.table_name} ({o.table_code}) · 模板 v{o.template_version_no} · {statusLabel(o.template_status)}{suggestions.some(s=>s.target_table_id===o.target_table_id&&s.template_version_id===o.template_version_id)?" · 名称匹配建议":""}</option>)}</select></label>
             {choice&&option&&<><label className="block text-sm">需求名称<input className="control mt-1" maxLength={200} value={choice.name} onChange={e=>{setChoices(old=>({...old,[target.key]:{...choice,name:e.target.value}}));setConfirmed(false);}}/></label>
               <div className="grid gap-3 sm:grid-cols-2">{target.columns.map(column=><label key={column} className="min-w-0 text-sm"><span className="break-all">{column}</span><select aria-label={`${target.table_name}.${column}字段关联`} className="control mt-1" value={choice.bindings[column]??""} onChange={e=>{const bindings={...choice.bindings};if(e.target.value)bindings[column]=Number(e.target.value);else delete bindings[column];setChoices(old=>({...old,[target.key]:{...choice,bindings}}));setConfirmed(false);}}><option value="">未关联（保留缺口）</option>{option.fields.map(f=><option key={f.id} value={f.id}>{f.name} ({f.code})</option>)}</select></label>)}</div></>}
           </section>;

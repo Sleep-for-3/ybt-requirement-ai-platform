@@ -57,11 +57,11 @@ class FormalReindexRequest(BaseModel):force:bool=False
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
 async def upload(project_id:int,response:Response,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),document_id:int|None=Form(None),logical_code:str|None=Form(None),source_category:str|None=Form(None),regulatory_document_no:str|None=Form(None),regulatory_version:str|None=Form(None),internal_revision:str|None=Form(None),publisher:str|None=Form(None),published_at:str|None=Form(None),effective_at:str|None=Form(None),expires_at:str|None=Form(None),applicable_institutions:str|None=Form(None),applicable_fields:str|None=Form(None),applicable_scenarios:str|None=Form(None),db:Session=Depends(get_db)):
-    if knowledge_type not in KNOWLEDGE_TYPES:raise HTTPException(400,"Invalid knowledge type")
-    if knowledge_scope not in KNOWLEDGE_SCOPES:raise HTTPException(400,"Invalid knowledge scope")
-    if confidentiality_level not in CONFIDENTIALITY_LEVELS:raise HTTPException(400,"Invalid confidentiality level")
-    if source_category is not None and source_category not in SOURCE_CATEGORIES:raise HTTPException(400,"Invalid source category")
-    if knowledge_scope=="institution" and not institution_name:raise HTTPException(400,"Institution scope requires institution_name")
+    if knowledge_type not in KNOWLEDGE_TYPES:raise HTTPException(400,"知识类型不合法")
+    if knowledge_scope not in KNOWLEDGE_SCOPES:raise HTTPException(400,"知识范围取值不合法")
+    if confidentiality_level not in CONFIDENTIALITY_LEVELS:raise HTTPException(400,"密级取值不合法")
+    if source_category is not None and source_category not in SOURCE_CATEGORIES:raise HTTPException(400,"来源分类取值不合法")
+    if knowledge_scope=="institution" and not institution_name:raise HTTPException(400,"机构范围必须填写 institution_name")
     project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
     content=await file.read();file_name=file.filename or "knowledge.txt"
     saved=get_storage_service().save(content,file_name=file_name,project_id=project_id)
@@ -83,7 +83,7 @@ def versions(document_id:int,project_id:int,db:Session=Depends(get_db)):_visible
 def review_document_version(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
     version=db.get(KnowledgeDocumentVersion,version_id)
-    if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
+    if not version or version.project_id!=project_id:raise HTTPException(404,"资源不存在")
     try:return _safe_version(review_knowledge_version(db,version_id,principal.username))
     except ValueError as exc:raise HTTPException(409,str(exc)) from exc
 
@@ -91,7 +91,7 @@ def review_document_version(version_id:int,project_id:int,principal:CurrentPrinc
 def submit_document_version_for_review(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
     version=db.get(KnowledgeDocumentVersion,version_id)
-    if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
+    if not version or version.project_id!=project_id:raise HTTPException(404,"资源不存在")
     try:return _safe_version(submit_knowledge_version_for_review(db,version_id))
     except ValueError as exc:raise HTTPException(409,str(exc)) from exc
 
@@ -99,7 +99,7 @@ def submit_document_version_for_review(version_id:int,project_id:int,principal:C
 def activate_document_version(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
     version=db.get(KnowledgeDocumentVersion,version_id)
-    if not version or version.project_id!=project_id:raise HTTPException(404,"Resource not found")
+    if not version or version.project_id!=project_id:raise HTTPException(404,"资源不存在")
     try:return _safe_version(activate_knowledge_version(db,version_id))
     except ValueError as exc:raise HTTPException(409,str(exc)) from exc
 @router.post("/knowledge/documents/{document_id}/reindex")
@@ -114,7 +114,7 @@ def reindex(document_id:int,project_id:int,principal:CurrentPrincipal,db:Session
 @router.get("/projects/{project_id}/semantic-index/status")
 def semantic_index_status(project_id:int,db:Session=Depends(get_db)):
     project=db.get(Project,project_id)
-    if project is None:raise HTTPException(404,"Project not found")
+    if project is None:raise HTTPException(404,"项目不存在")
     settings=get_settings();snapshot=build_corpus_snapshot(db,project_id);active=get_active_index_version(db,project_id)
     latest=db.scalar(select(EmbeddingIndexVersion).where(EmbeddingIndexVersion.project_id==project_id).order_by(EmbeddingIndexVersion.id.desc()))
     latest_evaluation=db.scalar(select(RagEvaluationRun).where(RagEvaluationRun.project_id==project_id,RagEvaluationRun.status=="completed").order_by(RagEvaluationRun.finished_at.desc(),RagEvaluationRun.id.desc()))
@@ -146,7 +146,7 @@ def semantic_index_status(project_id:int,db:Session=Depends(get_db)):
 
 @router.get("/projects/{project_id}/semantic-index/versions")
 def semantic_index_versions(project_id:int,db:Session=Depends(get_db)):
-    if db.get(Project,project_id) is None:raise HTTPException(404,"Project not found")
+    if db.get(Project,project_id) is None:raise HTTPException(404,"项目不存在")
     return [_row(item) for item in db.scalars(select(EmbeddingIndexVersion).where(EmbeddingIndexVersion.project_id==project_id).order_by(EmbeddingIndexVersion.id.desc())).all()]
 
 
@@ -212,7 +212,7 @@ def units(project_id:int,document_id:int|None=None,include_disabled:bool=False,d
 @router.get("/knowledge/units/{unit_id}")
 def unit(unit_id:int,project_id:int,db:Session=Depends(get_db)):
     item=db.get(KnowledgeUnit,unit_id)
-    if not item or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"Knowledge unit not found")
+    if not item or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"知识单元不存在")
     return _unit(item)
 @router.post("/projects/{project_id}/knowledge/planned-search")
 def search_with_plan(project_id: int, payload: PlannedSearchRequest, principal: RealPrincipal, db: Session = Depends(get_db)):
@@ -235,9 +235,9 @@ async def ask(project_id:int,payload:AskRequest,principal:CurrentPrincipal,db:Se
     project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.search")
     project_entity(db,TargetField,payload.target_field_id,project_id)
     project_entity(db,ProductScenario,payload.scenario_id,project_id)
-    if not payload.query.strip():raise HTTPException(400,"Question must not be empty")
+    if not payload.query.strip():raise HTTPException(400,"问题内容不能为空")
     if payload.retrieval_mode not in {"keyword_only","vector_only","hybrid"}:
-        raise HTTPException(400,"Invalid retrieval mode")
+        raise HTTPException(400,"检索模式取值不合法")
     filters=dict(target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,
                  knowledge_types=mode_knowledge_types(payload.answer_mode,payload.knowledge_types) if payload.answer_mode else payload.knowledge_types,
                  top_k=payload.top_k,retrieval_mode=payload.retrieval_mode,
@@ -288,13 +288,13 @@ async def create_run(project_id:int,payload:EvaluationRunCreate,principal:Curren
 @router.get("/evaluation-runs/{run_id}")
 def evaluation_run(run_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     item=db.get(RagEvaluationRun,run_id)
-    if not item:raise HTTPException(404,"Evaluation run not found")
+    if not item:raise HTTPException(404,"评测任务不存在")
     PermissionService(db,principal).require_project_permission(item.project_id,"project.view")
     return _row(item)
 @router.get("/evaluation-runs/{run_id}/results")
 def evaluation_results(run_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     run=db.get(RagEvaluationRun,run_id)
-    if not run:raise HTTPException(404,"Evaluation run not found")
+    if not run:raise HTTPException(404,"评测任务不存在")
     PermissionService(db,principal).require_project_permission(run.project_id,"project.view")
     return [_row(item) for item in db.scalars(select(RagEvaluationResult).where(RagEvaluationResult.evaluation_run_id==run_id)).all()]
 @router.get("/projects/{project_id}/feedback")
@@ -312,7 +312,7 @@ def feedback(project_id:int,payload:BindFeedback,principal:CurrentPrincipal,db:S
     values.pop("execution_metadata_json",None)
     if model_call_log_id is not None:
         run=db.get(ModelCallLog,model_call_log_id)
-        if not run or run.project_id!=project_id:raise HTTPException(404,"Model call not found")
+        if not run or run.project_id!=project_id:raise HTTPException(404,"模型调用记录不存在")
         values["output_hash"]=run.output_hash
         values["execution_kind"]=run.execution_kind
         values["execution_metadata_json"]=run.execution_metadata_json or {}
@@ -330,7 +330,7 @@ def feedback_to_evaluation_case(project_id:int,feedback_id:int,principal:Current
     project=PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")
     feedback_item=db.get(AIUserFeedback,feedback_id)
     if not feedback_item or feedback_item.project_id!=project_id:
-        raise HTTPException(404,"Feedback not found")
+        raise HTTPException(404,"反馈不存在")
     existing=db.scalar(select(RagEvaluationCase).where(RagEvaluationCase.source_feedback_id==feedback_id))
     if existing:
         return _row(existing)
@@ -394,7 +394,7 @@ def feedback_to_evaluation_case(project_id:int,feedback_id:int,principal:Current
     db.add(item);db.commit();db.refresh(item);return _row(item)
 @router.get("/prompt-versions")
 def prompt_versions(principal:CurrentPrincipal,db:Session=Depends(get_db)):
-    if not PermissionService(db,principal).is_platform_admin():raise HTTPException(403,"Platform administrator required")
+    if not PermissionService(db,principal).is_platform_admin():raise HTTPException(403,"需要平台管理员操作")
     return [_prompt_version(item) for item in db.scalars(select(PromptTemplateVersion).order_by(PromptTemplateVersion.prompt_key,PromptTemplateVersion.version_no.desc())).all()]
 
 def _csv(value):return [item.strip() for item in (value or "").replace("，",",").split(",") if item.strip()]
@@ -421,7 +421,7 @@ def _job(job):return job_submission_response(job)
 
 def _visible_document_or_404(db,document_id,project_id,require_owner=False):
     item=db.get(KnowledgeDocument,document_id)
-    if not item or (require_owner and item.project_id!=project_id) or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"Knowledge document not found")
+    if not item or (require_owner and item.project_id!=project_id) or not _scope_visible(db,item.knowledge_scope,item.project_id,item.institution_name,project_id):raise HTTPException(404,"知识文档不存在")
     return item
 
 def _scope_visible(db,scope,owner_project_id,institution_name,request_project_id):
@@ -442,12 +442,12 @@ def evidence_detail(project_id:int,source_type:str,entity_id:int,principal:Curre
         "source_to_mart":(SourceToMartMapping,"project.view","id project_id mart_field_id mapping_status source_system_summary source_tables_summary source_fields_summary business_rule join_condition filter_condition code_mapping_rule"),
         "mart_to_ybt":(MartToYbtMapping,"project.view","id project_id target_field_id mart_field_id mapping_status mart_table_summary mart_field_summary business_rule join_condition filter_condition code_mapping_rule"),
     }
-    if source_type not in definitions:raise HTTPException(404,"Resource not found")
+    if source_type not in definitions:raise HTTPException(404,"资源不存在")
     model,permission,names=definitions[source_type]
     try:
         PermissionService(db,principal).require_project_permission(project_id,permission)
         item=project_entity(db,model,entity_id,project_id)
     except HTTPException:
-        raise HTTPException(404,"Resource not found") from None
-    if hasattr(item,"enabled") and not item.enabled:raise HTTPException(404,"Resource not found")
+        raise HTTPException(404,"资源不存在") from None
+    if hasattr(item,"enabled") and not item.enabled:raise HTTPException(404,"资源不存在")
     return {"source_type":source_type,"fields":{name:getattr(item,name) for name in names.split()}}

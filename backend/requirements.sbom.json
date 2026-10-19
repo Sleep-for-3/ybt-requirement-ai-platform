@@ -1,6 +1,6 @@
 {
   "generated_from": "backend/.venv (Python 3.12.14)",
-  "component_count": 97,
+  "component_count": 103,
   "packages": [
     {
       "name": "alembic",
@@ -43,6 +43,11 @@
       "license": "BSD"
     },
     {
+      "name": "bm25s",
+      "version": "0.3.13",
+      "license": "MIT License"
+    },
+    {
       "name": "boto3",
       "version": "1.43.105",
       "license": "Apache-2.0"
@@ -76,6 +81,16 @@
       "name": "charset-normalizer",
       "version": "3.5.2",
       "license": "MIT"
+    },
+    {
+      "name": "chonkie",
+      "version": "1.7.0",
+      "license": "MIT License"
+    },
+    {
+      "name": "chonkie-core",
+      "version": "0.10.2",
+      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "click",
@@ -186,6 +201,11 @@
       "name": "iniconfig",
       "version": "2.3.0",
       "license": "UNKNOWN"
+    },
+    {
+      "name": "jieba",
+      "version": "0.42.1",
+      "license": "MIT"
     },
     {
       "name": "jmespath",
@@ -423,9 +443,19 @@
       "license": "UNKNOWN"
     },
     {
+      "name": "tenacity",
+      "version": "9.2.1",
+      "license": "Apache-2.0"
+    },
+    {
       "name": "tokenizers",
       "version": "0.23.2",
       "license": "UNKNOWN"
+    },
+    {
+      "name": "tokie",
+      "version": "0.1.4",
+      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "tqdm",

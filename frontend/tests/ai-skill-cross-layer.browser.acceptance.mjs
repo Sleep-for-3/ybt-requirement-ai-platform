@@ -59,7 +59,7 @@ try {
     assert.equal((await generated).status(), 200);
     const draft = page.getByRole("region", {name: "跨层映射草稿", exact: true});
     await draft.getByText("当前 AI 草稿正文与此记录一致。", {exact: true}).waitFor();
-    assert.match(await draft.innerText(), /Skill 固定版本 v1.*Mock/);
+    assert.match(await draft.innerText(), /技能固定版本 v1.*模拟/);
     assert.equal((await request(mappingBase)).final_content, before.final_content);
     result.checks.push(`${entry.kind}_published_mock_generation_preserves_final_and_displays_provenance`);
     const adopt = page.getByRole("button", {name: "采用为人工最终内容", exact: true});

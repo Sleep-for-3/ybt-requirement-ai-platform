@@ -80,6 +80,24 @@ def test_a_target_field_tool_without_a_subject_is_rejected():
     assert "target_field_unresolved" not in _codes(resolved)
 
 
+def test_a_subject_resolved_field_satisfies_the_tool_input_contract():
+    # Regression: the subject already carries the authoritative target field for every step, so a
+    # plan whose step input omits "target_field_id" is executable, not invalid. Checking the bare
+    # step input rejected it, which forced an unnecessary LLM repair attempt and then a fallback
+    # to a weaker deterministic plan.
+    step = PlannedStep(step_key="recall", tool_key="recall_field_candidates",
+                       reason="需要目标字段", input={})
+    draft = PlanDraft(objective=OBJECTIVE, scenario_key="regulatory_field_analysis",
+                      subject={"target_field_id": 7}, steps=[step])
+    assert "tool_input_invalid" not in _codes(draft)
+    assert validate_plan_draft(draft) == []
+    # The contract is still enforced: a step may not invent keys the tool does not declare.
+    invented = _with_step(draft, input={"definitely_unknown_key": 1})
+    assert "tool_input_invalid" in _codes(invented)
+    # ...and a required key the subject does not supply is still missing.
+    assert "tool_input_invalid" in _codes(PlanDraft(
+        objective=OBJECTIVE, scenario_key="regulatory_field_analysis", subject={}, steps=[step]))
+
 def test_permission_contract_is_checked_against_the_actor():
     draft = _valid_draft()
     assert "permission_not_granted" not in _codes(draft, permitted=None)

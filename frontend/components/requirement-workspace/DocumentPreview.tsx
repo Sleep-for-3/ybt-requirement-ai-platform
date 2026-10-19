@@ -15,10 +15,11 @@ import type {
   TargetTable
 } from "@/lib/api";
 import { combinedFieldStatus, mappingStatusLabel, mappingStatusTone, preferredMappingContent } from "@/lib/workspace-view-model.mjs";
-import { questionTypeLabel, statusLabel } from "@/lib/product-language";
+import { lineageStatusLabel, priorityLabel, questionTypeLabel, resourceKindLabel, statusLabel } from "@/lib/product-language";
 import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
 import type { RequirementScope } from "./RequirementScopePanel";
 import { RequirementContentEditor } from "./RequirementContentEditor";
+import { describeUserMessage } from "@/lib/user-message.mjs";
 
 export type RequirementGap = {id:string; field_id:number|null; origin:string; message:string; status:string};
 export type RequirementResourceSummary = {kind:string; name:string; code:string; status:string};
@@ -170,7 +171,7 @@ export function DocumentPreview({
               ["业务目标",requirementScope.objective], ["口径生效日期",requirementScope.effective_date],
               ["纳入范围",requirementScope.inclusion], ["排除条件",requirementScope.exclusion]
             ] as const).map(([label,value])=><div key={label}><dt className="font-semibold">{label}</dt><dd className="whitespace-pre-wrap text-slate-600">{value||"待确认"}</dd></div>)}
-              <div><dt className="font-semibold">资料与数据范围</dt><dd>{requirementResources?.length ? requirementResources.map((item,index)=><p key={index}>{item.kind}：{item.name} {item.code!==item.name?item.code:""} · {item.status==="selected"?"已选，待核验":"不可用，待重新选择"}</p>) : "未指定，不代表允许使用全部资料"}</dd></div>
+              <div><dt className="font-semibold">资料与数据范围</dt><dd>{requirementResources?.length ? requirementResources.map((item,index)=><p key={index}>{resourceKindLabel(item.kind)}：{item.name} {item.code!==item.name?item.code:""} · {item.status==="selected"?"已选，待核验":"不可用，待重新选择"}</p>) : "未指定，不代表允许使用全部资料"}</dd></div>
             </dl> : null}
 
             <SectionTitle number="2" title="字段级业务口径与技术溯源" />
@@ -205,7 +206,7 @@ export function DocumentPreview({
                         <Td>{preferredMappingContent(record.business, record.field.regulatory_refined_definition || record.field.regulatory_description || "待维护")}</Td>
                         <Td>{record.lineage?.source_system_name || sourceMapping?.source_system_summary || "待确认"}</Td>
                         <Td>{sourcePath(record)}</Td>
-                        <Td>{record.confirmedPath ? <><p>{record.pathConfirmed?"已确认路径":"路径待重新确认"}</p><p className="break-all">{record.confirmedPath.nodes.map(node=>[node.table_name,node.column_name].filter(Boolean).join(".")).join("；")}</p></> : martField ? `${martTable?.table_code || martTable?.table_name || "MART"}.${martField.field_code}` : martMapping?.mart_field_summary || "待确认"}</Td>
+                        <Td>{record.confirmedPath ? <><p>{record.pathConfirmed?"已确认路径":"路径待重新确认"}</p><p className="break-all">{record.confirmedPath.nodes.map(node=>[node.table_name,node.column_name].filter(Boolean).join(".")).join("；")}</p></> : martField ? `${martTable?.table_code || martTable?.table_name || "集市表"}.${martField.field_code}` : martMapping?.mart_field_summary || "待确认"}</Td>
                         <Td><RuleLayers source={sourceMapping?.final_content || sourceMapping?.business_rule} target={martMapping?.final_content || martMapping?.business_rule || record.lineage?.processing_logic} /><button className="mt-1 text-[9px] font-medium text-sky-700 hover:underline" onClick={(event) => { event.stopPropagation(); onSelectField(record.field.id); onShowEvidence(); }} type="button">查看 {evidenceCountByField[record.field.id] || 0} 条证据</button></Td>
                         <Td><StatusBadge tone={tone} value={status} /></Td>
                       </tr>
@@ -229,7 +230,7 @@ export function DocumentPreview({
               <ul className="space-y-2">
                 {selectedQuestions.map((question) => (
                   <li className="border-l-2 border-gold-300 bg-gold-50 px-3 py-2 text-[10px] leading-5 text-slate-700" key={question.id}>
-                    <strong className="text-gold-800">{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}：</strong>{question.question_text}
+                    <strong className="text-gold-800">{priorityLabel(question.priority)} · {questionTypeLabel(question.question_type)}：</strong>{question.question_text}
                     <span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span>
                   </li>
                 ))}
@@ -258,7 +259,7 @@ function RequirementGapList({gaps, records, onSelectField}: {gaps?:RequirementGa
   if(!gaps.length)return <p className="my-3 text-xs">本次完整性检查未发现缺口，仍需完成审核确认。</p>;
   return <ul aria-label="当前需求全部缺口" className="my-3 space-y-2">{gaps.map(gap=>{
     const field=records.find(item=>item.field.id===gap.field_id)?.field;
-    return <li key={gap.id} className="rounded border border-gold-200 bg-gold-50 p-3 text-xs"><strong>{gap.origin==="manual"?"人工问题":"分析发现"} · {field?.field_name||"需求范围"}</strong><p className="my-1 whitespace-pre-wrap">{gap.message}</p>{field?<button className="underline" onClick={()=>onSelectField(field.id)}>定位字段</button>:null}<span className="ml-2">待核验闭环</span></li>;
+    return <li key={gap.id} className="rounded border border-gold-200 bg-gold-50 p-3 text-xs"><strong>{gap.origin==="manual"?"人工问题":"分析发现"} · {field?.field_name||"需求范围"}</strong><p className="my-1 whitespace-pre-wrap">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</p>{field?<button className="underline" onClick={()=>onSelectField(field.id)}>定位字段</button>:null}<span className="ml-2">待核验闭环</span></li>;
   })}</ul>;
 }
 
@@ -272,7 +273,7 @@ function StructuredCaliber({ records, selected, onSelectField }: {
   records: FieldWorkspaceRecord[]; selected: FieldWorkspaceRecord | null; onSelectField: (id: number) => void;
 }) {
   return <div className="mt-5 space-y-4"><div className="rounded-lg border border-pine-100 bg-pine-50/50 px-4 py-3 text-xs text-pine-900">结构化口径是当前事实视图：监管字段、业务定义、技术溯源、双层 Mapping 和治理状态均来自服务器真实记录；文档预览不会反向修改这些事实。</div>
-    <div className="grid gap-3 md:grid-cols-2">{records.map((record) => <button className={`rounded-lg border p-3 text-left ${record.field.id === selected?.field.id ? "border-pine-400 bg-pine-50" : "border-line bg-white"}`} key={record.field.id} onClick={() => onSelectField(record.field.id)} type="button"><strong className="block text-xs text-ink">{record.field.field_name}</strong><span className="mt-1 block font-mono text-[10px] text-slate-400">{record.field.field_code}</span><span className="mt-2 block text-[11px] text-slate-600">业务：{record.business?.final_content || record.business?.ai_generated_content || "待维护"}</span><span className="mt-1 block text-[11px] text-slate-600">血缘：{record.lineage?.source_system_name || "待确认"} · {record.lineage?.lineage_status || "未关联"}</span></button>)}</div>
+    <div className="grid gap-3 md:grid-cols-2">{records.map((record) => <button className={`rounded-lg border p-3 text-left ${record.field.id === selected?.field.id ? "border-pine-400 bg-pine-50" : "border-line bg-white"}`} key={record.field.id} onClick={() => onSelectField(record.field.id)} type="button"><strong className="block text-xs text-ink">{record.field.field_name}</strong><span className="mt-1 block font-mono text-[10px] text-slate-400">{record.field.field_code}</span><span className="mt-2 block text-[11px] text-slate-600">业务：{record.business?.final_content || record.business?.ai_generated_content || "待维护"}</span><span className="mt-1 block text-[11px] text-slate-600">血缘：{record.lineage?.source_system_name || "待确认"} · {record.lineage?.lineage_status ? lineageStatusLabel(record.lineage.lineage_status) : "未关联"}</span></button>)}</div>
     {!selected ? <p className="text-xs text-slate-500">请选择字段查看完整口径。</p> : null}
   </div>;
 }
@@ -283,7 +284,7 @@ function EvidencePanel({ records, selectedFieldId, evidenceCountByField, onSelec
 }
 
 function QuestionsPanel({ questions }: { questions: PendingQuestion[] }) {
-  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{question.priority.toUpperCase()} · {questionTypeLabel(question.question_type)}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>未登记人工问题；事实完整性仍需评估</p></div>}</div>;
+  return <div className="mt-5">{questions.length ? <ul className="space-y-2">{questions.map((question) => <li className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-slate-700" key={question.id}><strong>{priorityLabel(question.priority)} · {questionTypeLabel(question.question_type)}</strong><span className="ml-2">{question.question_text}</span><span className="ml-2 text-slate-400">{statusLabel(question.question_status)}</span></li>)}</ul> : <div className="empty-state min-h-[180px]"><p>未登记人工问题；事实完整性仍需评估</p></div>}</div>;
 }
 
 function DocMeta({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
@@ -306,8 +307,8 @@ function sourcePath(record: FieldWorkspaceRecord) {
 function RuleLayers({ source, target }: { source?: string | null; target?: string | null }) {
   return (
     <div className="space-y-1">
-      <p><span className="font-semibold text-pine-700">Source→Mart：</span>{source || "待维护"}</p>
-      <p><span className="font-semibold text-sky-700">Mart→YBT：</span>{target || "待维护"}</p>
+      <p><span className="font-semibold text-pine-700">来源表→数据集市：</span>{source || "待维护"}</p>
+      <p><span className="font-semibold text-sky-700">数据集市→报送目标：</span>{target || "待维护"}</p>
     </div>
   );
 }

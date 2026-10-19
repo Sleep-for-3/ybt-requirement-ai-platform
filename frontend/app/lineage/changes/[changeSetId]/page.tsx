@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
+import { severityLabel, changeCategoryLabel } from "@/lib/product-language";
 
 type Item = {
   id: number;
@@ -52,7 +53,7 @@ export default function Page() {
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
         {data?.impact ? (
           <Link className="button-primary" href={`/lineage/impacts/${data.impact.id}`}>
-            查看 {data.impact.severity} 影响分析
+            查看 {severityLabel(data.impact.severity)}影响分析
           </Link>
         ) : null}
 
@@ -78,9 +79,9 @@ export default function Page() {
                     className="grid-row grid grid-cols-[140px_100px_minmax(0,1fr)_minmax(0,1fr)] items-start gap-3"
                     key={i.id}
                   >
-                    <span className="font-medium text-ink">{i.change_category}</span>
+                    <span className="font-medium text-ink">{changeCategoryLabel(i.change_category)}</span>
                     <span>
-                      <span className={severityBadge(i.severity)}>{i.severity}</span>
+                      <span className={severityBadge(i.severity)}>{severityLabel(i.severity)}</span>
                     </span>
                     <pre className="min-w-0 whitespace-pre-wrap break-all font-mono text-xs text-slate-600">
                       {JSON.stringify(i.old_value, null, 2)}

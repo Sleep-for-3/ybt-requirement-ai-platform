@@ -30,7 +30,7 @@ export function lineageNodeTechnicalLabel(node) {
 }
 
 export function lineageRelationLabel(edge) {
-  return RELATION_LABELS[text(edge?.edge_type)] || text(edge?.edge_type) || "数据关系";
+  return RELATION_LABELS[text(edge?.edge_type)] || (text(edge?.edge_type) ? "其他血缘关系" : "数据关系");
 }
 
 export function explainLineageEdgeInBusinessLanguage(edge, source, target) {

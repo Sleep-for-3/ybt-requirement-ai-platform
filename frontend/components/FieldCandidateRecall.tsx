@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiPost, CandidateSourceRecommendation } from "@/lib/api";
+import { describeError, describeErrorCode, describeUserMessage } from "@/lib/user-message.mjs";
+import { bindingScopeLabel, skillKeyLabel } from "@/lib/product-language";
 
 type Candidate = {
   candidate_id: string; datasource_id: number; database_name: string | null;
@@ -24,20 +26,20 @@ type Rerank = {
   };
 };
 
-// Mock and deterministic runs must never read as real-model quality validation.
+// 模拟与确定性运行不得被解读为真实模型的质量验证。
 const EXECUTION_LABELS: Record<string, string> = {
-  real_model: "真实模型", mock_model: "Mock 模型（仅流程验证）", deterministic: "确定性规则", degraded: "模型调用降级",
+  real_model: "真实模型", mock_model: "模拟模型（仅流程验证）", deterministic: "确定性规则", degraded: "模型调用降级",
 };
 
 function executionLabel(kind?: string) {
   if (!kind) return "未记录";
-  return EXECUTION_LABELS[kind] || kind;
+  return EXECUTION_LABELS[kind] || "其他执行方式";
 }
 
 function rankingLabel(result: Rerank | null) {
   if (!result) return "确定性召回排序（本次未调用模型）";
   if (result.ranking_mode === "model_rerank") return `模型重排（${executionLabel(result.execution_metadata?.execution_kind)}）`;
-  return `确定性召回排序（模型重排未成功：${result.rerank.error_code || "未知原因"}）`;
+  return `确定性召回排序（模型重排未成功：${describeErrorCode(result.rerank.error_code, "未知原因")}）`;
 }
 
 export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepared }: {
@@ -75,7 +77,7 @@ export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepare
       });
       if (alive.current) {setPrepared(old => [...old, candidateId]);onPrepared(result.recommendation);}
     } catch (failure) {
-      if (alive.current) {setRerank(null);setSnapshot(null);setVerified(false);setError(failure instanceof Error ? failure.message : "加入候选失败，请重新检索。");}
+      if (alive.current) {setRerank(null);setSnapshot(null);setVerified(false);setError(describeError(failure, "加入候选失败，请重新检索。"));}
     } finally {flight.current = false;if (alive.current) setBusy(false);}
   }
   async function modelRerank() {
@@ -90,7 +92,7 @@ export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepare
     } catch (failure) {
       if (alive.current && request === sequence.current) {
         setRerank(null);
-        setError(failure instanceof Error ? failure.message : "模型重排未成功，当前仍为确定性召回排序。");
+        setError(describeError(failure, "模型重排未成功，当前仍为确定性召回排序。"));
       }
     } finally {flight.current = false;if (alive.current) setBusy(false);}
   }
@@ -117,7 +119,7 @@ export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepare
         if (alive.current) setSnapshot({ input, result });
       }
     } catch (failure) {
-      if (alive.current) { setSnapshot(null); setRerank(null); setError(failure instanceof Error ? failure.message : "候选检索失败，请重试。"); }
+      if (alive.current) { setSnapshot(null); setRerank(null); setError(describeError(failure, "候选检索失败，请重试。")); }
     } finally {
       flight.current = false;
       if (alive.current) setBusy(false);
@@ -130,7 +132,7 @@ export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepare
     <p className="mt-1 text-xs text-slate-600">按当前字段与检索词进行词面匹配，未调用模型。仅查询本项目已启用的目录，不连接源库，也不写入映射。采用仍需在来源推荐流程中完成人工选择与安全探查。</p>
     <div className="mt-3 grid items-end gap-3 md:grid-cols-[2fr_1fr_auto_auto]">
       <label className="text-xs">补充检索词<input className="control mt-1 w-full" value={query} maxLength={2000} disabled={busy}
-        onChange={event => { setQuery(event.target.value); invalidate(); }} placeholder="如余额、account balance" /></label>
+        onChange={event => { setQuery(event.target.value); invalidate(); }} placeholder="如余额、账户余额" /></label>
       <label className="text-xs">限定数据源编号<input className="control mt-1 w-full" value={datasources} disabled={busy}
         onChange={event => { setDatasources(event.target.value); invalidate(); }} placeholder="留空检索本项目全部目录" /></label>
       <label className="text-xs">候选上限<select className="control mt-1 w-full" value={limit} disabled={busy}
@@ -147,14 +149,14 @@ export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepare
         <button className="button-secondary" disabled={busy} onClick={() => void modelRerank()}>模型重排（显式请求）</button>
         {verified && <span role="status">本次复核通过，仍需人工确认。</span>}
       </div>
-      <p className="text-xs text-slate-600">模型重排只有在点击后才会调用固定发布的 Skill；它只重排上方候选，不新增目录字段、不选择、不探查、不写入映射。</p>
+      <p className="text-xs text-slate-600">模型重排只有在点击后才会调用固定发布的技能；它只重排上方候选，不新增目录字段、不选择、不探查、不写入映射。</p>
       <div role="status" className="rounded border border-line p-2 text-xs">
         <p>当前列表来源：{rankingLabel(rerank)}</p>
         {rerank?.rerank.status === "applied" && <p className="mt-1">
-          固定 Skill：{rerank.rerank.skill_key} v{rerank.rerank.skill_version?.version_no} · 作用域 {rerank.rerank.binding_scope}
+          固定技能：{skillKeyLabel(rerank.rerank.skill_key)} v{rerank.rerank.skill_version?.version_no} · 作用域 {bindingScopeLabel(rerank.rerank.binding_scope)}
           {" · "}运行编号 {rerank.rerank.run_id} · 模型 {rerank.execution_metadata?.model_name || "未记录"}
         </p>}
-        {rerank && <p className="mt-1">{rerank.rerank.message}</p>}
+        {rerank && <p className="mt-1">{describeUserMessage(rerank.rerank.message, "该次重排未返回可读说明。")}</p>}
       </div>
       <details className="text-xs"><summary>查看检索快照</summary><p className="mt-1 break-all">{snapshot.result.context_hash}</p></details>
       {!displayed.length && <p className="text-sm text-slate-600">当前范围没有可用目录字段，请检查数据源及目录是否启用。</p>}

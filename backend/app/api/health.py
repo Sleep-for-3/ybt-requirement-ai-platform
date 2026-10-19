@@ -48,7 +48,7 @@ def details(
     if not settings.health_details_public:
         principal = get_current_principal(request, credentials, db)
         if not PermissionService(db, principal).is_platform_admin():
-            raise HTTPException(status_code=403, detail="Platform administrator permission is required")
+            raise HTTPException(status_code=403, detail="需要平台管理员权限")
     return run_health_checks(db, settings)
 
 
@@ -65,7 +65,7 @@ def metrics(
     if settings.environment.lower() == "production":
         principal = get_current_principal(request, credentials, db)
         if not PermissionService(db, principal).is_platform_admin():
-            raise HTTPException(status_code=403, detail="Platform administrator permission is required")
+            raise HTTPException(status_code=403, detail="需要平台管理员权限")
     rows = db.execute(select(BackgroundJob.status, func.count(BackgroundJob.id)).group_by(BackgroundJob.status)).all()
     set_job_metrics({key: count for key, count in rows})
     return Response(render_metrics(), media_type="text/plain; version=0.0.4")

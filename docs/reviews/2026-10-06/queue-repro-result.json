@@ -1,0 +1,35 @@
+{
+  "reviewed_commit": "fd7a532",
+  "scope": "RAM SQLite + fake broker + fake heartbeat; no live services",
+  "retry_publish_failure": {
+    "after_failed_retry": {
+      "status": "queued",
+      "has_old_dispatched_at": true,
+      "celery_task_id": "synthetic-old-task"
+    },
+    "broker_recovered_compensation": {
+      "candidates": 0,
+      "published": 0,
+      "failed": []
+    }
+  },
+  "inactive_institution_duplicate": {
+    "initial_status": "completed",
+    "after_duplicate_status": "cancelled",
+    "handler_calls": [],
+    "previous_result": {
+      "success_count": 1
+    }
+  },
+  "unresolved_handler_duplicate": {
+    "initial_status": "completed",
+    "after_duplicate_status": "failed",
+    "error_message": "No worker handler is registered for this job type"
+  },
+  "heartbeat_exception": {
+    "loop_has_exited": true,
+    "renewal_calls": 1,
+    "lease_lost_signalled": false,
+    "limit": "Does not dynamically prove stale business side effects"
+  }
+}

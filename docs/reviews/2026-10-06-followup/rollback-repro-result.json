@@ -1,0 +1,7 @@
+{
+  "reviewed_commit": "3db4db6",
+  "scope": "copied real rollback script; fake docker/curl/sleep; synthetic env; no live service actions",
+  "mock_directory": "/mnt/c/Users/admin/Downloads/ai-platform-dsh-20260930-150943/ai-platform/docs/reviews/2026-10-06-followup/rollback-mock-324196",
+  "all_ready_probes_failed": {"count": 40, "exit_code": 0, "tag_after": "release-A"},
+  "compose_up_failed": {"exit_code": 99, "initial_tag": "release-B", "tag_after_failure": "release-A"}
+}

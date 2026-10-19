@@ -347,7 +347,7 @@ def test_question_assignment_requires_active_membership_in_same_project() -> Non
 
         rejected = client.patch(f"/api/questions/{question['id']}", json={"assigned_user_id": outsider_id})
         assert rejected.status_code == 400
-        assert rejected.json()["detail"] == "Assigned user is not an active project member"
+        assert rejected.json()["detail"] == "指派的用户不是该项目的有效成员"
 
         assigned = client.patch(f"/api/questions/{question['id']}", json={"assigned_user_id": member_id})
         assert assigned.status_code == 200, assigned.text

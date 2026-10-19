@@ -5,7 +5,7 @@ import Link from "next/link";
 import { SemanticLifecycle, SemanticReview, semanticConceptTypeLabel } from "@/components/semantic-catalog/SemanticStatus";
 import type { SemanticCatalogItem } from "@/lib/api";
 
-const HEADERS = ["Concept", "Code", "Type", "Business Domain", "Effective Version", "Lifecycle", "Review", "Owner", "Confirmed Assets", "Updated"];
+const HEADERS = ["业务概念", "编码", "类型", "业务域", "生效版本", "生命周期", "审核", "责任部门", "已确认资产", "更新时间"];
 
 export function SemanticComparisonTable({ items, returnTo, auditMode }: { items:SemanticCatalogItem[];returnTo:string;auditMode:boolean }) {
   const visible = items.filter((item) => auditMode || !["rejected", "deprecated"].includes(item.status));

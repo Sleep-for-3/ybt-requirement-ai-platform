@@ -1,6 +1,6 @@
 const LABELS = {
   real_model: { label: "真实模型", tone: "ready", detail: "已调用真实模型" },
-  mock_model: { label: "Mock 流程", tone: "mock", detail: "固定模板输出，不代表真实模型效果" },
+  mock_model: { label: "模拟流程", tone: "mock", detail: "固定模板输出，不代表真实模型效果" },
   deterministic: { label: "规则算法", tone: "rule", detail: "由确定性规则生成，未调用模型" },
   degraded: { label: "模型降级", tone: "degraded", detail: "模型不可用，已保留确定性事实" }
 };

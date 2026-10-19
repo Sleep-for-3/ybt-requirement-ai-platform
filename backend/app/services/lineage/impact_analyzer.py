@@ -11,6 +11,7 @@ from app.models import (
     ProjectMembership, ReviewTask, ScenarioBusinessMapping, ScriptChangeItem, ScriptChangeSet, ScriptFile, ScriptFileVersion,
     SourceToMartMapping,
 )
+from app.services.governance.labels import severity_label
 from app.services.lineage.semantic_impact import resolve_semantic_impact
 from app.services.lineage.version_diff import VersionDiffResult
 
@@ -171,7 +172,7 @@ def persist_change_impact(
                     project_id=script_file.project_id, mapping_type=mapping_type, mapping_id=mapping_id,
                     evidence_type=evidence_type, evidence_id=evidence_id, source_name=source_name,
                     location_text=f"{script_file.relative_path} v{(to_version or from_version).version_no if (to_version or from_version) else '-'}", quoted_content=None,
-                    evidence_summary=f"{diff.severity}：{'、'.join(sorted({item.change_category for item in diff.items}))}",
+                    evidence_summary=f"{severity_label(diff.severity)}：{'、'.join(sorted({item.change_category for item in diff.items}))}",
                 ))
     status = "stale" if diff.severity == "critical" else "needs_review" if diff.severity in {"high", "medium"} else None
     if status and diff.semantic_changed:
@@ -191,7 +192,7 @@ def persist_change_impact(
             assignments.setdefault(membership.project_role, membership.user_id)
             notify_user(
                 db, membership.user_id, "lineage_impact_detected", "检测到高风险血缘变化",
-                f"脚本 #{script_file.id} 产生 {diff.severity} 级影响，请复核。",
+                f"脚本 #{script_file.id} 产生{severity_label(diff.severity)}级影响，请复核。",
                 project_id=script_file.project_id, resource_type="impact_analysis", resource_id=impact.id,
             )
         workflow = start_workflow(

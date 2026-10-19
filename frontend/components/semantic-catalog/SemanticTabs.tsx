@@ -7,7 +7,7 @@ import { useRef } from "react";
 import { DETAIL_TAB_IDS, moveTabContract, panelContractAttributes, tabContractAttributes } from "@/lib/semantic-catalog-dom-contract.mjs";
 import type { DetailQueryState } from "@/lib/semantic-catalog-view-model.mjs";
 
-const TAB_LABELS: Record<DetailQueryState["tab"], string> = { overview:"Overview",bindings:"Bindings",relations:"Relations",evidence:"Evidence",lineage:"Lineage",governance:"Governance",versions:"Versions" };
+const TAB_LABELS: Record<DetailQueryState["tab"], string> = { overview:"概览",bindings:"资产绑定",relations:"概念关系",evidence:"证据与知识",lineage:"血缘",governance:"治理",versions:"版本" };
 const DETAIL_TABS = DETAIL_TAB_IDS as readonly DetailQueryState["tab"][];
 
 export function SemanticTabs({ activeTab, onTab, children }: {

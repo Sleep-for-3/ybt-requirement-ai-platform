@@ -91,7 +91,7 @@ export function GlobalSearch({ projectId }: { projectId: number | null }) {
   return (
     <>
       <button aria-label="全局资产搜索" className="flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-line bg-slate-50 text-left text-xs text-slate-500 hover:border-pine-200 hover:bg-white md:w-auto md:min-w-56 md:justify-start md:px-3" disabled={!projectId} onClick={() => setOpen(true)} type="button">
-        <Search size={15} /><span className="hidden flex-1 md:block">搜索资产、语义、需求与血缘</span><kbd className="hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] md:inline">Ctrl K</kbd>
+        <Search size={15} /><span className="hidden flex-1 md:block">搜索资产、语义、需求与血缘</span><kbd className="hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] md:inline">快捷键 Ctrl+K</kbd>
       </button>
       <ModalDialog description="仅搜索当前项目中你有权访问的资产，结果直接进入生产页面。" onClose={() => setOpen(false)} open={open} title="全局资产搜索">
         <label className="relative block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input autoFocus className="control pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="输入名称、编码、定义或脚本路径（至少 2 个字符）" value={query} /></label>

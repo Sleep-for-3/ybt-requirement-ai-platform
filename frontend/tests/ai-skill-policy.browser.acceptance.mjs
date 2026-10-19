@@ -78,7 +78,7 @@ try {
   await policy.getByText("模型/规则对照候选（不代表人工确认）", { exact: true }).click();
   const provenance = policy.getByRole("region", { name: "候选生成来源", exact: true });
   await provenance.waitFor();
-  assert.match(await provenance.innerText(), /Skill 固定版本 v1.*Mock/);
+  assert.match(await provenance.innerText(), /技能固定版本 v1.*模拟/);
   await provenance.getByText("查看运行来源", { exact: true }).click();
   assert.match(await provenance.innerText(), /requirement_candidate_generation/);
   assert.equal(await policy.getByRole("combobox", { name: /^人工判断/ }).inputValue(), "conflict");
@@ -104,7 +104,7 @@ try {
   await auxiliary.getByRole("button", { name: "生成文档辅助候选", exact: true }).click();
   assert.equal((await assisted).status(), 200);
   await auxiliary.getByText("合成背景整理，须人工核验。", { exact: true }).waitFor();
-  assert.match(await auxiliary.innerText(), /Skill 固定版本 v1.*Mock/);
+  assert.match(await auxiliary.innerText(), /技能固定版本 v1.*模拟/);
   assert.match(await auxiliary.innerText(), /引用：revision:\d+:requirement/);
   assert.deepEqual(await request(base + "/revisions/3"), saved);
   assert.deepEqual(await request(base + "/revisions/2"), original);

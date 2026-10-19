@@ -1,0 +1,162 @@
+........................................................................ [  5%]
+........................................................................ [ 10%]
+........................................................................ [ 15%]
+........................................................................ [ 21%]
+........................................................................ [ 26%]
+.............F.......................................................... [ 31%]
+........................................................................ [ 37%]
+........................................................................ [ 42%]
+.......................................................................F [ 47%]
+........................................................................ [ 52%]
+........................................................................ [ 58%]
+........................................................................ [ 63%]
+........................................................................ [ 68%]
+........................................................................ [ 74%]
+........................................................................ [ 79%]
+........................................................................ [ 84%]
+........................................................................ [ 89%]
+........................................................................ [ 95%]
+..................................................................       [100%]
+================================== FAILURES ===================================
+____________ test_skill_migration_roundtrip_preserves_legacy_rows _____________
+tests\test_ai_skill_migration.py:30: in test_skill_migration_roundtrip_preserves_legacy_rows
+    assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "202609270044"
+E   AssertionError: assert '202610020051' == '202609270044'
+E     
+E     - 202609270044
+E     + 202610020051
+---------------------------- Captured stderr call -----------------------------
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 202607070001, initial schema
+INFO  [alembic.runtime.migration] Running upgrade 202607070001 -> 202607070002, template datasource nl task
+INFO  [alembic.runtime.migration] Running upgrade 202607070002 -> 202607070003, double layer mapping
+INFO  [alembic.runtime.migration] Running upgrade 202607070003 -> 202607100004, scenario traceability
+INFO  [alembic.runtime.migration] Running upgrade 202607100004 -> 202607140005, metadata catalog and safe profiling
+INFO  [alembic.runtime.migration] Running upgrade 202607140005 -> 202607140006, knowledge rag evaluation
+INFO  [alembic.runtime.migration] Running upgrade 202607140006 -> 202607150007, production governance workflow
+INFO  [alembic.runtime.migration] Running upgrade 202607150007 -> 202607150008, scenario review package and cancellable celery jobs
+INFO  [alembic.runtime.migration] Running upgrade 202607150008 -> 202607150009, SQL and shell lineage, script versioning and change impact
+INFO  [alembic.runtime.migration] Running upgrade 202607150009 -> 202607200010, caliber document production
+INFO  [alembic.runtime.migration] Running upgrade 202607200010 -> 202607220011, uat productization and deployment readiness
+INFO  [alembic.runtime.migration] Running upgrade 202607220011 -> 202607230012, AI runtime profiles and model call observability.
+INFO  [alembic.runtime.migration] Running upgrade 202607230012 -> 202607270013, Allow knowledge units to reference a list of target field codes.
+INFO  [alembic.runtime.migration] Running upgrade 202607270013 -> 202607300014, Add persistent semantic index versions.
+INFO  [alembic.runtime.migration] Running upgrade 202607300014 -> 202608200015, Add the governed regulatory semantic layer.
+INFO  [alembic.runtime.migration] Running upgrade 202608200015 -> 202608200016, Add canonical temporal semantic concept versions.
+INFO  [alembic.runtime.migration] Running upgrade 202608200016 -> 202608260017, Add durable metadata drift events.
+INFO  [alembic.runtime.migration] Running upgrade 202608260017 -> 202608270018, Add governed, reusable data quality expectations.
+INFO  [alembic.runtime.migration] Running upgrade 202608270018 -> 202608270019, Extend impact analyses with semantic and requirement scope.
+INFO  [alembic.runtime.migration] Running upgrade 202608270019 -> 202608280020, Add reporting cycles and governed metric snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 202608280020 -> 202608290021, Add targeted requirement workspace performance indexes.
+INFO  [alembic.runtime.migration] Running upgrade 202608290021 -> 202609100022, Add immutable structured requirement working snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 202609100022 -> 202609100023, Harden structured requirement snapshot scope identity.
+INFO  [alembic.runtime.migration] Running upgrade 202609100023 -> 202609100024, Add immutable, project-level lineage revision snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 202609100024 -> 202609100025, Add controlled polling configuration for lineage repositories.
+INFO  [alembic.runtime.migration] Running upgrade 202609100025 -> 202609120026, Align migrated columns with the ORM nullability contract.
+INFO  [alembic.runtime.migration] Running upgrade 202609120026 -> 202609120027, Record provider HTTP status and error detail on model call logs.
+INFO  [alembic.runtime.migration] Running upgrade 202609120027 -> 202609130028, Add scoped requirements and immutable delivery records.
+INFO  [alembic.runtime.migration] Running upgrade 202609130028 -> 202609140029, Append-only isolated requirement content; do not backfill shared facts.
+INFO  [alembic.runtime.migration] Running upgrade 202609140029 -> 202609140030, Fixed, bounded requirement generation inputs.
+INFO  [alembic.runtime.migration] Running upgrade 202609140030 -> 202609140031, Leased generation items; AI output is a candidate, never a shared write.
+INFO  [alembic.runtime.migration] Running upgrade 202609140031 -> 202609140032, Bind requirement revisions to governed review and immutable formal delivery.
+INFO  [alembic.runtime.migration] Running upgrade 202609140032 -> 202609160033, Add governed template and knowledge document versions.
+INFO  [alembic.runtime.migration] Running upgrade 202609160033 -> 202609170034, Add architecture configuration without modifying existing catalog rows.
+INFO  [alembic.runtime.migration] Running upgrade 202609170034 -> 202609170035, Durable previews for unified imports; existing upload semantics unchanged.
+INFO  [alembic.runtime.migration] Running upgrade 202609170035 -> 202609180036, Group reverse-engineered single-target requirements without changing old scopes.
+INFO  [alembic.runtime.migration] Running upgrade 202609180036 -> 202609180037, Attach confirmed requirement rules to existing UAT suites and review workflows.
+INFO  [alembic.runtime.migration] Running upgrade 202609180037 -> 202609180038, Append-only change evidence and explicit replacement revisions.
+INFO  [alembic.runtime.migration] Running upgrade 202609180038 -> 202609180039, Add an optional client request key for idempotent project creation.
+INFO  [alembic.runtime.migration] Running upgrade 202609180039 -> 202609200040, Add backward-compatible AI execution, evidence, and feedback lineage fields.
+INFO  [alembic.runtime.migration] Running upgrade 202609200040 -> 202609200041, Add structured AI feedback regression fields to evaluation cases.
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 202609200041 -> 202609270042, Add scoped Skill definitions, immutable-version identities and event history.
+INFO  [alembic.runtime.migration] Running upgrade 202609270042 -> 202609270043, Skill test snapshots and nullable links from legacy runtime records.
+INFO  [alembic.runtime.migration] Running upgrade 202609270043 -> 202609270044, Enforce published Skill content and compatibility snapshot immutability.
+INFO  [alembic.runtime.migration] Running upgrade 202609270044 -> 202610010045, Durable agent orchestration state (tasks, plans, steps, tool calls, human
+decisions, artifacts).
+INFO  [alembic.runtime.migration] Running upgrade 202610010045 -> 202610020046, Agent step optional dependencies (V2 dependency semantics).
+INFO  [alembic.runtime.migration] Running upgrade 202610020046 -> 202610020047, Record planner validation errors and attempts on the plan (V2 strict planning).
+INFO  [alembic.runtime.migration] Running upgrade 202610020047 -> 202610020048, Retrieval-based decision / case memory (human-confirmed experience).
+INFO  [alembic.runtime.migration] Running upgrade 202610020048 -> 202610020049, Adaptive planning flag on the agent task (Observe -> Replan).
+INFO  [alembic.runtime.migration] Running upgrade 202610020049 -> 202610020050, SQL change events: the idempotency anchor for automatically triggered impact analysis.
+INFO  [alembic.runtime.migration] Running upgrade 202610020050 -> 202610020051, Single-runner lease on the agent task (duplicate workers must not execute steps twice).
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 202610020051 -> 202610020050, Single-runner lease on the agent task (duplicate workers must not execute steps twice).
+INFO  [alembic.runtime.migration] Running downgrade 202610020050 -> 202610020049, SQL change events: the idempotency anchor for automatically triggered impact analysis.
+INFO  [alembic.runtime.migration] Running downgrade 202610020049 -> 202610020048, Adaptive planning flag on the agent task (Observe -> Replan).
+INFO  [alembic.runtime.migration] Running downgrade 202610020048 -> 202610020047, Retrieval-based decision / case memory (human-confirmed experience).
+INFO  [alembic.runtime.migration] Running downgrade 202610020047 -> 202610020046, Record planner validation errors and attempts on the plan (V2 strict planning).
+INFO  [alembic.runtime.migration] Running downgrade 202610020046 -> 202610010045, Agent step optional dependencies (V2 dependency semantics).
+INFO  [alembic.runtime.migration] Running downgrade 202610010045 -> 202609270044, Durable agent orchestration state (tasks, plans, steps, tool calls, human
+decisions, artifacts).
+INFO  [alembic.runtime.migration] Running downgrade 202609270044 -> 202609270043, Enforce published Skill content and compatibility snapshot immutability.
+INFO  [alembic.runtime.migration] Running downgrade 202609270043 -> 202609270042, Skill test snapshots and nullable links from legacy runtime records.
+INFO  [alembic.runtime.migration] Running downgrade 202609270042 -> 202609200041, Add scoped Skill definitions, immutable-version identities and event history.
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 202609200041 -> 202609270042, Add scoped Skill definitions, immutable-version identities and event history.
+INFO  [alembic.runtime.migration] Running upgrade 202609270042 -> 202609270043, Skill test snapshots and nullable links from legacy runtime records.
+INFO  [alembic.runtime.migration] Running upgrade 202609270043 -> 202609270044, Enforce published Skill content and compatibility snapshot immutability.
+INFO  [alembic.runtime.migration] Running upgrade 202609270044 -> 202610010045, Durable agent orchestration state (tasks, plans, steps, tool calls, human
+decisions, artifacts).
+INFO  [alembic.runtime.migration] Running upgrade 202610010045 -> 202610020046, Agent step optional dependencies (V2 dependency semantics).
+INFO  [alembic.runtime.migration] Running upgrade 202610020046 -> 202610020047, Record planner validation errors and attempts on the plan (V2 strict planning).
+INFO  [alembic.runtime.migration] Running upgrade 202610020047 -> 202610020048, Retrieval-based decision / case memory (human-confirmed experience).
+INFO  [alembic.runtime.migration] Running upgrade 202610020048 -> 202610020049, Adaptive planning flag on the agent task (Observe -> Replan).
+INFO  [alembic.runtime.migration] Running upgrade 202610020049 -> 202610020050, SQL change events: the idempotency anchor for automatically triggered impact analysis.
+INFO  [alembic.runtime.migration] Running upgrade 202610020050 -> 202610020051, Single-runner lease on the agent task (duplicate workers must not execute steps twice).
+__ test_obsolete_composite_constructor_has_no_production_module_or_reference __
+tests\test_legacy_mapping_retirement.py:153: in test_obsolete_composite_constructor_has_no_production_module_or_reference
+    assert offenders == []
+E   AssertionError: assert ['app\\servic...apping_draft'] == []
+E     
+E     Left contains 4 more items, first extra item: 'app\\services\\agent\\observability.py:generate_mapping_draft'
+E     Use -v to get more diff
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_ai_skill_migration.py::test_skill_migration_roundtrip_preserves_legacy_rows
+tests/test_ai_skill_migration.py::test_skill_migration_roundtrip_preserves_legacy_rows
+tests/test_ai_skill_migration.py::test_skill_migration_roundtrip_preserves_legacy_rows
+tests/test_ai_skill_migration.py::test_skill_migration_roundtrip_preserves_legacy_rows
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\alembic\config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+tests/test_semantic_migration.py::test_semantic_version_migration_bootstraps_one_v1_per_legacy_concept_and_downgrades_safely
+tests/test_semantic_migration.py::test_semantic_version_migration_bootstraps_one_v1_per_legacy_concept_and_downgrades_safely
+tests/test_semantic_migration.py::test_semantic_version_migration_bootstraps_one_v1_per_legacy_concept_and_downgrades_safely
+tests/test_semantic_migration.py::test_semantic_version_migration_bootstraps_one_v1_per_legacy_concept_and_downgrades_safely
+  C:\Users\admin\Downloads\ai-platform-dsh-20260930-150943\ai-platform\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py:1177: DeprecationWarning: The default datetime adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    cursor.executemany(statement, parameters)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================ slowest 20 durations =============================
+20.98s call     tests/test_deliverable_migrations.py::test_deliverable_migration_paths_are_reversible_and_deterministic[head-down-to-009-up]
+19.76s call     tests/test_semantic_migration.py::test_semantic_migration_upgrade_downgrade_cycle
+18.83s call     tests/test_migration_schema_freeze.py::test_fresh_install_then_downgrade_then_upgrade
+18.26s call     tests/test_semantic_layer.py::test_sqlite_confirmed_interval_is_serialized_across_sessions
+16.98s call     tests/test_scenario_traceability.py::test_technical_generate_blocks_or_rejects_concurrent_physical_change
+16.87s call     tests/test_scenario_traceability.py::test_technical_generate_revalidates_actor_and_permission
+16.86s call     tests/test_scenario_traceability.py::test_business_generate_revalidates_actor_and_permission
+16.82s call     tests/test_scenario_traceability.py::test_deliverable_queued_handler_passes_scoped_context_and_counts_blocks
+15.74s call     tests/test_semantic_migration.py::test_semantic_version_migration_bootstraps_one_v1_per_legacy_concept_and_downgrades_safely
+12.10s call     tests/test_ai_skill_migration.py::test_skill_migration_roundtrip_preserves_legacy_rows
+12.05s call     tests/test_uat_migrations.py::test_uat_migration_is_deterministic_and_reversible[head-down-one-up]
+11.77s call     tests/test_deliverable_migrations.py::test_deliverable_migration_paths_are_reversible_and_deterministic[head-down-one-up]
+10.89s call     tests/test_uat_migrations.py::test_uat_migration_is_deterministic_and_reversible[010-to-head]
+10.66s call     tests/test_double_layer_mapping.py::test_source_to_mart_blocked_readiness_never_calls_model_or_mutates_task
+10.59s call     tests/test_deliverable_migrations.py::test_deliverable_migration_paths_are_reversible_and_deterministic[009-to-head]
+10.25s call     tests/test_ai_skill_mapping.py::test_native_mapping_cannot_bypass_output_or_final_write_guards[permission_revoked-scenario_technical_lineage]
+9.82s call     tests/test_double_layer_mapping.py::test_source_to_mart_service_uses_one_context_and_governed_output_policy
+9.78s call     tests/test_uat_migrations.py::test_uat_migration_is_deterministic_and_reversible[empty-to-head]
+9.33s call     tests/test_deliverable_migrations.py::test_deliverable_migration_paths_are_reversible_and_deterministic[empty-to-head]
+8.85s call     tests/test_double_layer_mapping.py::test_source_to_mart_rejects_every_local_snapshot_category
+=========================== short test summary info ===========================
+FAILED tests/test_ai_skill_migration.py::test_skill_migration_roundtrip_preserves_legacy_rows
+FAILED tests/test_legacy_mapping_retirement.py::test_obsolete_composite_constructor_has_no_production_module_or_reference
+2 failed, 1360 passed, 9 warnings in 997.45s (0:16:37)

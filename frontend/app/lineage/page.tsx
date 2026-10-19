@@ -57,7 +57,7 @@ export default function Page() {
           </div>
           <div className="panel-body space-y-3">
             <p className="text-sm leading-relaxed text-slate-600">
-              平台只读取和静态解析脚本，不执行 SQL、Shell、Git hooks 或仓库程序。高风险变化必须通过 impact_analysis → technical_review → final_review 才能重新标记 verified。
+              平台只读取和静态解析脚本，不执行 SQL、Shell、Git 钩子或仓库程序。高风险变化必须依次通过影响分析、技术审核、最终审核后，才能重新标记为已核验。
             </p>
             {graph ? (
               <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="lineage-traversal">

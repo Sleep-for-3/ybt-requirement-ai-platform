@@ -1,0 +1,29 @@
+{
+  "scope": "synthetic reporting function; no live API or database",
+  "run_unchanged": true,
+  "before": {
+    "package_sha256": "85424c7561747ac068ae014fac3d648380f4c3982c3539e077deeba76ed7a8ba",
+    "version": {
+      "alembic_head_revision": "synthetic_revision_1",
+      "alembic_revision": "synthetic_revision_1",
+      "application_version": "synthetic-approved-release",
+      "git_commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "health": {
+      "status": "healthy"
+    }
+  },
+  "after": {
+    "package_sha256": "aefbe7564646ccef5dc97322019686216fc82d0c901a61474abc0145e1c70d6d",
+    "version": {
+      "alembic_head_revision": "synthetic_revision_2",
+      "alembic_revision": "synthetic_revision_2",
+      "application_version": "synthetic-approved-release",
+      "git_commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "health": {
+      "status": "not_ready"
+    }
+  },
+  "closed_package_changed": true
+}

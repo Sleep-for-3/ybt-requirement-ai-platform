@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ProjectSelector, useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiDownload } from "@/lib/api";
+import { describeError } from "@/lib/user-message.mjs";
 
 export default function ExportPage() {
   const { projectId } = useProjectWorkspace();
@@ -23,7 +24,7 @@ export default function ExportPage() {
       URL.revokeObjectURL(url);
       setMessage(`已生成 ${result.fileName}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "导出失败");
+      setMessage(describeError(error, "追踪工作簿导出失败，请稍后重试。"));
     }
   }
 

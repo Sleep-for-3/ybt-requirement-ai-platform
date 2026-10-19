@@ -1,0 +1,85 @@
+{
+  "scope": "synthetic-only, no live DB or real pg_dump",
+  "isolation_directory": "C:\\Users\\admin\\Downloads\\ai-platform-dsh-20260930-150943\\ai-platform\\.local-run\\engineering-followup-e11y73x3",
+  "targeted_pytest": {
+    "not_repeated": true,
+    "prior_log": "targeted-pytest.log",
+    "prior_result": "29 passed, 7 warnings in 65.18s"
+  },
+  "bom_build_info": {
+    "app_commit": "unknown",
+    "build_time": "unknown"
+  },
+  "mutable_build_info_same_process": {
+    "before": "synthetic-A",
+    "after": "synthetic-B"
+  },
+  "backup_synthetic_execute": {
+    "returncode": 0,
+    "ok": true,
+    "missing_critical": [
+      "postgres_dump"
+    ],
+    "artifacts": [
+      {
+        "key": "postgres_dump",
+        "file": "synthetic_isolated.dump",
+        "bytes": 40,
+        "sha256": "40e71f5c411d18a35deb58a57daf4c7ffa9da4c8ce1aa3a1560233c34d0e327e"
+      },
+      {
+        "key": "attachments",
+        "dir": "attachments",
+        "files": 1,
+        "bytes": 20,
+        "sha256_manifest": "per-file"
+      },
+      {
+        "key": "version_manifest",
+        "file": "version.json"
+      }
+    ],
+    "actual_files": [
+      "attachments\\example.txt",
+      "manifest.json",
+      "synthetic_isolated.dump",
+      "version.json"
+    ],
+    "version_manifest": {
+      "app_commit": "synthetic-commit",
+      "schema_head": "see backend/alembic/versions (202610030001 is the current head)",
+      "requirements_lock": "backend/requirements.lock.txt",
+      "generated_at": "2026-10-04T16:02:41.302957+00:00"
+    }
+  },
+  "backup_missing_critical_sources": {
+    "returncode": 0,
+    "ok": true,
+    "missing_critical": [
+      "attachments",
+      "config"
+    ],
+    "artifact_keys": [
+      "postgres_dump",
+      "version_manifest"
+    ]
+  },
+  "expired_active_runner": {
+    "calls": [
+      "old-runner-started",
+      "new-runner-side-effect",
+      "old-runner-side-effect"
+    ],
+    "errors": [],
+    "final_status": "completed",
+    "note": "accelerated expiry; real handler path; SQLite; not a real Celery or 900s soak test"
+  },
+  "observed_celery_configuration": {
+    "task_acks_late": false,
+    "task_reject_on_worker_lost": null,
+    "worker_prefetch_multiplier": 4,
+    "task_time_limit": null,
+    "task_soft_time_limit": null,
+    "note": "configuration read only, no broker/worker was started or queried"
+  }
+}

@@ -206,7 +206,10 @@ class BackgroundJobItem(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
-    __table_args__ = (Index("ix_audit_logs_lookup", "institution_id", "project_id", "action", "created_at"),)
+    __table_args__ = (
+        Index("ix_audit_logs_lookup", "institution_id", "project_id", "action", "created_at"),
+        Index("ix_audit_logs_chain_tail", "institution_id", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     institution_id: Mapped[int | None] = mapped_column(ForeignKey("institutions.id"), index=True)
@@ -222,6 +225,10 @@ class AuditLog(Base):
     result: Mapped[str] = mapped_column(String(50), default="success", index=True)
     ip_address_masked: Mapped[str | None] = mapped_column(String(100))
     user_agent_summary: Mapped[str | None] = mapped_column(String(255))
+    # ④ Audit hash chain.  Both columns stay NULL for rows written while the
+    # feature is disabled, so the chain can resume without rewriting history.
+    prev_hash: Mapped[str | None] = mapped_column(String(64))
+    entry_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 

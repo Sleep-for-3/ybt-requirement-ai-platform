@@ -1,0 +1,4 @@
+[回滚] 目标标签 release-A（commit SYNTHETIC_A，build 2026-01-01T00:00:00Z）
+[回滚] .env 已更新（标签与身份同步恢复）
+{"app_commit":"SYNTHETIC_A","build_time":"2026-01-01T00:00:00Z","schema_head":"202610060001"}
+[回滚] 完成：release-A（commit SYNTHETIC_A），身份与镜像一致

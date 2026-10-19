@@ -64,7 +64,7 @@ try{
     await card.getByRole("textbox",{name:"样本预期值",exact:true}).fill("120.00");
     await card.getByRole("textbox",{name:"样本实际值",exact:true}).fill("120.00");
     await card.getByRole("textbox",{name:"验证证据",exact:true}).fill("脱敏样本 A；人工核对来源值与输出值一致；未连接银行数据源。");
-    await card.getByPlaceholder("填写实际结果或 Finding 摘要").fill("人工核验原值规则一致");
+    await card.getByPlaceholder("填写实际结果或问题摘要").fill("人工核验原值规则一致");
     const [completed]=await Promise.all([
       page.waitForResponse(r=>r.url().includes("/uat-case-results/")&&r.url().endsWith("/complete-manual")&&r.request().method()==="POST"),
       card.getByRole("button",{name:"确认通过",exact:true}).click()]);

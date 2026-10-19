@@ -11,6 +11,8 @@ import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { PageState } from "@/components/feedback/PageState";
 import { useToast } from "@/components/feedback/ToastProvider";
 import { DataSource, DataSourceConnectionDiagnostic, apiGet, apiPost } from "@/lib/api";
+import { describeError } from "@/lib/user-message.mjs";
+import { dbTypeLabel, statusLabel } from "@/lib/product-language";
 
 type LoadState = "idle" | "loading" | "error" | "ready";
 
@@ -51,7 +53,7 @@ export default function Page() {
         if (controller.signal.aborted) return;
         setItems([]);
         setState("error");
-        toast.error(error instanceof Error ? error.message : "数据源列表加载失败");
+        toast.error(describeError(error, "数据源列表加载失败，请稍后重试。"));
       });
     return () => controller.abort();
   }, [projectId, reloadVersion, toast]);
@@ -70,7 +72,7 @@ export default function Page() {
       else toast.warning(result.message || "连接未通过，请检查配置。");
       reload();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "连接测试失败");
+      toast.error(describeError(error, "连接测试未完成，请稍后重试。"));
     } finally { setTestingId(null); }
   }
 
@@ -83,7 +85,7 @@ export default function Page() {
         {projectId && state === "loading" ? <PageState kind="loading" title="正在加载数据源" description="正在读取当前项目内可见的数据源。" /> : null}
         {projectId && state === "error" ? <PageState kind="error" title="数据源加载失败" description="请检查网络或权限后重试；技术详情已在本次提示中显示。" action={<button className="button-secondary" onClick={reload} type="button">重试</button>} /> : null}
         {projectId && state === "ready" && !items.length ? <PageState kind="empty" title="当前项目还没有数据源" description="从一个只读连接开始，随后测试连接并执行元数据同步。" action={createAction} /> : null}
-        {projectId && state === "ready" && items.length ? <section className="panel overflow-hidden"><div className="grid-head hidden grid-cols-[minmax(0,1fr)_120px_240px] sm:grid"><span>数据源</span><span>连接状态</span><span className="text-right">操作</span></div>{items.map((item) => <div className="grid-row grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px_240px] sm:items-center" key={item.id}><div className="min-w-0"><p className="truncate font-medium text-ink">{item.display_name || item.name}</p><p className="mt-1 truncate text-xs text-slate-500">{item.db_type} · {item.readonly_flag ? "只读连接" : "读写权限待核验"}{item.last_database_version ? ` · ${item.last_database_version}` : ""}</p></div><span><span className={testStatusBadge(item.last_test_status)}>{item.last_test_status || "未测试"}</span></span><div className="flex flex-wrap justify-end gap-2"><button className="button-secondary" disabled={testingId === item.id} onClick={() => void test(item.id)} type="button"><Play size={16} />{testingId === item.id ? "测试中…" : "测试"}</button><StatefulLink className="button-primary" href={`/datasources/${item.id}/catalog?projectId=${projectId}`}>详情与同步</StatefulLink></div></div>)}</section> : null}
+        {projectId && state === "ready" && items.length ? <section className="panel overflow-hidden"><div className="grid-head hidden grid-cols-[minmax(0,1fr)_120px_240px] sm:grid"><span>数据源</span><span>连接状态</span><span className="text-right">操作</span></div>{items.map((item) => <div className="grid-row grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px_240px] sm:items-center" key={item.id}><div className="min-w-0"><p className="truncate font-medium text-ink">{item.display_name || item.name}</p><p className="mt-1 truncate text-xs text-slate-500">{dbTypeLabel(item.db_type)} · {item.readonly_flag ? "只读连接" : "读写权限待核验"}{item.last_database_version ? ` · ${item.last_database_version}` : ""}</p></div><span><span className={testStatusBadge(item.last_test_status)}>{item.last_test_status ? statusLabel(item.last_test_status) : "未测试"}</span></span><div className="flex flex-wrap justify-end gap-2"><button className="button-secondary" disabled={testingId === item.id} onClick={() => void test(item.id)} type="button"><Play size={16} />{testingId === item.id ? "测试中…" : "测试"}</button><StatefulLink className="button-primary" href={`/datasources/${item.id}/catalog?projectId=${projectId}`}>详情与同步</StatefulLink></div></div>)}</section> : null}
       </div>
       {createOpen && projectId ? <DatasourceWizard projectId={projectId} onBusyChange={setCreating} onCreated={(_datasource, outcome) => { setDirty(false); setCreateOpen(false); if (outcome.syncSubmitted) toast.success("数据源已创建，连接检查通过并已提交首次元数据同步。"); else toast.warning(`数据源已保存，但首次检查或同步未完成：${outcome.message || "请进入详情继续处理。"}`); reload(); }} onDirtyChange={setDirty} onRequestClose={requestCloseCreate} /> : null}
       <ConfirmDialog danger confirmText="放弃修改" description="表单中尚有未保存内容。放弃后这些输入不会保存。" onCancel={() => setDiscardOpen(false)} onConfirm={() => { setDiscardOpen(false); setDirty(false); setCreateOpen(false); }} open={discardOpen} title="放弃未保存的数据源配置？" />

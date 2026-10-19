@@ -8,6 +8,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { MartTable, apiGet, apiPost } from "@/lib/api";
+import { describeError } from "@/lib/user-message.mjs";
 
 export default function Page() {
   const { projectId } = useProjectWorkspace();
@@ -49,7 +50,7 @@ export default function Page() {
       setCreateOpen(false);
       await reload();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "创建失败");
+      setFormError(describeError(error, "监管集市表创建失败，请检查填写内容后重试。"));
     } finally {
       setCreating(false);
     }

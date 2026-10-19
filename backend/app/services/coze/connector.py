@@ -17,11 +17,11 @@ class CozeConnector:
         if not self.settings.coze_enabled:
             return {
                 "enabled": False,
-                "message": "Coze Studio integration is disabled for this MVP run.",
+                "message": "Coze Studio 集成在本次 MVP 中未启用。",
                 "payload_keys": sorted(payload.keys()),
             }
         return {
             "enabled": True,
-            "message": "Coze Studio HTTP integration is reserved for a later phase.",
+            "message": "Coze Studio 的 HTTP 集成将在后续阶段提供。",
             "workflow_id": self.settings.coze_workflow_id,
         }

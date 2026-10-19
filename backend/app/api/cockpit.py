@@ -22,7 +22,7 @@ def institution_cockpit(request: Request, principal: RealPrincipal, db: Session 
     """Institution-level view over only projects visible to the current principal."""
     permissions = PermissionService(db, principal)
     if not permissions.capabilities()["can_view_institution_cockpit"]:
-        raise HTTPException(status_code=403, detail="Institution cockpit permission required")
+        raise HTTPException(status_code=403, detail="需要机构驾驶舱权限")
     visible_ids = permissions.visible_project_ids()
     statement = select(Project).order_by(Project.id.desc())
     if visible_ids is not None:

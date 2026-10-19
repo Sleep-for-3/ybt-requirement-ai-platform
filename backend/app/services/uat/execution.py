@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import BackgroundJob, UatCase, UatCaseResult, UatRun
 from app.services.governance.audit import record_audit, redact_summary
+from app.services.governance.labels import uat_run_status_label
 from app.services.governance.notifications import notify_user
 from app.services.uat.builtin_checks import evaluate_builtin_case
 
@@ -64,7 +65,7 @@ def uat_run_job_handler(db: Session, job: BackgroundJob) -> dict:
     summary = execute_uat_run(db, run_id, retry_statuses=retry_statuses)
     run = db.get(UatRun, run_id)
     record_audit(db, action="execute_uat_run", resource_type="uat_run", resource_id=run_id, actor_user_id=job.created_by, institution_id=job.institution_id, project_id=job.project_id, after={"background_job_id": job.id, "summary": summary})
-    notify_user(db, job.created_by, "uat_run_completed", "UAT 执行完成", f"UAT Run {run_id} 状态：{run.status}", project_id=run.project_id, resource_type="uat_run", resource_id=run.id)
+    notify_user(db, job.created_by, "uat_run_completed", "UAT 执行完成", f"UAT 执行 #{run_id} 状态：{uat_run_status_label(run.status)}", project_id=run.project_id, resource_type="uat_run", resource_id=run.id)
     db.commit()
     return {"success_count": summary["passed_count"], "failed_count": summary["failed_count"], "blocked_count": summary["blocked_count"], "pending_count": summary["pending_count"], "uat_run_id": run_id, "run_status": run.status}
 

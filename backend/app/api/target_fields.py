@@ -36,7 +36,7 @@ def create_field(payload: TargetFieldCreate, db: Session = Depends(get_db)) -> T
 def get_field(field_id: int, db: Session = Depends(get_db)) -> TargetField:
     field = db.get(TargetField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Target field not found")
+        raise HTTPException(status_code=404, detail="目标字段不存在")
     return field
 
 
@@ -49,7 +49,7 @@ async def generate_mapping(
 ) -> None:
     field = db.get(TargetField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Target field not found")
+        raise HTTPException(status_code=404, detail="目标字段不存在")
     PermissionService(db, principal).require_project_permission(
         field.project_id,
         "technical.edit",
@@ -58,7 +58,7 @@ async def generate_mapping(
         status_code=410,
         detail={
             "code": "legacy-mapping-generator-retired",
-            "message": "Legacy field mapping generation has been retired",
+            "message": "旧版字段映射生成能力已下线",
             "replacement_routes": [
                 "/api/source-to-mart-mappings/{mapping_id}/generate-draft",
                 "/api/mart-to-ybt-mappings/{mapping_id}/generate-draft",
@@ -83,9 +83,9 @@ def get_latest_draft(field_id: int, db: Session = Depends(get_db)) -> FieldMappi
 def review_draft(draft_id: int, payload: ReviewDraftRequest, db: Session = Depends(get_db)) -> FieldMappingDraft:
     draft = db.get(FieldMappingDraft, draft_id)
     if draft is None:
-        raise HTTPException(status_code=404, detail="Draft not found")
+        raise HTTPException(status_code=404, detail="草稿不存在")
     if payload.review_status not in {"pending", "approved", "rejected", "revised"}:
-        raise HTTPException(status_code=400, detail="Invalid review_status")
+        raise HTTPException(status_code=400, detail="review_status 取值不合法")
     draft.review_status = payload.review_status
     if payload.final_content is not None:
         draft.final_content = payload.final_content

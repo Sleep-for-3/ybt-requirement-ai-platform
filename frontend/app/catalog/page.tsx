@@ -111,7 +111,7 @@ export default function CatalogPage() {
         <div className="grid gap-5 xl:grid-cols-[220px_380px_1fr]">
           <section className="panel h-fit overflow-hidden">
             <div className="panel-header">
-              <h2 className="text-[15px] font-semibold text-ink">Schema 树</h2>
+              <h2 className="text-[15px] font-semibold text-ink">数据模式树</h2>
             </div>
             <div className="space-y-1.5 p-3">
               <button
@@ -152,7 +152,7 @@ export default function CatalogPage() {
             ) : (
               <div className="empty-state m-3">
                 <Table2 className="text-slate-300" size={28} />
-                <p>当前筛选下暂无目录表，试试切换数据源或 schema</p>
+                <p>当前筛选下暂无目录表，试试切换数据源或数据模式</p>
               </div>
             )}
             <Pagination page={tablePage} pageSize={TABLE_PAGE_SIZE} total={tableTotal} onPage={(page) => setTablePage(page)} />

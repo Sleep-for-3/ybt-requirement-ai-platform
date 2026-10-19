@@ -1,0 +1,11 @@
+{
+  "scope": "synthetic values, unmodified helper, no .next build or browser/service changes",
+  "differing_known_build_times": [],
+  "missing_frontend_schema": [],
+  "default_frontend_identity": {
+    "component": "frontend",
+    "app_commit": "unknown",
+    "build_time": "unknown",
+    "schema_head": null
+  }
+}

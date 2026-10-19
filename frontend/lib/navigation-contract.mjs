@@ -34,7 +34,7 @@ const SECTIONS = [
   ["/jobs", "后台任务"],
   ["/mart", "监管集市"],
   ["/admin", "系统管理"],
-  ["/uat", "UAT 验收"],
+  ["/uat", "验收工作台"],
   ["/agent", "智能体任务台"],
   ["/workspace", "需求工作台"]
 ];

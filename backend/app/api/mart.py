@@ -87,21 +87,21 @@ def delete_mart_field(field_id: int, db: Session = Depends(get_db)) -> dict[str,
 def _get_project_or_404(db: Session, project_id: int) -> Project:
     project = db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="项目不存在")
     return project
 
 
 def _get_mart_table_or_404(db: Session, table_id: int) -> MartTable:
     table = db.get(MartTable, table_id)
     if table is None:
-        raise HTTPException(status_code=404, detail="Mart table not found")
+        raise HTTPException(status_code=404, detail="监管集市表不存在")
     return table
 
 
 def _get_mart_field_or_404(db: Session, field_id: int) -> MartField:
     field = db.get(MartField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Mart field not found")
+        raise HTTPException(status_code=404, detail="监管集市字段不存在")
     return field
 
 

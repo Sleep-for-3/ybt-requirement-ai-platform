@@ -27,16 +27,16 @@ async def upload_file(project_id: int, principal: RealPrincipal, file: UploadFil
     project = PermissionService(db, principal).require_project_permission(project_id, "knowledge.manage")
     file_name = file.filename or ""
     if not _safe_file_name(file_name):
-        raise HTTPException(status_code=400, detail="Invalid file name")
+        raise HTTPException(status_code=400, detail="文件名不合法")
     if Path(file_name).suffix.lower() not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="File extension is not allowed")
+        raise HTTPException(status_code=400, detail="不允许该文件扩展名")
     if not any((file.content_type or "application/octet-stream").startswith(prefix) for prefix in ALLOWED_MIME_PREFIXES):
-        raise HTTPException(status_code=400, detail="File MIME type is not allowed")
+        raise HTTPException(status_code=400, detail="不允许该文件类型")
     if classification not in CLASSIFICATIONS:
-        raise HTTPException(status_code=400, detail="Invalid classification")
+        raise HTTPException(status_code=400, detail="文件密级设置不合法")
     data = await file.read(get_settings().max_upload_bytes + 1)
     if len(data) > get_settings().max_upload_bytes:
-        raise HTTPException(status_code=413, detail="File is too large")
+        raise HTTPException(status_code=413, detail="文件过大")
     digest = hashlib.sha256(data).hexdigest()
     duplicate = db.scalar(select(StoredFile).where(
         StoredFile.institution_id == project.institution_id,
@@ -78,7 +78,7 @@ async def upload_file(project_id: int, principal: RealPrincipal, file: UploadFil
             StoredFile.enabled.is_(True),
         ))
         if duplicate is None:
-            raise HTTPException(status_code=409, detail="A file with this storage key already exists")
+            raise HTTPException(status_code=409, detail="该存储标识下已存在文件")
         _raise_classification(duplicate, classification)
         record_audit(db, action="duplicate_upload", resource_type="stored_file", resource_id=duplicate.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"file_name": Path(file_name).name, "content_hash": digest})
         db.commit()
@@ -92,12 +92,12 @@ async def upload_file(project_id: int, principal: RealPrincipal, file: UploadFil
 def download_file(file_id: int, principal: RealPrincipal, db: Session = Depends(get_db)) -> Response:
     row = db.get(StoredFile, file_id)
     if row is None or not row.enabled:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="文件不存在")
     PermissionService(db, principal).require_project_permission(row.project_id, "project.view")
     try:
         content = get_storage_service().read(row.storage_key)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="File not found") from exc
+        raise HTTPException(status_code=404, detail="文件不存在") from exc
     record_audit(db, action="download", resource_type="stored_file", resource_id=row.id, actor_user_id=principal.user_id, institution_id=row.institution_id, project_id=row.project_id, after={"file_name": row.original_file_name, "classification": row.classification})
     db.commit()
     return Response(content=content, media_type=row.content_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(row.original_file_name)}", "Cache-Control": "no-store"})

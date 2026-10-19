@@ -43,3 +43,17 @@ Thumbs.db
 /docs/evaluation/**/push.log
 # B18: generated at release time (git rev-parse HEAD + timestamp); must not be committed
 backend/build-info.json
+
+# Local agent working artefacts — never shipped (session transcripts, ad-hoc scans,
+# one-off intermediate dumps). Kept on disk, deliberately untracked.
+.planning/_session.jsonl
+.planning/_prompts.md
+.planning/_p1.txt
+backend/jieba.cache
+backend/.ci-storage/
+backend/.ci-storage*/
+frontend/.next-verify-*/
+docs/research/__pycache__/
+*.bak.py
+*.orig.py
+

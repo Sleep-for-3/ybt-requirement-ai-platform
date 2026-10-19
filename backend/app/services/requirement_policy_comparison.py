@@ -18,7 +18,10 @@ class PolicyDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     unit_id: int = Field(gt=0)
     rule_ids: list[str] = Field(default_factory=list, max_length=2000)
-    status: Literal["matched", "conflict", "missing_implementation", "pending"]
+    # ``not_compared`` is the explicit "never ran the comparison" state.  Without it a
+    # unit nobody looked at was indistinguishable from one where a human found no
+    # implementation, and "never ran" inflated the missing-implementation count.
+    status: Literal["matched", "conflict", "missing_implementation", "pending", "not_compared"]
     rationale: str = Field(min_length=1, max_length=10000)
     difference: str = Field(default="", max_length=10000)
 
@@ -59,12 +62,15 @@ def comparison_issues(content):
     for unit in units:
         row = decisions.get(str(unit["unit_id"]))
         if not row:
-            issue(f"unit:{unit['unit_id']}", f"制度条款 {unit['unit_id']} 尚未人工对照")
+            # No decision is *not* evidence of missing implementation: it is the explicit
+            # "not compared yet" state, and the two must not share a counter.
+            issue("not_compared", f"制度条款 {unit['unit_id']} 尚未人工对照")
             continue
         links = set(row.get("rule_ids", []))
         if (row.get("status") != "matched" or not links or not links <= rules
                 or not str(row.get("rationale", "")).strip() or not row.get("confirmed_by")):
-            labels = {"conflict": "与脚本存在差异", "missing_implementation": "缺少脚本实现", "pending": "仍待确认"}
+            labels = {"conflict": "与脚本存在差异", "missing_implementation": "缺少脚本实现",
+                      "pending": "仍待确认", "not_compared": "尚未人工对照"}
             issue(f"unit:{unit['unit_id']}", f"制度条款 {unit['unit_id']} {labels.get(row.get('status'), '确认依据不完整')}")
         if links <= rules:
             covered.update(links)
@@ -122,6 +128,9 @@ def confirm_comparison(db, requirement, payload, actor_id):
             raise HTTPException(422, "请说明实现差异或缺失内容")
         if item.status == "missing_implementation" and item.rule_ids:
             raise HTTPException(422, "缺少实现不能同时关联已有实现，请改为冲突或待确认")
+        if item.status == "not_compared" and item.rule_ids:
+            # "Not compared" is a blank, not a conclusion: it cannot cite an implementation.
+            raise HTTPException(422, "未对照不能同时关联实现规则，请改为匹配、冲突或确认缺失")
         decisions[str(item.unit_id)] = {**item.model_dump(), "rule_ids": sorted(set(item.rule_ids)),
             "rationale": item.rationale.strip(), "difference": item.difference.strip(),
             "confirmed_by": actor_id, "confirmed_at": datetime.now(timezone.utc).isoformat(),

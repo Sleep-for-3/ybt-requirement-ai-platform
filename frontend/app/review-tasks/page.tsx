@@ -9,7 +9,8 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { RequirementImpactQueue } from "@/components/requirement-workspace/RequirementRecheckPanel";
 import { PageState } from "@/components/feedback/PageState";
 import { apiGet, apiPost } from "@/lib/api";
-import { dueState, formatDateTime, statusLabel, targetTypeLabel, workflowStepLabel } from "@/lib/product-language";
+import { dueState, formatDateTime, roleLabel, statusLabel, targetTypeLabel, workflowStepLabel } from "@/lib/product-language";
+import { describeError } from "@/lib/user-message.mjs";
 
 type Task = {
   id: number;
@@ -70,7 +71,7 @@ export default function Page() {
     try {
       setItems(await apiGet<Task[]>("/me/tasks"));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "待办加载失败，请稍后重试");
+      setError(describeError(cause, "待办加载失败，请稍后重试。"));
     } finally {
       setLoading(false);
     }
@@ -87,7 +88,7 @@ export default function Page() {
       setNotice("任务已领取，可以开始处理。");
       await reload();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "领取失败，请稍后重试");
+      setError(describeError(cause, "领取失败，请稍后重试。"));
     } finally {
       setActionId(null);
     }
@@ -135,7 +136,7 @@ export default function Page() {
             const due = dueState(item.due_at);
             return <article className="grid gap-3 border-b border-line p-4 last:border-0 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_150px_145px_130px] md:items-center" key={item.id}>
               <div className="min-w-0"><p className="font-semibold text-ink">{workflowStepLabel(item.step_key)}</p><p className="mt-1 text-xs text-slate-500">{item.task_type ? targetTypeLabel(item.task_type) : "审核流程"}</p></div>
-              <div className="min-w-0"><p className="truncate text-sm text-slate-700">{targetTypeLabel(item.target_type)} · {item.target_id}</p><p className="mt-1 text-xs text-slate-500">项目 {item.project_id}{item.assignee_role ? ` · ${item.assignee_role}` : ""}</p></div>
+              <div className="min-w-0"><p className="truncate text-sm text-slate-700">{targetTypeLabel(item.target_type)} · {item.target_id}</p><p className="mt-1 text-xs text-slate-500">项目 {item.project_id}{item.assignee_role ? ` · ${roleLabel(item.assignee_role)}` : ""}</p></div>
               <span className={`${statusBadge(item.status)} w-fit`}>{statusLabel(item.status)}</span>
               <div className={due === "overdue" ? "text-sm font-semibold text-coral-700" : due === "soon" ? "text-sm font-medium text-gold-700" : "text-xs text-slate-500"}><span>{formatDateTime(item.due_at)}</span>{due === "overdue" ? <span className="ml-1 text-[10px]">已超期</span> : due === "soon" ? <span className="ml-1 text-[10px]">即将到期</span> : null}</div>
               <div className="flex justify-end gap-2"><button className="button-secondary" disabled={actionId === item.id || item.status === "claimed"} onClick={() => void claim(item.id)} type="button">{actionId === item.id ? "领取中…" : "领取"}</button><Link className="button-primary" href={`/tasks/${item.id}?from=work&returnTo=${encodeURIComponent(returnTo)}`}>处理</Link></div>

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 export type Recheck = {id:number;requirement_id:number;name:string;content_version:number;
   target_table_id:number;scenario_id:number;field_ids:number[];status:string;resolution:string|null;
@@ -26,7 +27,7 @@ export function RequirementRecheckPanel({projectId,requirementId,contentVersion,
     if(flight.current||dirty||!reasons[row.id]?.trim())return;
     flight.current=true;setBusy(true);setError("");
     try{await apiPost(`${base}/rechecks/${row.id}/${kind}`,{expected_content_version:contentVersion,reason:reasons[row.id]});await rows.refetch();onChanged();}
-    catch(e){setError(e instanceof Error?e.message:"操作失败");}
+    catch(e){setError(describeError(e,"操作未完成，请稍后重试。"));}
     finally{flight.current=false;setBusy(false);}
   }
   if(!rows.data?.length&&!rows.isError)return null;
@@ -36,7 +37,7 @@ export function RequirementRecheckPanel({projectId,requirementId,contentVersion,
     {(error||rows.isError)&&<p role="alert" className="text-red-700">{error||"复核记录读取失败"}</p>}
     {rows.data?.map(row=><div key={row.id} className="space-y-2 border-t pt-3">
       <h3>原内容 v{row.content_version} · {row.status==="reviewed"?"复核已关闭":"待复核"}</h3>
-      <ul>{row.changes.map(change=><li key={change.code}>{change.message}{change.frozen_version!=null?`（v${change.frozen_version} → v${change.current_version??"不可用"}）`:""}</li>)}</ul>
+      <ul>{row.changes.map(change=><li key={change.code}>{describeUserMessage(change.message, "该变更说明待补充，请人工核验。")}{change.frozen_version!=null?`（v${change.frozen_version} → v${change.current_version??"不可用"}）`:""}</li>)}</ul>
       {row.replacement_content_version&&<p>处理修订 v{row.replacement_content_version}：{row.resolution}</p>}
       {row.status!=="reviewed"&&<>
         <label className="block">修订或处理依据<textarea className="control mt-1" maxLength={10000} value={reasons[row.id]??""} disabled={busy||dirty} onChange={e=>setReasons(old=>({...old,[row.id]:e.target.value}))}/></label>
@@ -63,7 +64,7 @@ export function RequirementImpactQueue({projectId}:{projectId:number}){
     if(flight.current)return;flight.current=true;setBusy(true);setError("");
     try{await apiPost(`/projects/${projectId}/requirements/${impact.requirement_id}/rechecks`,{
       expected_content_version:impact.content_version,change_hash:impact.change_hash});await impacts.refetch();}
-    catch(e){setError(e instanceof Error?e.message:"创建复核任务失败");}
+    catch(e){setError(describeError(e,"创建复核任务未完成，请稍后重试。"));}
     finally{flight.current=false;setBusy(false);}
   }
   return <section className="space-y-3 border-b border-line pb-4" aria-label="需求依据变化影响">
@@ -72,7 +73,7 @@ export function RequirementImpactQueue({projectId}:{projectId:number}){
     {impacts.isPending&&<p role="status" className="text-sm">正在核验需求依据…</p>}
     {impacts.data?.items.map(impact=><div key={impact.requirement_id} className="space-y-2 border-t pt-3 text-sm">
       <Link className="text-teal-800 underline" href={`/workspace?projectId=${projectId}&requirementId=${impact.requirement_id}&tableId=${impact.target_table_id}&scenarioId=${impact.scenario_id}`}>{impact.name} · 内容 v{impact.content_version} · 待复核</Link>
-      <ul>{impact.changes.map(change=><li key={change.code}>{change.message}</li>)}</ul>
+      <ul>{impact.changes.map(change=><li key={change.code}>{describeUserMessage(change.message, "该变更说明待补充，请人工核验。")}</li>)}</ul>
       {impact.recheck_id?<p>已建立复核记录 #{impact.recheck_id}</p>:permissions.can("technical.edit")&&<button className="button-secondary" disabled={busy} onClick={()=>void create(impact)}>建立复核任务</button>}
     </div>)}
     {impacts.data&&!impacts.data.items.length&&<p className="text-sm text-slate-500">当前已扫描范围内没有依据变化。</p>}

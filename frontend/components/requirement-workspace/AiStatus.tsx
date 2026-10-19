@@ -4,6 +4,8 @@ import { AlertTriangle, CheckCircle2, LoaderCircle, Sparkles } from "lucide-reac
 import Link from "next/link";
 
 import type { BackgroundJobSummary } from "@/lib/api";
+import { statusLabel } from "@/lib/product-language";
+import { describeUserMessage } from "@/lib/user-message.mjs";
 
 function jobText(job: BackgroundJobSummary) {
   if (job.current_step) return job.current_step;
@@ -11,8 +13,8 @@ function jobText(job: BackgroundJobSummary) {
   if (job.status === "running") return "AI 分析任务正在执行";
   if (job.status === "completed") return "草稿生成完成，人工最终内容未被自动修改";
   if (job.status === "partially_completed") return "部分字段完成，请查看任务明细";
-  if (job.status === "failed") return job.error_message || "AI 分析失败，现有人工口径未被修改";
-  return job.status;
+  if (job.status === "failed") return describeUserMessage(job.error_message, "AI 分析失败，现有人工口径未被修改");
+  return statusLabel(job.status);
 }
 
 function JobRow({ job, label }: { job: BackgroundJobSummary; label: string }) {
@@ -45,7 +47,7 @@ export function AiStatus({ businessJob, technicalJob }: { businessJob: Backgroun
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-pine text-white"><Sparkles size={16} /></span>
           <div>
             <strong className="text-xs text-pine-900">AI 只生成建议草稿</strong>
-            <p className="mt-1 text-[11px] leading-5 text-slate-600">任务阶段和进度以真实 Background Job 为准。再次生成不会自动覆盖人工最终内容。</p>
+            <p className="mt-1 text-[11px] leading-5 text-slate-600">任务阶段和进度以真实后台任务为准。再次生成不会自动覆盖人工最终内容。</p>
           </div>
         </div>
       </div>

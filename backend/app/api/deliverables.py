@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import date, datetime, timezone
 from io import BytesIO
 
@@ -54,6 +55,8 @@ from app.services.mapping.generator_context import (
 )
 from app.services.task_queue import get_task_queue
 
+logger = logging.getLogger("app.deliverables")
+
 router = APIRouter(tags=["deliverables"])
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEMPLATE_TYPES = {"business_traceability", "source_to_mart", "mart_to_ybt", "full_delivery_package", "pending_questions", "evidence_matrix", "change_comparison"}
@@ -63,8 +66,8 @@ SECTIONS = {"target_field", "scenario_business_mapping", "scenario_technical_lin
 @router.post("/projects/{project_id}/deliverable-templates/upload", status_code=201)
 async def upload_template(project_id: int, principal: CurrentPrincipal, file: UploadFile = File(...), template_name: str = Form(""), template_type: str = Form("full_delivery_package"), description: str | None = Form(None), template_id: int | None = Form(None), db: Session = Depends(get_db)) -> dict:
     project = _permission(db, principal, project_id, "template.manage")
-    if template_type not in TEMPLATE_TYPES: raise HTTPException(400, "Invalid template_type")
-    if not (file.filename or "").lower().endswith(".xlsx"): raise HTTPException(400, "Only .xlsx templates are supported")
+    if template_type not in TEMPLATE_TYPES: raise HTTPException(400, "template_type 取值不合法")
+    if not (file.filename or "").lower().endswith(".xlsx"): raise HTTPException(400, "仅支持 .xlsx 格式模板")
     content = await file.read()
     digest = hashlib.sha256(content).hexdigest()
     if template_id:
@@ -128,12 +131,12 @@ def configure_template(version_id: int, principal: CurrentPrincipal, payload: Te
     version = _resource_visible(db, principal, DeliverableTemplateVersion, version_id, "template.manage")
     referenced = db.scalar(select(DeliverablePackage.id).where(DeliverablePackage.template_version_id == version.id).limit(1))
     if version.parse_status == "active" or referenced is not None:
-        raise HTTPException(409, "Activated or referenced template versions are immutable; upload a new version")
+        raise HTTPException(409, "已激活或被引用的模板版本不可修改，请上传新版本")
     configured = payload.model_dump()
     available_sheets = {item["sheet_name"] for item in version.sheet_config_json}
     for item in configured["sheet_mappings"]:
         if item["sheet_name"] not in available_sheets:
-            raise HTTPException(400, "Configured sheet does not exist in the workbook")
+            raise HTTPException(400, "配置的工作表在工作簿中不存在")
     for existing in _column_mappings(db, version.id): db.delete(existing)
     db.flush()
     for existing in _sheet_mappings(db, version.id): db.delete(existing)
@@ -151,7 +154,7 @@ def configure_template(version_id: int, principal: CurrentPrincipal, payload: Te
     ]
     if structural_errors:
         db.rollback()
-        raise HTTPException(400, {"message": "Invalid template configuration", "issues": structural_errors})
+        raise HTTPException(400, {"message": "模板配置不合法", "issues": structural_errors})
     version.column_mapping_json = configured["sheet_mappings"]
     version.warnings_json = validation["issues"]
     record_audit(db, action="configure_template_mapping", resource_type="deliverable_template_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=version.project_id, after={"sheet_mapping_count": len(configured["sheet_mappings"])})
@@ -164,7 +167,7 @@ def activate_template(version_id: int, principal: CurrentPrincipal, db: Session 
     template = db.get(DeliverableTemplate, version.template_id)
     validation = validate_template_version(db, version.id)
     if not validation["valid"]:
-        raise HTTPException(409, {"message": "Template validation failed", "validation": validation})
+        raise HTTPException(409, {"message": "模板校验未通过", "validation": validation})
     siblings = list(db.scalars(select(DeliverableTemplate).where(DeliverableTemplate.project_id == template.project_id, DeliverableTemplate.template_type == template.template_type)).all())
     for sibling in siblings: sibling.is_default = sibling.id == template.id
     template.current_version_no = version.version_no; template.enabled = True; version.parse_status = "active"
@@ -221,7 +224,7 @@ def preview_historical(import_id: int, principal: CurrentPrincipal, db: Session 
 def apply_historical(import_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     document = _resource_visible(db, principal, HistoricalCaliberImport, import_id, "historical_caliber.reuse")
     ambiguous = db.scalar(select(HistoricalCaliberItem.id).where(HistoricalCaliberItem.historical_import_id == document.id, HistoricalCaliberItem.match_status == "ambiguous").limit(1))
-    if ambiguous: raise HTTPException(409, "Ambiguous historical rows require manual confirmation")
+    if ambiguous: raise HTTPException(409, "历史数据存在歧义，需人工确认")
     document.status = "applied"; db.commit(); return _row(document)
 
 
@@ -234,8 +237,8 @@ def field_historical(field_id: int, principal: CurrentPrincipal, db: Session = D
 @router.post("/historical-caliber-items/{item_id}/reuse")
 def reuse_historical(item_id: int, principal: CurrentPrincipal, payload: dict = Body(default={}), db: Session = Depends(get_db)) -> dict:
     item = _resource_visible(db, principal, HistoricalCaliberItem, item_id, "historical_caliber.reuse")
-    if item.match_status != "matched" or not item.matched_target_field_id: raise HTTPException(409, "Historical item must be uniquely matched")
-    if not item.matched_scenario_id: raise HTTPException(409, "Scenario requires manual confirmation")
+    if item.match_status != "matched" or not item.matched_target_field_id: raise HTTPException(409, "历史数据必须唯一匹配")
+    if not item.matched_scenario_id: raise HTTPException(409, "场景需人工确认")
     business = db.scalar(select(ScenarioBusinessMapping).where(ScenarioBusinessMapping.target_field_id == item.matched_target_field_id, ScenarioBusinessMapping.scenario_id == item.matched_scenario_id))
     technical = db.scalar(select(ScenarioTechnicalLineage).where(ScenarioTechnicalLineage.target_field_id == item.matched_target_field_id, ScenarioTechnicalLineage.scenario_id == item.matched_scenario_id))
     if item.business_content:
@@ -295,12 +298,12 @@ def create_question(project_id: int, payload: PendingQuestionCreateRequest, prin
     table = _resource(db, TargetTable, values["target_table_id"], project_id)
     if values["target_field_id"] is not None:
         target_field = _resource(db, TargetField, values["target_field_id"], project_id)
-        if target_field.target_table_id != table.id: raise HTTPException(400, "Target field does not belong to target table")
+        if target_field.target_table_id != table.id: raise HTTPException(400, "目标字段不属于目标表")
     if values["scenario_id"] is not None:
         _resource(db, ProductScenario, values["scenario_id"], project_id)
     if values["assigned_user_id"] is not None:
         membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == values["assigned_user_id"], ProjectMembership.status == "active"))
-        if membership is None: raise HTTPException(400, "Assigned user is not an active project member")
+        if membership is None: raise HTTPException(400, "指派的用户不是该项目的有效成员")
     question = PendingQuestion(institution_id=project.institution_id, project_id=project_id, target_table_id=table.id, target_field_id=values["target_field_id"], scenario_id=values["scenario_id"], question_type=values["question_type"], question_text=values["question_text"], priority=values["priority"], assigned_role=values["assigned_role"], assigned_user_id=values["assigned_user_id"], source_type=values["source_type"], source_id=values["source_id"], question_status="assigned" if values["assigned_user_id"] or values["assigned_role"] else "open")
     db.add(question); db.flush(); record_audit(db, action="create_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"question_type": question.question_type, "priority": question.priority})
     if question.assigned_user_id:
@@ -322,7 +325,7 @@ def update_question(question_id: int, payload: PendingQuestionUpdateRequest, pri
     question = _resource_visible(db, principal, PendingQuestion, question_id, "question.manage")
     if values.get("assigned_user_id") is not None:
         membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == question.project_id, ProjectMembership.user_id == values["assigned_user_id"], ProjectMembership.status == "active"))
-        if membership is None: raise HTTPException(400, "Assigned user is not an active project member")
+        if membership is None: raise HTTPException(400, "指派的用户不是该项目的有效成员")
     for key, value in values.items(): setattr(question, key, value)
     record_audit(db, action="assign_question" if "assigned_user_id" in values or "assigned_role" in values else "update_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, project_id=question.project_id, after=values)
     if "assigned_user_id" in values and question.assigned_user_id:
@@ -339,7 +342,7 @@ def answer_question(question_id: int, payload: PendingQuestionAnswerRequest, pri
 
 @router.post("/questions/{question_id}/{decision}")
 def decide_question(question_id: int, decision: str, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
-    if decision not in {"accept", "reject", "close"}: raise HTTPException(404, "Unknown action")
+    if decision not in {"accept", "reject", "close"}: raise HTTPException(404, "不支持的操作")
     question = _resource_visible(db, principal, PendingQuestion, question_id, "question.manage")
     question.question_status = {"accept": "accepted", "reject": "rejected", "close": "closed"}[decision]
     if decision in {"accept", "close"}: question.resolved_at = datetime.now(timezone.utc); question.resolved_by = principal.user_id
@@ -362,14 +365,14 @@ def create_deliverable(project_id: int, payload: DeliverableCreateRequest, princ
     template = _resource(db, DeliverableTemplate, version.template_id, project_id)
     stored = db.get(StoredFile, version.stored_file_id)
     if version.parse_status != "active" or not template.enabled:
-        raise HTTPException(409, "An active enabled template version is required")
+        raise HTTPException(409, "需要已启用且处于激活状态的模板版本")
     if template.template_type != payload.package_type:
-        raise HTTPException(409, "Template type is not compatible with package_type")
+        raise HTTPException(409, "模板类型与 package_type 不兼容")
     if stored is None or stored.project_id != project_id or not stored.enabled:
-        raise HTTPException(409, "Template source file is unavailable")
+        raise HTTPException(409, "模板源文件不可用")
     template_validation = validate_template_version(db, version.id)
     if not template_validation["valid"]:
-        raise HTTPException(409, {"message": "Template validation failed", "validation": template_validation})
+        raise HTTPException(409, {"message": "模板校验未通过", "validation": template_validation})
     package = DeliverablePackage(institution_id=project.institution_id, project_id=project_id, package_name=payload.package_name or f"{table.table_name}正式交付包", package_type=payload.package_type, target_table_id=table.id, template_version_id=version.id, created_by=principal.user_id)
     db.add(package); db.flush(); _ensure_field_items(db, package); db.commit(); return _package_detail(db, package)
 
@@ -664,13 +667,13 @@ def validate_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessi
 def submit_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> dict:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.manage")
     if package.status != "generated":
-        raise HTTPException(409, "Only a generated deliverable can be submitted for review")
+        raise HTTPException(409, "只有已生成的交付物才能提交审核")
     template_validation = validate_template_version(db, package.template_version_id)
     if not template_validation["valid"]:
-        raise HTTPException(409, {"message": "Template validation failed", "validation": template_validation})
+        raise HTTPException(409, {"message": "模板校验未通过", "validation": template_validation})
     _verify_rendered_file(db, package)
     validation = validate_package(db, package.id, update_status=False)
-    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
+    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "交付物校验未通过", "validation": validation})
     package.status = "pending_review"; db.flush()
     instance = start_workflow(db, project_id=package.project_id, workflow_key="project_export_review", target_type="deliverable_package", target_id=package.id, created_by=principal.user_id or 0, assignments={})
     snapshot_hash = _review_content_hash(db, package)
@@ -708,24 +711,26 @@ def _deliverable_render_handler(db: Session, job: BackgroundJob) -> dict:
         package.status = "cancelled"; db.commit(); return {"success_count": 0, "failed_count": 0, "cancelled_count": 1}
     try:
         return _render_package_workbook(db, job, package)
-    except Exception as exc:
+    except Exception:
         # A crashed renderer must never leave the package stuck in
-        # "generating": surface it as a retryable failure with the real reason
-        # so the delivery cannot be submitted for review by accident.
+        # "generating": surface it as a retryable failure so the delivery
+        # cannot be submitted for review by accident.  异常类名与堆栈只进日志，
+        # 用户可见字段（warnings / 审计 / 通知）只写中文业务原因 + 结构化 code。
+        logger.exception("deliverable render crashed: package_id=%s job_id=%s", job.payload_summary_json.get("package_id"), job.id)
         db.rollback()
         package = db.get(DeliverablePackage, int(job.payload_summary_json["package_id"]))
         if package is not None:
-            reason = f"{type(exc).__name__}: {exc}"[:500]
+            user_message = "交付物生成失败，请稍后重试；若持续失败请联系管理员排查。"
             package.status = "render_failed"
             package.generated_file_id = None
             package.content_hash = None
-            package.warnings_json = [{"severity": "error", "code": "render_crashed", "message": reason}]
+            package.warnings_json = [{"severity": "error", "code": "render_crashed", "message": user_message}]
             record_audit(
                 db, action="render_deliverable_failed", resource_type="deliverable_package",
                 resource_id=package.id, actor_user_id=job.created_by, institution_id=package.institution_id,
-                project_id=package.project_id, after={"error": reason},
+                project_id=package.project_id, after={"error_code": "render_crashed"},
             )
-            notify_user(db, job.created_by, "deliverable_render_failed", "正式交付 Excel 渲染失败", reason, project_id=package.project_id, resource_type="deliverable_package", resource_id=package.id)
+            notify_user(db, job.created_by, "deliverable_render_failed", "正式交付 Excel 渲染失败", user_message, project_id=package.project_id, resource_type="deliverable_package", resource_id=package.id)
             db.commit()
         raise
 
@@ -771,7 +776,7 @@ def _render_package_workbook(db: Session, job: BackgroundJob, package: Deliverab
 @router.get("/deliverables/{package_id}/download")
 def download_deliverable(package_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
     package = _resource_visible(db, principal, DeliverablePackage, package_id, "deliverable.export")
-    if not package.generated_file_id: raise HTTPException(409, "Deliverable has not been rendered")
+    if not package.generated_file_id: raise HTTPException(409, "交付物尚未生成")
     stored = db.get(StoredFile, package.generated_file_id); content = get_storage_service().read(stored.storage_key); record_audit(db, action="download_deliverable_excel", resource_type="deliverable_package", resource_id=package.id, actor_user_id=principal.user_id, project_id=package.project_id, after={"file_id": stored.id}); db.commit(); return Response(content, media_type=XLSX, headers={"Content-Disposition": f"attachment; filename=deliverable-{package.id}.xlsx"})
 
 
@@ -785,21 +790,21 @@ def approve_deliverable(package_id: int, principal: CurrentPrincipal, db: Sessio
         if existing is not None:
             return {"package": _row(package), "version": _row(existing), "idempotent": True}
     if package.status != "pending_review":
-        raise HTTPException(409, "Only a pending-review deliverable can be approved")
+        raise HTTPException(409, "只有待审核的交付物才能审批")
     template_validation = validate_template_version(db, package.template_version_id)
     if not template_validation["valid"]:
-        raise HTTPException(409, {"message": "Template validation failed", "validation": template_validation})
+        raise HTTPException(409, {"message": "模板校验未通过", "validation": template_validation})
     _verify_rendered_file(db, package)
     validation = validate_package(db, package.id, update_status=False)
-    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "Deliverable validation failed", "validation": validation})
+    if validation["error_count"]: db.rollback(); raise HTTPException(409, {"message": "交付物校验未通过", "validation": validation})
     workflow = db.get(WorkflowInstance, workflow_id) if workflow_id else None
     if workflow is not None and (workflow.project_id != package.project_id or workflow.target_type != "deliverable_package" or workflow.target_id != package.id):
         workflow = None
-    if workflow is None or workflow.status != "approved": raise HTTPException(409, "Deliverable final review task has not been approved")
+    if workflow is None or workflow.status != "approved": raise HTTPException(409, "交付物终审任务尚未通过")
     snapshot_hash = _review_content_hash(db, package)
     expected_submission_hash = _review_submission_hash(workflow.id, package.generated_file_id, package.content_hash, snapshot_hash)
     if submission.get("workflow_instance_id") != workflow.id or submission.get("generated_file_id") != package.generated_file_id or submission.get("content_hash") != package.content_hash or submission.get("review_snapshot_hash") != snapshot_hash or submission.get("review_submission_hash") != expected_submission_hash:
-        raise HTTPException(409, "The current rendered deliverable has not completed final review")
+        raise HTTPException(409, "当前已生成的交付物尚未完成终审")
     existing = db.scalar(select(DeliverablePackageVersion).where(DeliverablePackageVersion.project_id == package.project_id, DeliverablePackageVersion.deliverable_package_id == package.id, DeliverablePackageVersion.workflow_instance_id == workflow.id))
     if existing is not None:
         package.status = "approved"; package.version_no = existing.version_no; db.commit()
@@ -848,7 +853,7 @@ def get_deliverable_version(version_id: int, principal: CurrentPrincipal, db: Se
 def download_deliverable_version(version_id: int, principal: CurrentPrincipal, db: Session = Depends(get_db)) -> Response:
     version = _resource_visible(db, principal, DeliverablePackageVersion, version_id, "deliverable.export")
     stored = db.get(StoredFile, version.generated_file_id)
-    if stored is None or not stored.enabled: raise HTTPException(404, "Version file not found")
+    if stored is None or not stored.enabled: raise HTTPException(404, "版本文件不存在")
     record_audit(db, action="download_deliverable_version", resource_type="deliverable_package_version", resource_id=version.id, actor_user_id=principal.user_id, project_id=version.project_id, after={"version_no": version.version_no}); db.commit()
     return Response(get_storage_service().read(stored.storage_key), media_type=XLSX, headers={"Content-Disposition": f"attachment; filename=deliverable-version-{version.version_no}.xlsx"})
 
@@ -894,11 +899,11 @@ async def compile_ybt(
 def _permission(db, principal, project_id, permission): return PermissionService(db, principal).require_project_permission(project_id, permission)
 def _resource(db, model, resource_id, project_id):
     item = db.get(model, resource_id)
-    if item is None or item.project_id != project_id: raise HTTPException(404, "Resource not found")
+    if item is None or item.project_id != project_id: raise HTTPException(404, "资源不存在")
     return item
 def _resource_visible(db, principal, model, resource_id, permission="deliverable.view"):
     item = db.get(model, resource_id)
-    if item is None: raise HTTPException(404, "Resource not found")
+    if item is None: raise HTTPException(404, "资源不存在")
     _permission(db, principal, item.project_id, permission); return item
 def _row(item): return {column.key: getattr(item, column.key) for column in item.__table__.columns}
 def _sheet_mappings(db, version_id): return list(db.scalars(select(TemplateSheetMapping).where(TemplateSheetMapping.template_version_id == version_id).order_by(TemplateSheetMapping.id)).all())
@@ -908,7 +913,7 @@ def _column_mappings(db, version_id):
 def _template_detail(db, template, version): return {"template": _row(template), "version": _row(version), "sheet_mappings": [_row(item) for item in _sheet_mappings(db, version.id)]}
 def _read_stored(db, file_id):
     row = db.get(StoredFile, file_id)
-    if row is None or not row.enabled: raise HTTPException(404, "Stored template file not found")
+    if row is None or not row.enabled: raise HTTPException(404, "模板文件不存在")
     return get_storage_service().read(row.storage_key)
 def _store_file(db, project, user_id, file_name, content, content_type):
     digest = hashlib.sha256(content).hexdigest(); existing = db.scalar(select(StoredFile).where(StoredFile.project_id == project.id, StoredFile.content_hash == digest, StoredFile.enabled.is_(True)))
@@ -1157,7 +1162,7 @@ async def _compile_mapping(
 ) -> dict:
     mapping = db.get(model, mapping_id)
     if mapping is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
+        raise HTTPException(status_code=404, detail="资源不存在")
     try:
         validate_generation_actor(db, principal)
         authorized_project = PermissionService(
@@ -1303,7 +1308,7 @@ def _render_fingerprint(db: Session, package: DeliverablePackage) -> str:
         DeliverableTemplateVersion.id == package.template_version_id,
     ))
     if version is None:
-        raise HTTPException(409, "Deliverable template version is unavailable")
+        raise HTTPException(409, "交付物模板版本不可用")
     payload = {
         "package_id": package.id,
         "template_file_hash": version.file_hash,
@@ -1335,14 +1340,14 @@ def _review_submission_hash(workflow_instance_id: int, generated_file_id: int | 
 
 def _verify_rendered_file(db, package: DeliverablePackage) -> StoredFile:
     if not package.generated_file_id or not package.content_hash:
-        raise HTTPException(409, "Render the deliverable before continuing")
+        raise HTTPException(409, "请先生成交付物再继续")
     stored = db.get(StoredFile, package.generated_file_id)
     if stored is None or stored.project_id != package.project_id or not stored.enabled:
-        raise HTTPException(409, "Rendered deliverable file is unavailable")
+        raise HTTPException(409, "已生成的交付物文件不可用")
     content = get_storage_service().read(stored.storage_key)
     actual_hash = hashlib.sha256(content).hexdigest()
     if actual_hash != package.content_hash or actual_hash != stored.content_hash:
-        raise HTTPException(409, "Rendered deliverable content hash mismatch")
+        raise HTTPException(409, "交付物内容哈希与生成记录不一致")
     return stored
 
 

@@ -198,24 +198,38 @@ def test_requirement_document_blocks_without_binding_or_evidence(agent_env):
     result = registry.get_tool("generate_requirement_document").handler(
         _context(agent_env, {"target_field_id": agent_env.target_field.id})
     )
+    # Unmet preconditions are configuration gaps: the step stops with an actionable todo
+    # instead of writing a deterministic draft that reads like a finished deliverable.
     assert result.status == "blocked"
-    assert {item["code"] for item in result.gaps} == {"document_context_missing"}
     assert result.artifacts == []
-    assert result.step_output["blocked_reason"] == "document_context_missing"
+    codes = {item["code"] for item in result.gaps}
+    assert "requirement_input_missing" in codes
+    assert "skill_binding_missing" in codes
+    assert result.step_output["blocked_reason"] == "requirement_input_missing"
+    todo = result.step_output["next_action"]
+    assert todo["code"] == "prepare_document_revision"
+    assert todo["api"].endswith("/requirements")
+    assert result.output["next_action"] == todo
+    assert result.output["requires_human_confirmation"] is True
 
-
-def test_requirement_candidate_degrades_to_a_labelled_deterministic_draft(agent_env):
+def test_requirement_candidate_blocks_without_requirement_input(agent_env):
     result = registry.get_tool("generate_requirement_candidate").handler(
         _context(agent_env, {"target_field_id": agent_env.target_field.id, "skill_key": "requirement_candidate_generation"})
     )
-    assert result.status == "completed"
-    assert result.degraded_path == "deterministic_draft"
-    candidate = result.artifacts[0]["summary"]["candidate"]
-    assert result.artifacts[0]["artifact_type"] == "requirement_candidate"
-    assert result.artifacts[0]["evidence_refs"] == [item["id"] for item in result.facts]
-    assert "不构成监管合规结论" in candidate["final_content"]
-    assert {"skill_binding_missing"} <= set(candidate["gaps"])
-    assert result.output["gap_codes"]
+    # A missing generation input is configuration, not a model outage: no deterministic draft is
+    # produced, and the step carries the todo that unblocks it.
+    assert result.status == "blocked"
+    assert result.degraded_path is None
+    assert result.artifacts == []
+    codes = {item["code"] for item in result.gaps}
+    assert "requirement_input_missing" in codes
+    assert result.step_output["blocked_reason"] == "requirement_input_missing"
+    todo = result.step_output["next_action"]
+    assert todo["code"] == "create_requirement_input"
+    assert todo["follow_up_api"].endswith("/generation-inputs")
+    assert todo["target_field_id"] == agent_env.target_field.id
+    assert result.output["next_action"] == todo
+    assert result.output["requires_human_confirmation"] is True
 
 
 def test_illegal_inputs_are_rejected_by_validate_input():

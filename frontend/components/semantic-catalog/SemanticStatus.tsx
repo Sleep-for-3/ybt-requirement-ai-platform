@@ -3,9 +3,9 @@
 import { Archive, Ban, CircleCheck, Clock3, FilePenLine, Sparkles } from "lucide-react";
 
 import type { SemanticCatalogReviewSummary, SemanticLifecycleStatus } from "@/lib/api";
-
+import { statusLabel, workflowStepLabel } from "@/lib/product-language";
 const LIFECYCLE = {
-  confirmed: { label: "已确认 / Confirmed", className: "badge-success", icon: CircleCheck },
+  confirmed: { label: "已确认", className: "badge-success", icon: CircleCheck },
   draft: { label: "草稿", className: "badge-neutral", icon: FilePenLine },
   ai_suggested: { label: "候选建议", className: "badge-info", icon: Sparkles },
   rejected: { label: "已拒绝 · 非当前事实", className: "badge-danger", icon: Ban },
@@ -20,7 +20,7 @@ export function SemanticLifecycle({ status }: { status: SemanticLifecycleStatus 
 
 export function SemanticReview({ review }: { review: SemanticCatalogReviewSummary }) {
   if (!review.pending) return <span className="text-xs text-slate-500">无待评审流程</span>;
-  const detail = review.current_step || review.status;
+  const detail = workflowStepLabel(review.current_step) || statusLabel(review.status);
   return <span className="inline-flex items-center gap-1 text-xs text-gold-700" role="status"><Clock3 aria-hidden size={13} /><span>待评审{detail ? ` · ${detail}` : ""}</span></span>;
 }
 
@@ -29,5 +29,5 @@ export function SemanticGovernanceStatus({ status, review }: { status:SemanticLi
 }
 
 export function semanticConceptTypeLabel(value: string) {
-  return ({ business_term: "业务术语", metric: "指标", dimension: "维度", code_set: "代码集", business_rule: "业务规则", regulatory_rule: "监管规则" } as Record<string, string>)[value] || value;
+  return ({ business_term: "业务术语", metric: "指标", dimension: "维度", code_set: "代码集", business_rule: "业务规则", regulatory_rule: "监管规则" } as Record<string, string>)[value] || "未配置中文名称";
 }

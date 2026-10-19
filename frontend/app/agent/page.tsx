@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Check, ChevronDown, PencilLine, Play, RefreshCw, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
 import Link from "next/link";
+import { DEGRADED_CODE_LABELS, degradedReasonLabel, describeEnum, describeError, describeErrorCode, describeUserMessage, gapCodeLabel } from "@/lib/user-message.mjs";
 import { FormEvent, useState } from "react";
 
 import {
@@ -18,6 +19,7 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
 import { artifactRefHref, artifactRefLabel } from "@/lib/artifact-links.mjs";
+import { artifactTypeLabel, changeCategoryLabel, riskLevelLabel, severityLabel, statusLabel } from "@/lib/product-language";
 
 /** 静态字面量类名：Tailwind 只会保留源码里出现过的类名。 */
 const TONE_CLASS: Record<StatusTone, string> = { success: "badge-success", danger: "badge-danger", warning: "badge-warning", info: "badge-info", neutral: "badge-neutral" };
@@ -46,13 +48,13 @@ const durationText = (startedAt?: string | null, finishedAt?: string | null) => 
   const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
   if (!Number.isFinite(start) || !Number.isFinite(end)) return "—";
   const ms = Math.max(0, end - start);
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+  return ms < 1000 ? `${ms} 毫秒` : `${(ms / 1000).toFixed(1)} 秒`;
 };
 const objectJson = (value: unknown) =>
   value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length ? JSON.stringify(value, null, 2) : "";
 
 function Badge({ status }: { status: string }) {
-  const label = TASK_STATUS_LABELS[status] || STEP_STATUS_LABELS[status] || status;
+  const label = TASK_STATUS_LABELS[status] || STEP_STATUS_LABELS[status] || "未配置中文名称";
   return <span aria-label={`状态：${label}`} className={TONE_CLASS[statusTone(status)]}>{label}</span>;
 }
 /** 降级步骤（已完成/已跳过）必须显示为警告色，绝不渲染为成功。 */
@@ -131,12 +133,12 @@ export default function AgentWorkspacePage() {
       if (data?.task?.id) setPickedTaskId(data.task.id);
       refresh();
     },
-    onError: (error) => setNotice(error instanceof Error ? error.message : "任务创建失败，请检查权限后重试。")
+    onError: (error) => setNotice(describeError(error, "任务创建失败，请检查权限后重试。"))
   });
   const action = useMutation({
     mutationFn: ({ path, body }: { path: string; body: Record<string, unknown> }) => apiPost(path, body),
     onSuccess: () => { setNotice("操作已提交，智能体执行状态已刷新。"); refresh(); },
-    onError: (error) => setNotice(error instanceof Error ? error.message : "操作失败，请稍后重试。")
+    onError: (error) => setNotice(describeError(error, "操作未完成，请稍后重试。"))
   });
 
   function startTask(event: FormEvent<HTMLFormElement>) {
@@ -195,7 +197,7 @@ export default function AgentWorkspacePage() {
               <ul className="mt-2 space-y-1 text-xs text-slate-600">
                 {tools.data.map((tool) => (
                   <li key={tool.tool_key}>
-                    <span className="font-mono text-slate-700">{tool.tool_key}</span> · {tool.display_name} · 风险 {tool.risk_level || "—"}
+                    <span className="font-mono text-slate-700">{tool.tool_key}</span> · {tool.display_name} · 风险 {tool.risk_level ? riskLevelLabel(tool.risk_level) : "—"}
                     {tool.read_only ? " · 只读" : ""}{tool.requires_human_confirmation ? " · 需人工确认" : ""} · 权限{" "}
                     {(tool.required_permissions || []).join("、") || "—"} · {tool.description || "无描述"}
                   </li>
@@ -208,7 +210,7 @@ export default function AgentWorkspacePage() {
         {metrics.data ? (
           <Section title="运行指标" meta={`任务 ${formatMetric(metrics.data.task_count)} · 终态 ${formatMetric(metrics.data.terminal_task_count)} · 状态分布 ${
             Object.entries(metrics.data.status_counts || {})
-              .map(([status, count]) => `${STEP_STATUS_LABELS[status] || TASK_STATUS_LABELS[status] || status} ${count}`).join(" / ") || "—"
+              .map(([status, count]) => `${STEP_STATUS_LABELS[status] || TASK_STATUS_LABELS[status] || "未知状态"} ${count}`).join(" / ") || "—"
           }`}>
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {Object.entries(metrics.data.metrics || {}).map(([key, value]) => (
@@ -275,7 +277,7 @@ export default function AgentWorkspacePage() {
             <SqlChangePanel steps={detail.steps || []} />
             <GapPanel gaps={detail.gaps || []} />
             <ArtifactPanel artifacts={detail.artifacts || []} projectId={projectId} />
-            <Section title="执行日志" meta={`工具调用 ${logSummary.total} 次 · 成功 ${logSummary.completed} · 失败 ${logSummary.failed} · 降级 ${logSummary.degraded} · 平均耗时 ${logSummary.averageDurationMs} ms · 证据 ${logSummary.evidenceCount}`}>
+            <Section title="执行日志" meta={`工具调用 ${logSummary.total} 次 · 成功 ${logSummary.completed} · 失败 ${logSummary.failed} · 降级 ${logSummary.degraded} · 平均耗时 ${logSummary.averageDurationMs} 毫秒 · 证据 ${logSummary.evidenceCount}`}>
               {calls.length ? (
                 <div className="space-y-2">
                   {calls.map(({ call, stepKey }, index) => (
@@ -284,9 +286,9 @@ export default function AgentWorkspacePage() {
                       <span className="font-medium text-slate-700">{stepKey}</span>
                       <span className="font-mono text-slate-500">{call.tool_key}</span>
                       <Badge status={call.status || "pending"} />
-                      <span className="text-slate-500">{call.duration_ms ?? 0} ms</span>
-                      {call.degraded_path ? <span className="badge-warning">降级 {call.degraded_path}</span> : null}
-                      {call.failure_reason ? <span className="badge-danger">失败 {call.failure_reason}</span> : null}
+                      <span className="text-slate-500">{call.duration_ms ?? 0} 毫秒</span>
+                      {call.degraded_path ? <span className="badge-warning">降级 {gapCodeLabel(call.degraded_path)}</span> : null}
+                      {call.failure_reason ? <span className="badge-danger">失败原因需人工核验</span> : null}
                       {call.human_confirmed ? <span className="badge-success">已人工确认</span> : null}
                       {call.adopted ? <span className="badge-success">已采纳</span> : null}
                     </div>
@@ -325,7 +327,7 @@ function TaskPanel({ task, busy, onAction }: { task: AgentTask; busy: boolean; o
         ]} />
       </div>
       {task.error_code || task.error_message ? (
-        <p className={`mt-3 ${ALERT}`} role="alert">{task.error_code || "error"}：{task.error_message || "无详细信息"}</p>
+        <p className={`mt-3 ${ALERT}`} role="alert">任务未完成：{describeErrorCode(task.error_code, "处理过程中出现问题，请稍后重试。")}{task.error_message ? `（${describeUserMessage(task.error_message, "服务未返回可读说明。")}）` : ""}</p>
       ) : null}
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         {controls.map((item) => (
@@ -351,7 +353,7 @@ function HumanGatePanel({ step, plan, busy, onSubmit }: {
       await onSubmit(decisionPayload(decision, comment, editedJson));
       setComment("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "决策提交失败");
+      setError(describeError(cause, "决策提交失败，请稍后重试。"));
     }
   }
   return (
@@ -409,16 +411,16 @@ function PlanPanel({ plan }: { plan: AgentPlan }) {
           <PlanSourceBadge source={plan.planner_source} />
           {degraded ? <span className="badge-danger">降级计划：不是 AI 成功</span> : null}
         </div>
-        <p className="mt-1 text-xs text-slate-500">规划来源 {planSourceLabel(plan.planner_source)} · 计划状态 {plan.status} · 步骤 {steps.length} 个 · 规划尝试 {attempts ?? "—"} · 哈希 {plan.plan_hash || "—"}</p>
+        <p className="mt-1 text-xs text-slate-500">规划来源 {planSourceLabel(plan.planner_source)} · 计划状态 {statusLabel(plan.status)} · 步骤 {steps.length} 个 · 规划尝试 {attempts ?? "—"} · 校验摘要 {plan.plan_hash ? `${String(plan.plan_hash).slice(0, 8)}…` : "—"}</p>
       </div>
       {plan.degraded_reason ? (
         <p className="border-b border-line bg-gold-50 px-5 py-2.5 text-xs text-gold-700" role="note">
-          规划降级原因：{plan.degraded_reason}（已回退确定性计划，未采用模型输出）
+          规划降级原因：{degradedReasonLabel(plan.degraded_reason)}（已回退确定性计划，未采用模型输出）
         </p>
       ) : null}
       {validationErrors.length ? (
         <div className="border-b border-line bg-coral-50 px-5 py-2.5 text-xs text-coral-700" role="alert">
-          规划校验失败（模型输出已被拒绝，未采用）：{validationErrors.join("；")}
+          规划校验失败（模型输出已被拒绝，未采用）：{validationErrors.map((item) => describeUserMessage(item, "该项校验未提供可读说明。")).join("；")}
         </div>
       ) : null}
       <ol>
@@ -431,7 +433,7 @@ function PlanPanel({ plan }: { plan: AgentPlan }) {
               {item.required === false ? <span className="badge-neutral">可选步骤</span> : null}
               {item.depends_on?.length ? <span className="text-xs text-slate-500">依赖 {item.depends_on.join(" → ")}</span> : null}
             </div>
-            {item.reason ? <p className="mt-1 text-xs text-slate-500">{item.reason}</p> : null}
+            {item.reason ? <p className="mt-1 text-xs text-slate-500">{describeUserMessage(item.reason, "该步骤未提供可读说明。")}</p> : null}
             {objectJson(item.input) ? <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-mist p-2 font-mono text-[11px] text-slate-600">{objectJson(item.input)}</pre> : null}
           </li>
         ))}
@@ -466,9 +468,9 @@ function StepTimeline({ snapshot }: { snapshot: AgentSnapshot }) {
             <DList items={[
               ["工具", step.tool_key], ["状态", <StepBadge key="s" step={step} />],
               ["耗时", durationText(step.started_at, step.finished_at)], ["尝试次数", step.attempt_count ?? 0],
-              ["证据引用", `${step.evidence_refs?.length ?? 0} 个`], ["缺口代码", step.gap_codes?.length ? step.gap_codes.join("、") : "—"],
+              ["证据引用", `${step.evidence_refs?.length ?? 0} 个`], ["缺口", step.gap_codes?.length ? step.gap_codes.map((item) => gapCodeLabel(item)).join("、") : "—"],
               ["依赖", step.depends_on?.length ? step.depends_on.join(" → ") : "—"],
-              ["人工网关", `${step.human_gate_key || "—"}${step.review_task_id ? ` · #${step.review_task_id}` : ""}`]
+              ["人工确认", step.human_gate_key ? "需人工确认" : "无"]
             ]} />
             {isStepDegraded(step) ? (
               <p className={ALERT} role="alert">
@@ -479,14 +481,14 @@ function StepTimeline({ snapshot }: { snapshot: AgentSnapshot }) {
               <pre className="max-h-40 overflow-auto rounded-lg bg-white p-2 font-mono text-[11px] text-slate-600">{stepInputJson(snapshot.plan, step.step_key)}</pre>
             </KV>
             <KV label="输出摘要">{preview(step.summary, 400)}</KV>
-            {step.reason ? <KV label="规划理由">{step.reason}</KV> : null}
+            {step.reason ? <KV label="规划理由">{describeUserMessage(step.reason, "该步骤未提供可读说明。")}</KV> : null}
             {step.evidence_refs?.length ? (
               <KV label="证据明细">
                 <span className="break-all font-mono text-[11px] text-slate-500">{preview(step.evidence_refs, 400)}</span>
               </KV>
             ) : null}
             {step.error_code || step.error_message ? (
-              <p className={ALERT} role="alert">失败：{step.error_code || "error"} · {step.error_message || "无详细信息"}</p>
+              <p className={ALERT} role="alert">步骤未完成：{describeErrorCode(step.error_code, "处理过程中出现问题，请稍后重试。")}{step.error_message ? `（${describeUserMessage(step.error_message, "服务未返回可读说明。")}）` : ""}</p>
             ) : null}
             <div className="space-y-2">
               <div className="text-xs font-medium text-slate-500">工具调用尝试</div>
@@ -496,13 +498,13 @@ function StepTimeline({ snapshot }: { snapshot: AgentSnapshot }) {
                     <span className="font-mono text-slate-700">{call.tool_key}</span>
                     <span className="badge-neutral">第 {call.attempt ?? 1} 次</span>
                     <Badge status={call.status || "pending"} />
-                    <span className="text-slate-500">{call.duration_ms ?? 0} ms · 证据 {call.evidence_count ?? 0}</span>
+                    <span className="text-slate-500">{call.duration_ms ?? 0} 毫秒 · 证据 {call.evidence_count ?? 0}</span>
                     {call.read_only ? <span className="badge-info">只读</span> : null}
-                    {call.risk_level ? <span className="badge-neutral">风险 {call.risk_level}</span> : null}
+                    {call.risk_level ? <span className="badge-neutral">风险 {riskLevelLabel(call.risk_level)}</span> : null}
                     {call.human_confirmed ? <span className="badge-success">已人工确认</span> : null}
                     {call.adopted ? <span className="badge-success">已采纳</span> : null}
-                    {call.degraded_path ? <span className="badge-warning">降级路径 {call.degraded_path}</span> : null}
-                    {call.failure_reason ? <span className="badge-danger">失败原因 {call.failure_reason}</span> : null}
+                    {call.degraded_path ? <span className="badge-warning">降级路径 {gapCodeLabel(call.degraded_path)}</span> : null}
+                    {call.failure_reason ? <span className="badge-danger">失败原因需人工核验</span> : null}
                   </div>
                   {call.model_name ? <p className="mt-1 text-slate-500">模型 {call.model_name} · 提示模板 {call.prompt_version || "—"}</p> : null}
                   <p className="mt-1 text-slate-500">入参 {preview(call.input_summary, 160)} · 出参 {preview(call.output_summary, 160)}</p>
@@ -576,13 +578,13 @@ function GapPanel({ gaps }: { gaps: AgentSnapshot["gaps"] }) {
           {groups.map((group) => (
             <div className="rounded-lg border border-line" key={group.code}>
               <div className={`${CHIP} border-b border-line px-3 py-2 text-sm`}>
-                <span className="badge-warning font-mono">{group.code}</span>
+                <span className="badge-warning">{gapCodeLabel(group.code)}</span>
                 <span className="text-xs text-slate-500">{group.count} 条 · 涉及步骤 {group.stepKeys.join("、") || "—"}</span>
               </div>
               <ul className="space-y-1 px-3 py-2 text-xs text-slate-600">
                 {group.items.map((item, index) => (
                   <li key={`${item.step_key}-${index}`}>
-                    <span className="font-mono text-slate-400">{item.step_key || "—"}</span>：{item.message || "无说明"}
+                    <span className="font-mono text-slate-400">{item.step_key || "—"}</span>：{describeUserMessage(item.message, "无说明")}
                   </li>
                 ))}
               </ul>
@@ -610,7 +612,7 @@ function ArtifactPanel({ artifacts, projectId }: { artifacts: AgentSnapshot["art
                 <Badge status={artifact.status} />
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                类型 {artifact.artifact_type} · 引用{" "}
+                类型 {artifactTypeLabel(artifact.artifact_type)} · 引用{" "}
                 {href ? <Link className="text-pine-700 underline" href={href}>{artifactRefLabel(artifact.ref_type, artifact.ref_id)}</Link> : artifactRefLabel(artifact.ref_type, artifact.ref_id)} · 证据{" "}
                 {artifact.evidence_refs?.length ?? 0} 条{artifact.confirmed_by ? ` · 确认人 ${artifact.confirmed_by}` : ""}
               </p>
@@ -694,7 +696,7 @@ function SubjectPanel({ summary, steps, busy, onSubmit }: {
       setPicked(null);
       setNotice("已提交人工选择的分析对象，后端将按该字段重建计划。");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "提交失败，请稍后重试。");
+      setError(describeError(cause, "提交失败，请稍后重试。"));
     }
   }
 
@@ -779,13 +781,13 @@ function AdaptivePlanPanel({ plan, summary }: {
         ["规划来源", <PlanSourceBadge key="src" source={timeline.plannerSource} />],
         ["规划尝试次数", timeline.plannerAttempts === null ? "—" : String(timeline.plannerAttempts)],
         ["是否重规划", timeline.revised ? "是（计划版本已提升）" : "否"],
-        ["降级状态", timeline.degraded ? (timeline.degradedReason || "规划降级") : "未降级"]
+        ["降级状态", timeline.degraded ? degradedReasonLabel(timeline.degradedReason || "规划降级") : "未降级"]
       ]} />
       {timeline.validationErrors.length ? (
         <div className={`mt-3 ${ALERT}`} role="alert">
           规划校验失败（模型输出已被拒绝，未采用）：
           <ul className="mt-1 list-inside list-disc">
-            {timeline.validationErrors.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            {timeline.validationErrors.map((item, index) => <li key={`${index}-${item}`}>{describeUserMessage(item, "该项校验未提供可读说明。")}</li>)}
           </ul>
         </div>
       ) : null}
@@ -809,7 +811,7 @@ function AdaptivePlanPanel({ plan, summary }: {
                   <ul className="mt-1 space-y-1 text-xs text-slate-600">
                     {item.gaps.map((gap, gapIndex) => (
                       <li key={`${gap.code}-${gapIndex}`}>
-                        <span className="font-mono text-slate-400">{gap.stepKey || "—"}</span> · <span className="font-mono">{gap.code || "unknown"}</span>：{gap.message || "无说明"}
+                        <span className="text-slate-400">{gap.stepKey || "—"}</span> · <span>{gapCodeLabel(gap.code)}</span>：{describeUserMessage(gap.message, "无说明")}
                       </li>
                     ))}
                   </ul>
@@ -852,7 +854,7 @@ function CaseMemoryPanel({ steps }: { steps: AgentStep[] }) {
                 </p>
               ) : null}
               {view.gapMessage ? (
-                <p className={`mt-1 ${ALERT}`} role="alert">缺口 {view.gapCodes.join("、") || "—"}：{view.gapMessage}</p>
+                <p className={`mt-1 ${ALERT}`} role="alert">缺口 {view.gapCodes.map((item) => gapCodeLabel(item)).join("、") || "—"}：{describeUserMessage(view.gapMessage, "服务未返回可读说明。")}</p>
               ) : null}
             </div>
           );
@@ -866,7 +868,7 @@ function SqlChangePanel({ steps }: { steps: AgentStep[] }) {
   const rows = steps.map((step) => ({ step, view: sqlChangeView(step) })).filter((row) => row.view.isSqlStep);
   if (!rows.length) return null;
   return (
-    <Section title="SQL 变更（interpretation）" meta={`${rows.length} 个 SQL 步骤 · 变更项与口径影响均需人工确认`}>
+    <Section title="SQL 变更" meta={`${rows.length} 个 SQL 步骤 · 变更项与口径影响均需人工确认`}>
       <div className="space-y-3">
         {rows.map(({ step, view }) => (
           <div className={CARD} key={step.id}>
@@ -875,12 +877,12 @@ function SqlChangePanel({ steps }: { steps: AgentStep[] }) {
               <span className="badge-neutral font-mono">{step.tool_key}</span>
               <StepBadge step={step} />
               <span className="badge-info">{view.changeCount} 项变更</span>
-              {view.severity ? <span className="badge-warning">严重度 {view.severity}</span> : null}
+              {view.severity ? <span className="badge-warning">严重程度 {severityLabel(view.severity)}</span> : null}
               {view.caliberAffectingCount > 0 ? <span className="badge-danger">可能影响口径 {view.caliberAffectingCount} 项</span> : null}
-              {view.degraded ? <span className="badge-warning">降级：{view.degradedCodes.join("、")}</span> : null}
+              {view.degraded ? <span className="badge-warning">降级：{describeEnum(view.degradedCodes[0], DEGRADED_CODE_LABELS, "其他降级")}{view.degradedCodes.length > 1 ? ` 等 ${view.degradedCodes.length} 项` : ""}</span> : null}
             </div>
             {view.baselineMissing ? (
-              <p className={`mt-2 ${ALERT}`} role="alert">缺少可比对的 SQL 基线（sql_baseline_missing）：该步骤按缺口跳过，不得当作“无变更”。</p>
+              <p className={`mt-2 ${ALERT}`} role="alert">缺少可比对的 SQL 基线：该步骤按缺口跳过，不得当作“无变更”。</p>
             ) : null}
             {view.hasBaseline ? (
               <div className="mt-2 grid gap-2 lg:grid-cols-2">
@@ -893,11 +895,11 @@ function SqlChangePanel({ steps }: { steps: AgentStep[] }) {
                 {view.changes.map((change, index) => (
                   <li className="rounded-lg border border-line bg-white px-3 py-2" key={`${change.category}-${index}`}>
                     <div className={CHIP}>
-                      <span className="badge-neutral font-mono">{change.category || "unclassified"}</span>
+                      <span className="badge-neutral">{changeCategoryLabel(change.category)}</span>
                       <span className="text-xs font-medium text-slate-700">{change.label}</span>
-                      {change.severity ? <span className="badge-warning">严重度 {change.severity}</span> : null}
+                      {change.severity ? <span className="badge-warning">严重程度 {severityLabel(change.severity)}</span> : null}
                       {change.affectsCaliber ? <span className="badge-danger">可能影响口径</span> : null}
-                      {change.requiresHumanConfirmation ? <span className="badge-warning">interpretation · 需人工确认</span> : null}
+                      {change.requiresHumanConfirmation ? <span className="badge-warning">需人工确认加工逻辑</span> : null}
                     </div>
                     <div className="mt-1 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
                       <div>

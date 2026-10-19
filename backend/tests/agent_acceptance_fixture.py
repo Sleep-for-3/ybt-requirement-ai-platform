@@ -14,10 +14,15 @@ Shared by the pytest acceptance test and the live demo seeding script.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AISkillDefinition,
+    AISkillScopeBinding,
+    AISkillVersion,
     BusinessSystem,
     CatalogColumn,
     CatalogSchema,
@@ -29,9 +34,14 @@ from app.models import (
     KnowledgeUnit,
     LineageEdge,
     LineageNode,
+    ModelProfile,
     ProductScenario,
     Project,
     ProjectMembership,
+    Requirement,
+    RequirementGenerationInput,
+    RequirementGenerationItem,
+    RequirementRevision,
     ScenarioBusinessMapping,
     ScriptFile,
     ScriptFileVersion,
@@ -43,7 +53,13 @@ from app.models import (
     TargetTable,
     User,
 )
+from app.schemas.ai_skill import SkillScope
+from app.schemas.ai_skill_control import SkillContent
+from app.services.ai_skills.control import scope_key
+from app.services.ai_skills.evaluation import dependencies
 from app.services.llm.execution_metadata import stable_hash
+from app.services.mapping.requirement_input import build_requirement_input
+from app.services.requirement_scope import content_digest
 from app.services.retrieval.keyword_index import index_knowledge_unit
 
 INSTITUTION_CODE = "ACCEPT_AGENT_BANK"
@@ -228,6 +244,110 @@ def seed_agent_acceptance(db: Session) -> dict:
                                transformation_type="aggregate", filter_condition="deal_status in ('ACTIVE','MATURED')"))
             db.flush()
 
+    # ------------------------------------------------------------------------------------
+    # P1-A: a fixed requirement input and two published, project-pinned Skills.
+    # Without these rows the requirement steps are blocked by their own preconditions and the
+    # acceptance chain never reaches the reportable deliverables.
+    # ------------------------------------------------------------------------------------
+    requirement = _get_or_create(
+        db, Requirement, project_id=project.id, name=OBJECTIVE,
+        defaults={"version": 1, "content_version": 1,
+                  "scope_json": {"target_table_id": target_table.id,
+                                 "field_ids": [target_field.id], "scenario_id": scenario.id}},
+    )
+    content_json = {
+        "requirement": {
+            "name": OBJECTIVE,
+            "objective": OBJECTIVE,
+            "background": "合成验收数据：仅用于验证受治理的需求生成链路。",
+            "effective_date": None,
+            "inclusion": "仅纳入持有到期或已确认的二级市场福费廷交易。",
+            "exclusion": "排除已终止或未确认状态的交易。",
+            "target_table_id": target_table.id,
+            "scenario_id": scenario.id,
+            "document_ids": [document.id],
+            "source_table_ids": [source_table.id],
+            "mart_table_ids": [],
+            "confidentiality_level": "internal",
+        },
+        "fields": [{
+            "field": {"id": target_field.id, "field_code": FIELD_CODE, "field_name": FIELD_NAME,
+                      "field_type": target_field.field_type},
+        }],
+        "manual_ownership": {str(target_field.id): {}},
+        "project_id": project.id,
+        "content_version": 1,
+    }
+    revision = _get_or_create(
+        db, RequirementRevision, project_id=project.id, requirement_id=requirement.id,
+        content_version=1,
+        defaults={"scope_version": 1, "status": "draft", "content_json": content_json,
+                  "content_hash": content_digest(content_json), "created_by": user.id},
+    )
+    if requirement.content_version != revision.content_version:
+        requirement.content_version = revision.content_version
+        db.flush()
+
+    input_json = build_requirement_input(db, revision, [target_field.id], ["business"])
+    generation_input = _get_or_create(
+        db, RequirementGenerationInput, project_id=project.id, requirement_id=requirement.id,
+        idempotency_key="acceptance-seed-0001",
+        defaults={"revision_id": revision.id, "request_hash": stable_hash(
+                      {"requirement_id": requirement.id, "content_version": revision.content_version,
+                       "field_ids": [target_field.id], "sections": ["business"]}),
+                  "input_hash": content_digest(input_json), "input_json": input_json,
+                  "created_by": user.id},
+    )
+    _get_or_create(
+        db, RequirementGenerationItem, input_id=generation_input.id, field_id=target_field.id,
+        section="business", defaults={"status": "pending"},
+    )
+
+    profile = _get_or_create(
+        db, ModelProfile, profile_name="acceptance-mock",
+        defaults={"provider_type": "mock", "local_only": True, "enabled": True,
+                  "max_context_tokens": 64000},
+    )
+    for skill_key, display_name, prompt, schema_key in (
+        ("requirement_candidate_generation", "需求候选", "仅生成待人工采用的需求候选",
+         "requirement_candidate_v1"),
+        ("requirement_document_assistance", "需求文档辅助", "仅基于固定需求修订辅助整理文档段落",
+         "document_assistance_v1"),
+    ):
+        definition = _get_or_create(
+            db, AISkillDefinition, skill_key=skill_key,
+            defaults={"task_key": skill_key, "display_name": display_name, "created_by": user.id},
+        )
+        version_row = db.scalar(select(AISkillVersion).where(
+            AISkillVersion.definition_id == definition.id, AISkillVersion.version_no == 1))
+        if version_row is None:
+            scope = SkillScope(scope_type="project", institution_id=institution.id, project_id=project.id)
+            skill_content = SkillContent(system_prompt=prompt, model_profile_id=profile.id,
+                                         output_schema_key=schema_key).model_dump(mode="json")
+            version_row = AISkillVersion(
+                definition_id=definition.id, version_no=1, **scope.model_dump(),
+                scope_key=scope_key(scope), content_json=skill_content,
+                content_hash=stable_hash(skill_content), created_by=user.id, edited_by=user.id,
+            )
+            db.add(version_row)
+            db.flush()
+            # Order matters: dependencies() hashes the draft content, so it must be computed
+            # before the version becomes an immutable published record.
+            version_row.release_dependency_hash = dependencies(db, version_row)
+            version_row.status = "published"
+            version_row.published_at = datetime.now(timezone.utc)
+            db.flush()
+        binding = db.scalar(select(AISkillScopeBinding).where(
+            AISkillScopeBinding.definition_id == definition.id,
+            AISkillScopeBinding.scope_key == scope_key(
+                SkillScope(scope_type="project", institution_id=institution.id, project_id=project.id))))
+        if binding is None:
+            scope = SkillScope(scope_type="project", institution_id=institution.id, project_id=project.id)
+            db.add(AISkillScopeBinding(definition_id=definition.id, version_id=version_row.id,
+                                       **scope.model_dump(), scope_key=scope_key(scope),
+                                       updated_by=user.id))
+            db.flush()
+
     db.commit()
     return {
         "institution_id": institution.id, "user_id": user.id, "username": user.username,
@@ -238,4 +358,8 @@ def seed_agent_acceptance(db: Session) -> dict:
         "document_version_id": version.id, "script_file_id": script.id,
         "script_file_version_id": script_version.id, "sql_statement_id": statement.id,
         "target_node_id": target_node.id, "objective": OBJECTIVE,
+        "requirement_id": requirement.id, "revision_id": revision.id,
+        "generation_input_id": generation_input.id,
+        "candidate_skill_key": "requirement_candidate_generation",
+        "document_skill_key": "requirement_document_assistance",
     }

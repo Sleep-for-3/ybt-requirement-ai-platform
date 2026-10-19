@@ -47,7 +47,7 @@ export default function LoginPage() {
           </span>
           <div>
             <div className="text-sm font-semibold">一表通口径平台</div>
-            <div className="text-xs text-emerald-100/60">YBT Requirement AI Platform</div>
+            <div className="text-xs text-emerald-100/60">需求口径与交付一体化平台</div>
           </div>
         </div>
 
@@ -89,7 +89,7 @@ export default function LoginPage() {
             </span>
             <div>
               <div className="text-sm font-semibold text-ink">一表通口径平台</div>
-              <div className="text-xs text-slate-500">YBT Requirement AI Platform</div>
+              <div className="text-xs text-slate-500">需求口径与交付一体化平台</div>
             </div>
           </div>
 
@@ -115,7 +115,7 @@ export default function LoginPage() {
             <p className="mt-4 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700">{message}</p>
           ) : null}
 
-          <p className="mt-8 text-center text-xs text-slate-400">默认使用 Mock LLM，无需真实模型密钥</p>
+          <p className="mt-8 text-center text-xs text-slate-400">默认使用模拟模型，无需真实模型密钥</p>
         </form>
       </section>
     </main>

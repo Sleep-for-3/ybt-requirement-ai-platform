@@ -3,6 +3,8 @@
 import { GitBranch } from "lucide-react";
 
 import { LineageGraph as Graph, LineageNode } from "@/lib/api";
+import { lineageRelationLabel } from "@/lib/lineage-explanation.mjs";
+import { confidenceLevelLabel } from "@/lib/product-language";
 
 export const MISSING_BUSINESS_REMARK = "缺少业务备注";
 
@@ -151,8 +153,8 @@ export function LineageGraph({ graph }: { graph: Graph | null }) {
                   <LineageNodeLabelView node={nodes.get(edge.source_node_id)} fallbackId={edge.source_node_id} />
                 </td>
                 <td className="p-3">
-                  {edge.edge_type}
-                  <div className="text-xs text-slate-500">{edge.confidence_level}</div>
+                  {lineageRelationLabel(edge)}
+                  <div className="text-xs text-slate-500">置信度 {confidenceLevelLabel(edge.confidence_level)}</div>
                 </td>
                 <td className="p-3">
                   <LineageNodeLabelView node={nodes.get(edge.target_node_id)} fallbackId={edge.target_node_id} />

@@ -8,6 +8,8 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { StatefulLink } from "@/components/StatefulLink";
 import { DeliverableTemplate, apiGet, uploadForm } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
+import { describeError } from "@/lib/user-message.mjs";
+import { roleLabel } from "@/lib/product-language";
 
 export default function Page() {
   const { projectId } = useProjectWorkspace();
@@ -21,7 +23,7 @@ export default function Page() {
     try {
       setItems(await apiGet(`/projects/${projectId}/deliverable-templates`));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "模板加载失败");
+      setMessage(describeError(error, "交付模板加载失败，请稍后重试。"));
     }
   }
   useEffect(() => { void load(); }, [projectId]);
@@ -38,7 +40,7 @@ export default function Page() {
       setMessage("新模板已上传，请完成业务区域配置、校验并激活。");
       await load();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "上传失败");
+      setMessage(describeError(error, "模板上传失败，请检查文件后重试。"));
     }
   }
 
@@ -62,7 +64,7 @@ export default function Page() {
           </section>
         ) : (
           <p className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-600">
-            当前角色为 {permissions.role || "只读角色"}，模板配置仅供查看。
+            当前角色为 {roleLabel(permissions.role)}，模板配置仅供查看。
           </p>
         )}
 
@@ -141,5 +143,5 @@ function statusBadgeClass(status?: string | null) {
 }
 
 function statusLabel(status?: string | null) {
-  return ({ parsed: "待配置", configured: "已配置", active: "已激活" } as Record<string, string>)[status || ""] || status || "未知";
+  return ({ parsed: "待配置", configured: "已配置", active: "已激活" } as Record<string, string>)[status || ""] || "未知状态";
 }

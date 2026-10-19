@@ -103,7 +103,7 @@ def rerun_completed_job(job_id: int, principal: RealPrincipal, db: Session = Dep
     if original.project_id is not None:
         PermissionService(db, principal).require_project_permission(original.project_id, "task.manage")
     if original.status not in {"completed", "partially_completed"}:
-        raise HTTPException(status_code=409, detail="Only completed jobs can be explicitly rerun")
+        raise HTTPException(status_code=409, detail="只有已完成的作业才能手动重跑")
     rerun = get_task_queue().enqueue(
         db,
         job_type=original.job_type,
@@ -393,7 +393,7 @@ def _job_cancelled(db: Session, job: BackgroundJob) -> bool:
 
 def _job_or_404(db, job_id):
     job=db.get(BackgroundJob,job_id)
-    if job is None: raise HTTPException(status_code=404,detail="Background job not found")
+    if job is None: raise HTTPException(status_code=404,detail="后台作业不存在")
     return job
 
 

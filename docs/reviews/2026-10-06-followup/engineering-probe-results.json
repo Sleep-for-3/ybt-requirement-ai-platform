@@ -1,0 +1,56 @@
+{
+  "reviewed_commit": "3db4db6",
+  "scope": "RAM SQLite; fake broker/storage/heartbeat/Redis; no live service actions",
+  "c03_retry_recovery": {
+    "after_failed_publish": {
+      "status": "queued",
+      "dispatched_at": null,
+      "celery_task_id": null,
+      "queued_at_recorded": true
+    },
+    "immediate_sweep": {
+      "candidates": 0,
+      "published": 0,
+      "failed": []
+    },
+    "sweep_after_synthetic_grace": {
+      "candidates": 1,
+      "published": 1,
+      "failed": []
+    }
+  },
+  "c04_completed_duplicate": {
+    "after_missing_handler": "completed"
+  },
+  "c05_real_handler_commit_after_loss": {
+    "first_attempt": {
+      "job_status": "running",
+      "result": {},
+      "lost_signalled": true,
+      "persisted_domain_counts": {
+        "stored_files": 1,
+        "notifications": 1,
+        "audit_logs": 1
+      }
+    },
+    "takeover_attempt": {
+      "job_status": "completed",
+      "persisted_domain_counts": {
+        "stored_files": 2,
+        "notifications": 2,
+        "audit_logs": 2
+      }
+    },
+    "limit": "Real manifest handler/DB commits, fake storage and accelerated lease expiry; no real file/model/service effects"
+  },
+  "c10_current_fixture": {
+    "status": "failed",
+    "error": "'datasource_id'",
+    "has_background_job_attempt_count": false,
+    "acceptance_terminal_predicate": true
+  },
+  "c10_completed_result_key_guard": {
+    "raised": "RuntimeError",
+    "message": "WRONGTYPE Operation against a key holding the wrong kind of value"
+  }
+}

@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { describeError } from "@/lib/user-message.mjs";
 import { aiExecutionPresentation } from "@/lib/ai-execution-label.mjs";
 import { AsyncActionButton } from "@/components/feedback/AsyncActionButton";
 import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
@@ -19,6 +20,7 @@ import {
   BackgroundJobSummary, CandidateSourceRecommendation, ColumnProfileSnapshot, ColumnProfileTask, HybridKnowledgeItem, MappingEvidence, ProductScenario, RegulatoryKnowledgeItem, ScenarioBusinessMapping,
   ScenarioReviewPackageView, ScenarioTechnicalLineage, TargetField, apiGet, apiPost, apiPut,
 } from "@/lib/api";
+import { knowledgeTypeLabel, lineageStatusLabel, statusLabel } from "@/lib/product-language";
 
 const EMPTY_BUSINESS = {
   business_definition: "", source_system_screenshot_required: false, source_system_change_required: false,
@@ -166,7 +168,7 @@ export default function FieldScenarioPage() {
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true); setMessage("");
     try { await action(); setMessage(success); await reload(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "操作失败"); }
+    catch (error) { setMessage(describeError(error, "操作未完成，请稍后重试。")); }
     finally { setBusy(false); }
   }
 
@@ -241,7 +243,7 @@ export default function FieldScenarioPage() {
       const result = await apiPost<{ recommendation: CandidateSourceRecommendation }>(`/source-recommendations/${item.id}/select`, {});
       setSelectedRecommendationId(result.recommendation.id); setMessage("候选已选择，尚未探查或采用");
       if (!item.catalog_column_id) await reload();
-    } catch (error) {setMessage(error instanceof Error ? error.message : "选择失败，请重新检索候选。");}
+    } catch (error) {setMessage(describeError(error, "选择失败，请重新检索候选。"));}
     finally {setBusy(false);}
   }
   async function profileCatalogCandidate(item: CandidateSourceRecommendation) {
@@ -253,7 +255,7 @@ export default function FieldScenarioPage() {
       setMessage("字段探查任务已创建");
     } else {
       setProfileTask(task);
-      setMessage(`安全探查 ${task.status}`);
+      setMessage(`安全探查 ${statusLabel(task.status)}`);
     }
   }
   async function adoptCatalogCandidate(item: CandidateSourceRecommendation) {
@@ -366,10 +368,10 @@ export default function FieldScenarioPage() {
           </div>
           <div className="panel-body">
             <div className="grid gap-3 md:grid-cols-4">
-              <ReviewMeta label="审核包" value={reviewPackage ? `#${reviewPackage.id} · ${reviewPackage.status} · v${reviewPackage.current_version_no}` : "尚未创建"} />
+              <ReviewMeta label="审核包" value={reviewPackage ? `#${reviewPackage.id} · ${statusLabel(reviewPackage.status)} · v${reviewPackage.current_version_no}` : "尚未创建"} />
               <ReviewMeta label="当前审核步骤" value={reviewPackage?.workflow_instance?.current_step || "尚未提交"} />
               <ReviewMeta label="当前负责人" value={reviewPackage?.workflow_instance?.current_assignee_user_id ? `用户 #${reviewPackage.workflow_instance.current_assignee_user_id}` : (reviewPackage?.workflow_instance?.current_assignee_role || "待分配")} />
-              <ReviewMeta label="血缘状态" value={lineage ? `${lineage.lineage_status}${lineage.lineage_last_verified_at ? ` · ${new Date(lineage.lineage_last_verified_at).toLocaleString()}` : ""}` : "not_linked"} />
+              <ReviewMeta label="血缘状态" value={lineage ? `${lineageStatusLabel(lineage.lineage_status)}${lineage.lineage_last_verified_at ? ` · ${new Date(lineage.lineage_last_verified_at).toLocaleString()}` : ""}` : lineageStatusLabel("not_linked")} />
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
               {contextualReviewTasks.map((task) => (
@@ -380,7 +382,7 @@ export default function FieldScenarioPage() {
                 >
                   <b>{task.step_key}</b>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                    <span className={statusBadgeClass(task.status)}>{task.status}</span>
+                    <span className={statusBadgeClass(task.status)}>{statusLabel(task.status)}</span>
                     <span>负责人 #{task.assignee_user_id || "待领取"}</span>
                   </div>
                   <div className="mt-1 text-xs text-slate-500">到期：{task.due_at || "未设置"}</div>
@@ -535,7 +537,7 @@ export default function FieldScenarioPage() {
                     ))}
                   </select>
                   <select className="control" onChange={(e) => setSchemaFilter(e.target.value)} value={schemaFilter}>
-                    <option value="">全部 schema</option>
+                    <option value="">全部数据模式</option>
                     {Array.from(new Set(recommendations.map((item) => item.recommended_schema_name || ""))).filter(Boolean).map((value) => (
                       <option key={value}>{value}</option>
                     ))}
@@ -606,7 +608,7 @@ export default function FieldScenarioPage() {
                       {ragKnowledge.map((item) => (
                         <div className="rounded-lg border border-line bg-white p-3 text-sm shadow-xs" key={item.knowledge_unit_id}>
                           <div className="flex justify-between gap-3">
-                            <strong className="text-ink">{item.title || item.knowledge_type}</strong>
+                            <strong className="text-ink">{item.title || knowledgeTypeLabel(item.knowledge_type)}</strong>
                             <span className="shrink-0 text-sm font-semibold tabular-nums text-pine-600">{Math.round(item.rerank_score * 100)}%</span>
                           </div>
                           <p className="mt-2 text-slate-600">{item.content}</p>
@@ -648,7 +650,7 @@ export default function FieldScenarioPage() {
                   <div className="panel-body space-y-3">
                     {knowledge.map((item) => (
                       <div className="rounded-lg border border-line bg-white p-3 text-sm shadow-xs" key={item.id}>
-                        <strong className="text-ink">{item.knowledge_type}</strong>
+                        <strong className="text-ink">{knowledgeTypeLabel(item.knowledge_type)}</strong>
                         <p className="mt-2 text-slate-600">{item.business_explanation || "-"}</p>
                         <p className="mt-1 text-xs text-slate-500">{item.source_document_name} / {item.source_sheet_name} / {item.source_cell_range}</p>
                       </div>

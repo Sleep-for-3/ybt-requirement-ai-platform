@@ -68,7 +68,7 @@ test("parser edge types never leak technical English into the business summary",
 
 test("execution labels keep mock, real, rule, and degraded results distinguishable", () => {
   assert.equal(aiExecutionPresentation({ execution_kind: "real_model" }).label, "真实模型");
-  assert.equal(aiExecutionPresentation({ execution_kind: "mock_model" }).label, "Mock 流程");
+  assert.equal(aiExecutionPresentation({ execution_kind: "mock_model" }).label, "模拟流程");
   assert.equal(aiExecutionPresentation({ execution_kind: "deterministic" }).label, "规则算法");
   assert.equal(aiExecutionPresentation({ execution_kind: "degraded" }).label, "模型降级");
   assert.equal(aiExecutionPresentation(null).label, "来源未标记");

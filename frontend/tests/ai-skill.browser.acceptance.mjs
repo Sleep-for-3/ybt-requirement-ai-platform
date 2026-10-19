@@ -100,7 +100,7 @@ try {
   assert.ok(explanation.skill_result.facts.some(item => item.kind === "field_constraints"));
   assert.ok(!explanation.skill_result.gaps.some(item => item.code === "policy_retrieval_failed" || item.code === "provider_not_available"));
   result.checks.push("auxiliary_context_enabled_with_explicit_missing_history");
-  const layers = page.getByRole("region", { name: "Skill 分层证据", exact: true });
+  const layers = page.getByRole("region", { name: "技能分层证据", exact: true });
   await layers.getByText("1. 固定版本事实", { exact: true }).waitFor();
   await layers.getByText("2. 有效制度条款", { exact: true }).waitFor();
   await layers.getByText("3. AI 候选", { exact: true }).waitFor();

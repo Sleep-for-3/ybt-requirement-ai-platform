@@ -52,4 +52,4 @@ def export_field_mapping(
 
 def _ensure_markdown(format: str) -> None:
     if format != "markdown":
-        raise HTTPException(status_code=400, detail="Only markdown export is supported in this MVP")
+        raise HTTPException(status_code=400, detail="当前版本仅支持导出 Markdown")

@@ -1,0 +1,10 @@
+{
+  "reviewed_commit": "fd7a532",
+  "status": "not_dynamically_reproduced",
+  "reason": "WSL child-process inventory failed with Wsl/E_ACCESSDENIED",
+  "returncode": 4294967295,
+  "runs": [],
+  "real_services_invoked": false,
+  "conclusion_source": "source confirmation only: release-server.sh lines 39,59,63,177-178",
+  "limit": "Do not count this artifact as a successful dynamic release reproduction"
+}

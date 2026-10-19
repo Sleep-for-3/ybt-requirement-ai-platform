@@ -1,4 +1,4 @@
-from copy import deepcopy
+﻿from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -205,3 +205,66 @@ def test_missing_implementation_and_partial_rule_coverage_remain_blocking(snapsh
     issues = comparison_issues(load_revision(db, project.id, req.id, 3).content_json)
     assert any("缺少脚本实现" in i["message"] for i in issues)
     assert sum(i["code"].startswith("scope:policy:rule:") for i in issues) == len(view["rules"])
+
+
+NOT_COMPARED = "not_compared"
+NOT_COMPARED_CODE = "scope:policy:not_compared"
+
+
+def test_a_unit_never_compared_is_reported_apart_from_missing_implementation(snapshot_api):
+    # "Nobody compared this clause yet" and "we compared it and found no implementation"
+    # are different findings.  Counting the first as the second overstates the gap and
+    # tells a reviewer that an implementation was searched for when it never was.
+    client, db, project, _, req, _ = snapshot_api
+    base, unit, _, view, _ = setup_comparison(snapshot_api)
+
+    issues = comparison_issues(load_revision(db, project.id, req.id, 2).content_json)
+
+    codes = [i["code"] for i in issues]
+    assert codes.count(NOT_COMPARED_CODE) == 1
+    assert any(str(unit.id) in i["message"] for i in issues if i["code"] == NOT_COMPARED_CODE)
+    assert not any(i["code"] == f"unit:{unit.id}" and "缺少脚本实现" in i["message"] for i in issues)
+
+
+def test_not_compared_keeps_the_review_unfinished_without_claiming_a_missing_implementation(snapshot_api):
+    client, db, project, _, req, _ = snapshot_api
+    base, unit, _, view, _ = setup_comparison(snapshot_api)
+    payload = decision(view, unit.id, NOT_COMPARED)
+    payload["decisions"][0]["rule_ids"] = []
+    payload["decisions"][0]["difference"] = ""
+
+    response = client.post(base + "/policy-comparison", json=payload)
+
+    assert response.status_code == 201, response.text
+    content = load_revision(db, project.id, req.id, 3).content_json
+    issues = comparison_issues(content)
+    assert any("尚未人工对照" in i["message"] for i in issues)
+    assert not any("缺少脚本实现" in i["message"] for i in issues)
+    assert _unresolved(content)
+
+
+def test_not_compared_cannot_cite_an_implementation_rule(snapshot_api):
+    # A blank state that cites rules would read as "compared, matched to nothing": the
+    # verdict must stay empty rather than borrow coverage from an unverified rule.
+    client, db, project, _, req, _ = snapshot_api
+    base, unit, _, view, _ = setup_comparison(snapshot_api)
+    payload = decision(view, unit.id, NOT_COMPARED)
+    payload["decisions"][0]["difference"] = ""
+
+    response = client.post(base + "/policy-comparison", json=payload)
+
+    assert response.status_code == 422
+    assert "未对照" in response.json()["detail"]
+
+
+def test_not_compared_renders_as_its_own_label_in_the_scope_export(snapshot_api):
+    client, db, project, _, req, _ = snapshot_api
+    base, unit, _, view, _ = setup_comparison(snapshot_api)
+    payload = decision(view, unit.id, NOT_COMPARED)
+    payload["decisions"][0]["rule_ids"] = []
+    payload["decisions"][0]["difference"] = ""
+    assert client.post(base + "/policy-comparison", json=payload).status_code == 201
+
+    content = load_revision(db, project.id, req.id, 3).content_json
+
+    assert content["policy_comparisons"]["decisions"][str(unit.id)]["status"] == NOT_COMPARED

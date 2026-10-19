@@ -8,6 +8,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { PageState } from "@/components/feedback/PageState";
 import { apiGet } from "@/lib/api";
 import { AuthCapabilities, AuthMe, NO_CAPABILITIES } from "@/lib/auth-capabilities";
+import { describeError } from "@/lib/user-message.mjs";
 
 const AdminCapabilityContext = createContext<AuthCapabilities>(NO_CAPABILITIES);
 
@@ -35,7 +36,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       setAuth(nextAuth);
       setError("");
     }).catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : "无法验证管理权限");
+      if (active) setError(describeError(cause, "无法验证管理权限，请稍后重试。"));
     });
     return () => { active = false; };
   }, []);

@@ -26,6 +26,7 @@ from app.models import AgentArtifact, AgentHumanDecision, AgentStep, AgentTask
 from app.services.agent import state_machine as sm
 from app.services.agent.scenarios import scenario_requires_subject, scenario_spec
 from app.services.agent.tools.registry import registered_tools, tools_visible_for_permissions
+from app.services.governance.labels import agent_step_status_label
 
 MAX_STEPS_IN_STATE = 24
 MAX_GAPS_IN_STATE = 20
@@ -150,7 +151,7 @@ def _unresolved_questions(task: AgentTask, gaps: list[dict[str, Any]], summary: 
     mapping = {
         "missing_basis": "缺少可引用的监管条款依据。",
         "sql_baseline_missing": "脚本没有可比对的上一版本。",
-        "skill_binding_missing": "所需技能未发布/未绑定，只得到确定性降级结果。",
+        "skill_binding_missing": "所需技能未发布/未绑定：需求生成会显式阻塞并给出待办，其他步骤保留确定性结果。",
         "metadata_not_found": "元数据目录中未找到对应实体。",
         "dependency_gap": "上游步骤被跳过，下游无法继续。",
     }
@@ -174,7 +175,7 @@ def observation_digest(state: dict[str, Any]) -> str:
     lines.append(f"证据：{evidence.get('evidence_items', 0)} 条，覆盖 {evidence.get('coverage')}，"
                  f"类型 {json.dumps(evidence.get('kinds') or {}, ensure_ascii=False)}")
     for step in state.get("completed_steps") or []:
-        lines.append(f"- [{step['status']}] {step['step_key']}（{step['tool_key']}，证据 {step['evidence_count']}）"
+        lines.append(f"- [{agent_step_status_label(step['status'])}] {step['step_key']}（{step['tool_key']}，证据 {step['evidence_count']}）"
                      f" {step.get('summary') or ''}")
     gaps = state.get("gaps") or []
     if gaps:

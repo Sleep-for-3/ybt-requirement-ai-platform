@@ -31,15 +31,42 @@ class CeleryTaskQueue:
         self._publish(db, job)
         return job
 
+    def stage(self, db: Session, *, job_type: str, institution_id: int | None, project_id: int | None, created_by: int, idempotency_key: str, payload_summary: dict[str, Any]) -> tuple[BackgroundJob, bool]:
+        """Insert the job row into the caller's transaction without publishing it.
+
+        Outbox semantics: the row is flushed but not committed, so a caller can make
+        "this job exists" and its own state change atomic. The caller commits and then
+        calls :meth:`dispatch_staged`; a crash in between leaves ``dispatched_at`` NULL and
+        :meth:`dispatch_undelivered` re-publishes it later.
+        """
+        return create_or_get_job(
+            db,
+            job_type=job_type,
+            institution_id=institution_id,
+            project_id=project_id,
+            created_by=created_by,
+            idempotency_key=idempotency_key,
+            payload_summary=payload_summary,
+            commit=False,
+        )
+
+    def dispatch_staged(self, db: Session, job: BackgroundJob, handler=None) -> BackgroundJob:
+        self._publish(db, job)
+        return job
+
     def _publish(self, db: Session, job: BackgroundJob) -> bool:
         """N11: publish the durable job and record that delivery actually happened.
-
         The job row is committed before this call.  If the broker is unreachable the publish raises
         and ``dispatched_at`` stays NULL, so ``dispatch_undelivered`` can re-publish the job later
         instead of leaving it queued forever with no trace.  Re-publishing is safe: the worker
         claims the job atomically, so a duplicate message short-circuits in ``_execute``.
-        """
 
+        A deduplicated job is never re-published: another caller already owns delivering the row
+        it won, and dispatching here would either double-send it or, if the *other* publisher is
+        still in flight, mark an undelivered row as delivered.
+        """
+        if getattr(job, "submission_deduplicated", False):
+            return False
         result = self.celery_app.send_task("app.workers.execute_background_job", args=[job.id])
         job.celery_task_id = getattr(result, "id", None)
         job.dispatched_at = datetime.now(UTC)
@@ -118,6 +145,10 @@ class CeleryTaskQueue:
         job.dispatched_at = None
         job.celery_task_id = None
         job.queued_at = datetime.now(UTC)
+        # The deduplication marker belongs to the *submission* that lost the race, and it lives on
+        # the ORM instance. A retry is this caller's own delivery attempt, so keeping the marker
+        # from a previous deduplicated submission would silently skip the publish below.
+        job.submission_deduplicated = False
         db.commit()
         self._publish(db, job)
         return job

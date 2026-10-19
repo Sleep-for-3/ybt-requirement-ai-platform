@@ -13,15 +13,16 @@ const STATUS_MESSAGES = {
   503: "模型、向量服务或外部依赖暂不可用"
 };
 const FIELD_LABELS = {
-  profile_name: "Profile 名称",
-  provider_type: "Provider 类型",
-  base_url: "Base URL",
+  profile_name: "模型配置名称",
+  provider_type: "模型服务类型",
+  base_url: "服务地址",
   model_name: "模型名称",
-  embedding_model_name: "Embedding 模型名称",
-  api_key_env_name: "API Key 环境变量名",
+  embedding_model_name: "向量模型名称",
+  api_key_env_name: "密钥环境变量名",
   local_only: "模型位置",
   config_json: "高级配置"
 };
+const CJK_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/;
 const UNSAFE_ERROR_PATTERN =
   /traceback|sqlalchemy|(?:postgres(?:ql)?|mysql|mssql|mongodb|redis):\/\/|authorization\s*:|cookie\s*:|api[_ -]?key\s*[:=]\s*\S+|\bsk-[a-z0-9_-]+|bearer\s+[a-z0-9._~-]+|(?:[a-z]:\\|\/(?:home|users?|app|var|opt)\/)|(?:完整|system|raw)\s*prompt/i;
 
@@ -38,7 +39,9 @@ export class ApiError extends Error {
 
 function safeMessage(message, status) {
   const text = String(message || "").trim();
-  if (!text || UNSAFE_ERROR_PATTERN.test(text)) {
+  // 面向用户的一律是中文：没有任何中日韩字符的内容（英文实现文本、错误码、
+  // 异常类名、snake_case 技术串）都不属于产品语言，直接回退到状态级中文文案。
+  if (!text || !CJK_PATTERN.test(text) || UNSAFE_ERROR_PATTERN.test(text)) {
     return STATUS_MESSAGES[status] || "请求失败";
   }
   return text.slice(0, 500);
@@ -53,10 +56,11 @@ function validationIssueText(issue) {
         .map((part) => FIELD_LABELS[String(part)] || String(part))
         .join(" → ")
     : "";
-  const message =
-    typeof issue.msg === "string"
-      ? issue.msg.replace(/^Value error,\s*/i, "")
-      : "请求参数不正确";
+  // 字段级校验的 msg 常常是 pydantic 原文（如 "string does not match pattern"），
+  // 位置前缀已是中文，但仍不能把英文实现文本带到用户面前。
+  const rawMessage =
+    typeof issue.msg === "string" ? issue.msg.replace(/^Value error,\s*/i, "") : "";
+  const message = rawMessage && CJK_PATTERN.test(rawMessage) ? rawMessage : "取值不符合要求";
   return location ? `${location}：${message}` : message;
 }
 

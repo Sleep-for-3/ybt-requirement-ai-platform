@@ -14,6 +14,7 @@ import { JobProgressPanel } from "@/components/jobs/JobProgressPanel";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, DataSource, MetadataDriftEvent, MetadataSyncTask, apiGet, apiPost, uploadForm } from "@/lib/api";
+import { dbTypeLabel, statusLabel } from "@/lib/product-language";
 
 type ImportPreview = { id: number; file_name: string; parse_summary_json: { row_count: number; sheet_count: number }; warnings_json: string[] };
 
@@ -68,7 +69,7 @@ export default function DatasourceCatalogPage() {
       if ("job_type" in result) {
         setActiveJob(result);
       } else {
-      setMessage(`同步 ${result.status}：${result.table_count} 表 / ${result.column_count} 字段`);
+      setMessage(`同步 ${statusLabel(result.status)}：${result.table_count} 表 / ${result.column_count} 字段`);
       await reload();
       }
     }
@@ -108,14 +109,14 @@ export default function DatasourceCatalogPage() {
         </section>
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <HealthCard icon={<Activity size={17}/>} label="连接状态" value={datasource?.last_test_status || "未测试"} detail={datasource?.last_test_at ? `检查于 ${formatDate(datasource.last_test_at)}` : "尚未执行连接诊断"}/>
-          <HealthCard icon={<Server size={17}/>} label="Connector / Driver" value={datasource?.db_type || "加载中"} detail={datasource?.last_database_version || "数据库版本待检测"}/>
-          <HealthCard icon={<Database size={17}/>} label="纳管范围" value={`${selectedSchemas.length} 个 Schema`} detail={selectedSchemas.join("、") || "尚未选择纳管范围"}/>
+          <HealthCard icon={<Server size={17}/>} label="连接器 / 驱动" value={datasource?.db_type ? dbTypeLabel(datasource.db_type) : "加载中"} detail={datasource?.last_database_version || "数据库版本待检测"}/>
+          <HealthCard icon={<Database size={17}/>} label="纳管范围" value={`${selectedSchemas.length} 个数据模式`} detail={selectedSchemas.join("、") || "尚未选择纳管范围"}/>
           <HealthCard icon={<Clock3 size={17}/>} label="上次成功同步" value={lastSuccessfulTask(tasks) ? formatDate(lastSuccessfulTask(tasks)!.finished_at) : "暂无"} detail={lastSuccessfulTask(tasks) ? `${duration(lastSuccessfulTask(tasks)!)} · ${lastSuccessfulTask(tasks)!.table_count} 表 / ${lastSuccessfulTask(tasks)!.column_count} 字段` : "等待首次同步"}/>
         </section>
         <section className="panel p-4">
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm font-medium text-ink">同步模式<select className="control mt-1.5 min-w-40" onChange={(event)=>setSyncMode(event.target.value)} value={syncMode}><option value="incremental">增量刷新</option><option value="full">全量对账</option><option value="selected_schemas">指定 Schema</option></select></label>
-            <div className="min-w-0 flex-1"><p className="text-sm font-medium text-ink">纳管 Schema</p><div className="mt-1.5 flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-line bg-slate-50 p-2">{(datasource?.last_discovered_schemas_json || []).map((schema)=><label className="badge-neutral cursor-pointer" key={schema}><input checked={selectedSchemas.includes(schema)} onChange={(event)=>setSelectedSchemas((current)=>event.target.checked?[...current,schema]:current.filter((item)=>item!==schema))} type="checkbox"/>{schema}</label>)}</div></div>
+            <div className="min-w-0 flex-1"><p className="text-sm font-medium text-ink">纳管数据模式</p><div className="mt-1.5 flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-line bg-slate-50 p-2">{(datasource?.last_discovered_schemas_json || []).map((schema)=><label className="badge-neutral cursor-pointer" key={schema}><input checked={selectedSchemas.includes(schema)} onChange={(event)=>setSelectedSchemas((current)=>event.target.checked?[...current,schema]:current.filter((item)=>item!==schema))} type="checkbox"/>{schema}</label>)}</div></div>
           <AsyncActionButton actionStatus={polledJob && ["queued", "running"].includes(polledJob.status) ? polledJob.status as "queued" | "running" : syncAction.status} className="button-primary" loadingText="正在提交同步…" onClick={() => void sync()}>
             <RefreshCw size={16} />
             {tasks.length ? "重新同步" : "首次同步"}
@@ -179,7 +180,7 @@ export default function DatasourceCatalogPage() {
               {tasks.map((task) => (
                 <div className="grid-row grid grid-cols-[130px_1fr] items-center" key={task.id}>
                   <span>
-                    <span className={syncStatusBadge(task.status)}>{task.status}</span>
+                    <span className={syncStatusBadge(task.status)}>{statusLabel(task.status)}</span>
                   </span>
                   <div>
                     <div className="text-slate-600">
@@ -202,7 +203,7 @@ export default function DatasourceCatalogPage() {
           )}
         </section>
         <section className="panel overflow-hidden">
-          <div className="panel-header"><div><h2 className="text-[15px] font-semibold text-ink">最近 Schema Drift</h2><p className="mt-1 text-xs text-slate-500">基于最近一次 Metadata Sync 的真实前后快照；rename 仅作为候选，不自动改写资产绑定。当前按最新顺序显示最多 200 条，完整事件已持久化并支持审计接口分页读取。</p></div></div>
+          <div className="panel-header"><div><h2 className="text-[15px] font-semibold text-ink">最近结构变更</h2><p className="mt-1 text-xs text-slate-500">基于最近一次元数据同步的真实前后快照；字段更名仅作为候选，不自动改写资产绑定。当前按最新顺序显示最多 200 条，完整事件已持久化并支持审计接口分页读取。</p></div></div>
           {drift.length ? <><div className="grid-head grid grid-cols-[90px_minmax(0,1fr)_minmax(0,1fr)]"><span>变化</span><span>资产</span><span>属性</span></div>{drift.map((event)=><div className="grid-row grid grid-cols-[90px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3" key={event.id}><span className={driftBadge(event.change_type)}>{driftLabel(event.change_type)}</span><div className="min-w-0"><p className="truncate font-medium text-ink">{event.entity_key}</p>{event.rename_candidate_key?<p className="mt-1 truncate text-xs text-gold-700">可能由 {event.rename_candidate_key} 重命名</p>:null}</div><p className="truncate text-xs text-slate-500">{event.changed_attributes_json.join("、") || "启用状态"}</p></div>)}</> : <div className="m-4"><div className="empty-state"><Activity className="text-slate-300" size={28}/><p>最近一次同步未检测到元数据变化</p></div></div>}
         </section>
       </div>

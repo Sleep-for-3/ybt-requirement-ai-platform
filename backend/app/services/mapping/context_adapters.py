@@ -37,11 +37,22 @@ from app.services.mapping.generator_context import (
     ScenarioTechnicalGenerationSnapshot,
     SourceToMartGenerationSnapshot,
 )
+from app.core.settings import get_settings
 from app.services.semantic.context_authority import AUTHORITY_RANKS, FactState
 
 
-SOURCE_TO_MART_PROJECTION_LIMIT = 6000
-MAX_SELECTED_FACTS = 30
+def projection_char_limit() -> int:
+    """Hard character cap for one generator prompt projection."""
+
+    return int(get_settings().generation_projection_char_limit)
+
+
+def projection_fact_limit() -> int:
+    """Hard cap on how many governed facts may enter one projection."""
+
+    return int(get_settings().generation_projection_fact_limit)
+
+
 MAX_CONTEXT_QUESTIONS = 20
 TRUNCATION_MARKER = "\n[TRUNCATED:generator-context-projection]"
 PHYSICAL_SOURCE_EVIDENCE_MISSING = "PHYSICAL_SOURCE_EVIDENCE_MISSING"
@@ -822,9 +833,9 @@ def _task_prompt(
             or ["- 无"]
         ),
     ])
-    if len(prompt) <= SOURCE_TO_MART_PROJECTION_LIMIT:
+    if len(prompt) <= projection_char_limit():
         return prompt, False
-    allowed = SOURCE_TO_MART_PROJECTION_LIMIT - len(TRUNCATION_MARKER)
+    allowed = projection_char_limit() - len(TRUNCATION_MARKER)
     return prompt[:allowed] + TRUNCATION_MARKER, True
 
 
@@ -846,9 +857,9 @@ def _projection_budget(
     )
     return ContextProjectionBudget(
         unit="characters",
-        limit=SOURCE_TO_MART_PROJECTION_LIMIT,
+        limit=projection_char_limit(),
         used=used,
-        remaining=max(SOURCE_TO_MART_PROJECTION_LIMIT - used, 0),
+        remaining=max(projection_char_limit() - used, 0),
         complete=not truncated and facts_omitted == 0,
         facts_available=facts_available,
         facts_included=facts_included,
@@ -929,7 +940,41 @@ def _select_facts(context: RegulatoryContext) -> tuple[list[ContextFact], int]:
         *context.quality,
     ]
     ordered = sorted(facts, key=_fact_sort_key)
-    return ordered[:MAX_SELECTED_FACTS], len(ordered)
+    return _admit_facts(ordered, projection_fact_limit()), len(ordered)
+
+
+def _admit_facts(ordered: list[ContextFact], limit: int) -> list[ContextFact]:
+    """Fit as many facts as the cap allows without dropping a fact class wholesale.
+
+    A plain ``ordered[:limit]`` slice is ordered by authority only, so a large
+    candidate class (many field candidates for one target field) could push a
+    whole other class out of the projection purely because of its size.  The
+    governed generator must never see a projection that silently hides every
+    candidate record, so the cap round-robins one fact per (authority, fact_type)
+    class at a time, in authority order.  Every included fact is still fully
+    rendered and the omitted ones still surface as ``facts_omitted``.
+    """
+
+    if limit <= 0:
+        return []
+    buckets: dict[tuple[str, str], list[ContextFact]] = {}
+    for fact in ordered:
+        buckets.setdefault((fact.authority.value, fact.fact_type), []).append(fact)
+    admitted: list[ContextFact] = []
+    round_index = 0
+    while len(admitted) < limit:
+        progressed = False
+        for bucket in buckets.values():
+            if round_index >= len(bucket):
+                continue
+            admitted.append(bucket[round_index])
+            progressed = True
+            if len(admitted) >= limit:
+                break
+        if not progressed:
+            break
+        round_index += 1
+    return sorted(admitted, key=_fact_sort_key)
 
 
 def _fact_sort_key(fact: ContextFact) -> tuple[int, str, str, int]:
@@ -975,9 +1020,9 @@ def _source_to_mart_prompt(
         "Context 待确认问题:",
         *(question_lines or ["- 无"]),
     ])
-    if len(prompt) <= SOURCE_TO_MART_PROJECTION_LIMIT:
+    if len(prompt) <= projection_char_limit():
         return prompt, False
-    allowed = SOURCE_TO_MART_PROJECTION_LIMIT - len(TRUNCATION_MARKER)
+    allowed = projection_char_limit() - len(TRUNCATION_MARKER)
     return prompt[:allowed] + TRUNCATION_MARKER, True
 
 
@@ -1070,7 +1115,9 @@ __all__ = [
     "audit_scenario_physical_coverage",
     "build_physical_source_whitelist",
     "context_projection_block_reasons",
+    "projection_char_limit",
     "projection_context_budget",
+    "projection_fact_limit",
     "projection_context_complete",
     "projection_selected_fact_refs",
     "redacted_generation_output_trace",

@@ -7,6 +7,7 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { StatefulLink } from "@/components/StatefulLink";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { ScriptChange, apiGet } from "@/lib/api";
+import { severityLabel } from "@/lib/product-language";
 
 function severityBadge(severity: string) {
   if (severity === "critical") return "badge-danger";
@@ -48,7 +49,7 @@ export default function Page() {
                     </div>
                   </div>
                   <span className="justify-self-end">
-                    <span className={severityBadge(item.severity)}>{item.severity}</span>
+                    <span className={severityBadge(item.severity)}>{severityLabel(item.severity)}</span>
                   </span>
                 </StatefulLink>
               ))}

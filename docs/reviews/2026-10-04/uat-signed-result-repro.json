@@ -1,0 +1,14 @@
+{
+  "scope": "isolated in-memory API state transition; optional-auth unit-test mode",
+  "run_application_version": null,
+  "run_git_commit_sha": null,
+  "initial_signoff": {
+    "id": 1,
+    "status": "approved"
+  },
+  "post_signoff_edit_http_status": 200,
+  "run_status_after_edit": "failed",
+  "signoff_statuses_after_edit": [
+    "approved"
+  ]
+}

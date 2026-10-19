@@ -1,0 +1,7 @@
+{"case": "SQL_CONTROL_SIMPLE_ALIAS", "status": "success", "columns": [], "raw_synthetic_phone_returned": false, "aggregate_alias_flags": {"cnt": false}, "warning_count": 1, "warnings": ["已移除敏感或疑似敏感结果字段: cnt"]}
+{"case": "SQL_NESTED_ALIAS", "status": "success", "columns": ["cnt"], "raw_synthetic_phone_returned": true, "aggregate_alias_flags": {"cnt": true}, "warning_count": 0, "warnings": []}
+{"case": "SQL_MIXED_AGGREGATE", "status": "success", "columns": ["cnt"], "raw_synthetic_phone_returned": true, "aggregate_alias_flags": {"cnt": true}, "warning_count": 0, "warnings": []}
+{"case": "JOB_TAKEOVER_DIFFERENT_OWNER_CONTROL", "takeover_claimed": true, "owners_equal": false, "status_after_old_runner_returns": "running", "successor_lease_preserved": true, "old_result_overwrote_successor": false}
+{"case": "JOB_TAKEOVER_SAME_OWNER", "takeover_claimed": true, "owners_equal": true, "status_after_old_runner_returns": "completed", "successor_lease_preserved": false, "old_result_overwrote_successor": true}
+{"case": "WORKFLOW_EDIT_INTERLEAVING", "submission_committed_before_edit_commit": true, "workflow_status": "in_progress", "content_after_edit": "after-submission", "controlled_sqlite_schedule": true, "postgres_live_run": false}
+{"case": "CELERY_OUTBOX_PENDING", "broker_publish_calls": 1, "replay_status": "queued", "celery_task_id_missing": true, "known_documented_gap": true}

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { Project, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { createClientId } from "@/lib/client-id.mjs";
+import { describeError } from "@/lib/user-message.mjs";
 
 export default function ProjectsPage() {
   const { projects, projectId, refreshProjects, selectProject } = useProjectWorkspace();
@@ -63,7 +64,7 @@ export default function ProjectsPage() {
         setActionError("项目已创建，但项目列表刷新失败，请手动刷新页面。");
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "创建失败");
+      setFormError(describeError(error, "项目创建失败，请检查填写内容后重试。"));
     } finally {
       setCreating(false);
     }
@@ -105,7 +106,7 @@ export default function ProjectsPage() {
       setLifecycle(null);
       await refreshProjects();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "项目状态更新失败");
+      setActionError(describeError(error, "项目状态更新失败，请稍后重试。"));
       setLifecycle(null);
     } finally {
       setLifecycleBusy(false);

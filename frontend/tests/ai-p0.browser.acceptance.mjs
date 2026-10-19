@@ -221,7 +221,7 @@ try {
   await graphEdge.dispatchEvent("click");
   if (apiTransport === "mock") {
     await page.getByText("生成已阻断：上下文超过冻结预算", {exact: false}).waitFor();
-    await page.getByText(/920 \/ 800 characters/).waitFor();
+    await page.getByText(/920 \/ 800 字符/).waitFor();
     await page.getByText(/缺少上游字段列表/).waitFor();
     result.checks.structuredContextBlockVisible = true;
     result.screenshots.contextBlocked = path.join(outputDir, "context-blocked.png");
@@ -229,8 +229,8 @@ try {
     await page.getByRole("button", {name: /重试/}).click();
   }
   const explanationPanel = page.locator('aside[aria-label="血缘关系业务解释"]').filter({visible: true}).last();
-  await explanationPanel.getByText("Mock 流程", {exact: true}).waitFor();
-  result.executionLabel = "Mock 流程";
+  await explanationPanel.getByText("模拟流程", {exact: true}).waitFor();
+  result.executionLabel = "模拟流程";
   await page.getByText("候选 · 未人工确认", {exact: true}).waitFor();
   await page.getByText("缺少制度依据", {exact: true}).waitFor();
   result.checks.missingPolicyBasisVisible = true;

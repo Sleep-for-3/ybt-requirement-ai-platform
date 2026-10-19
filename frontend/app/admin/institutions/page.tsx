@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/feedback/ConfirmDialog";
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { apiGet, apiPost } from "@/lib/api";
 import { institutionTypeLabel, statusLabel } from "@/lib/product-language";
+import { describeError } from "@/lib/user-message.mjs";
 
 type Institution = {
   id: number;
@@ -33,7 +34,7 @@ export default function Page() {
       setItems(await apiGet("/admin/institutions"));
       setMsg("");
     } catch (error) {
-      setMsg(error instanceof Error ? error.message : "加载失败");
+      setMsg(describeError(error, "机构列表加载失败，请稍后重试。"));
     }
   }
 
@@ -60,7 +61,7 @@ export default function Page() {
       setMsg("机构已创建");
       await reload();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "创建失败");
+      setFormError(describeError(error, "机构创建失败，请检查填写内容后重试。"));
     } finally {
       setCreating(false);
     }

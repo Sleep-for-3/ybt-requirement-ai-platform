@@ -22,7 +22,7 @@ CheckResult = dict[str, Any]
 def run_health_checks(db: Session, settings: Settings) -> dict[str, Any]:
     """Run bounded, secret-safe deployment checks and return one canonical result."""
     checks: dict[str, CheckResult] = {
-        "application": _result("healthy", "Application process is running."),
+        "application": _result("healthy", "应用进程运行正常。"),
         "database": _timed(_check_database, db),
         "alembic_revision": _timed(_check_revision, db),
         "storage": _timed(_check_storage),
@@ -61,21 +61,21 @@ def _timed(check: Callable[..., CheckResult], *args: Any) -> CheckResult:
     try:
         result = check(*args)
     except Exception:
-        result = _result("unhealthy", "Health check failed.")
+        result = _result("unhealthy", "健康检查执行失败。")
     result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
     return result
 
 
 def _check_database(db: Session) -> CheckResult:
     db.execute(text("select 1"))
-    return _result("healthy", "Database query succeeded.")
+    return _result("healthy", "数据库查询正常。")
 
 
 def _check_revision(db: Session) -> CheckResult:
     current, head = database_revisions(db.connection())
     if current is None or current != head:
-        return _result("unhealthy", "Database migration revision is not at repository head.", current_revision=current, head_revision=head)
-    return _result("healthy", "Database migration revision is current.", current_revision=current, head_revision=head)
+        return _result("unhealthy", "数据库迁移版本未达到仓库最新版本。", current_revision=current, head_revision=head)
+    return _result("healthy", "数据库迁移版本已是最新。", current_revision=current, head_revision=head)
 
 
 def _check_storage() -> CheckResult:
@@ -84,30 +84,30 @@ def _check_storage() -> CheckResult:
     stored = storage.save(payload, file_name="health-check.txt", project_id=None)
     try:
         if storage.read(stored.storage_key) != payload:
-            return _result("unhealthy", "Storage read-after-write verification failed.")
+            return _result("unhealthy", "对象存储写入后读取校验失败。")
     finally:
         storage.delete(stored.storage_key)
-    return _result("healthy", "Storage write, read, and delete verification succeeded.")
+    return _result("healthy", "对象存储写入、读取、删除校验均通过。")
 
 
 def _check_redis(settings: Settings) -> CheckResult:
     if settings.task_queue_provider != "celery":
-        return _result("disabled", "Redis is not required by the inline task queue.")
+        return _result("disabled", "当前使用内联任务队列，无需 Redis。")
     from redis import Redis
 
     timeout = settings.health_check_timeout_seconds
     client = Redis.from_url(settings.redis_url, socket_connect_timeout=timeout, socket_timeout=timeout)
     try:
         if not client.ping():
-            return _result("unhealthy", "Redis did not respond successfully.")
+            return _result("unhealthy", "Redis 未响应成功。")
     finally:
         client.close()
-    return _result("healthy", "Redis responded successfully.")
+    return _result("healthy", "Redis 响应正常。")
 
 
 def _check_task_queue(settings: Settings) -> CheckResult:
     if settings.task_queue_provider == "inline":
-        return _result("healthy", "Inline task queue is enabled.", provider="inline")
+        return _result("healthy", "已启用内联任务队列。", provider="inline")
     if settings.task_queue_provider == "celery":
         from app.services.task_queue import get_task_queue
 
@@ -115,29 +115,29 @@ def _check_task_queue(settings: Settings) -> CheckResult:
         inspector = queue.celery_app.control.inspect(timeout=settings.health_check_timeout_seconds)
         workers = inspector.ping() or {}
         if not workers:
-            return _result("unhealthy", "No Celery worker responded to the bounded ping.", provider="celery")
-        return _result("healthy", "Celery workers responded successfully.", provider="celery", worker_count=len(workers))
-    return _result("unhealthy", "Task queue provider is invalid.")
+            return _result("unhealthy", "限时探测未收到任何 Celery 工作节点响应。", provider="celery")
+        return _result("healthy", "Celery 工作节点响应正常。", provider="celery", worker_count=len(workers))
+    return _result("unhealthy", "任务队列提供方配置无效。")
 
 
 def _check_vector_store(settings: Settings) -> CheckResult:
     if settings.vector_store_provider == "mock":
-        return _result("disabled", "External vector store is disabled.")
+        return _result("disabled", "外部向量库未启用。")
     lite_path = (getattr(settings, "milvus_lite_path", "") or "").strip()
     if lite_path:
         # The embedded Milvus Lite engine stores its data in a local file and opens no TCP
         # endpoint, so a socket probe can never succeed.  A configured Lite path is the
         # reachability signal for that mode; the API process would fail loudly at startup if
         # the file could not be opened.
-        return _result("healthy", "Embedded Milvus Lite store is configured.")
+        return _result("healthy", "已配置内嵌 Milvus Lite 存储。")
     parsed = urlparse(settings.milvus_uri)
     host = parsed.hostname
     port = parsed.port or 19530
     if not host:
-        return _result("unhealthy", "Vector store address is invalid.")
+        return _result("unhealthy", "向量库地址无效。")
     with socket.create_connection((host, port), timeout=settings.health_check_timeout_seconds):
         pass
-    return _result("healthy", "Vector store endpoint is reachable.")
+    return _result("healthy", "向量库端点可连通。")
 
 
 def _provider_configuration(
@@ -149,19 +149,18 @@ def _provider_configuration(
     try:
         normalized = normalize_provider_type(provider)
     except RuntimeError:
-        return _result("unhealthy", "Provider type is not supported.")
+        return _result("unhealthy", "模型服务提供方类型不受支持。")
     if normalized == "mock":
-        return _result("mock", "Mock provider is configured; no external request is made.", provider="mock")
+        return _result("mock", "当前为模拟（Mock）提供方，不会发起外部请求。", provider="mock")
     try:
         validate_provider_url(base_url, local_only=normalized.startswith("local_"))
     except ValueError:
-        return _result("unhealthy", "Provider Base URL is invalid.", provider=normalized)
+        return _result("unhealthy", "模型服务地址（Base URL）无效。", provider=normalized)
     if not base_url.strip() or not model.strip():
-        return _result("unhealthy", "Provider configuration is incomplete.", provider=normalized)
+        return _result("unhealthy", "模型服务配置不完整。", provider=normalized)
     if provider_requires_api_key(normalized) and not api_key.strip():
-        return _result("unhealthy", "Provider API-key environment variable is not set.", provider=normalized)
-    return _result("healthy", "Provider configuration is complete; connectivity is tested only on demand.", provider=normalized)
-
+        return _result("unhealthy", "模型服务的 API Key 环境变量未设置。", provider=normalized)
+    return _result("healthy", "模型服务配置完整；连通性仅在实际调用时检测。", provider=normalized)
 
 def _check_llm_provider(settings: Settings) -> CheckResult:
     return _provider_configuration(
@@ -183,7 +182,7 @@ def _check_embedding_provider(settings: Settings) -> CheckResult:
     if settings.vector_store_provider == "milvus" and settings.embedding_dimension <= 0:
         return _result(
             "unhealthy",
-            "Formal vector indexing requires a configured embedding dimension.",
+            "正式向量索引需要先配置向量维度。",
             provider=result.get("provider"),
             configured_dimension=None,
         )
@@ -192,7 +191,7 @@ def _check_embedding_provider(settings: Settings) -> CheckResult:
 
 def _check_semantic_index(db: Session, settings: Settings) -> CheckResult:
     if settings.vector_store_provider == "mock":
-        return _result("disabled", "Formal semantic indexing is disabled in Mock vector mode.")
+        return _result("disabled", "Mock 向量模式下正式语义索引已禁用。")
     active_count = int(db.scalar(
         select(func.count(EmbeddingIndexVersion.id)).where(
             EmbeddingIndexVersion.status == "active"
@@ -206,13 +205,13 @@ def _check_semantic_index(db: Session, settings: Settings) -> CheckResult:
     if active_count == 0:
         return _result(
             "degraded",
-            "Milvus is configured but no active semantic index exists yet.",
+            "已配置 Milvus，但尚无生效中的语义索引。",
             active_index_count=0,
             failed_index_count=failed_count,
         )
     return _result(
         "healthy",
-        "Validated active semantic indexes are available.",
+        "已有生效且已校验的语义索引。",
         active_index_count=active_count,
         failed_index_count=failed_count,
     )
@@ -228,4 +227,4 @@ def _check_disk_space(settings: Settings) -> CheckResult:
         path = parent
     usage = shutil.disk_usage(path)
     status = "healthy" if usage.free >= settings.disk_free_min_bytes else "degraded"
-    return _result(status, "Disk free-space threshold is satisfied." if status == "healthy" else "Disk free space is below the configured threshold.", free_bytes=usage.free)
+    return _result(status, "磁盘可用空间满足阀值。" if status == "healthy" else "磁盘可用空间低于配置阀值。", free_bytes=usage.free)

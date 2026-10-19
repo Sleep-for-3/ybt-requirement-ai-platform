@@ -33,7 +33,7 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   script_repository_sync: "代码仓库同步",
   script_upload_ingestion: "SQL 文件解析与血缘分析",
   sql_archive_ingest: "SQL 文件解析与血缘分析",
-  uat_run_execute: "UAT 验收运行"
+  uat_run_execute: "验收运行"
 };
 
 const ERROR_LABELS: Record<string, string> = {

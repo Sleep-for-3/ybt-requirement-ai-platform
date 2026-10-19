@@ -13,12 +13,12 @@ import { apiGet, BackgroundJobSummary } from "@/lib/api";
 import { normalizeRequestError } from "@/lib/http-response.mjs";
 
 const RESULT_LABELS: Record<string, string> = {
-  chunk_count: "Chunk 总数",
-  collection: "Milvus Collection",
+  chunk_count: "文档片段总数",
+  collection: "向量库集合",
   document_id: "知识文档 ID",
   document_count: "文档总数",
-  embedding_model: "Embedding 模型",
-  embedding_provider: "Embedding Provider",
+  embedding_model: "向量模型",
+  embedding_provider: "向量模型服务商",
   failed_count: "失败数量",
   file_id: "结果文件 ID",
   index_version_id: "索引版本 ID",

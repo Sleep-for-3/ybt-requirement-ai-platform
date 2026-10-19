@@ -4,6 +4,7 @@ from app.core.database import SessionLocal
 from app.core.settings import get_settings
 from app.models import BackgroundJob
 from app.services.lineage.monitoring import run_due_repository_monitors
+from app.services.task_queue.factory import get_task_queue
 from app.services.task_queue.handlers import resolve_job_handler
 from app.services.task_queue.inline import InlineTaskQueue
 from app.services.version_info import version_report
@@ -23,6 +24,14 @@ celery_app.conf.beat_schedule = {
     "version-report": {
         "task": "app.workers.version_report",
         "schedule": 300.0,
+    },
+    # P0 outbox: a job committed but never delivered (process died between the committing
+    # transaction and the dispatch) is invisible to the broker. This sweep re-delivers those
+    # rows, which is what makes the atomic "decision + work queued" commit safe instead of
+    # merely quieter about a lost continuation.
+    "redispatch-undelivered-jobs": {
+        "task": "app.workers.redispatch_undelivered_jobs",
+        "schedule": 60.0,
     },
 }
 
@@ -51,3 +60,16 @@ def poll_lineage_repositories() -> dict:
 
     with SessionLocal() as db:
         return run_due_repository_monitors(db).as_dict()
+
+
+@celery_app.task(name="app.workers.redispatch_undelivered_jobs")
+def redispatch_undelivered_jobs() -> dict:
+    """P0 outbox: deliver jobs that were committed but never handed to a worker.
+
+    The queue rows are the durable record; a process that died between the committing
+    transaction and the dispatch leaves such a row behind. The sweep is the compensating
+    half of that atomic commit, so a lost continuation is recovered instead of stranded.
+    """
+
+    with SessionLocal() as db:
+        return get_task_queue().dispatch_undelivered(db)

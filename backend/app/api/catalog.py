@@ -27,7 +27,7 @@ def tables(project_id:int,datasource_id:int|None=None,schema_name:str|None=None,
 @router.get("/catalog/tables/{table_id}",response_model=CatalogTableRead)
 def table(table_id:int,db:Session=Depends(get_db)):
     item=db.get(CatalogTable,table_id)
-    if item is None:raise HTTPException(404,"Catalog table not found")
+    if item is None:raise HTTPException(404,"数据目录表不存在")
     return item
 
 @router.get("/catalog/tables/{table_id}/columns",response_model=PaginatedCatalogColumns)
@@ -46,19 +46,19 @@ def search(project_id:int,payload:CatalogSearchRequest,db:Session=Depends(get_db
 @router.post("/catalog/columns/{column_id}/import-as-source-field",response_model=CatalogImportResult)
 def source_field(column_id:int,payload:CatalogImportRequest|None=None,db:Session=Depends(get_db)):
     column=db.get(CatalogColumn,column_id)
-    if column is None:raise HTTPException(404,"Catalog column not found")
+    if column is None:raise HTTPException(404,"数据目录字段不存在")
     item=import_source_column(db,column,payload or CatalogImportRequest()); return CatalogImportResult(binding_id=item.id,binding_type=item.binding_type,source_table_id=item.source_table_id,source_field_id=item.source_field_id)
 
 @router.post("/catalog/columns/{column_id}/import-as-mart-field",response_model=CatalogImportResult)
 def mart_field(column_id:int,db:Session=Depends(get_db)):
     column=db.get(CatalogColumn,column_id)
-    if column is None:raise HTTPException(404,"Catalog column not found")
+    if column is None:raise HTTPException(404,"数据目录字段不存在")
     item=import_mart_column(db,column); return CatalogImportResult(binding_id=item.id,binding_type=item.binding_type,mart_table_id=item.mart_table_id,mart_field_id=item.mart_field_id)
 
 @router.post("/catalog/tables/{table_id}/import-as-source-table",response_model=CatalogImportResult)
 def source_table(table_id:int,payload:CatalogImportRequest|None=None,db:Session=Depends(get_db)):
     table=db.get(CatalogTable,table_id)
-    if table is None:raise HTTPException(404,"Catalog table not found")
+    if table is None:raise HTTPException(404,"数据目录表不存在")
     system,source=import_source_table(db,table,payload or CatalogImportRequest()); item=db.scalar(select(CatalogImportBinding).where(CatalogImportBinding.catalog_table_id==table.id,CatalogImportBinding.catalog_column_id.is_(None),CatalogImportBinding.binding_type=="source_field"))
     if item is None:item=CatalogImportBinding(project_id=table.project_id,catalog_table_id=table.id,binding_type="source_field");db.add(item)
     item.business_system_id=system.id;item.source_table_id=source.id;db.commit();db.refresh(item)
@@ -67,7 +67,7 @@ def source_table(table_id:int,payload:CatalogImportRequest|None=None,db:Session=
 @router.post("/catalog/tables/{table_id}/import-as-mart-table",response_model=CatalogImportResult)
 def mart_table(table_id:int,db:Session=Depends(get_db)):
     table=db.get(CatalogTable,table_id)
-    if table is None:raise HTTPException(404,"Catalog table not found")
+    if table is None:raise HTTPException(404,"数据目录表不存在")
     mart=db.scalar(select(MartTable).where(MartTable.project_id==table.project_id,MartTable.datasource_id==table.datasource_id,MartTable.schema_name==table.schema_name,MartTable.physical_table_name==table.table_name))
     if mart is None:
         mart=MartTable(project_id=table.project_id,table_code=table.table_name,table_name=table.table_comment or table.table_name,table_comment=table.table_comment,datasource_id=table.datasource_id,database_name=table.database_name,schema_name=table.schema_name,physical_table_name=table.table_name,is_existing=True);db.add(mart);db.flush()

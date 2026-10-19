@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { LineageNode, apiGet, apiPost } from "@/lib/api";
+import { candidateTypeLabel, entityLabel } from "@/lib/product-language";
 
 type Candidate = {
   id: number;
@@ -47,10 +48,10 @@ export default function Page() {
                   <div>
                     <strong className="font-mono text-sm text-ink">{node.logical_name}</strong>
                     <div className="text-xs text-slate-500">
-                      {node.node_type} · 节点 #{node.id}
+                      {entityLabel(node.node_type)} · 节点 #{node.id}
                     </div>
                   </div>
-                  <span className="badge-warning">unresolved</span>
+                  <span className="badge-warning">待人工解析</span>
                 </div>
                 {node.candidates.length ? (
                   <div className="mt-3 grid gap-2">
@@ -61,7 +62,7 @@ export default function Page() {
                       >
                         <div>
                           <strong className="text-ink">
-                            {candidate.candidate_type} #{candidate.candidate_id}
+                            {candidateTypeLabel(candidate.candidate_type)} #{candidate.candidate_id}
                           </strong>
                           <div className="text-xs text-slate-500">
                             {candidate.match_reason} · {Math.round(candidate.score * 100)}%

@@ -15,7 +15,7 @@ router=APIRouter(tags=["metadata sync"])
 @router.post("/datasources/{datasource_id}/metadata-sync")
 def sync(datasource_id:int,payload:MetadataSyncRequest,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     datasource=db.get(DataSource,datasource_id)
-    if datasource is None: raise HTTPException(404,"Data source not found")
+    if datasource is None: raise HTTPException(404,"数据源不存在")
     project=PermissionService(db,principal).require_project_permission(datasource.project_id,"catalog.manage")
     job=submit_project_job(db,project,principal,job_type="metadata_sync",payload={"datasource_id":datasource.id,**payload.model_dump(mode="json")},handler=metadata_sync_handler)
     task_id=(job.result_summary_json or {}).get("metadata_sync_task_id")
@@ -24,21 +24,21 @@ def sync(datasource_id:int,payload:MetadataSyncRequest,principal:CurrentPrincipa
 @router.get("/datasources/{datasource_id}/metadata-sync-tasks",response_model=list[MetadataSyncTaskRead])
 def tasks(datasource_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     datasource=db.get(DataSource,datasource_id)
-    if datasource is None: raise HTTPException(404,"Data source not found")
+    if datasource is None: raise HTTPException(404,"数据源不存在")
     PermissionService(db,principal).require_project_permission(datasource.project_id,"catalog.search")
     return list(db.scalars(select(MetadataSyncTask).where(MetadataSyncTask.datasource_id==datasource_id).order_by(MetadataSyncTask.id.desc())).all())
 
 @router.get("/metadata-sync-tasks/{task_id}",response_model=MetadataSyncTaskRead)
 def task(task_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     item=db.get(MetadataSyncTask,task_id)
-    if item is None: raise HTTPException(404,"Metadata sync task not found")
+    if item is None: raise HTTPException(404,"元数据同步任务不存在")
     PermissionService(db,principal).require_project_permission(item.project_id,"catalog.search")
     return item
 
 @router.get("/metadata-sync-tasks/{task_id}/drift",response_model=list[MetadataDriftEventRead])
 def drift(task_id:int,principal:CurrentPrincipal,offset:int=Query(0,ge=0),limit:int=Query(250,ge=1,le=1000),db:Session=Depends(get_db)):
     item=db.get(MetadataSyncTask,task_id)
-    if item is None: raise HTTPException(404,"Metadata sync task not found")
+    if item is None: raise HTTPException(404,"元数据同步任务不存在")
     PermissionService(db,principal).require_project_permission(item.project_id,"catalog.search")
     return list(db.scalars(select(MetadataDriftEvent).where(MetadataDriftEvent.sync_task_id==task_id).order_by(MetadataDriftEvent.id.desc()).offset(offset).limit(limit)).all())
 

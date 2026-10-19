@@ -159,7 +159,7 @@ async def test_chat(
     _require_admin(db, principal)
     profile = db.get(ModelProfile, payload.profile_id) if payload.profile_id else _active_profile(db)
     if payload.profile_id and profile is None:
-        raise HTTPException(404, "Model profile not found")
+        raise HTTPException(404, "模型档案不存在")
     service = None
     try:
         service = _profile_service(profile)
@@ -192,7 +192,7 @@ async def test_chat(
         raise HTTPException(
             status_code=503,
             detail={
-                "message": str(exc),
+                "message": "模型调用失败，请稍后重试或联系管理员",
                 "error_code": exc.error_type,
                 "provider": getattr(service, "provider", None),
                 "model": getattr(service, "model", None),
@@ -228,7 +228,7 @@ def test_embedding(
     except LLMRuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not vector or not all(isinstance(value, (int, float)) for value in vector):
-        raise HTTPException(status_code=503, detail="Embedding provider returned an invalid vector")
+        raise HTTPException(status_code=503, detail="向量化服务返回了无效向量")
     return {
         "status": "ok",
         "dimension": len(vector),
@@ -377,7 +377,7 @@ def project_model_calls(
 
 def _require_admin(db: Session, principal: Principal) -> None:
     if not PermissionService(db, principal).is_platform_admin():
-        raise HTTPException(status_code=403, detail="Platform administrator permission is required")
+        raise HTTPException(status_code=403, detail="需要平台管理员权限")
 
 
 def _active_profile(db: Session) -> ModelProfile | None:
@@ -558,11 +558,22 @@ def _configuration_drift(profile: ModelProfile | None, llm: dict[str, Any]) -> d
     }
 
 
+_COMPONENT_LABELS: dict[str, str] = {
+    "llm": "大模型",
+    "vector_store": "向量库",
+}
+
+
+def _component_label(component: str) -> str:
+    """把内部组件标识符换成面向用户的中文名；未登记时用通用词，绝不直出英文。"""
+    return _COMPONENT_LABELS.get(component, "该服务")
+
+
 def _configuration_issue(component: str, status: dict[str, Any]) -> dict[str, str] | None:
     if status.get("configuration_status") != "configured":
-        return {"component": component, "code": "configuration_incomplete", "message": f"{component} configuration is incomplete"}
+        return {"component": component, "code": "configuration_incomplete", "message": f"{_component_label(component)}配置不完整，请补全必填项"}
     if status.get("reachable") is False:
-        return {"component": component, "code": status.get("reachability_error") or "endpoint_unreachable", "message": f"{component} endpoint is unreachable"}
+        return {"component": component, "code": status.get("reachability_error") or "endpoint_unreachable", "message": f"{_component_label(component)}服务地址不可达，请检查网络或服务状态"}
     return None
 
 
@@ -655,9 +666,9 @@ def _validate_activation(item: ModelProfile) -> None:
     if provider == "mock":
         return
     if not item.base_url or not item.model_name:
-        raise HTTPException(status_code=422, detail="Base URL and model name are required before activation")
+        raise HTTPException(status_code=422, detail="激活前必须填写 Base URL 和模型名称")
     if provider_requires_api_key(provider) and not resolve_api_key(item.api_key_env_name):
-        raise HTTPException(status_code=422, detail=f"API key environment variable {item.api_key_env_name or '(missing)'} is not configured")
+        raise HTTPException(status_code=422, detail=f"未配置 API Key 环境变量 {item.api_key_env_name or '(missing)'}")
     try:
         validate_env_name(item.api_key_env_name)
         validate_provider_url(
@@ -691,7 +702,7 @@ def _disable_active_profiles(db: Session) -> None:
 def _profile_or_404(db: Session, profile_id: int) -> ModelProfile:
     item = db.get(ModelProfile, profile_id)
     if item is None:
-        raise HTTPException(status_code=404, detail="Model profile not found")
+        raise HTTPException(status_code=404, detail="模型档案不存在")
     return item
 
 

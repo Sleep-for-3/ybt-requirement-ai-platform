@@ -208,7 +208,7 @@ def test_runtime_status_reports_an_unreachable_milvus_endpoint() -> None:
     assert issue == {
         "component": "vector_store",
         "code": "endpoint_unreachable",
-        "message": "vector_store endpoint is unreachable",
+        "message": "向量库服务地址不可达，请检查网络或服务状态",
     }
 
 

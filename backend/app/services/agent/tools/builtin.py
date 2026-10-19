@@ -487,7 +487,7 @@ def _task_gaps(ctx: ToolContext) -> tuple[list[dict[str, Any]], list[dict[str, A
         for item in summary.get("gaps") or []:
             gaps.append({"step_key": step.step_key, "tool_key": step.tool_key, **item})
         for item in summary.get("policy_comparisons") or []:
-            if item.get("status") in {"conflict", "missing_implementation", "pending"}:
+            if item.get("status") in {"conflict", "missing_implementation", "pending", "not_compared"}:
                 comparisons.append({"step_key": step.step_key, **item})
         for item in step.gap_codes_json or []:
             if not any(existing.get("code") == item for existing in gaps):
@@ -504,6 +504,7 @@ def _create_gap_report(ctx: ToolContext) -> ToolResult:
         "gap_count": len(gaps),
         "conflict_count": len(blocking),
         "missing_implementation_count": len([item for item in comparisons if item.get("status") == "missing_implementation"]),
+        "not_compared_count": len([item for item in comparisons if item.get("status") == "not_compared"]),
         "unsupported_basis_count": len(unsupported),
         "requires_human_confirmation": bool(gaps or comparisons),
     }
@@ -661,8 +662,11 @@ def _compare_policy_and_implementation(ctx: ToolContext) -> ToolResult:
         related = [item for item in envelope.facts if item.kind in IMPLEMENTATION_KINDS and related_tokens
                    and any(token in _evidence_text(item) for token in related_tokens)]
         if not related:
-            gaps.append(gap("missing_implementation",
-                            f"未找到与监管条款 {clause.id} 对应的实现证据（SQL/血缘/元数据）。",
+            # No token-matched implementation fact is *not* the same finding as "the
+            # implementation is missing": the deterministic pass simply did not compare
+            # this clause.  Report the honest state, not a conclusion nobody reached.
+            gaps.append(gap("policy_not_compared",
+                            f"监管条款 {clause.id} 未完成实现对照（未定位到可关联的实现证据）。",
                             source_ref=clause.id).model_dump(mode="json"))
             continue
         candidate = SkillPolicyComparison(

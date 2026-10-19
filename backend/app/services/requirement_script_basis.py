@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.models import (CatalogClassification, CatalogColumn, CatalogTable, LineageEdge,
     LineageNode, ScriptFile, ScriptFileVersion, SqlStatement, TargetTable, TemplateVersion)
+from app.services.governance.labels import parse_status_label
 from app.services.requirement_revisions import append_revision, load_revision
 from app.services.requirement_scope import content_digest
 
@@ -122,7 +123,7 @@ def script_preview(db, project_id, version_ids):
     for version, script in versions:
         gaps.extend(version.warnings_json or [])
         if version.parse_status != "parsed" or script.file_type != "sql":
-            gaps.append(f"脚本 {script.relative_path} 解析状态为 {version.parse_status}，须核验支持范围")
+            gaps.append(f"脚本 {script.relative_path} 解析状态为{parse_status_label(version.parse_status)}，须核验支持范围")
     if not targets:
         gaps.append("未识别可确认的写入目标")
     result = {"policy_version": "requirement-script-basis-v1",

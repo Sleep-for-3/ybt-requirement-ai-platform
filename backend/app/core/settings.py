@@ -110,7 +110,21 @@ class Settings(BaseSettings):
     # slow provider, while an interactive request must answer or hand the user
     # back the evidence it already retrieved instead of hanging.
     llm_interactive_timeout_seconds: int = 90
-
+    # Field-rerank call budget.  0 keeps the historical behaviour: the rerank call is
+    # an explicit user action and the product contract today is "wait for the model",
+    # not "degrade when the model is slow".  A positive value is the opt-in switch
+    # for degrade-instead-of-block and is bounded like every other provider budget;
+    # whether that behaviour may become the default is a human product decision.
+    field_rerank_timeout_seconds: float = 0
+    # Generator context projection budget.  The projection is what an AI draft
+    # generator is allowed to see of a RegulatoryContext: a hard character cap on
+    # the rendered prompt plus a hard cap on how many governed facts may be
+    # included.  Both are policy limits, so they are configurable and bounded
+    # instead of being frozen at the historical 6000 / 30 values, but they are
+    # still limits: exceeding them blocks generation (the generator must never
+    # invent evidence that was dropped from its projection).
+    generation_projection_char_limit: int = 6000
+    generation_projection_fact_limit: int = 30
     @property
     def resolved_llm_api_key(self) -> str:
         return resolve_api_key(self.llm_api_key_env_name, self.llm_api_key)
@@ -134,6 +148,49 @@ class Settings(BaseSettings):
     hybrid_final_top_k: int = 20
     hybrid_vector_weight: float = 0.45
     hybrid_keyword_weight: float = 0.55
+
+    # ② 重排 / ③ BM25 / ⑦ 融合
+    reranker_enabled: bool = False
+    reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_top_k: int = 50
+    reranker_cache_dir: str = ""
+    keyword_bm25_k1: float = 1.2
+    keyword_bm25_b: float = 0.75
+    fusion_strategy: str = "rrf"
+    rrf_k: int = 60
+
+    # ① OCR / ⑥ 切分
+    ocr_enabled: bool = False
+    ocr_provider: str = "rapidocr"
+    ocr_max_pages: int = 50
+    chunk_strategy: str = "fixed"
+    chunk_size: int = 1000
+    chunk_overlap: int = 150
+
+    # ④ 审计哈希链
+    audit_chain_enabled: bool = True
+
+    # ⑤ 引用蕴含校验 / ⑧ LLM 裁判
+    citation_support_check: str = "off"
+    ragas_judge_enabled: bool = False
+
+    def validate_projection_budget_reasonable(self) -> list[dict[str, str]]:
+        """Keep the generator projection budget inside a sane, reviewable band."""
+
+        issues: list[dict[str, str]] = []
+        if not 512 <= self.generation_projection_char_limit <= 200_000:
+            issues.append({
+                "severity": "error",
+                "code": "projection_char_limit_unreasonable",
+                "message": "GENERATION_PROJECTION_CHAR_LIMIT must be between 512 and 200000.",
+            })
+        if not 1 <= self.generation_projection_fact_limit <= 500:
+            issues.append({
+                "severity": "error",
+                "code": "projection_fact_limit_unreasonable",
+                "message": "GENERATION_PROJECTION_FACT_LIMIT must be between 1 and 500.",
+            })
+        return issues
 
     safe_sql_default_limit: int = 100
     safe_sql_max_limit: int = 1000
@@ -208,10 +265,48 @@ class Settings(BaseSettings):
                 "llm_interactive_timeout_invalid",
                 "LLM_INTERACTIVE_TIMEOUT_SECONDS must be between 1 and 180.",
             )
+        if self.field_rerank_timeout_seconds != 0 and not 1 <= self.field_rerank_timeout_seconds <= 180:
+            add(
+                "error",
+                "field_rerank_timeout_invalid",
+                "FIELD_RERANK_TIMEOUT_SECONDS must be 0 (no budget, current default) or between 1 and 180.",
+            )
         if self.hybrid_keyword_weight < 0 or self.hybrid_vector_weight < 0 or (
             self.hybrid_keyword_weight + self.hybrid_vector_weight <= 0
         ):
             add("error", "hybrid_weights_invalid", "Hybrid retrieval weights must be non-negative and have a positive sum.")
+        if self.fusion_strategy not in {"rrf", "weighted"}:
+            add(
+                "error",
+                "fusion_strategy_invalid",
+                "FUSION_STRATEGY must be one of: rrf, weighted.",
+            )
+        if self.rrf_k <= 0:
+            add("error", "rrf_k_invalid", "RRF_K must be positive.")
+        if self.keyword_bm25_k1 <= 0:
+            add("error", "keyword_bm25_k1_invalid", "KEYWORD_BM25_K1 must be positive.")
+        if not 0 <= self.keyword_bm25_b <= 1:
+            add("error", "keyword_bm25_b_invalid", "KEYWORD_BM25_B must be between 0 and 1.")
+        if self.chunk_strategy not in {"fixed", "semantic"}:
+            add(
+                "error",
+                "chunk_strategy_invalid",
+                "CHUNK_STRATEGY must be one of: fixed, semantic.",
+            )
+        if self.chunk_overlap < 0 or self.chunk_size <= 0 or self.chunk_overlap >= self.chunk_size:
+            add(
+                "error",
+                "chunk_size_invalid",
+                "CHUNK_SIZE must be positive and CHUNK_OVERLAP must be >= 0 and smaller than CHUNK_SIZE.",
+            )
+        if self.citation_support_check not in {"off", "judge"}:
+            add(
+                "error",
+                "citation_support_check_invalid",
+                "CITATION_SUPPORT_CHECK must be one of: off, judge.",
+            )
+        if self.ocr_max_pages <= 0:
+            add("error", "ocr_max_pages_invalid", "OCR_MAX_PAGES must be positive.")
         if self.milvus_metric_type.upper() != "COSINE":
             add("warning", "milvus_metric_non_default", "COSINE is the validated default metric for semantic retrieval.")
         try:
@@ -243,6 +338,7 @@ class Settings(BaseSettings):
             add("error", "git_allowlist_empty", "Git ingestion requires an allowed host or local root; otherwise disable Git ingestion.")
         if production and self.debug:
             add("error", "debug_enabled", "DEBUG must be disabled in production.")
+        issues.extend(self.validate_projection_budget_reasonable())
         return issues
 
     def validate_production_security(self) -> None:

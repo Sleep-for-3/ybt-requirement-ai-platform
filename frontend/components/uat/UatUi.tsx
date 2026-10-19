@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, XCircle } from "lucide-react";
+import { describeError } from "@/lib/user-message.mjs";
 
 export const UAT_STATUS_LABELS: Record<string, string> = {
   draft: "草稿",
@@ -41,7 +42,7 @@ export function UatStatus({ value }: { value: string }) {
   return (
     <span className={tone}>
       <Icon size={14} />
-      {UAT_STATUS_LABELS[value] || value}
+      {UAT_STATUS_LABELS[value] || "未配置中文名称"}
     </span>
   );
 }
@@ -88,11 +89,5 @@ function formatValue(value: unknown): string {
 }
 
 export function readError(error: unknown) {
-  if (!(error instanceof Error)) return "操作失败";
-  try {
-    const parsed = JSON.parse(error.message) as { detail?: string };
-    return parsed.detail || error.message;
-  } catch {
-    return error.message;
-  }
+  return describeError(error, "操作未完成，请稍后重试。");
 }

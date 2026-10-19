@@ -17,7 +17,7 @@ router = APIRouter(prefix="/admin", tags=["administration"])
 @router.post("/bootstrap", response_model=BootstrapResponse, status_code=status.HTTP_201_CREATED)
 def bootstrap(payload: BootstrapRequest, db: Session = Depends(get_db)) -> dict:
     if db.scalar(select(func.count(User.id))) > 0 or db.scalar(select(func.count(Institution.id))) > 0:
-        raise HTTPException(status_code=409, detail="Platform has already been bootstrapped")
+        raise HTTPException(status_code=409, detail="平台已完成初始化")
     institution = Institution(
         institution_code=payload.institution_code.strip().upper(),
         institution_name=payload.institution_name.strip(),
@@ -49,7 +49,7 @@ def bootstrap(payload: BootstrapRequest, db: Session = Depends(get_db)) -> dict:
 def list_institutions(principal: RealPrincipal, db: Session = Depends(get_db)) -> list[Institution]:
     permissions = PermissionService(db, principal)
     if not permissions.capabilities()["can_view_admin"]:
-        raise HTTPException(status_code=403, detail="Administrator capability required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     if permissions.is_platform_admin():
         return list(db.scalars(select(Institution).order_by(Institution.institution_name)).all())
     ids = select(InstitutionMembership.institution_id).where(
@@ -62,14 +62,14 @@ def list_institutions(principal: RealPrincipal, db: Session = Depends(get_db)) -
 @router.post("/institutions", response_model=InstitutionRead, status_code=201)
 def create_institution(payload: InstitutionCreate, principal: RealPrincipal, db: Session = Depends(get_db)) -> Institution:
     if not PermissionService(db, principal).is_platform_admin():
-        raise HTTPException(status_code=403, detail="Platform administrator required")
+        raise HTTPException(status_code=403, detail="需要平台管理员操作")
     if payload.institution_type not in {"bank", "consulting_company", "platform_operator"}:
-        raise HTTPException(status_code=400, detail="Invalid institution type")
+        raise HTTPException(status_code=400, detail="机构类型不合法")
     institution_code = payload.institution_code.strip().upper()
     # 重复创建必须是可以被调用方处理的 409，而不是数据库唯一约束冒出来的 500。
     # 端到端验收脚本正是依赖这个语义来决定「复用既有机构」还是「新建」。
     if db.scalar(select(Institution.id).where(Institution.institution_code == institution_code)) is not None:
-        raise HTTPException(status_code=409, detail="Institution code already exists")
+        raise HTTPException(status_code=409, detail="机构编码已存在")
     institution = Institution(
         institution_code=institution_code,
         institution_name=payload.institution_name.strip(),
@@ -82,7 +82,7 @@ def create_institution(payload: InstitutionCreate, principal: RealPrincipal, db:
         db.commit()
     except IntegrityError as exc:  # 并发下仍可能同时通过上面的预检查
         db.rollback()
-        raise HTTPException(status_code=409, detail="Institution code already exists") from exc
+        raise HTTPException(status_code=409, detail="机构编码已存在") from exc
     db.refresh(institution)
     return institution
 
@@ -91,13 +91,13 @@ def create_institution(payload: InstitutionCreate, principal: RealPrincipal, db:
 def create_user(payload: AdminUserCreate, principal: RealPrincipal, db: Session = Depends(get_db)) -> User:
     PermissionService(db, principal).require_institution_role(payload.institution_id, {"institution_admin", "security_admin"})
     if payload.institution_role not in INSTITUTION_ROLES:
-        raise HTTPException(status_code=400, detail="Invalid institution role")
+        raise HTTPException(status_code=400, detail="机构角色不合法")
     username = payload.username.strip().lower()
     email = payload.email.strip().lower()
     if db.scalar(select(User.id).where(User.username == username)) is not None:
-        raise HTTPException(status_code=409, detail="Username already exists")
+        raise HTTPException(status_code=409, detail="用户名已存在")
     if db.scalar(select(User.id).where(func.lower(User.email) == email)) is not None:
-        raise HTTPException(status_code=409, detail="Email already exists")
+        raise HTTPException(status_code=409, detail="邮箱已存在")
     user = User(
         username=username,
         display_name=payload.display_name.strip(),
@@ -118,7 +118,7 @@ def create_user(payload: AdminUserCreate, principal: RealPrincipal, db: Session 
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Username or email already exists") from exc
+        raise HTTPException(status_code=409, detail="用户名或邮箱已存在") from exc
     db.refresh(user)
     return user
 
@@ -134,7 +134,7 @@ def list_users(principal: RealPrincipal, db: Session = Depends(get_db)) -> list[
             InstitutionMembership.role.in_(("institution_admin", "security_admin")),
         )).all())
         if not visible_institution_ids:
-            raise HTTPException(status_code=403, detail="Institution administrator required")
+            raise HTTPException(status_code=403, detail="需要机构管理员权限")
 
     statement = select(User, InstitutionMembership, Institution).join(
         InstitutionMembership, InstitutionMembership.user_id == User.id,
@@ -170,5 +170,5 @@ def list_users(principal: RealPrincipal, db: Session = Depends(get_db)) -> list[
 @router.get("/permissions")
 def permissions(principal: RealPrincipal, db: Session = Depends(get_db)) -> dict:
     if not PermissionService(db, principal).capabilities()["can_view_permission_matrix"]:
-        raise HTTPException(status_code=403, detail="Platform administrator required")
+        raise HTTPException(status_code=403, detail="需要平台管理员操作")
     return {"institution_roles": sorted(INSTITUTION_ROLES), "project_roles": {role: sorted(values) for role, values in PROJECT_ROLE_PERMISSIONS.items()}}

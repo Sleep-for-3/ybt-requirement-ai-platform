@@ -56,5 +56,5 @@ def apply_traceability_template_api(template_id: int, db: Session = Depends(get_
 def _document_or_404(db: Session, template_id: int) -> TraceabilityTemplateDocument:
     document = db.get(TraceabilityTemplateDocument, template_id)
     if document is None:
-        raise HTTPException(status_code=404, detail="Traceability template not found")
+        raise HTTPException(status_code=404, detail="追溯模板不存在")
     return document

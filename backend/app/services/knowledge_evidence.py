@@ -34,14 +34,18 @@ def unit_locator(unit):
         value = raw.get(key)
         if type(value) is int and value >= 0:
             locator[key] = value
-    for key in ("sheet_name", "cell_range", "heading"):
+    # ``chapter_heading`` rides along with ``chapter_no``: a citation that can say which
+    # chapter a clause belongs to needs the heading frozen with the locator, not
+    # re-derived from the document later.
+    for key in ("sheet_name", "cell_range", "heading", "chapter_no", "chapter_heading", "clause_no"):
         value = raw.get(key)
         if isinstance(value, str):
             locator[key] = value[:500]
     for key, value in (("page_no", unit.source_page_no), ("sheet_name", unit.source_sheet_name),
-                       ("cell_range", unit.source_cell_range), ("heading", unit.source_heading)):
-        if value is not None:
-            locator.setdefault(key, value)
+                       ("cell_range", unit.source_cell_range), ("heading", unit.source_heading),
+                       ("chapter_no", metadata.get("chapter_no")), ("clause_no", metadata.get("clause_no"))):
+        if isinstance(value, str) and value:
+            locator.setdefault(key, value[:500])
     if type(metadata.get("paragraph")) is int:
         locator.setdefault("paragraph_index", metadata["paragraph"])
     if type(metadata.get("row")) is int:

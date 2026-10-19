@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.models import KnowledgeChunk, KnowledgeDocument
 from app.services.embeddings import get_embedding_service
 from app.services.embeddings.observability import embed_with_observability
-from app.services.text_processing import chunk_text
+from app.core.settings import get_settings
+from app.services.text_processing import chunk_text_by_strategy
 from app.services.vector import VectorRecord, get_vector_store
 from app.services.storage import get_storage_service
 
@@ -41,7 +42,13 @@ async def ingest_document(
     db.flush()
 
     chunks = []
-    for chunk in chunk_text(text):
+    settings = get_settings()
+    for chunk in chunk_text_by_strategy(
+        text,
+        chunk_size=settings.chunk_size,
+        overlap=settings.chunk_overlap,
+        strategy=settings.chunk_strategy,
+    ):
         chunk_record = KnowledgeChunk(
             document_id=document.id,
             project_id=project_id,

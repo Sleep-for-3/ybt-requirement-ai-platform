@@ -1,0 +1,77 @@
+{
+  "head": "3db4db6516a2c2cd495fe4109701a5a6451cb393",
+  "boundary": "Current source; real HTTP response/draft/polling helpers. All network, storage, timers and React boundary mocked. No service/database access.",
+  "c01": {
+    "normal_refresh": {
+      "expected": "one refresh then protected request succeeds",
+      "actual": {
+        "rejected_status": 401,
+        "message": "expired"
+      },
+      "protected_calls": 1,
+      "refresh_calls": 1,
+      "token": "A-new",
+      "regression": true
+    },
+    "old_refresh_after_login_b": {
+      "expected": "B token unchanged, no protected replay",
+      "token": "B-access",
+      "protected_calls": 1,
+      "closed": true
+    },
+    "late_a_401_after_login_b": {
+      "expected": "old A request must not initiate B refresh",
+      "actual_refresh_bodies": [
+        {
+          "refresh_token": "B-refresh"
+        }
+      ],
+      "protected_calls": 1,
+      "token": "B-new",
+      "remaining": true
+    },
+    "logout": {
+      "calls": [
+        {
+          "url": "http://mock/api/auth/logout",
+          "body": "{\"refresh_token\":\"A-refresh\"}"
+        }
+      ],
+      "local_cleared": true
+    }
+  },
+  "c02": {
+    "actor_a_key": "skill-draft:actor:17:project:11:none:requirement_candidate_generation",
+    "actor_b_key": "skill-draft:actor:18:project:11:none:requirement_candidate_generation",
+    "unknown_key": null,
+    "a_reads_own": "private A",
+    "b_reads_a": null,
+    "unknown_reads": null,
+    "wrong_owner_reads": null,
+    "closed": true,
+    "identity_source": "frontend /ai-skills/capabilities -> backend RealPrincipal.user_id (source checked)"
+  },
+  "c11": {
+    "visibility_recovery": {
+      "expected": "visibility recovery resumes continued polling for running job",
+      "calls": 4,
+      "seen": [
+        "running"
+      ],
+      "stalled_after_success": true,
+      "scheduled_timers": 0,
+      "remaining": true
+    },
+    "online_hook_recovery": {
+      "calls": 4,
+      "delivered_statuses": [
+        "completed"
+      ],
+      "unavailable_before": "后台任务状态暂时无法更新",
+      "unavailable_after_completed": "后台任务状态暂时无法更新",
+      "unrelated_job_99_unavailable": "后台任务状态暂时无法更新",
+      "online_fetch_closed": true,
+      "sticky_global_remaining": true
+    }
+  }
+}

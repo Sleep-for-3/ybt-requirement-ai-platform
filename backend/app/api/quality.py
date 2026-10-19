@@ -47,6 +47,32 @@ _SCOPE_MODELS = {
     "monitoring": {"monitoring_target": None},
 }
 
+# 面向用户的中文标签：枚举值一律查表后拼进人话，绝不直出 entity_type / scope_type 原值。
+_SCOPE_LABELS = {
+    "requirement": "需求",
+    "mapping": "映射",
+    "uat": "验收",
+    "monitoring": "监控",
+}
+_ENTITY_LABELS = {
+    "target_field": "目标字段",
+    "field_mapping_draft": "字段映射草稿",
+    "scenario_business_mapping": "场景业务映射",
+    "source_to_mart_mapping": "来源到集市映射",
+    "mart_to_ybt_mapping": "集市到业务表映射",
+    "scenario_technical_lineage": "场景技术血缘",
+    "uat_case": "验收用例",
+    "monitoring_target": "监控目标",
+}
+
+
+def _scope_label(scope_type: str) -> str:
+    return _SCOPE_LABELS.get(scope_type, "该范围")
+
+
+def _entity_label(entity_type: str) -> str:
+    return _ENTITY_LABELS.get(entity_type, "该类型")
+
 
 @router.get(
     "/projects/{project_id}/quality-expectations",
@@ -189,9 +215,9 @@ def transition_quality_expectation(
         DataQualityExpectation, expectation_id, "project.manage"
     )
     if expectation.status == "retired":
-        raise HTTPException(status_code=409, detail="Retired quality expectations cannot be transitioned")
+        raise HTTPException(status_code=409, detail="已下线的质量期望不能变更状态")
     if payload.status == "confirmed" and expectation.status not in {"draft", "ai_suggested"}:
-        raise HTTPException(status_code=409, detail="Only a draft or AI suggestion can be confirmed")
+        raise HTTPException(status_code=409, detail="只有草稿或 AI 建议可以确认")
     before_status = expectation.status
     expectation.status = payload.status
     expectation.status_reason = payload.comment
@@ -221,16 +247,16 @@ def _create_binding(
     allowed_entities = _SCOPE_MODELS[payload.scope_type]
     model = allowed_entities.get(payload.entity_type)
     if payload.entity_type not in allowed_entities:
-        raise ValueError(f"{payload.entity_type} cannot be used for {payload.scope_type} quality scope")
+        raise ValueError(f"{_entity_label(payload.entity_type)}不能用于{_scope_label(payload.scope_type)}的质量范围")
     if model is None:
         if payload.entity_id is not None or not payload.entity_key:
-            raise ValueError("monitoring_target requires entity_key and does not accept entity_id")
+            raise ValueError("监控目标只能填实体标识，不能同时填实体编号")
     else:
         if payload.entity_id is None or payload.entity_key:
-            raise ValueError(f"{payload.entity_type} requires entity_id and does not accept entity_key")
+            raise ValueError(f"{_entity_label(payload.entity_type)}必须填实体编号，不能填实体标识")
         entity = db.get(model, payload.entity_id)
         if entity is None or entity.project_id != project_id:
-            raise ValueError("quality binding target does not belong to the project")
+            raise ValueError("质量绑定的目标不属于当前项目")
     duplicate = db.scalar(select(DataQualityExpectationBinding.id).where(
         DataQualityExpectationBinding.expectation_id == expectation_id,
         DataQualityExpectationBinding.scope_type == payload.scope_type,
@@ -240,7 +266,7 @@ def _create_binding(
         DataQualityExpectationBinding.binding_status == "active",
     ))
     if duplicate is not None:
-        raise ValueError("active quality expectation binding already exists")
+        raise ValueError("该质量期望已存在生效中的绑定")
     binding = DataQualityExpectationBinding(
         project_id=project_id,
         expectation_id=expectation_id,

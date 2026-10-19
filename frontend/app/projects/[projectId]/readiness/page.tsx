@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, ProjectReadiness, ReadinessDimension } from "@/lib/api";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 const LABELS: Record<string, string> = {
   project_configuration: "项目配置",
@@ -24,7 +25,7 @@ const LABELS: Record<string, string> = {
   deliverable_template: "交付模板",
   deliverable_package: "交付包",
   open_questions: "待确认问题",
-  uat_status: "UAT 验收",
+  uat_status: "验收状态",
   deployment_readiness: "部署准备"
 };
 
@@ -50,7 +51,7 @@ export default function ReadinessPage() {
   useEffect(() => {
     apiGet<ProjectReadiness>(`/projects/${projectId}/readiness`)
       .then(setData)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "加载失败"));
+      .catch((reason) => setError(describeError(reason, "项目就绪度加载失败，请稍后重试。")));
   }, [projectId]);
 
   return (
@@ -72,7 +73,7 @@ export default function ReadinessPage() {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <div className="stat-label">总体状态</div>
-              <div className="stat-value">{data ? STATUS[data.overall_status] : "加载中"}</div>
+              <div className="stat-value">{data ? STATUS[data.overall_status] || "状态待同步" : "加载中"}</div>
             </div>
             <div className="text-right">
               <div className="stat-label">加权完成度</div>
@@ -93,7 +94,7 @@ export default function ReadinessPage() {
               </div>
               <ul className="mt-2 space-y-1 text-sm text-gold-800">
                 {data.critical_blockers.map((item) => (
-                  <li key={`${item.dimension}-${item.code}`}>{item.message}</li>
+                  <li key={`${item.dimension}-${item.code}`}>{describeUserMessage(item.message, "该原因说明待补充，请人工核验。")}</li>
                 ))}
               </ul>
             </div>
@@ -126,7 +127,7 @@ function DimensionCard({ dimensionKey, item }: { dimensionKey: string; item: Rea
         </div>
         <span className={STATUS_BADGE[item.status] || "badge-neutral"}>
           <Icon size={12} />
-          {STATUS[item.status]}
+          {STATUS[item.status] || "状态待同步"}
         </span>
       </div>
       <div className="mt-3 h-2 rounded-full bg-slate-100">
@@ -134,7 +135,7 @@ function DimensionCard({ dimensionKey, item }: { dimensionKey: string; item: Rea
       </div>
       {item.blocking_reasons.map((reason) => (
         <p className="mt-3 text-sm text-gold-700" key={reason.code}>
-          {reason.message}
+          {describeUserMessage(reason.message, "该原因说明待补充，请人工核验。")}
         </p>
       ))}
       {item.recommended_actions[0] ? (

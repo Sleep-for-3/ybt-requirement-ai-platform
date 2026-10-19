@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, hasSession } from "@/lib/api";
 import { statusLabel } from "@/lib/product-language";
+import { describeUserMessage } from "@/lib/user-message.mjs";
 
 type CoverageMetric = {
   numerator: number;
@@ -107,7 +108,7 @@ export default function Page() {
 
   return (
     <main className={reportMode ? "bg-mist" : ""}>
-      <WorkspaceHeader title="项目进度看板" meta="准备度、正式版本、变更影响、UAT 与下一步操作" />
+      <WorkspaceHeader title="项目进度看板" meta="准备度、正式版本、变更影响、验收与下一步操作" />
       <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-6">
         {loading ? <div className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-slate-500" role="status">正在加载项目驾驶舱…</div> : null}
         {error ? <div className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert">{error}</div> : null}
@@ -128,7 +129,7 @@ export default function Page() {
           />
           <Summary label="未审核影响" value={String(data?.unreviewed_impact_count ?? "-")} href="/lineage/changes" />
           <Summary
-            label="最新 UAT"
+            label="最近验收"
             value={data?.latest_uat ? `${data.latest_uat.run_name} · ${statusLabel(data.latest_uat.status)}` : "尚无"}
             href={data?.latest_uat ? `/uat/runs/${data.latest_uat.id}` : "/uat"}
           />
@@ -143,7 +144,7 @@ export default function Page() {
           <CoverageCard label="技术血缘覆盖率" metric={data?.metric_definitions?.technical_lineage_coverage} href="/lineage" />
           <CoverageCard label="证据完备率" metric={data?.metric_definitions?.evidence_coverage} href="/knowledge" />
         </section>
-        {view === "executive" ? <section className="panel p-4"><h2 className="text-sm font-semibold text-ink">风险 Top N</h2>{data?.critical_blockers?.length ? <ul className="mt-3 space-y-2">{data.critical_blockers.map((item) => <li className="rounded-lg border border-coral-100 bg-coral-50 px-3 py-2 text-xs text-coral-800" key={item.code}>{item.message}</li>)}</ul> : <p className="mt-3 text-xs text-slate-500">当前没有服务端标记的高风险阻塞项。</p>}</section> : null}
+        {view === "executive" ? <section className="panel p-4"><h2 className="text-sm font-semibold text-ink">风险前 N 项</h2>{data?.critical_blockers?.length ? <ul className="mt-3 space-y-2">{data.critical_blockers.map((item) => <li className="rounded-lg border border-coral-100 bg-coral-50 px-3 py-2 text-xs text-coral-800" key={item.code}>{describeUserMessage(item.message, "该阻塞项未提供可读说明。")}</li>)}</ul> : <p className="mt-3 text-xs text-slate-500">当前没有服务端标记的高风险阻塞项。</p>}</section> : null}
         {view === "executive" ? <AnalyticsRiskSection analytics={analytics} /> : null}
         {view === "executive" ? <ReportBrief data={data} /> : null}
         {view === "business" ? <section className="panel p-4"><h2 className="text-sm font-semibold text-ink">业务运营</h2><div className="mt-3 grid gap-3 sm:grid-cols-3"><Summary label="待业务审核" value={String(data?.pending_business_review_count ?? "-")} href="/review-tasks" /><Summary label="待确认问题" value={String(data?.open_question_count ?? "-")} href="/questions" /><Summary label="低置信度" value={String(data?.low_confidence_count ?? "-")} href={`/projects/${projectId}/readiness`} /></div></section> : null}
@@ -176,7 +177,7 @@ function classifyAnalyticsError(error: unknown): string {
 
 function AnalyticsRiskSection({ analytics }: { analytics: AnalyticsOverview | null }) {
   const max = Math.max(...(analytics?.risk_distribution.map((item) => item.value) || [0]), 1);
-  return <section className="panel p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><div><h2 className="text-sm font-semibold text-ink">风险结构</h2><p className="mt-1 text-xs text-slate-500">来自统一 Analytics Dataset 的当前事实，不含模拟趋势。</p></div><span className="text-xs text-slate-400">{analytics?.reporting_cycle ? `报送期：${analytics.reporting_cycle.cycle_name}` : "当前实时范围"}</span></div><div className="mt-4 space-y-3">{analytics?.risk_distribution.map((item) => <Link className="group block" href={item.drill_target} key={item.code}><div className="mb-1 flex items-center justify-between text-xs"><span className="font-medium text-slate-700">{item.label}</span><span className="tabular-nums text-slate-500">{item.value}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-coral-400 transition-all group-hover:bg-coral-500" style={{ width: `${Math.max(item.value / max * 100, item.value ? 4 : 0)}%` }} /></div></Link>) || <p className="text-xs text-slate-500">分析数据加载中…</p>}</div></section>;
+  return <section className="panel p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><div><h2 className="text-sm font-semibold text-ink">风险结构</h2><p className="mt-1 text-xs text-slate-500">来自统一分析数据集的当前事实，不含模拟趋势。</p></div><span className="text-xs text-slate-400">{analytics?.reporting_cycle ? `报送期：${analytics.reporting_cycle.cycle_name}` : "当前实时范围"}</span></div><div className="mt-4 space-y-3">{analytics?.risk_distribution.map((item) => <Link className="group block" href={item.drill_target} key={item.code}><div className="mb-1 flex items-center justify-between text-xs"><span className="font-medium text-slate-700">{item.label}</span><span className="tabular-nums text-slate-500">{item.value}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-coral-400 transition-all group-hover:bg-coral-500" style={{ width: `${Math.max(item.value / max * 100, item.value ? 4 : 0)}%` }} /></div></Link>) || <p className="text-xs text-slate-500">分析数据加载中…</p>}</div></section>;
 }
 
 function MetricStrip({ analytics }: { analytics: AnalyticsOverview }) {
@@ -189,9 +190,9 @@ function MetricStrip({ analytics }: { analytics: AnalyticsOverview }) {
   const questions = analytics.metrics.open_question_rate;
   const review = analytics.metrics.review_completion_rate;
   const risk = analytics.metrics.high_risk_impact_count;
-  const ratio = (metric?: { value: number | null; numerator: number; denominator: number }) => metric?.value == null ? "N/A" : `${Math.round(metric.value * 100)}%`;
+  const ratio = (metric?: { value: number | null; numerator: number; denominator: number }) => metric?.value == null ? "暂无数据" : `${Math.round(metric.value * 100)}%`;
   const detail = (metric?: { numerator: number; denominator: number }) => !metric ? "暂无可计算对象" : metric.denominator === 0 ? "暂无可计算对象" : `${metric.numerator}/${metric.denominator}`;
-  return <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-label="统一治理指标"><Metric label="总体准备度" value={readiness?.value == null ? "N/A" : `${Math.round(readiness.value * 100)}%`} detail="实时准备度评分" /><Metric label="业务口径" value={ratio(business)} detail={detail(business)} /><Metric label="技术血缘" value={ratio(technical)} detail={detail(technical)} /><Metric label="血缘覆盖" value={ratio(lineage)} detail={detail(lineage)} /><Metric label="未解析血缘" value={ratio(unresolved)} detail={detail(unresolved)} /><Metric label="证据完备" value={ratio(evidence)} detail={detail(evidence)} /><Metric label="审核完成" value={ratio(review)} detail={detail(review)} /><Metric label="待确认问题" value={ratio(questions)} detail={detail(questions)} /><Metric label="高风险影响" value={risk ? String(risk.numerator) : "0"} detail="未闭环高风险影响" /></section>;
+  return <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-label="统一治理指标"><Metric label="总体准备度" value={readiness?.value == null ? "暂无数据" : `${Math.round(readiness.value * 100)}%`} detail="实时准备度评分" /><Metric label="业务口径" value={ratio(business)} detail={detail(business)} /><Metric label="技术血缘" value={ratio(technical)} detail={detail(technical)} /><Metric label="血缘覆盖" value={ratio(lineage)} detail={detail(lineage)} /><Metric label="未解析血缘" value={ratio(unresolved)} detail={detail(unresolved)} /><Metric label="证据完备" value={ratio(evidence)} detail={detail(evidence)} /><Metric label="审核完成" value={ratio(review)} detail={detail(review)} /><Metric label="待确认问题" value={ratio(questions)} detail={detail(questions)} /><Metric label="高风险影响" value={risk ? String(risk.numerator) : "0"} detail="未闭环高风险影响" /></section>;
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {

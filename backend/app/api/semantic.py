@@ -225,7 +225,7 @@ def get_concept_version(
     PermissionService(db, principal).require_project_permission(project_id, "project.view")
     version = db.get(SemanticConceptVersion, version_id)
     if version is None or version.project_id != project_id or version.semantic_concept_id != concept_id:
-        raise HTTPException(status_code=404, detail="SemanticConceptVersion not found")
+        raise HTTPException(status_code=404, detail="语义概念版本不存在")
     return version
 
 
@@ -245,13 +245,13 @@ def transition_version(
     permissions.require_project_permission(project_id, "project.view")
     allowed = {"task.manage", "business.review", "technical.review", "final.review"}
     if not (permissions.effective_project_permissions(project_id) & allowed):
-        raise HTTPException(status_code=403, detail="Semantic status transition requires a review permission")
+        raise HTTPException(status_code=403, detail="语义状态流转需要审核权限")
     project = db.get(Project, project_id)
     if payload.status == "confirmed" and project is not None and project.governance_workflow_enabled:
-        raise HTTPException(status_code=409, detail="Semantic confirmation must be completed through semantic_governance_review")
+        raise HTTPException(status_code=409, detail="语义确认必须通过 semantic_governance_review 流程完成")
     version = db.get(SemanticConceptVersion, version_id)
     if version is None or version.project_id != project_id or version.semantic_concept_id != concept_id:
-        raise HTTPException(status_code=404, detail="SemanticConceptVersion not found")
+        raise HTTPException(status_code=404, detail="语义概念版本不存在")
     before = _snapshot(version)
     version = transition_version_status(
         db, version, payload.status, principal.username, project_id=project_id,
@@ -367,7 +367,7 @@ def create_relation(
 ) -> SemanticRelation:
     project = PermissionService(db, principal).require_project_permission(project_id, "business.edit")
     if payload.source_concept_id == payload.target_concept_id:
-        raise HTTPException(status_code=400, detail="Semantic self-relations are not allowed")
+        raise HTTPException(status_code=400, detail="不允许建立语义概念的自关联")
     get_project_semantic_resource(db, project_id, "semantic_concept", payload.source_concept_id)
     get_project_semantic_resource(db, project_id, "semantic_concept", payload.target_concept_id)
     relation = SemanticRelation(
@@ -555,10 +555,10 @@ def _transition(db: Session, principal: Principal, project_id: int, resource_typ
     permissions.require_project_permission(project_id, "project.view")
     allowed = {"task.manage", "business.review", "technical.review", "final.review"}
     if not (permissions.effective_project_permissions(project_id) & allowed):
-        raise HTTPException(status_code=403, detail="Semantic status transition requires a review permission")
+        raise HTTPException(status_code=403, detail="语义状态流转需要审核权限")
     project = db.get(Project, project_id)
     if payload.status == "confirmed" and project is not None and project.governance_workflow_enabled:
-        raise HTTPException(status_code=409, detail="Semantic confirmation must be completed through semantic_governance_review")
+        raise HTTPException(status_code=409, detail="语义确认必须通过 semantic_governance_review 流程完成")
     resource = get_project_semantic_resource(db, project_id, resource_type, resource_id)
     before = _snapshot(resource)
     if resource_type == "semantic_concept":
@@ -593,7 +593,7 @@ def _normalize_code(value: str) -> str:
 
 def _require_editable(resource) -> None:
     if resource.status not in {"draft", "ai_suggested"}:
-        raise HTTPException(status_code=409, detail="Confirmed, rejected, or deprecated semantic resources cannot be edited in place")
+        raise HTTPException(status_code=409, detail="已确认、已驳回或已废弃的语义资源不能原地编辑")
 
 
 def _flush_or_conflict(db: Session, detail: str) -> None:

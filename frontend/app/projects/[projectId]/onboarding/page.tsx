@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, OnboardingStep, ProjectOnboarding } from "@/lib/api";
+import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
 
 export default function OnboardingPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -16,7 +17,7 @@ export default function OnboardingPage() {
   useEffect(() => {
     apiGet<ProjectOnboarding>(`/projects/${projectId}/onboarding`)
       .then(setData)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "加载失败"));
+      .catch((reason) => setError(describeError(reason, "项目上线引导加载失败，请稍后重试。")));
   }, [projectId]);
 
   const completed = data?.steps.filter((item) => item.status === "completed").length || 0;
@@ -79,7 +80,7 @@ function StepCard({ item }: { item: OnboardingStep }) {
         </div>
         {item.blocking_reasons.map((reason) => (
           <p className="mt-2 text-sm text-gold-700" key={reason.code}>
-            {reason.message}
+            {describeUserMessage(reason.message, "该原因说明待补充，请人工核验。")}
           </p>
         ))}
         {item.next_action ? <p className="mt-2 text-sm text-slate-600">下一步：{item.next_action}</p> : null}

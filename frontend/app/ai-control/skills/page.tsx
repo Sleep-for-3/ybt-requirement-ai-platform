@@ -8,10 +8,13 @@ import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { SkillValidationDetail } from "@/components/SkillValidationDetail";
 import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { clearDraft, readDraft, saveDraft } from "@/lib/unsaved-changes.mjs";
+import { bindingTodoView } from "@/lib/skill-binding-todos.mjs";
+import { describeError } from "@/lib/user-message.mjs";
+import { providerTypeLabel, statusLabel } from "@/lib/product-language";
 
 type Scope = { scope_type: "platform" | "institution" | "project" | "task"; institution_id?: number; project_id?: number; invocation_key?: string };
 const SCOPE_LABELS = { platform: "平台", institution: "机构", project: "项目", task: "任务" };
-const TASK_LABELS: Record<string, string> = { requirement_document_assistance: "固定版本文档辅助", lineage_edge_explanation: "血缘关系解释", policy_comparison: "制度比较", requirement_candidate_generation: "需求候选", scenario_business_mapping: "场景业务映射", scenario_technical_lineage: "场景技术溯源", source_to_mart_mapping: "源到集市映射", mart_to_ybt_mapping: "集市到一表通映射", regulatory_qa: "监管问答", data_field_explanation: "字段解释", field_semantic_matching: "字段语义匹配", change_impact_explanation: "变更影响解释", quality_rule_suggestion: "质量规则建议", uat_suggestion: "UAT 建议", project_assistant: "项目助手" };
+const TASK_LABELS: Record<string, string> = { requirement_document_assistance: "固定版本文档辅助", lineage_edge_explanation: "血缘关系解释", policy_comparison: "制度比较", requirement_candidate_generation: "需求候选", scenario_business_mapping: "场景业务映射", scenario_technical_lineage: "场景技术溯源", source_to_mart_mapping: "源到集市映射", mart_to_ybt_mapping: "集市到一表通映射", regulatory_qa: "监管问答", data_field_explanation: "字段解释", field_semantic_matching: "字段语义匹配", change_impact_explanation: "变更影响解释", quality_rule_suggestion: "质量规则建议", uat_suggestion: "验收建议", project_assistant: "项目助手" };
 type Definition = { skill_key: string; task_key: string; display_name: string };
 type Model = { id: number; name: string; provider_type: string; model_name: string };
 type Content = { system_prompt: string; user_prompt_template: string; model_profile_id: number; [key: string]: unknown };
@@ -23,10 +26,10 @@ type Capabilities = { actor_id: number; can_register: boolean; can_edit: boolean
 type BindingOption = { id: number; version_no: number; scope_type: string; content_hash: string; available: boolean };
 type Run = { id: number; version_id: number; created_by: number; mode: string; status: string; metrics: { total: number; passed: number; real_model_successes: number; review_comment?: string } };
 const STATUS: Record<string, string> = { draft: "草稿", testing: "测试中", pending_approval: "待独立审批", published: "已发布", deprecated: "已停用", archived: "已归档" };
-const MODES: Record<string, string> = { deterministic: "确定性验证", mock_model: "Mock 测试", real_model: "真实模型测试", replay: "回放", human_review: "人工评审" };
+const MODES: Record<string, string> = { deterministic: "确定性验证", mock_model: "模拟测试", real_model: "真实模型测试", replay: "回放", human_review: "人工评审" };
 const inputClass = "mt-1 w-full rounded border border-slate-300 bg-white p-2 text-sm";
 const buttonClass = "rounded border border-slate-300 bg-white px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40";
-function errorMessage(error: unknown) { return error instanceof Error ? error.message : "操作失败，请刷新后重试。"; }
+function errorMessage(error: unknown) { return describeError(error, "操作未完成，请刷新后重试。"); }
 function query(scope: Scope) { return new URLSearchParams(Object.entries(scope).map(([key, value]) => [key, String(value)])).toString(); }
 const MAPPING_TASKS = ["source_to_mart_mapping", "mart_to_ybt_mapping", "scenario_business_mapping", "scenario_technical_lineage"];
 function initialContent(model = 0, task = "lineage_edge_explanation"): Content {
@@ -39,9 +42,9 @@ function initialContent(model = 0, task = "lineage_edge_explanation"): Content {
 
 export default function Page() {
   const { selectedProject } = useProjectWorkspace();
-  return <main><WorkspaceHeader title="AI Skill 配置中心" meta="范围配置 · 测试门禁 · 独立审批"/>
+  return <main><WorkspaceHeader title="智能能力配置中心" meta="范围配置 · 测试门禁 · 独立审批"/>
     <div className="mx-auto max-w-6xl space-y-4 p-4 lg:p-6">
-      <p className="text-sm text-slate-600">先保存草稿与测试用例，再运行确定性及对应模型测试，通过后提交独立审批。发布后固定版本绑定到所选配置范围。<Link className="ml-2 underline" href="/prompt-versions">查看兼容 Prompt 记录</Link></p>
+      <p className="text-sm text-slate-600">先保存草稿与测试用例，再运行确定性及对应模型测试，通过后提交独立审批。发布后固定版本绑定到所选配置范围。<Link className="ml-2 underline" href="/prompt-versions">查看兼容提示词记录</Link></p>
       {selectedProject?.institution_id ? <ScopeWorkspace key={`${selectedProject.institution_id}:${selectedProject.id}`} institutionId={selectedProject.institution_id} projectId={selectedProject.id}/> : <p className="panel p-4">请先选择已归属机构的项目。</p>}
     </div></main>;
 }
@@ -73,12 +76,17 @@ function ProjectSkills({ scope, testProjectId, onLockedChange }: { scope: Scope;
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [editorLocked, setEditorLocked] = useState(false);
   const [registerTask, setRegisterTask] = useState("requirement_candidate_generation");
+  const [bindingTodos, setBindingTodos] = useState<ReturnType<typeof bindingTodoView>>(null);
   useEffect(() => { onLockedChange(loading || editorLocked); }, [loading, editorLocked, onLockedChange]);
   useEffect(() => {
     let alive = true;
     Promise.all([apiGet<Definition[]>(`/ai-skills?${query(scope)}`), apiGet<Model[]>(`/ai-skills/model-options?${query(scope)}`), apiGet<Capabilities>(`/ai-skills/capabilities?${query(scope)}`)])
       .then(([definitions, options, permissions]) => { if (alive) { setSkills(definitions); setModels(options); setCapabilities(permissions); setSelected(definitions[0]?.skill_key || ""); } })
       .catch(error => { if (alive) setError(errorMessage(error)); }).finally(() => { if (alive) setLoading(false); });
+    // The todo list is advisory: the page still works when the operator may read Skills but not
+    // list the scope's un-pinned ones, so its failure never blocks the editor.
+    apiGet<Parameters<typeof bindingTodoView>[0]>(`/ai-skills/binding-todos?${query(scope)}`)
+      .then(items => { if (alive) setBindingTodos(bindingTodoView(items)); }).catch(() => undefined);
     return () => { alive = false; };
   }, [scope]);
   async function registerSkill() {
@@ -90,7 +98,8 @@ function ProjectSkills({ scope, testProjectId, onLockedChange }: { scope: Scope;
   }
   return <>
     {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-    {loading ? <p role="status">正在读取配置…</p> : !skills.length && !error ? <p className="panel p-4">尚未注册 Skill。请由平台管理员注册能力。</p> : null}
+    {loading ? <p role="status">正在读取配置…</p> : !skills.length && !error ? <p className="panel p-4">尚未注册技能。请由平台管理员注册能力。</p> : null}
+    {bindingTodos && <section aria-label="未固定技能" className="panel space-y-1 p-3 text-sm"><h2 className="font-semibold">待固定的技能</h2><p>{bindingTodos.message}</p>{bindingTodos.items.filter(item => item.available).map(item => <button key={item.skill_key} className="block text-left underline" onClick={() => setSelected(item.skill_key)}>{item.display_name} · 固定采用 v{item.version_no}</button>)}<p className="text-xs text-slate-600">固定采用需要人工确认，不会随发布自动变更。</p></section>}
     {capabilities?.can_register && <details className="panel p-3"><summary className="cursor-pointer text-sm">注册能力（平台管理员）</summary><label className="block text-sm">能力类型<select aria-label="注册能力类型" className={inputClass} disabled={loading || editorLocked} value={registerTask} onChange={event => setRegisterTask(event.target.value)}>{Object.entries(TASK_LABELS).map(([value, label]) => <option key={value} value={value} disabled={skills.some(skill => skill.skill_key === value)}>{label}{skills.some(skill => skill.skill_key === value) ? " · 已注册" : ""}</option>)}</select></label><button className={buttonClass} disabled={loading || editorLocked || skills.some(skill => skill.skill_key === registerTask)} onClick={registerSkill}>注册所选能力</button></details>}
     {skills.length > 0 && <label className="block text-sm">选择能力<select className={inputClass} value={selected} disabled={editorLocked} onChange={event => setSelected(event.target.value)}>{skills.map(skill => <option key={skill.skill_key} value={skill.skill_key}>{skill.display_name}</option>)}</select></label>}
     {capabilities && skills.find(skill => skill.skill_key === selected) && <SkillEditor key={selected} scope={scope} testProjectId={testProjectId} skill={skills.find(skill => skill.skill_key === selected)!} models={models} capabilities={capabilities} onLockedChange={setEditorLocked}/>}
@@ -130,7 +139,7 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
   const skillDraftKey = actorId === null ? null
     : `skill-draft:actor:${actorId}:${scope.scope_type}:${scope.project_id ?? "none"}:${scope.institution_id ?? "none"}:${skill.skill_key}`;
   useEffect(() => { onLockedChange(busy || dirty); }, [busy, dirty, onLockedChange]);
-  // F02: register the Skill draft with the shared unsaved-changes registry. Previously this page only
+  // F02：把技能草稿注册到共享的未保存变更登记表。此前该页面只
   // installed its own `beforeunload` listener, so the global project switch / in-app link guard could
   // not see the edit and leaving silently dropped it.
   useUnsavedChanges(`skill-editor:${scope.project_id ?? "none"}:${scope.institution_id ?? "none"}:${skill.skill_key}`, dirty);
@@ -186,7 +195,7 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
     if (!active) return;
     const item = await apiPost<Version>(`${root}/versions/${active.version_no}/${kind}`, { expected_lock_version: active.lock_version,
       ...(kind === "submit" || kind === "publish" ? { test_project_id: testProjectId, expected_binding_lock: binding?.lock_version ?? null } : {}) });
-    await refresh(item.id); setNotice(`当前状态：${STATUS[item.status] || item.status}`);
+    await refresh(item.id); setNotice(`当前状态：${STATUS[item.status] || "状态待同步"}`);
   }
   function insertVariable(variable: string) {
     const textarea = templateRef.current;
@@ -216,14 +225,14 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
       </section>
     </aside>
     <section className="panel space-y-4 p-4">
-      <h2 className="font-semibold">{active ? `v${active.version_no} · ${STATUS[active.status] || active.status}` : "新草稿"}</h2>
+      <h2 className="font-semibold">{active ? `v${active.version_no} · ${STATUS[active.status] || "状态待同步"}` : "新草稿"}</h2>
       {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">{error}<button className="ml-2 underline" disabled={busy} onClick={() => void action(() => refresh(active?.id))}>重新读取服务端版本</button></p>}
       {notice && <p role="status" className="text-sm text-emerald-800">{notice}</p>}
       {busy && <p role="status" className="text-sm">操作处理中，请等待结果…</p>}
       {dirty && <div className="text-sm text-amber-800"><p>有未保存的修改，请先保存或放弃修改，再切换能力、版本或运行测试。</p><button className="mt-1 underline" disabled={busy} onClick={() => setContent(active?.content || initialContent(models[0]?.id, skill.task_key))}>放弃未保存修改</button></div>}
       {pendingDraft && <div className="text-sm text-sky-800" role="status"><p>发现本地保存的草稿（{pendingDraft.savedAt || "时间未知"}，基于版本 #{pendingDraft.basedOnVersionId ?? "新草稿"}）。{active && pendingDraft.basedOnVersionId !== active.id ? "该草稿基于其他版本，恢复前请核对基线。" : ""}</p><div className="mt-1 flex gap-3"><button className="underline" disabled={busy || readOnly} onClick={() => { setContent(pendingDraft.content); setPendingDraft(null); }}>恢复草稿</button><button className="underline" disabled={busy} onClick={() => { if (skillDraftKey) clearDraft(window.localStorage, skillDraftKey, actorId); setPendingDraft(null); }}>丢弃草稿</button></div></div>}
       <fieldset disabled={busy || readOnly} className="space-y-3 disabled:opacity-75">
-        <label className="block text-sm">模型配置<select className={inputClass} value={content.model_profile_id} onChange={event => setContent({ ...content, model_profile_id: Number(event.target.value) })}><option value={0}>请选择模型</option>{models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.provider_type}/{model.model_name}</option>)}</select></label>
+        <label className="block text-sm">模型配置<select className={inputClass} value={content.model_profile_id} onChange={event => setContent({ ...content, model_profile_id: Number(event.target.value) })}><option value={0}>请选择模型</option>{models.map(model => <option key={model.id} value={model.id}>{model.name} · {providerTypeLabel(model.provider_type)}/{model.model_name}</option>)}</select></label>
         <label className="block text-sm">系统提示词<textarea className={inputClass} rows={5} value={content.system_prompt} onChange={event => setContent({ ...content, system_prompt: event.target.value })}/></label>
         <label className="block text-sm">输入模板<textarea ref={templateRef} className={`${inputClass} font-mono`} rows={5} value={content.user_prompt_template} onChange={event => setContent({ ...content, user_prompt_template: event.target.value })}/></label>
         <div className="flex flex-wrap gap-2" aria-label="插入模板变量">{["subject", "facts", "policy_evidence", "gaps"].map(variable => <button key={variable} className={buttonClass} onClick={() => insertVariable(variable)}>插入 {variable}</button>)}</div>
@@ -246,13 +255,13 @@ function SkillEditor({ scope, testProjectId, skill, models, capabilities, onLock
         {active.status === "published" && <button disabled={busy || !capabilities.can_publish} className={buttonClass} onClick={() => void action(() => transition("deprecate"))}>停用新增绑定</button>}
         {["published", "deprecated", "archived"].includes(active.status) && <button disabled={busy || !capabilities.can_edit} className={buttonClass} onClick={() => void action(async () => { const item = await apiPost<Version>(`${root}/versions/${active.version_no}/restore`, {}); await refresh(item.id); setNotice("已恢复为新草稿，需要重新测试和审批。"); })}>恢复为新草稿</button>}
       </div>}
-      {active && versions.length > 1 && <div className="flex flex-wrap items-end gap-2"><label className="text-sm">对比版本<select aria-label="对比版本" className={inputClass} value={compareVersion} disabled={busy} onChange={event => setCompareVersion(event.target.value)}><option value="">请选择版本</option>{versions.filter(item => item.id !== active.id).map(item => <option key={item.id} value={item.version_no}>v{item.version_no} · {STATUS[item.status]}</option>)}</select></label><button className={buttonClass} disabled={busy || dirty || !compareVersion || Number(compareVersion) === active.version_no} onClick={() => void action(async () => setDetail(await apiPost(`${root}/versions/${active.version_no}/diff`, { other_version: Number(compareVersion) })))}>查看版本差异</button></div>}
+      {active && versions.length > 1 && <div className="flex flex-wrap items-end gap-2"><label className="text-sm">对比版本<select aria-label="对比版本" className={inputClass} value={compareVersion} disabled={busy} onChange={event => setCompareVersion(event.target.value)}><option value="">请选择版本</option>{versions.filter(item => item.id !== active.id).map(item => <option key={item.id} value={item.version_no}>v{item.version_no} · {STATUS[item.status] || "状态待同步"}</option>)}</select></label><button className={buttonClass} disabled={busy || dirty || !compareVersion || Number(compareVersion) === active.version_no} onClick={() => void action(async () => setDetail(await apiPost(`${root}/versions/${active.version_no}/diff`, { other_version: Number(compareVersion) })))}>查看版本差异</button></div>}
       <section className="space-y-3 border-t pt-4"><h3 className="font-semibold">固定测试用例与运行</h3>
-        <p className="text-xs text-slate-500">当前项目有 {cases.length} 个用例。真实模型测试会调用所选模型服务；Mock 与回放不能代替真实模型结果。</p>
+        <p className="text-xs text-slate-500">当前项目有 {cases.length} 个用例。真实模型测试会调用所选模型服务；模拟与回放不能代替真实模型结果。</p>
         <details><summary className="cursor-pointer text-sm">添加固定用例（技术配置）</summary><label className="mt-2 block text-sm">用例 JSON（name、input、assertions）<textarea aria-label="测试用例 JSON" className={`${inputClass} font-mono`} rows={8} value={caseText} onChange={event => setCaseText(event.target.value)} disabled={busy}/></label><button className={buttonClass} disabled={busy || !capabilities.can_edit || !caseText.trim()} onClick={() => void action(async () => { await apiPost(`${root}/test-cases`, JSON.parse(caseText)); await refresh(active?.id); setCaseText(""); setNotice("固定用例已保存，发布前需重新测试。"); })}>保存测试用例</button></details>
         <div className="flex flex-wrap items-center gap-2"><label className="text-sm">验证类型<select className={inputClass} value={mode} disabled={busy} onChange={event => setMode(event.target.value)}>{Object.entries(MODES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <button className={buttonClass} disabled={busy || dirty || !capabilities.can_edit || !active || !["draft", "testing"].includes(active.status) || !cases.length} onClick={() => void action(async () => { if (!active) return; const run = await apiPost<Run>(`${root}/test-runs`, { version: active.version_no, project_id: testProjectId, mode, expected_lock_version: active.lock_version }); await refresh(active.id); setDetail(run); })}>运行所选测试</button></div>
-        <div className="space-y-2">{runs.filter(run => run.version_id === active?.id).map(run => <button key={run.id} disabled={busy} className="block w-full rounded border p-2 text-left text-sm" onClick={() => void action(async () => { setDetail({ ...run, results: await apiGet(`/ai-skill-test-runs/${run.id}/results`) }); })}>#{run.id} · {MODES[run.mode]} · {run.status} · {run.metrics.passed}/{run.metrics.total}</button>)}</div>
+        <div className="space-y-2">{runs.filter(run => run.version_id === active?.id).map(run => <button key={run.id} disabled={busy} className="block w-full rounded border p-2 text-left text-sm" onClick={() => void action(async () => { setDetail({ ...run, results: await apiGet(`/ai-skill-test-runs/${run.id}/results`) }); })}>#{run.id} · {MODES[run.mode]} · {statusLabel(run.status)} · {run.metrics.passed}/{run.metrics.total}</button>)}</div>
       </section>
       {detail !== null && <><SkillValidationDetail value={detail}/><details><summary className="cursor-pointer text-sm">完整验证记录</summary><pre aria-label="服务端验证结果" className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-3 text-xs">{JSON.stringify(detail, null, 2)}</pre></details></>}
       {selectedRun?.mode === "human_review" && <section aria-label="独立人工评审" className="space-y-2 rounded border p-3 text-sm">

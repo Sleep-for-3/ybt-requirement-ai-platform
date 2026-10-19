@@ -8,6 +8,7 @@ import { useProjectWorkspace } from "@/components/ProjectContext";
 import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet } from "@/lib/api";
 import { canViewNavigationAudience, navigationAccessForProject, type NavigationAudience } from "@/lib/navigation-contract.mjs";
+import { sourceKindLabel } from "@/lib/product-language";
 
 type ResourceRow={key:string;title:string;href:string;description:string;count:number;coverage:string;updated_at?:string|null;statuses:{label:string;count:number}[];audience:NavigationAudience|"all";group:"资料治理"|"数据资产"};
 type Summary={resources:ResourceRow[];recent_changes:{kind:string;title:string;updated_at:string;href:string}[];pending_items:{type:string;label:string;count:number;href:string}[]};
@@ -42,7 +43,7 @@ export default function Page(){
           </Link>)}</div></section>;
       })}
       {summary.data?<div className="grid gap-6 lg:grid-cols-2">
-        <section className="panel p-5"><div className="mb-4 flex items-center gap-2"><Clock3 size={18}/><h2 className="font-semibold">最近变更</h2></div>{summary.data.recent_changes.length?<ol className="space-y-3">{summary.data.recent_changes.map((item,index)=><li key={`${item.kind}-${index}`}><Link className="flex min-w-0 items-start justify-between gap-3 rounded-lg p-2 hover:bg-mist" href={item.href}><span className="min-w-0"><span className="badge-neutral">{item.kind}</span><span className="ml-2 break-words text-sm font-medium">{item.title}</span></span><time className="shrink-0 text-xs text-slate-500">{dateTime(item.updated_at)}</time></Link></li>)}</ol>:<p className="text-sm text-slate-500">暂无可展示的真实变更。</p>}</section>
+        <section className="panel p-5"><div className="mb-4 flex items-center gap-2"><Clock3 size={18}/><h2 className="font-semibold">最近变更</h2></div>{summary.data.recent_changes.length?<ol className="space-y-3">{summary.data.recent_changes.map((item,index)=><li key={`${item.kind}-${index}`}><Link className="flex min-w-0 items-start justify-between gap-3 rounded-lg p-2 hover:bg-mist" href={item.href}><span className="min-w-0"><span className="badge-neutral">{sourceKindLabel(item.kind)}</span><span className="ml-2 break-words text-sm font-medium">{item.title}</span></span><time className="shrink-0 text-xs text-slate-500">{dateTime(item.updated_at)}</time></Link></li>)}</ol>:<p className="text-sm text-slate-500">暂无可展示的真实变更。</p>}</section>
         <section className="panel p-5"><div className="mb-4 flex items-center gap-2"><ShieldAlert size={18}/><h2 className="font-semibold">待处理事项</h2></div>{summary.data.pending_items.length?<ul className="space-y-3">{summary.data.pending_items.map(item=><li key={item.type}><Link className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm hover:bg-amber-100" href={item.href}><span>{item.label}</span><strong>{item.count}</strong></Link></li>)}</ul>:<div className="flex items-center gap-2 text-sm text-slate-500"><FileCheck2 size={18}/><span>当前没有待审核、解析失败或待激活事项。</span></div>}</section>
       </div>:null}
     </div>
