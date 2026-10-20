@@ -12,6 +12,70 @@ export function askErrorMessage(error) {
   if (error?.status === 400 || error?.status === 422) return "问题或筛选条件无效，请检查后重新提交。";
   return "回答服务暂不可用，请稍后重试。";
 }
+
+/**
+ * 回答阶段的中文提示（页面与回归共用同一份逻辑，避免“测试一套、页面另一套”）。
+ *
+ * 三种基础状态保留原有口径；引用支撑校验是**附加**信息：
+ * - 开关未开启时明示“尚未进行引用支撑校验”，绝不出现任何“已验证”字样；
+ * - 校验失败/未完成时明示无法验证，而不是让用户以为已经核实过；
+ * - 底层错误串（timeout / RuntimeError 等）一律不上页面，只给中文归类。
+ */
+export function answerStatusNotice(result) {
+  const status = result?.answer_status;
+  const support = result?.citation_support;
+  const base = status === "degraded"
+    ? "回答服务暂不可用，以下展示已获取的证据，结论待确认。"
+    : status === "needs_confirmation"
+      ? "证据不足或尚未确认，请核验下方缺口。"
+      : "已找到依据，请核验适用范围与引用。";
+  if (!support || support.enabled === false) {
+    return { text: base, tone: status === "degraded" ? "danger" : "neutral",
+      verification: null };
+  }
+  const verification = support.verification || "unknown";
+  const tone = verification === "verified" ? "neutral" : status === "degraded" ? "danger" : "warning";
+  return { text: `${base}${supportVerificationNotice(support)}`, tone, verification };
+}
+
+/** 引用支撑校验的中文结论；未知值不得回显原始英文。 */
+export function supportVerificationNotice(support) {
+  const counts = supportCounts(support);
+  const verification = support?.verification;
+  const suffix = counts.unjudged > 0 && verification !== "verified"
+    ? `（另有 ${counts.unjudged} 条结论未能判定）`
+    : "";
+  const text = {
+    verified: "引用支撑校验通过：结论与引用一致。",
+    partially_supported: "部分结论有引用支撑，其余无法验证，请以引用原文为准。",
+    unsupported: "关键结论缺少引用支撑，不能作为已证实结论使用。",
+    unknown: "引用支撑校验未完成，结论暂无法验证。",
+    degraded: "引用支撑校验失败，本次结论无法验证。"
+  }[String(verification || "")] || "引用支撑校验状态未知，请人工核验引用原文。";
+  return text + suffix;
+}
+
+/** 校验的分母与计数，供页面展示“已判定/未知/未判定”。 */
+export function supportCounts(support) {
+  const toInt = (value) => (Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0);
+  const total = toInt(support?.claims_total);
+  const judged = toInt(support?.claims_judged);
+  return {
+    total,
+    judged,
+    unjudged: Math.max(toInt(support?.claims_unjudged), total - judged),
+    supported: toInt(support?.claims_supported),
+    unsupported: toInt(support?.claims_unsupported),
+    unknown: toInt(support?.claims_unknown),
+    coverage: typeof support?.claim_coverage === "number" ? support.claim_coverage : null,
+    truncated: Boolean(support?.coverage_truncated)
+  };
+}
+
+/** 覆盖率的中文展示；分母为 0 时显示“—”，不得伪装成 100%。 */
+export function coverageText(value) {
+  return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(0)}%` : "—";
+}
 export function askPayload(mode, query, target, scenario, includeHistory = false, historicalAsOf = "") {
   return { query: query.trim(), answer_mode: answerMode(mode), top_k: 8,
     ...(includeHistory ? { include_history: true, ...(historicalAsOf ? { historical_as_of: historicalAsOf } : {}) } : {}),

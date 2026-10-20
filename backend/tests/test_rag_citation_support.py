@@ -225,7 +225,12 @@ def test_citations_without_a_verdict_are_marked_unknown(db, monkeypatch):
     assert result["unknown_count"] == 1
 
 
-def test_grounded_answer_exposes_citation_support_only_when_enabled(db, monkeypatch):
+def test_unsupported_citation_downgrades_the_answer_instead_of_staying_grounded(db, monkeypatch):
+    """⑤: a legal citation id is not proof of support — an unsupported verdict must downgrade.
+
+    This replaces the pre-B-package assertion ``answer_status == "grounded"``, which recorded the
+    defect: the judge verdict was merely attached to the payload and never influenced the status.
+    """
     settings = get_settings()
     monkeypatch.setattr(settings, "citation_support_check", "judge", raising=False)
     service = _VerdictService(
@@ -252,9 +257,12 @@ def test_grounded_answer_exposes_citation_support_only_when_enabled(db, monkeypa
     assert support["enabled"] is True
     assert support["verdicts"][0]["verdict"] == "unsupported"
     assert support["unsupported_ratio"] == 1.0
-    # A suspicious citation is reported, not silently promoted to a failure status.
-    assert result["answer_status"] == "grounded"
-
+    # B 包新契约：引用不支持关键结论时，不得继续以 grounded / high 呈现为已证实。
+    assert result["answer_status"] == "needs_confirmation"
+    assert result["answer_status"] != "grounded"
+    assert result["confidence_level"] == "low"
+    # 依据不丢：引用仍然保留可定位。
+    assert result["citations"] and result["citations"][0]["knowledge_unit_id"] == 1
 
 # --------------------------------------------------------------------------- degradation
 

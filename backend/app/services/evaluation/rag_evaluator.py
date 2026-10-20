@@ -143,11 +143,12 @@ async def run_evaluation(db, run):
     })
     run.retrieval_config_json = config
     db.commit()
-
     metrics = []
     failed_query_count = 0
     degraded_query_count = 0
     total_token_usage = 0
+    # B 包：引用支撑的分母与计数（空列表 → 汇总时分母为 0，而不是满分）。
+    citation_support_metrics: list[dict] = []
     for case in cases:
         started = time.perf_counter()
         try:
@@ -225,6 +226,11 @@ async def run_evaluation(db, run):
             # call is made, no key is added, and every existing metric keeps its exact value.
             judge_metrics: dict = {}
             judge_metadata: dict = {}
+            # B 包：引用支撑结果必须进入逐条元数据（无论 ⑧ 忠实性裁判是否开启），
+            # 否则“引用不支持”在评测结果里根本不可见，只能被当成正常生成。
+            case_support = answer.get("citation_support")
+            if case_support is not None:
+                judge_metadata["citation_support"] = case_support
             if settings.ragas_judge_enabled:
                 judgement = await judge_faithfulness(
                     db,
@@ -244,6 +250,26 @@ async def run_evaluation(db, run):
                     "faithfulness": judgement,
                     "citation_support": answer.get("citation_support"),
                 }
+            else:
+                judge_metadata = {
+                    "citation_support": case_support,
+                } if case_support is not None else {}
+            if case_support is not None:
+                support_metrics = {
+                    "citation_support_unsupported_count": float(
+                        case_support.get("claims_unsupported")
+                        or case_support.get("unsupported_count")
+                        or 0
+                    ),
+                    "citation_support_claim_coverage": float(
+                        case_support.get("claim_coverage") or 0.0
+                    ),
+                    "citation_support_judged": float(
+                        1.0 if case_support.get("judged") else 0.0
+                    ),
+                }
+                judge_metrics = {**judge_metrics, **support_metrics}
+                citation_support_metrics.append(support_metrics)
             execution_metadata = _merge_execution_metadata(answer, answer_status)
             execution_metadata.update(judge_metadata)
             db.add(RagEvaluationResult(
@@ -372,6 +398,20 @@ async def run_evaluation(db, run):
         "indexing_throughput_chunks_per_second": _indexing_throughput(active_index),
         "token_usage_total": total_token_usage,
     }
+    if citation_support_metrics:
+        # B 包：开关开启时必须发布分母。“未发现不支持”只有在分母明确时才有意义。
+        summary_metrics["citation_support_denominator"] = len(citation_support_metrics)
+        summary_metrics["citation_support_unsupported_count"] = sum(
+            item["citation_support_unsupported_count"] for item in citation_support_metrics)
+        summary_metrics["citation_support_claim_coverage"] = round(
+            sum(item["citation_support_claim_coverage"] for item in citation_support_metrics)
+            / len(citation_support_metrics), 4)
+        summary_metrics["metric_notes"] = {
+            **summary_metrics["metric_notes"],
+            "citation_support": (
+                "引用支撑：claim_coverage 为裁判实际打分的主张占比；"
+                "覆盖率不足时不得视为已验证"),
+        }
     if settings.ragas_judge_enabled:
         # ⑧: faithfulness is averaged over the answers the judge actually scored; the count is
         # published next to it so a fully degraded judgement run cannot look like a clean 0.

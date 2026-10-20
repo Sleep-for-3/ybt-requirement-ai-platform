@@ -9,3 +9,8 @@ export function viewerFormat(type:string): "pdf"|"grid"|"text"|"blocks";
 export function ownedBlobUrl(blob:Blob): {url:string;dispose():void};
 export function evidenceTarget(c:KnowledgeCitation,projectId:number): {kind:"document";documentId?:number;unitId?:number;versionId?:number;locator:KnowledgeLocator}|{kind:"entity";path:string}|null;
 export function askErrorMessage(error: unknown): string;
+export type AnswerNotice = { text: string; tone: "neutral"|"warning"|"danger"; verification: string|null };
+export function answerStatusNotice(result: { answer_status?: string; citation_support?: Record<string, unknown>|null }|null|undefined): AnswerNotice;
+export function supportVerificationNotice(support: Record<string, unknown>|null|undefined): string;
+export function supportCounts(support: Record<string, unknown>|null|undefined): { total:number; judged:number; unjudged:number; supported:number; unsupported:number; unknown:number; coverage:number|null; truncated:boolean };
+export function coverageText(value: number|null|undefined): string;

@@ -1,0 +1,919 @@
+{
+  "budget": {
+    "benchmark_gateway_calls_after": 71,
+    "benchmark_gateway_calls_before": 71,
+    "note": "harness 自身 token 与平台测试 token 分开统计，两者均未计入真实模型费用",
+    "planning_hours": 8,
+    "real_model_calls": 0
+  },
+  "code": {
+    "baseline_head": "353420dc9f2bd6c8040e18769c4db9138aa13bdc",
+    "baseline_worktree": "..\\_baseline-353420d (detached worktree, same SHA)",
+    "branch": "dsh/banking-semantic-agent-v2",
+    "head": "353420dc9f2bd6c8040e18769c4db9138aa13bdc",
+    "worktree_dirty": true
+  },
+  "dataset": {
+    "by_family": {
+      "agent_state_chain": 18,
+      "citation_not_supporting": 20,
+      "citation_support_boundary": 17,
+      "field_semantics": 18,
+      "rerank_long_context": 20,
+      "version_and_scope": 18
+    },
+    "case_count": 111,
+    "digest": "5ed97aed0bd017cc275a6a30a1c97c2afcaa0e5052071c41fe4edec9adaa7cac",
+    "families_complete": true,
+    "harness_digest": "f302d5bf59b71a054dd573d914462ab1aa9838793aeac2b996c62e38cc3bd9e5",
+    "provenance": "全部为合成案例（synthetic=True, provenance=synthetic*），不含业务数据",
+    "schema": "overnight-benchmark-v1",
+    "seed_group_count": 60,
+    "split_digests": {
+      "dev": "a354cf236ff2bfccbe0c9a68b12a7dab65259ef5eb727c7b0c7b9072493b99b2",
+      "holdout": "b913f8bdf8b1514ad0c69354ff70dbee3ae410266f28ee18fb54cc57b90c0a1d"
+    },
+    "split_sizes": {
+      "dev": 88,
+      "holdout": 23
+    }
+  },
+  "evidence_classes": {
+    "deterministic_or_mock_verified": {
+      "benchmark_after": {
+        "by_family": {
+          "agent_state_chain": {
+            "executed": 18,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 18,
+            "total": 18
+          },
+          "citation_not_supporting": {
+            "executed": 20,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 20,
+            "total": 20
+          },
+          "citation_support_boundary": {
+            "executed": 17,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 17,
+            "total": 17
+          },
+          "field_semantics": {
+            "executed": 18,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 18,
+            "total": 18
+          },
+          "rerank_long_context": {
+            "executed": 20,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 20,
+            "total": 20
+          },
+          "version_and_scope": {
+            "executed": 18,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 18,
+            "total": 18
+          }
+        },
+        "case_count": 111,
+        "executed_count": 111,
+        "failed_count": 0,
+        "failures": [],
+        "gateway_calls_total": 71,
+        "latency_ms_total": 2355,
+        "not_run": [],
+        "not_run_count": 0,
+        "pass_rate_by_family": {
+          "agent_state_chain": 1.0,
+          "citation_not_supporting": 1.0,
+          "citation_support_boundary": 1.0,
+          "field_semantics": 1.0,
+          "rerank_long_context": 1.0,
+          "version_and_scope": 1.0
+        },
+        "pass_rate_executed": 1.0,
+        "pass_rate_over_corpus": 1.0,
+        "passed_count": 111
+      },
+      "benchmark_before": {
+        "by_family": {
+          "agent_state_chain": {
+            "executed": 18,
+            "failed": 0,
+            "not_run": 0,
+            "passed": 18,
+            "total": 18
+          },
+          "citation_not_supporting": {
+            "executed": 20,
+            "failed": 11,
+            "not_run": 0,
+            "passed": 9,
+            "total": 20
+          },
+          "citation_support_boundary": {
+            "executed": 17,
+            "failed": 1,
+            "not_run": 0,
+            "passed": 16,
+            "total": 17
+          },
+          "field_semantics": {
+            "executed": 18,
+            "failed": 9,
+            "not_run": 0,
+            "passed": 9,
+            "total": 18
+          },
+          "rerank_long_context": {
+            "executed": 20,
+            "failed": 20,
+            "not_run": 0,
+            "passed": 0,
+            "total": 20
+          },
+          "version_and_scope": {
+            "executed": 18,
+            "failed": 6,
+            "not_run": 0,
+            "passed": 12,
+            "total": 18
+          }
+        },
+        "case_count": 111,
+        "executed_count": 111,
+        "failed_count": 47,
+        "failures": [
+          {
+            "case_id": "C1-A1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-B1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-C1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-C2",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-D1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-E1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-F1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-G1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-H1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-I1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C1-J1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C2-J1",
+            "failures": [],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-A1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-B1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-C1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-D1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-E1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-F1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-G1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-H1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C3-I1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C4-A1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-A2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-B1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-B2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-C1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15, 20]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-C2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15, 20]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-D1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-D2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-E1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-E2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-F1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-F2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-G1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-G2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-H1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-H2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-I1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-I2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-J1",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C4-J2",
+            "failures": [
+              "tail_ranks_not_model_evaluated:[8, 15]"
+            ],
+            "forbidden_hits": []
+          },
+          {
+            "case_id": "C5-A1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C5-B1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C5-C1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C5-D1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C5-E1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          },
+          {
+            "case_id": "C5-H1",
+            "failures": [
+              "answer_status:grounded not in ['needs_confirmation', 'partially_supported']"
+            ],
+            "forbidden_hits": [
+              "answer_status=grounded"
+            ]
+          }
+        ],
+        "gateway_calls_total": 71,
+        "latency_ms_total": 2295,
+        "not_run": [],
+        "not_run_count": 0,
+        "pass_rate_by_family": {
+          "agent_state_chain": 1.0,
+          "citation_not_supporting": 0.45,
+          "citation_support_boundary": 0.9412,
+          "field_semantics": 0.5,
+          "rerank_long_context": 0.0,
+          "version_and_scope": 0.6667
+        },
+        "pass_rate_executed": 0.5766,
+        "pass_rate_over_corpus": 0.5766,
+        "passed_count": 64
+      },
+      "citation_judgement_coverage": {
+        "C1-A1": {
+          "answer_status": "needs_confirmation",
+          "degraded": false,
+          "failures": [],
+          "judged_count": 1,
+          "supported": 0,
+          "unknown": 0,
+          "unsupported": 1,
+          "verdict": "pass"
+        },
+        "C1-H2": {
+          "answer_status": "grounded",
+          "degraded": false,
+          "failures": [],
+          "judged_count": 1,
+          "supported": 1,
+          "unknown": 0,
+          "unsupported": 0,
+          "verdict": "pass"
+        },
+        "C2-F1": {
+          "answer_status": "needs_confirmation",
+          "degraded": true,
+          "failures": [],
+          "judged_count": 1,
+          "supported": 0,
+          "unknown": 1,
+          "unsupported": 0,
+          "verdict": "pass"
+        },
+        "C2-G1": {
+          "answer_status": "needs_confirmation",
+          "degraded": false,
+          "failures": [],
+          "judged_count": 1,
+          "supported": 1,
+          "unknown": 0,
+          "unsupported": 0,
+          "verdict": "pass"
+        },
+        "C3-A2": {
+          "answer_status": "grounded",
+          "degraded": false,
+          "failures": [],
+          "judged_count": 1,
+          "supported": 1,
+          "unknown": 0,
+          "unsupported": 0,
+          "verdict": "pass"
+        },
+        "C5-A2": {
+          "answer_status": "grounded",
+          "degraded": false,
+          "failures": [],
+          "judged_count": 1,
+          "supported": 1,
+          "unknown": 0,
+          "unsupported": 0,
+          "verdict": "pass"
+        }
+      },
+      "comparison": {
+        "after_pass_rate": 1.0,
+        "before_pass_rate": 0.5766,
+        "comparable": true,
+        "dataset_digest_matches": true,
+        "families": {
+          "agent_state_chain": {
+            "after": "18/18",
+            "before": "18/18",
+            "passed_delta": 0
+          },
+          "citation_not_supporting": {
+            "after": "20/20",
+            "before": "9/20",
+            "passed_delta": 11
+          },
+          "citation_support_boundary": {
+            "after": "17/17",
+            "before": "16/17",
+            "passed_delta": 1
+          },
+          "field_semantics": {
+            "after": "18/18",
+            "before": "9/18",
+            "passed_delta": 9
+          },
+          "rerank_long_context": {
+            "after": "20/20",
+            "before": "0/20",
+            "passed_delta": 20
+          },
+          "version_and_scope": {
+            "after": "18/18",
+            "before": "12/18",
+            "passed_delta": 6
+          }
+        },
+        "fixed": [
+          "C1-A1",
+          "C1-B1",
+          "C1-C1",
+          "C1-C2",
+          "C1-D1",
+          "C1-E1",
+          "C1-F1",
+          "C1-G1",
+          "C1-H1",
+          "C1-I1",
+          "C1-J1",
+          "C2-J1",
+          "C3-A1",
+          "C3-B1",
+          "C3-C1",
+          "C3-D1",
+          "C3-E1",
+          "C3-F1",
+          "C3-G1",
+          "C3-H1",
+          "C3-I1",
+          "C4-A1",
+          "C4-A2",
+          "C4-B1",
+          "C4-B2",
+          "C4-C1",
+          "C4-C2",
+          "C4-D1",
+          "C4-D2",
+          "C4-E1",
+          "C4-E2",
+          "C4-F1",
+          "C4-F2",
+          "C4-G1",
+          "C4-G2",
+          "C4-H1",
+          "C4-H2",
+          "C4-I1",
+          "C4-I2",
+          "C4-J1",
+          "C4-J2",
+          "C5-A1",
+          "C5-B1",
+          "C5-C1",
+          "C5-D1",
+          "C5-E1",
+          "C5-H1"
+        ],
+        "fixed_count": 47,
+        "harness_digest_matches": true,
+        "regressed": [],
+        "regressed_count": 0,
+        "still_failing": [],
+        "still_failing_count": 0
+      },
+      "description": "跑通真实服务入口，仅把模型边界替换为确定性桩；证明协议、状态机与预算机制，不证明真实模型效果",
+      "real_model_fixes": [
+        "claims_unknown counted unjudged claims -> now counted over judged claims only",
+        "claim_coverage exceeded 1.0 (observed 1.25/2.5) -> citation-level mode reports 0.0 with explicit dimension",
+        "citation-level judgement reported verified -> now at most partially_supported/unsupported"
+      ],
+      "rerank_four_facts": {
+        "C4-A1": {
+          "after": {
+            "admitted": 15,
+            "batch_count": 5,
+            "coverage_label": "full",
+            "coverage_mismatch": null,
+            "model_evaluated": 15,
+            "planner": "batched",
+            "recalled": 15,
+            "returned": 15,
+            "tail_ranks_not_model_evaluated": []
+          },
+          "before": {
+            "admitted": 3,
+            "model_evaluated": 3,
+            "planner": "single_prompt_trim",
+            "recalled": 15,
+            "returned": 3,
+            "tail_ranks_not_model_evaluated": [
+              8,
+              15
+            ]
+          }
+        },
+        "C4-B1": {
+          "after": {
+            "admitted": 15,
+            "batch_count": 5,
+            "coverage_label": "full",
+            "coverage_mismatch": null,
+            "model_evaluated": 15,
+            "planner": "batched",
+            "recalled": 15,
+            "returned": 15,
+            "tail_ranks_not_model_evaluated": []
+          },
+          "before": {
+            "admitted": 3,
+            "model_evaluated": 3,
+            "planner": "single_prompt_trim",
+            "recalled": 15,
+            "returned": 3,
+            "tail_ranks_not_model_evaluated": [
+              8,
+              15
+            ]
+          }
+        },
+        "C4-C1": {
+          "after": {
+            "admitted": 20,
+            "batch_count": 7,
+            "coverage_label": "full",
+            "coverage_mismatch": null,
+            "model_evaluated": 20,
+            "planner": "batched",
+            "recalled": 20,
+            "returned": 20,
+            "tail_ranks_not_model_evaluated": []
+          },
+          "before": {
+            "admitted": 3,
+            "model_evaluated": 3,
+            "planner": "single_prompt_trim",
+            "recalled": 20,
+            "returned": 3,
+            "tail_ranks_not_model_evaluated": [
+              8,
+              15,
+              20
+            ]
+          }
+        }
+      },
+      "targeted_suites": []
+    },
+    "real_component_verified": {
+      "browser": {
+        "backend": "FastAPI uvicorn :8000",
+        "checks_total": 16,
+        "database": "PostgreSQL",
+        "engine": "system Google Chrome via Playwright channel=chrome (headless)",
+        "failed": 0,
+        "frontend": "Next.js dev server :3000",
+        "passed": 16,
+        "results_file": "docs/ux/acceptance/nightly-20261019/results.json",
+        "screenshots": [
+          "01-ask-page.png",
+          "02-workspace.png"
+        ]
+      },
+      "description": "触及真实组件的验证结果",
+      "full_backend_regression": {
+        "after": {
+          "duration_s": 1632.63,
+          "failed": 0,
+          "label": "改后（当前 worktree）",
+          "log": "_runs/full-backend-after-final.log",
+          "passed": 1851,
+          "skipped": 1
+        },
+        "before": {
+          "duration_s": 2140.3,
+          "failed": 0,
+          "label": "改前 353420d（detached worktree）",
+          "log": "_runs/baseline-full-backend-353420d.log",
+          "passed": 1816,
+          "skipped": 1
+        },
+        "command": "pytest tests -q -p no:randomly",
+        "delta": {
+          "failed": 0,
+          "note": "新增 35 条测试：A 包 11 + B 包 11 + C 包 13；既有 1816 条无一退化",
+          "passed": 35,
+          "skipped": 0
+        },
+        "environment": "AUTH_MODE=optional, TASK_QUEUE_PROVIDER=inline, PYTHONIOENCODING=utf-8, STORAGE_DIR=<abs dev_storage_local>",
+        "provenance": "两轮均为 SQLite + Mock provider；改前在 detached worktree 跑同一基线 SHA"
+      },
+      "postgres_redis_celery": "本机 5432/6379 监听中，但本轮未对队列/持久化做真实组件验证",
+      "real_catalog_via_orm": "rerank 家族在真实 SQLite catalog 上跑通 recall + envelope + measure_batch_capacity + rerank_fields，并真实复核 resolve_skill 的内容哈希/依赖哈希/作用域"
+    },
+    "real_model_effect_verified": {
+      "call_count": 6,
+      "citation": {
+        "audit_calls": 4,
+        "audit_tokens": 16157,
+        "executed": 4,
+        "observed": {
+          "answered": 4,
+          "degraded": 0,
+          "grounded": 0,
+          "judge_used_real_model": 4,
+          "needs_confirmation": 4,
+          "verifications": [
+            "partially_supported",
+            "unsupported"
+          ],
+          "with_citations": 4
+        },
+        "requested": 4
+      },
+      "description": "真实模型效果（2026-10-20 补齐）",
+      "detail_doc": "docs/handoff/overnight-20261019/real-model-and-browser-verification.md",
+      "not_proven": "真实 Top1/Top3 准确率与引用蕴含准确率（缺人工标注真值，无法计算）",
+      "proven": "模型真被调用、候选真被比较、unsupported 真会降级；token 与延迟来自 ModelCallLog",
+      "provider": {
+        "base_url_env": "LLM_BASE_URL",
+        "model": "deepseek-v4-flash",
+        "profile_id": 4,
+        "provider_type": "openai_compatible"
+      },
+      "rerank": {
+        "audit_calls": 2,
+        "audit_tokens": 20797,
+        "executed": 2,
+        "observed": {
+          "errors": [],
+          "fallback_only": 0,
+          "full_coverage": 2,
+          "model_rerank_applied": 2,
+          "partial_coverage": 0,
+          "real_model_names": [
+            "deepseek-v4-flash"
+          ]
+        },
+        "requested": 2
+      },
+      "switch_restored": "CITATION_SUPPORT_CHECK 已恢复出厂默认 off",
+      "verified": true
+    },
+    "static_confirmed": {
+      "description": "从代码与配置读出的静态事实，未运行任何被测路径",
+      "families_declared": [
+        "citation_not_supporting",
+        "citation_support_boundary",
+        "field_semantics",
+        "rerank_long_context",
+        "version_and_scope",
+        "agent_state_chain"
+      ],
+      "families_executable": [
+        "citation_not_supporting",
+        "citation_support_boundary",
+        "field_semantics",
+        "version_and_scope",
+        "agent_state_chain"
+      ],
+      "settings_defaults": {
+        "auth_mode": "optional",
+        "citation_support_check_default": "off",
+        "field_rerank_timeout_seconds_default": 0.0,
+        "llm_provider": "openai_compatible",
+        "note": "以上为当前生效值；benchmark 在进程内单独切换到 judge 路径，不改默认配置",
+        "ragas_judge_enabled_default": false,
+        "reranker_enabled_default": false,
+        "task_queue_provider": "inline",
+        "vector_store_provider": "milvus"
+      }
+    }
+  },
+  "generated_at": "2026-10-20T00:43:56.523079+00:00"
+}

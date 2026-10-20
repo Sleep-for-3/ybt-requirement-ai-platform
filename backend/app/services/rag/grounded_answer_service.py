@@ -16,7 +16,14 @@ from app.services.retrieval import HybridRetriever
 from app.services.semantic_index.reindex import build_corpus_snapshot
 from app.services.semantic_index.versioning import get_active_index_version
 
-from .citation_validator import check_citation_support, validate_citations
+from .citation_support import split_claims_all
+from .citation_validator import (
+    DEGRADED_VERIFICATION,
+    VERIFIED,
+    check_citation_support,
+    claim_support_summary,
+    validate_citations,
+)
 from app.services.knowledge_evidence import document_citation, evidence_runtime
 
 
@@ -145,36 +152,136 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
     )
     # ⑤: opt-in entailment check. The switch defaults to "off", in which case nothing is added
     # and the returned payload stays byte-for-byte the pre-existing shape.
+    #
+    # B 包缺陷修复：judge 结论不再只是"附加"。引用 ID 合法只能证明**引用可解析**，不能证明它
+    # 支撑了结论；因此主张级判定必须参与 answer_status / confidence_level / supported_claims /
+    # trustworthiness。注意这里**不新增** answer_status 取值：可精细语义放在
+    # citation_support.verification 中，状态机仍为 grounded / needs_confirmation / degraded。
+    claim_list = [*supported_claims, *unsupported_claims] or split_claims_all(answer)
     citation_support = None
+    claim_support = None
     if get_settings().citation_support_check == "judge":
+        # 只判定答案**实际引用**的知识单元：检索召回但从未被引用的证据与结论无关，
+        # 不给它判定既正常也正确，不能反过来把整体降级（那是惩罚多召回）。
         citation_support = await check_citation_support(
             db,
             citations,
             answer=answer,
+            claims=claim_list,
+            referenced_unit_ids=(
+                sorted(int(item) for item in referenced) if referenced else None),
+            # 已检测到冲突的证据也必须参与判定：冲突不得因“未被本轮答案引用”而静默归隐。
+            conflict_unit_ids=sorted({
+                int(item["knowledge_unit_id"])
+                for conflict in conflicts
+                for item in items[:10]
+                if f"knowledge-unit-{item['knowledge_unit_id']}" in (conflict.get("citation_ids") or [])
+            }) or None,
             project_id=project_id,
             confidentiality_levels=[_highest_confidentiality(items)],
         )
+        claim_support = claim_support_summary(citation_support)
     db.commit()
+    base_confidence = output.get("confidence_level") or (
+        "high" if items[0]["rerank_score"] >= 0.75 else "medium")
+    if claim_support is not None:
+        # 拆分“已支持部分 / 待核实部分”：已被裁判确认支持的断言才算 supported_claims，
+        # 未被确认（unsupported + unknown）的全部进入 unsupported_claims，但引用一律保留。
+        supported_claims = list(claim_support["supported_claims"])
+        unsupported_claims = _merge_unique(
+            unsupported_claims,
+            claim_support["unsupported_claims"],
+            claim_support["unknown_claims"],
+        )
+    answer_status = _answer_status(
+        invalid_output=invalid_output, claim_support=claim_support, cited=bool(citations))
+    confidence_level = _confidence_level(
+        invalid_output=invalid_output,
+        claim_support=claim_support,
+        generated=base_confidence,
+    )
     result = {
         "answer": answer,
-        "confidence_level": "low" if invalid_output else (output.get("confidence_level")
-        or ("high" if items[0]["rerank_score"] >= 0.75 else "medium")),
+        "confidence_level": confidence_level,
         "citations": citations,
         "supported_claims": [] if invalid_output else (supported_claims or [answer]),
         "unsupported_claims": unsupported_claims,
         "open_questions": open_questions
         or ["来源字段和适用场景仍需业务与科技人员确认。"],
         "retrieval_log_id": retrieval_log.id,
-        "answer_status": "needs_confirmation" if invalid_output else "grounded",
-        "trustworthiness": _trust(items, citations, conflicts, index_freshness,
-            "normal" if not invalid_output else "needs_confirmation"),
+        "answer_status": answer_status,
+        "trustworthiness": _trust(
+            items, citations, conflicts, index_freshness,
+            "normal" if not invalid_output else "needs_confirmation",
+            claim_support=claim_support,
+        ),
         "index_freshness": index_freshness,
         "conflicts": conflicts,
         "execution_metadata": execution_metadata,
     }
+    if claim_support is not None:
+        result["unverified_claims"] = _merge_unique(
+            claim_support["unsupported_claims"], claim_support["unknown_claims"])
     if citation_support is not None:
         result["citation_support"] = citation_support
     return result
+
+
+def _merge_unique(*groups) -> list[str]:
+    """稳定去重合并，保留首次出现顺序（断言顺序对页面展示有意义）。"""
+    merged: list[str] = []
+    for group in groups:
+        for item in group or []:
+            text = str(item)
+            if text and text not in merged:
+                merged.append(text)
+    return merged
+
+
+def _answer_status(*, invalid_output: bool, claim_support, cited: bool) -> str:
+    """把引用支撑结论收敛到既有 answer_status 状态机。
+
+    * 开关关闭（claim_support is None）或校验完全通过 → 维持 grounded；
+    * 存在未支撑/未判断/覆盖不足 → needs_confirmation（不新增状态值）；
+    * 裁判本身失败且没有可用引用 → degraded（本就无依据可用）。
+    """
+    if invalid_output:
+        return "needs_confirmation"
+    if claim_support is None:
+        return "grounded"
+    verification = claim_support.get("verification")
+    if verification == VERIFIED:
+        return "grounded"
+    if verification == DEGRADED_VERIFICATION and not cited:
+        return "degraded"
+    return "needs_confirmation"
+
+
+def _confidence_level(*, invalid_output: bool, claim_support, generated: str) -> str:
+    if invalid_output:
+        return "low"
+    if claim_support is None or claim_support.get("verification") == VERIFIED:
+        return generated
+    return "low"
+
+
+def _support_model_status(claim_support) -> str:
+    """把主张级事实映射为可信性模型的"证据状态"，供 _trust 决定等级上限。"""
+    if claim_support is None:
+        return "normal"
+    verification = claim_support.get("verification")
+    if verification == DEGRADED_VERIFICATION:
+        return "degraded"
+    if int(claim_support.get("unsupported_count") or 0) > 0 or verification == "unsupported":
+        return "unsupported_claims"
+    if (
+        int(claim_support.get("unknown_count") or 0) > 0
+        or int(claim_support.get("unjudged_count") or 0) > 0
+        or float(claim_support.get("coverage") or 0.0) < 1.0
+        or verification not in (None, VERIFIED)
+    ):
+        return "partial_support"
+    return "normal"
 
 
 def _degraded_answer(
@@ -231,20 +338,31 @@ def _evidence_conflicts(items):
             groups.setdefault(str(key), []).append(item)
     conflicts = []
     for key, rows in groups.items():
-        hashes = {row.get("content_hash") for row in rows}
-        if len(rows) > 1 and len(hashes) > 1:
+        # 旧实现只比 content_hash；但检索项未必带 content_hash（自有文档以外的证据、评测快照、
+        # 手工构造项都可能没有），此时全为 None → 集合只有 1 个元素，两份相互矛盾的高权威
+        # 资料会被误判为“口径一致”而静默合并。改为：优先比 hash，缺 hash 时退化为比正文。
+        signatures = {
+            row.get("content_hash") or str(row.get("content") or "")
+            for row in rows
+        }
+        if len(rows) > 1 and len(signatures) > 1:
             conflicts.append({"topic": key, "message": "多份当前高权威资料口径不一致，需要人工确认。",
                 "citation_ids": [f"knowledge-unit-{row['knowledge_unit_id']}" for row in rows]})
     return conflicts
 
 
-def _trust(items, citations, conflicts, index_freshness, model_status):
+def _trust(items, citations, conflicts, index_freshness, model_status, claim_support=None):
     rank = max((item.get("authority_rank", 0) for item in items), default=0)
     located = bool(citations) and all((citation.get("locator") or {}).get("block_id") for citation in citations)
     formal_index_state = index_freshness.get("formal_index_current")
     index_current = formal_index_state is True
-    if model_status == "degraded" or conflicts or any(item.get("historical") for item in items):
+    # B 包：主张级判定参与可信性。没有任何一条断言被确认支持时不得给出 A/B；
+    # 仅“部分未确认”时最多 C；裁判失败/存在矛盾时 D。
+    support_status = _support_model_status(claim_support)
+    if model_status == "degraded" or support_status in {"degraded", "unsupported_claims"} or conflicts or any(item.get("historical") for item in items):
         grade = "D"
+    elif support_status == "partial_support":
+        grade = "C" if citations else "D"
     elif rank >= 6 and located and index_current:
         grade = "A"
     elif rank >= 4 and located:
@@ -255,14 +373,22 @@ def _trust(items, citations, conflicts, index_freshness, model_status):
               "B": "已审核资料，并有可定位依据",
               "C": "业务沉淀或候选证据，需要人工确认",
               "D": "历史、冲突、证据不足或模型降级"}
-    return {"grade": grade, "reason": labels[grade], "dimensions": {
+    dimensions = {
         "authority": {"level": rank, "label": "监管正式文件" if rank >= 6 else "监管答疑" if rank >= 5 else "已审核行内资料" if rank >= 3 else "业务或技术沉淀"},
         "version_validity": {"ok": bool(items), "label": "当前生效且未失效" if items else "无有效版本"},
         "evidence_location": {"ok": located, "label": "证据定位完整" if located else "证据定位不完整"},
         "consistency": {"ok": not conflicts, "label": "未发现冲突" if not conflicts else "存在待确认冲突"},
         "index_freshness": {"ok": index_current, "label": "正式索引已覆盖" if index_current else "未启用正式索引" if formal_index_state is None else "正式索引待更新"},
-        "model_status": {"ok": model_status == "normal", "label": "模型正常" if model_status == "normal" else "模型降级或输出待确认"}}}
-
+        "model_status": {"ok": model_status == "normal", "label": "模型正常" if model_status == "normal" else "模型降级或输出待确认"},
+    }
+    if claim_support is not None:
+        verification = claim_support.get("verification")
+        dimensions["support_verification"] = {
+            "ok": verification == VERIFIED,
+            "label": _VERIFICATION_LABELS.get(
+                str(verification), "引用支撑校验未完成，结论无法验证"),
+        }
+    return {"grade": grade, "reason": labels[grade], "dimensions": dimensions}
 
 def _empty_trust():
     return {"grade": "D", "reason": "证据不足，需要人工确认", "dimensions": {
@@ -270,6 +396,14 @@ def _empty_trust():
         "evidence_location": {"ok": False, "label": "无证据定位"}, "consistency": {"ok": True, "label": "无可比较证据"},
         "index_freshness": {"ok": False, "label": "无可用索引证据"}, "model_status": {"ok": False, "label": "未调用模型"}}}
 
+
+_VERIFICATION_LABELS = {
+    "verified": "引用支撑校验通过，结论有据可查",
+    "partially_supported": "部分结论有依据，其余无法验证",
+    "unsupported": "关键结论缺少引用支撑",
+    "unknown": "引用支撑校验未完成，结论无法验证",
+    "degraded": "引用支撑校验失败，结论无法验证",
+}
 
 def _string_list(value) -> list[str]:
     if isinstance(value, list):

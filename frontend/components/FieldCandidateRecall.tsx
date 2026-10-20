@@ -10,7 +10,10 @@ type Candidate = {
   schema_name: string; table_name: string; column_name: string;
   column_comment: string | null; table_comment: string | null; data_type: string | null;
   nullable: boolean | null; source_version: string; score: number; rationale: string;
-  recall_score?: number; recall_rationale?: string; evidence_refs?: string[]; rank_source?: "model" | "recall";
+  recall_score?: number; recall_rationale?: string; evidence_refs?: string[];
+  // ``batch_screened`` won a batch but not the decisive finalist call; ``recall_unevaluated``
+  // never reached any model comparison.  Both are honest states, not "model ranked".
+  rank_source?: "model" | "batch_screened" | "recall_unevaluated" | "recall";
 };
 type Query = { project_id: number; target_field_id: number; query: string; top_k: number; datasource_ids: number[] };
 type Recall = { context_hash: string; candidates: Candidate[]; scanned_count: number; returned_count: number };
@@ -34,6 +37,20 @@ const EXECUTION_LABELS: Record<string, string> = {
 function executionLabel(kind?: string) {
   if (!kind) return "未记录";
   return EXECUTION_LABELS[kind] || "其他执行方式";
+}
+
+/**
+ * How a candidate's position was produced.
+ *
+ * ``batch_screened`` and ``recall_unevaluated`` are deliberately *not* called "模型排序分":
+ * the candidate either lost the decisive comparison or never entered one, and showing it as
+ * model-ranked would overstate what the platform actually did.
+ */
+function rankSourceLabel(source?: Candidate["rank_source"]) {
+  if (source === "model") return "模型排序分";
+  if (source === "batch_screened") return "批次内通过、未进决赛的分（非模型排序分）";
+  if (source === "recall_unevaluated") return "未经模型评估的召回排序分";
+  return "召回排序分";
 }
 
 function rankingLabel(result: Rerank | null) {
@@ -163,7 +180,11 @@ export function FieldCandidateRecall({ projectId, fieldId, scenarioId, onPrepare
       <div className="grid gap-3 lg:grid-cols-2">{displayed.map(item => <article key={item.candidate_id} className="rounded border border-line p-3 text-xs">
         <h3 className="break-all font-semibold">{[item.database_name, item.schema_name, item.table_name, item.column_name].filter(Boolean).join(".")}</h3>
         <p className="mt-1">{item.column_comment || "无字段说明"} · {item.data_type || "类型未记录"} · {item.nullable === true ? "可空" : item.nullable === false ? "非空" : "空值约束未知"}</p>
-        <p className="mt-1">{item.rank_source === "model" ? "模型排序分" : "召回排序分"} {item.score.toFixed(3)}（非置信度） · {item.rationale}</p>
+        <p className="mt-1">{rankSourceLabel(item.rank_source)} {item.score.toFixed(3)}（非置信度） · {item.rationale}</p>
+        {/* A candidate the model never compared must never read as "model ranked". */}
+        {item.rank_source && item.rank_source !== "model" && item.rank_source !== "recall" && (
+          <p className="mt-1">未经模型比较，仍为召回顺序，需人工核验。</p>
+        )}
         {item.rank_source === "model" && <p className="mt-1">原始召回排序分 {item.recall_score?.toFixed(3)} · 引用 {item.evidence_refs?.length ? item.evidence_refs.join("、") : "无"}</p>}
         <button className="button-secondary mt-2" disabled={busy || !scenarioId || prepared.includes(item.candidate_id)}
           onClick={() => void prepare(item.candidate_id)}>{prepared.includes(item.candidate_id) ? "已加入来源候选" : "加入来源候选"}</button>

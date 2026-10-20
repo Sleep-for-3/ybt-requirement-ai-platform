@@ -1,0 +1,110 @@
+{
+  "started_at": "2026-10-20T03:55:55.453Z",
+  "app": "http://127.0.0.1:3000",
+  "api": "http://127.0.0.1:8000/api",
+  "checks": [
+    {
+      "name": "workspace page renders",
+      "ok": true,
+      "detail": "title=一表通字段口径智能辅助平台"
+    },
+    {
+      "name": "ask page exposes the question box",
+      "ok": true,
+      "detail": "textareas=1"
+    },
+    {
+      "name": "real ask returns an answer",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "answer contract matches the active citation-support switch",
+      "ok": true,
+      "detail": "switch=judge, verification=partially_supported"
+    },
+    {
+      "name": "judge coverage denominators are coherent",
+      "ok": true,
+      "detail": "total=5 judged=0 dim=citation_level"
+    },
+    {
+      "name": "claim coverage never exceeds 1.0",
+      "ok": true,
+      "detail": "coverage=0"
+    },
+    {
+      "name": "real ask returns a usable answer",
+      "ok": true,
+      "detail": "answer_status=needs_confirmation"
+    },
+    {
+      "name": "page never claims \"already semantically verified\" while the switch is off",
+      "ok": true,
+      "detail": "no forbidden claim found"
+    },
+    {
+      "name": "page renders without a JavaScript crash after the real answer calls",
+      "ok": true,
+      "detail": "rendered 586 chars"
+    },
+    {
+      "name": "rerank endpoint answered",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "every returned candidate carries a rank_source",
+      "ok": true,
+      "detail": "15 candidates"
+    },
+    {
+      "name": "model-evaluated candidates are labelled as model ranking",
+      "ok": true,
+      "detail": "model=15"
+    },
+    {
+      "name": "unevaluated candidates are never labelled model ranking",
+      "ok": true,
+      "detail": "unevaluated=0"
+    },
+    {
+      "name": "coverage is reported for the caller",
+      "ok": true,
+      "detail": "coverage={\"recalled\":15,\"admitted\":15,\"model_evaluated\":15,\"returned\":15,\"unranked_ids\":[],\"coverage\":\"full\"}"
+    },
+    {
+      "name": "no unexpected console errors on visited pages",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no 404 on a page or API route exercised by this run",
+      "ok": true,
+      "detail": "0 unrelated 404(s), none on tested routes"
+    }
+  ],
+  "failed_responses": [],
+  "observed_switch": "judge",
+  "switch_on_probe": {
+    "status": 200,
+    "answer_status": "needs_confirmation",
+    "verification": "unsupported",
+    "claims_total": 1,
+    "claims_judged": 0,
+    "claims_unjudged": 1,
+    "claim_coverage": 0,
+    "claim_coverage_dimension": "citation_level",
+    "citation_coverage": 1,
+    "citation_unsupported": 5,
+    "citation_unknown": 0,
+    "judge_model": "deepseek-v4-flash"
+  },
+  "all_404_urls": [],
+  "finished_at": "2026-10-20T03:56:55.742Z",
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "passed": 16,
+  "failed": 0
+}

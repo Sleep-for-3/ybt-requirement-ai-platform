@@ -76,9 +76,18 @@ VERDICT_ALIASES = {
 #: Candidate container keys a judge payload may nest its verdict list under.
 VERDICT_CONTAINER_KEYS = ("verdicts", "results", "judgements", "judgments", "claims", "items")
 
-MAX_CLAIMS = 20
+#: Hard cap for one claim batch. A single judge call never sees more than this many claims, so a
+#: slow model cannot stall the answer on an unbounded prompt.
+MAX_CLAIMS_PER_CALL = 20
+#: Backwards-compatible alias: the historical single-call cap.
+MAX_CLAIMS = MAX_CLAIMS_PER_CALL
+#: How many claim batches one answer may spend. 3 x 20 = 60 claims are covered; anything beyond
+#: that is reported as *explicitly uncovered* rather than silently cut off.
+MAX_JUDGE_BATCHES = 3
 MAX_QUOTE_CHARS = 1200
 MAX_REASON_CHARS = 300
+#: Marker used when a verdict carries no usable key (neither claim_id nor citation_id).
+UNKEYED_VERDICT = "<unkeyed>"
 
 CITATION_SUPPORT_SYSTEM_PROMPT = (
     "你是银行一表通知识问答的引用蕴含校验裁判（[AI_SKILL_CITATION_SUPPORT_V1]）。"
@@ -157,11 +166,12 @@ def parse_judge_verdicts(payload: Any) -> list[dict]:
             if item.get(source_key) not in (None, ""):
                 verdict["claim"] = str(item[source_key])
                 break
+        if item.get("claim_id") not in (None, ""):
+            verdict["claim_id"] = str(item["claim_id"])
         if item.get("knowledge_unit_id") is not None:
             verdict["knowledge_unit_id"] = item["knowledge_unit_id"]
         verdicts.append(verdict)
     return verdicts
-
 
 def tally_verdicts(verdicts: list[dict]) -> dict:
     """Count supported/unsupported/unknown verdicts."""
@@ -186,6 +196,28 @@ def split_claims(text: str) -> list[str]:
         return []
     parts = (part.strip() for part in re.split(r"[。；;\n]+", str(text)))
     return [part for part in parts if part][:MAX_CLAIMS]
+
+
+
+def split_claims_all(text: str) -> list[str]:
+    """Split a whole answer into atomic claims **without truncation**.
+
+    The caller needs the real total to publish a coverage denominator: silently keeping the
+    first N claims is exactly the defect where an answer looks fully verified while its tail was
+    never judged. Punctuation is preserved so a supported claim can be shown verbatim.
+    """
+    if not text:
+        return []
+    parts = (part.strip() for part in re.split(r"(?<=[。；;])", str(text)))
+    return [part for part in parts if part]
+
+
+def claim_payloads(claims: list[str]) -> list[dict]:
+    """Give every claim a stable id so verdicts can never be aligned by position."""
+    return [
+        {"claim_id": f"claim-{index + 1}", "claim": str(text)}
+        for index, text in enumerate(claims)
+    ]
 
 
 def citation_evidence(citations: Any) -> list[dict]:
@@ -314,7 +346,6 @@ async def judge_faithfulness(
         result["skip_reason"] = "no_claims"
         return result
     result["claims_total"] = len(claim_list)
-
     user_prompt = json.dumps(
         {
             "answer": answer_text,

@@ -92,11 +92,11 @@ def test_the_differentiated_descriptor_shrinks_each_candidate(wide_env):
     assert 600 <= per_candidate <= 700, per_candidate
 
 
-def test_the_default_recall_snapshot_is_narrowed_instead_of_refused(wide_env):
-    """An ordinary ``top_k=20`` request must reach the model instead of failing on the budget."""
+def test_the_default_recall_snapshot_is_compared_in_batches_instead_of_refused(wide_env):
+    """An ordinary ``top_k=20`` request must reach the model for *every* candidate, not just a prefix."""
 
     admitted = len(wide_env["fitted"].facts)
-    assert admitted < TOP_K
+    assert admitted < TOP_K  # 单批仍然装不下 20 个
 
     response = submit_rerank(wide_env["client"], wide_env["query"], wide_env["baseline"])
 
@@ -105,11 +105,15 @@ def test_the_default_recall_snapshot_is_narrowed_instead_of_refused(wide_env):
     assert body["ranking_mode"] == "model_rerank"
     # Recall stays honest: the recall count is not rewritten to the admitted count.
     assert body["returned_count"] == TOP_K
-    assert len(body["candidates"]) == admitted
-    assert body["rerank"]["candidate_scope"] == {
-        "recalled": TOP_K, "admitted": admitted,
-        "dropped_for_context_budget": TOP_K - admitted, "reason": "model_context_budget"}
-
+    # 旧契约: 只返回 admitted 个。新契约: 全部召回都返回, 未评估的显式标记 —— 因为分批让全部
+    # 候选都进了模型比较, 没有了"丢尾"。
+    assert len(body["candidates"]) == TOP_K
+    coverage = body["rerank"]["coverage"]
+    assert coverage["recalled"] == coverage["returned"] == TOP_K
+    assert coverage["model_evaluated"] >= admitted
+    assert coverage["coverage"] in {"full", "partial"}
+    # 没有"丢尾"了：没有任何候选因预算被踢出（旧的 candidate_scope 语义）。
+    assert body["rerank"]["candidate_scope"] is None
 
 def test_the_admitted_set_keeps_the_recall_order_of_the_strongest_candidates(wide_env):
     """Dropping from the tail neither reorders nor promotes: admitted is a strict prefix of recall."""
@@ -133,6 +137,7 @@ def test_a_snapshot_that_already_fits_reports_no_reduction(wide_env):
     body = response.json()
     assert body["rerank"]["candidate_scope"] is None
     assert len(body["candidates"]) == 1
+    assert body["rerank"]["coverage"]["coverage"] == "full"
 
 
 def test_a_budget_that_cannot_hold_one_candidate_still_fails_loudly(control_env, monkeypatch):
