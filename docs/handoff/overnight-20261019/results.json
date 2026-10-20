@@ -707,6 +707,26 @@
         "still_failing": [],
         "still_failing_count": 0
       },
+      "d_package": {
+        "comparator_families_after": 36,
+        "comparator_families_before": 29,
+        "detail_doc": "docs/handoff/overnight-20261019/d-package-sql-semantic.md",
+        "new_dimensions": [
+          "group_by_changed",
+          "distinct_changed",
+          "union_mode_changed",
+          "having_changed",
+          "join_type_changed"
+        ],
+        "not_proven": "order_by/top_limit/cte 仍不可检；D 包未做真实模型验证（纯确定性比较器）",
+        "still_unsupported": [
+          "order_by",
+          "top_limit",
+          "cte"
+        ],
+        "targeted_tests": "87 passed (52 contract + 35 six-obligation)",
+        "total_families": 39
+      },
       "description": "跑通真实服务入口，仅把模型边界替换为确定性桩；证明协议、状态机与预算机制，不证明真实模型效果",
       "real_model_fixes": [
         "claims_unknown counted unjudged claims -> now counted over judged claims only",
@@ -808,11 +828,11 @@
       "description": "触及真实组件的验证结果",
       "full_backend_regression": {
         "after": {
-          "duration_s": 1632.63,
+          "duration_s": 1649.34,
           "failed": 0,
-          "label": "改后（当前 worktree）",
-          "log": "_runs/full-backend-after-final.log",
-          "passed": 1851,
+          "label": "改后（当前 worktree，含 D 包）",
+          "log": "_runs/full-backend-d-final.log",
+          "passed": 1886,
           "skipped": 1
         },
         "before": {
@@ -826,7 +846,7 @@
         "command": "pytest tests -q -p no:randomly",
         "delta": {
           "failed": 0,
-          "note": "新增 35 条测试：A 包 11 + B 包 11 + C 包 13；既有 1816 条无一退化",
+          "note": "A/B/C 新增 35 条后 1851；D 包再新增 35 条（六类覆盖测试）后 1886；既有 1816 条无一退化",
           "passed": 35,
           "skipped": 0
         },
