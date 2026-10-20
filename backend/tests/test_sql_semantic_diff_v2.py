@@ -29,6 +29,43 @@ from app.services.lineage.sql_semantic_diff import (
 
 # family code -> (old SQL, new SQL, the comparator category that must be reported)
 SUPPORTED_CASES: dict[str, tuple[str, str, str]] = {
+    # Statement-level constructs are compared as their own dimensions, so these three
+    # families moved here from ``UNSUPPORTED_CASES`` with real SQL pairs that prove it.
+    "group_by_granularity": (
+        "insert into tgt select dt, count(*) as c from t group by dt",
+        "insert into tgt select dt, count(*) as c from t group by dt, branch",
+        "group_by_changed",
+    ),
+    "distinct_toggle": (
+        "insert into tgt select distinct branch from t",
+        "insert into tgt select branch from t",
+        "distinct_changed",
+    ),
+    "union_vs_union_all": (
+        "insert into tgt select a from t1 union all select a from t2",
+        "insert into tgt select a from t1 union select a from t2",
+        "union_mode_changed",
+    ),
+    "having": (
+        "insert into tgt select dt, sum(amt) as c from t group by dt having sum(amt) > 100",
+        "insert into tgt select dt, sum(amt) as c from t group by dt having sum(amt) > 0",
+        "having_changed",
+    ),
+    "left_vs_inner_join": (
+        "insert into tgt select a.id, b.amt as x from a left join b on a.id = b.id",
+        "insert into tgt select a.id, b.amt as x from a join b on a.id = b.id",
+        "join_type_changed",
+    ),
+    "full_join": (
+        "insert into tgt select a.id, b.amt as x from a left join b on a.id = b.id",
+        "insert into tgt select a.id, b.amt as x from a full outer join b on a.id = b.id",
+        "join_type_changed",
+    ),
+    "multi_table_aggregation_granularity": (
+        "insert into tgt select a.id, sum(b.amt) as c from a join b on a.id = b.id group by a.id",
+        "insert into tgt select a.id, sum(b.amt) as c from a join b on a.id = b.id group by a.id, b.dt",
+        "group_by_changed",
+    ),
     "window_function": (
         "insert into tgt select row_number() over (partition by acct order by dt) as rn from t",
         "insert into tgt select row_number() over (partition by acct order by amt) as rn from t",
@@ -182,22 +219,6 @@ SUPPORTED_CASES: dict[str, tuple[str, str, str]] = {
 # family code -> (old SQL, new SQL): the family's own construct changes, yet the
 # comparator can only emit its unattributed script-level fallback.
 UNSUPPORTED_CASES: dict[str, tuple[str, str]] = {
-    "group_by_granularity": (
-        "insert into tgt select dt, count(*) as c from t group by dt",
-        "insert into tgt select dt, count(*) as c from t group by dt, branch",
-    ),
-    "distinct_toggle": (
-        "insert into tgt select distinct branch from t",
-        "insert into tgt select branch from t",
-    ),
-    "union_vs_union_all": (
-        "insert into tgt select a from t1 union all select a from t2",
-        "insert into tgt select a from t1 union select a from t2",
-    ),
-    "having": (
-        "insert into tgt select dt, sum(amt) as c from t group by dt having sum(amt) > 100",
-        "insert into tgt select dt, sum(amt) as c from t group by dt having sum(amt) > 0",
-    ),
     "order_by": (
         "insert into tgt select amt from t order by dt",
         "insert into tgt select amt from t order by amt",
@@ -209,19 +230,6 @@ UNSUPPORTED_CASES: dict[str, tuple[str, str]] = {
     "cte": (
         "insert into tgt with c as (select amt from t1) select amt from c",
         "insert into tgt with c as (select amt * 2 as amt from t1) select amt from c",
-    ),
-    "left_vs_inner_join": (
-        "insert into tgt select a.id, b.amt as x from a left join b on a.id = b.id",
-        "insert into tgt select a.id, b.amt as x from a join b on a.id = b.id",
-    ),
-    "full_join": (
-        "insert into tgt select a.id, b.amt as x from a left join b on a.id = b.id",
-        "insert into tgt select a.id, b.amt as x from a full outer join b on a.id = b.id",
-    ),
-    "multi_table_aggregation_granularity": (
-        "insert into tgt select a.id, sum(b.amt) as c from a join b on a.id = b.id group by a.id",
-        "insert into tgt select a.id, sum(b.amt) as c from a join b on a.id = b.id "
-        "group by a.id, b.dt",
     ),
 }
 
@@ -311,18 +319,11 @@ def test_unsupported_family_set_is_explicit_and_counted():
     diff = semantic_changes(*SUPPORTED_CASES["gt_vs_ge"][:2])
     declared = {entry["code"] for entry in diff["unsupported_families"]}
     assert declared == {
-        "group_by_granularity",
-        "distinct_toggle",
-        "union_vs_union_all",
-        "having",
         "order_by",
         "top_limit",
         "cte",
-        "left_vs_inner_join",
-        "full_join",
-        "multi_table_aggregation_granularity",
     }
-    assert diff["family_coverage"] == {"detected": 29, "total": 39}
+    assert diff["family_coverage"] == {"detected": 36, "total": 39}
     assert diff["family_coverage"]["detected"] == 39 - len(declared)
 
 
@@ -355,7 +356,7 @@ def test_comment_and_whitespace_only_change_is_non_semantic_only():
     assert diff["facts"] == []
     assert diff["interpretations"] == []
     assert diff["unsupported_families"], "the gap list is reported for a non-semantic diff too"
-    assert diff["family_coverage"] == {"detected": 29, "total": 39}
+    assert diff["family_coverage"] == {"detected": 36, "total": 39}
 
 
 def test_facts_carry_no_business_conclusion_for_any_covered_pair():

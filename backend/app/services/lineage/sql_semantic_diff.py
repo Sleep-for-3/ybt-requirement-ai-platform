@@ -47,6 +47,10 @@ SEMANTIC_LABELS: dict[str, str] = {
     "filter_changed": "过滤范围（WHERE/条件）发生变化",
     "join_changed": "关联对象或 JOIN 条件发生变化",
     "join_type_changed": "JOIN 类型发生变化",
+    "group_by_changed": "分组粒度（GROUP BY 键）发生变化",
+    "distinct_changed": "DISTINCT 去重语义发生变化",
+    "union_mode_changed": "UNION / UNION ALL 去重语义发生变化",
+    "having_changed": "聚合后过滤（HAVING）条件发生变化",
     "aggregation_changed": "聚合逻辑发生变化",
     "code_mapping_changed": "代码映射（CASE WHEN 等）发生变化",
     "transformation_changed": "取值/加工规则发生变化",
@@ -61,6 +65,7 @@ SEMANTIC_LABELS: dict[str, str] = {
 # Categories that can move a regulatory caliber and therefore need a human read.
 CALIBER_AFFECTING: frozenset[str] = frozenset({
     "filter_changed", "join_changed", "join_type_changed", "aggregation_changed",
+    "group_by_changed", "distinct_changed", "union_mode_changed", "having_changed",
     "code_mapping_changed", "transformation_changed", "source_column_removed",
     "source_table_changed", "target_column_changed",
 })
@@ -99,20 +104,20 @@ class SemanticFamilySpec:
 # with the concrete reason, and is surfaced in ``unsupported_families``.
 SEMANTIC_FAMILIES: dict[str, SemanticFamilySpec] = {
     "group_by_granularity": SemanticFamilySpec(
-        "group_by_granularity", "GROUP BY 粒度", DETECTION_UNSUPPORTED, None, True,
-        "comparator 不比较 GROUP BY 键：键变化不进入任何 lineage 属性，实测 group by dt → group by dt, branch 只产生无归因回退项。",
+        "group_by_granularity", "GROUP BY 粒度", DETECTION_COMPARATOR, "group_by_changed", True,
+        "GROUP BY 键以规范化文本作为独立比较维度（statement_semantics.group_by）；键增删或改变会得到 group_by_changed，与列级血缘无关。",
     ),
     "distinct_toggle": SemanticFamilySpec(
-        "distinct_toggle", "DISTINCT 增删", DETECTION_UNSUPPORTED, None, True,
-        "DISTINCT 不是 comparator 的比较维度：select distinct → select 的投影与边完全一致，只产生无归因回退项。",
+        "distinct_toggle", "DISTINCT 增删", DETECTION_COMPARATOR, "distinct_changed", True,
+        "DISTINCT 作为语句级模式比较（statement_semantics.distinct）；仅当 UNION 模式未同时变化时才归因为 distinct_changed，避免把 UNION 改写误报为去重变化。",
     ),
     "union_vs_union_all": SemanticFamilySpec(
-        "union_vs_union_all", "UNION ↔ UNION ALL", DETECTION_UNSUPPORTED, None, True,
-        "UNION 去重语义未被建模：union all → union 的投影与来源边一致，只产生无归因回退项。",
+        "union_vs_union_all", "UNION ↔ UNION ALL", DETECTION_COMPARATOR, "union_mode_changed", True,
+        "UNION / UNION ALL 去重语义以规范化模式集合比较（statement_semantics.union_modes），变化得到 union_mode_changed。",
     ),
     "having": SemanticFamilySpec(
-        "having", "HAVING", DETECTION_UNSUPPORTED, None, True,
-        "HAVING 不是 exp.Where，comparator 只采集 WHERE 文本：having 条件变化只产生无归因回退项。",
+        "having", "HAVING", DETECTION_COMPARATOR, "having_changed", True,
+        "HAVING 谓词以规范化文本作为独立比较维度（statement_semantics.having），与 WHERE 分开归因；条件变化得到 having_changed。",
     ),
     "window_function": SemanticFamilySpec(
         "window_function", "Window Function", DETECTION_COMPARATOR, "transformation_changed", True,
@@ -243,16 +248,16 @@ SEMANTIC_FAMILIES: dict[str, SemanticFamilySpec] = {
         "ON 子句文本进入 join_condition，关联键变化即 join_changed。",
     ),
     "left_vs_inner_join": SemanticFamilySpec(
-        "left_vs_inner_join", "LEFT ↔ INNER", DETECTION_UNSUPPORTED, None, True,
-        "comparator 只采集 JOIN ON 文本、不比较 JOIN 类型：left join → inner join（ON 不变）只产生无归因回退项。",
+        "left_vs_inner_join", "LEFT ↔ INNER", DETECTION_COMPARATOR, "join_type_changed", True,
+        "JOIN 类型以规范化种类集合比较（statement_semantics.join_types）；left → inner 得到 join_type_changed。",
     ),
     "full_join": SemanticFamilySpec(
-        "full_join", "FULL JOIN", DETECTION_UNSUPPORTED, None, True,
-        "同 left_vs_inner_join：JOIN 类型不在比较维度内，实测 left join → full outer join 只产生无归因回退项。",
+        "full_join", "FULL JOIN", DETECTION_COMPARATOR, "join_type_changed", True,
+        "同 left_vs_inner_join：FULL 也是 join_types 集合中的一个元素，增删均得到 join_type_changed。",
     ),
     "multi_table_aggregation_granularity": SemanticFamilySpec(
-        "multi_table_aggregation_granularity", "多表聚合粒度", DETECTION_UNSUPPORTED, None, True,
-        "多表聚合粒度由 GROUP BY 键决定，而 comparator 不比较 GROUP BY（实测只产生无归因回退项）。",
+        "multi_table_aggregation_granularity", "多表聚合粒度", DETECTION_COMPARATOR, "group_by_changed", True,
+        "多表聚合粒度由 GROUP BY 键决定，而 GROUP BY 现已作为独立维度比较，键变化得到 group_by_changed。",
     ),
 }
 

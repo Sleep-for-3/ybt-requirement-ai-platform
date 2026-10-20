@@ -53,6 +53,7 @@ def compare_sql_versions(old_sql: str, new_sql: str, *, dialect: str = "") -> Ve
     _condition_changes(items, old.edges, new.edges, "transformation_expression", "transformation_changed", "high")
     if old.parse_status != new.parse_status:
         items.append(ChangeItemSpec("parse_quality_changed", "script_version", {"status": old.parse_status}, {"status": new.parse_status}, "high"))
+    _statement_semantic_changes(items, old, new)
     if not items:
         items.append(ChangeItemSpec("transformation_changed", "script", {"normalized": old_ast}, {"normalized": new_ast}, "medium"))
     items = _deduplicate(items)
@@ -98,13 +99,74 @@ def _edge_key(edge: LineageEdgeSpec) -> tuple[str, str, str]:
 def _edge_value(edge: LineageEdgeSpec) -> dict:
     return {"source": edge.source.logical_name, "target": edge.target.logical_name, "edge_type": edge.edge_type}
 
-
 def _condition_changes(items: list[ChangeItemSpec], old_edges, new_edges, attr: str, category: str, severity: str) -> None:
     old_values = {_normalize(getattr(item, attr)) for item in old_edges if getattr(item, attr)}
     new_values = {_normalize(getattr(item, attr)) for item in new_edges if getattr(item, attr)}
     if old_values != new_values:
         items.append(ChangeItemSpec(category, "lineage_edge", {attr: sorted(old_values)}, {attr: sorted(new_values)}, severity))
 
+
+def _statement_semantic_changes(items: list[ChangeItemSpec], old_result, new_result) -> None:
+    """Compare statement-level constructs that never reach a lineage edge.
+
+    GROUP BY keys, DISTINCT, UNION de-duplication and JOIN kinds change what a query
+    returns without changing which column feeds which target, so they are invisible to
+    the edge comparator and have to be compared here.  Each family becomes its own
+    ``entity_type`` so the fact is attributed to a structural dimension instead of
+    falling back to ``unattributed_ast_change``.
+
+    Nothing is emitted when the construct is absent on both sides: absence of evidence
+    must never be reported as a change.
+    """
+
+    old_states = _semantic_states(old_result)
+    new_states = _semantic_states(new_result)
+    if not old_states and not new_states:
+        return
+
+    def collect(states, key):
+        return {value for state in states for value in state.get(key, ()) if value}
+
+    for key, category, family, severity in (
+        ("group_by", "group_by_changed", "group_by", "high"),
+        ("union_modes", "union_mode_changed", "union", "high"),
+        ("join_types", "join_type_changed", "join_type", "high"),
+        ("having", "having_changed", "having", "high"),
+    ):
+        old_values = collect(old_states, key)
+        new_values = collect(new_states, key)
+        if old_values != new_values:
+            items.append(ChangeItemSpec(
+                category, family,
+                {key: sorted(old_values)}, {key: sorted(new_values)}, severity,
+            ))
+
+    # DISTINCT is a mode, not a list, and sqlglot marks a plain ``UNION`` query as
+    # distinct internally.  Only a DISTINCT that is not explained by a UNION change is
+    # reported, so a UNION rewrite cannot masquerade as a DISTINCT change.
+    old_distinct = any(state.get("distinct") for state in old_states)
+    new_distinct = any(state.get("distinct") for state in new_states)
+    union_changed = collect(old_states, "union_modes") != collect(new_states, "union_modes")
+    if old_distinct != new_distinct and not union_changed:
+        items.append(ChangeItemSpec(
+            "distinct_changed", "distinct",
+            {"distinct": str(old_distinct).lower()}, {"distinct": str(new_distinct).lower()}, "high",
+        ))
+
+
+def _semantic_states(result) -> list[dict]:
+    """Statement semantics as plain dicts, resilient to older parse results."""
+
+    states: list[dict] = []
+    for entry in getattr(result, "statement_semantics", ()) or ():
+        states.append({
+            "group_by": tuple(entry.group_by or ()),
+            "distinct": bool(entry.distinct),
+            "union_modes": tuple(entry.union_modes or ()),
+            "join_types": tuple(entry.join_types or ()),
+            "having": tuple(entry.having or ()),
+        })
+    return states
 
 def _normalize(value: str | None) -> str:
     return re.sub(r"\s+", " ", value or "").strip().lower()

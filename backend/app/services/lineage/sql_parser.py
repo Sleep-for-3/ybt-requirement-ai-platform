@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field, replace
 
 import sqlglot
@@ -52,13 +53,37 @@ class ParsedStatementSpec:
 
 
 @dataclass(frozen=True)
+class StatementSemantics:
+    """Statement-level constructs that never become lineage edges.
+
+    GROUP BY keys, DISTINCT, UNION de-duplication, HAVING predicates, row limits,
+    JOIN kinds and CTE names all change what a query *means* without changing which
+    column feeds which target.  The edge comparator is blind to them by construction,
+    so they are carried separately and compared as their own dimensions.
+
+    Every field holds a normalized, sorted, human-readable text so that a formatting
+    or alias-only rewrite compares equal; an empty tuple means "construct absent".
+    """
+
+    statement_index: int
+    group_by: tuple[str, ...] = ()
+    distinct: bool = False
+    distinct_on: tuple[str, ...] = ()
+    union_modes: tuple[str, ...] = ()
+    having: tuple[str, ...] = ()
+    row_limit: tuple[str, ...] = ()
+    join_types: tuple[str, ...] = ()
+    cte_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class SqlLineageParseResult:
     parse_status: str
     statements: tuple[ParsedStatementSpec, ...]
     nodes: tuple[LineageNodeSpec, ...]
     edges: tuple[LineageEdgeSpec, ...]
     warnings: tuple[str, ...]
-
+    statement_semantics: tuple[StatementSemantics, ...] = ()
 
 def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] | None = None) -> SqlLineageParseResult:
     """Statically parse SQL into evidence-bearing lineage specifications.
@@ -70,6 +95,7 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
     prepared = preprocess_sql(sql, variables)
     warnings = list(prepared.warnings)
     statements: list[ParsedStatementSpec] = []
+    _statement_semantics_list: list[StatementSemantics] = []
     edges: list[LineageEdgeSpec] = []
     try:
         chunks = _split_sql_statements(prepared.parse_sql, dialect)
@@ -105,14 +131,124 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
             warning = f"Statement {index + 1} lineage partially parsed: {exc}"
             warnings.append(warning)
             statements[-1] = replace(statement, parse_status="partially_parsed", warnings=(warning,))
-
+        # Statement-level constructs are collected even when the edge extraction above
+        # degraded: a GROUP BY key is still factual information about the query.
+        try:
+            _statement_semantics_list.append(statement_semantics(expression, index))
+        except Exception as exc:
+            warnings.append(f"Statement {index + 1} semantic extraction failed: {exc}")
     parse_status = "parsed"
     if any(item.parse_status != "parsed" for item in statements):
         parse_status = "partially_parsed" if any(item.parse_status != "failed" for item in statements) else "failed"
     if parse_status == "partially_parsed":
         edges = [replace(item, confidence_level="low") for item in edges]
     nodes = _deduplicate_nodes(edge for edge in edges)
-    return SqlLineageParseResult(parse_status, tuple(statements), nodes, tuple(_deduplicate_edges(edges)), tuple(dict.fromkeys(warnings)))
+    return SqlLineageParseResult(
+        parse_status, tuple(statements), nodes, tuple(_deduplicate_edges(edges)),
+        tuple(dict.fromkeys(warnings)), tuple(_statement_semantics_list))
+
+
+def statement_semantics(expression: exp.Expression, statement_index: int) -> StatementSemantics:
+    """Extract the statement-level constructs the edge comparator cannot see.
+
+    Deliberately conservative: anything ambiguous stays *absent* (an empty tuple)
+    rather than being guessed, so a caller never reads an invented GROUP BY key.
+    Text is normalized through sqlglot's own renderer so that whitespace, keyword
+    case and redundant parentheses do not register as a change.
+    """
+
+    def rendered(items) -> tuple[str, ...]:
+        values = {_semantic_text(item) for item in items if item is not None}
+        return tuple(sorted(value for value in values if value))
+
+    queries = [node for node in expression.walk() if isinstance(node, exp.Query)]
+    if not queries:
+        return StatementSemantics(statement_index)
+
+    group_by: list[exp.Expression] = []
+    having: list[exp.Expression] = []
+    limits: list[exp.Expression] = []
+    distinct_on: list[exp.Expression] = []
+    union_modes: set[str] = set()
+    join_types: set[str] = set()
+    cte_names: set[str] = set()
+    distinct = False
+    for query in queries:
+        group = query.args.get("group")
+        if group is not None:
+            group_by.extend(group.expressions)
+        having_node = query.args.get("having")
+        if having_node is not None:
+            having.append(having_node)
+        limit = query.args.get("limit")
+        if limit is not None:
+            limits.append(limit)
+        offset = query.args.get("offset")
+        if offset is not None:
+            limits.append(offset)
+        # ``distinct`` is either the boolean-ish Select arg or a Distinct node; both
+        # forms appear across sqlglot versions and dialects.
+        raw_distinct = query.args.get("distinct")
+        if isinstance(raw_distinct, exp.Distinct):
+            distinct = True
+            distinct_on.extend(raw_distinct.expressions)
+        elif raw_distinct is not None and raw_distinct is not False:
+            distinct = True
+        for union in query.find_all(exp.Union):
+            union_modes.add("union_all" if union.args.get("distinct") is False else "union")
+        for join in query.find_all(exp.Join):
+            join_types.add(_join_kind(join))
+        cte_names.update(cte.alias_or_name for cte in query.find_all(exp.CTE) if cte.alias_or_name)
+    return StatementSemantics(
+        statement_index=statement_index,
+        group_by=rendered(group_by),
+        distinct=distinct,
+        distinct_on=rendered(distinct_on),
+        union_modes=tuple(sorted(union_modes)),
+        having=rendered(having),
+        row_limit=rendered(limits),
+        join_types=tuple(sorted(join_types)),
+        cte_names=tuple(sorted(cte_names)),
+    )
+
+
+def _semantic_text(node: exp.Expression) -> str:
+    """Normalized rendering used for equality only; never parsed back.
+
+    Table qualifiers are stripped from column references before rendering: ``a.dt`` and
+    ``b.dt`` denote the same grouping key on the same table, so an alias rename must not
+    read as a GROUP BY change.  Only the qualifier is dropped -- the column name, literal
+    and expression shape are preserved, so a genuine key change still differs.
+    """
+
+    try:
+        unqualified = node.copy()
+        for column in unqualified.find_all(exp.Column):
+            column.set("table", None)
+        text = unqualified.sql(pretty=False, normalize=True)
+    except Exception:
+        return ""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _join_kind(join: exp.Join) -> str:
+    side = (join.args.get("side") or "").upper()
+    kind = (join.args.get("kind") or "").upper()
+    if kind == "CROSS":
+        return "cross"
+    if side == "LEFT" and kind == "OUTER":
+        return "left"
+    if side == "RIGHT" and kind == "OUTER":
+        return "right"
+    if side == "FULL" and kind == "OUTER":
+        return "full"
+    if side in {"LEFT", "RIGHT", "FULL"}:
+        return side.lower()
+    if kind == "INNER":
+        return "inner"
+    if kind:
+        return kind.lower()
+    return "inner" if side else "inner"
 
 
 def _split_sql_statements(sql: str, dialect: str) -> list[tuple[str, int, int]]:
