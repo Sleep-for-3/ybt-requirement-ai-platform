@@ -1,0 +1,148 @@
+{
+  "generated_at": "2026-10-21T23:39:54+0800",
+  "project_id": 1,
+  "steps": {
+    "login": {
+      "status": "ok",
+      "latency_ms": 581.1
+    },
+    "upload": {
+      "http_status": 200,
+      "document_id": 1,
+      "document_status": "pending_review",
+      "version": 0
+    },
+    "upload_parse": {
+      "parse_status": "parsed",
+      "document_status": "pending_review",
+      "candidate_version_id": 2
+    },
+    "submit_review": {
+      "error": "HTTP 409: {\"detail\":\"只有解析成功的草稿版本可以提交审核\",\"error_code\":\"state_conflict\",\"user_message\":\"资源状态冲突\",\"technical_message\":null,\"trace_id\":\"f1b611e1ce8c4e499e8d8d1432b85465\",\"retryable\":false,\"suggested_actions\":[\"刷新页面后重试\"]}"
+    },
+    "review": {
+      "lifecycle_status": "approved"
+    },
+    "activate": {
+      "lifecycle_status": "active"
+    },
+    "reindex": {
+      "http_status": 200,
+      "response": {
+        "already_active": false,
+        "id": 5,
+        "institution_id": null,
+        "project_id": 1,
+        "idempotency_key": "4ffba69032a8f35f01b217850bd77cde9f4bc96ab2725ac3bc9a0cac37138e8c",
+        "job_type": "knowledge_embedding_reindex",
+        "celery_task_id": null,
+        "correlation_id": "3bb09278d3eb49b9aebacbf2ec5ea4d6",
+        "status": "completed",
+        "progress": 100,
+        "current_step": "completed",
+        "payload_summary_json": {
+          "provider": "local_vllm",
+          "model_name": "BAAI/bge-small-zh-v1.5",
+          "model_fingerprint": "ec2e880fd3f890488e74513b5c37f671cb5c33273a13b68a7b444a6ae10b16df",
+          "vector_dimension": 512,
+          "corpus_hash": "cb1fc2670a8f92dc9e2a188a9043ba232f8a205caf299dea07e0a498809b1d9d",
+          "document_count": 1,
+          "chunk_count": 5,
+          "batch_size": 64,
+          "chunk_strategy_version": "existing-knowledge-unit-v1",
+          "index_config_version": "formal-semantic-index-v1",
+          "force": true,
+          "generation": 1
+        },
+        "result_summary_json": {
+          "success_count": 1,
+          "failed_count": 0,
+          "index_version_id": 2,
+          "embedding_provider": "local_vllm",
+          "embedding_model": "BAAI/bge-small-zh-v1.5",
+          "vector_dimension": 512,
+          "document_count": 1,
+          "chunk_count": 5,
+          "indexed_count": 5,
+          "collection": "ybt_semantic_p1_v2_ec2e880fd3f8_d512",
+          "validation": {
+            "actual_count": 5,
+            "sample_search_hit_count": 1,
+            "valid": true
+          }
+        },
+        "error_message": null,
+        "retry_count": 0,
+        "max_retries": 3,
+        "lease_owner": null,
+        "lease_expires_at": null,
+        "dispatched_at": null,
+        "queued_at": "2026-10-21T15:39:55.421485+00:00",
+        "started_at": "2026-10-21T15:39:55.437578+00:00",
+        "finished_at": "2026-10-21T15:40:01.574744+00:00",
+        "created_by": 1,
+        "created_at": "2026-10-21T15:39:55.374318+00:00",
+        "updated_at": "2026-10-21T15:40:01.571313+00:00",
+        "job_id": 5,
+        "deduplicated": false,
+        "message": "任务已提交",
+        "status_url": "/api/jobs/5"
+      },
+      "latency_ms": 6246.6
+    },
+    "index_status": {
+      "mode": "formal",
+      "formal_ready": true,
+      "vector_store": "milvus",
+      "vector_dimension": 512,
+      "document_count": 1,
+      "chunk_count": 5,
+      "active_index_id": 2,
+      "active_index_current": true,
+      "milvus_health": {
+        "healthy": true,
+        "collection": "ybt_semantic_p1_v2_ec2e880fd3f8_d512",
+        "collection_exists": true
+      },
+      "latency_ms": 49.9
+    },
+    "retrieval": {
+      "cases": [
+        {
+          "query": "客户统一标识取哪个字段",
+          "http_status": 200,
+          "item_count": 5,
+          "top_titles": [
+            "ybt_customer_id_policy.md",
+            "ybt_customer_id_policy.md",
+            "ybt_customer_id_policy.md"
+          ],
+          "top_scores": [
+            0,
+            0,
+            0
+          ],
+          "latency_ms": 1226.5
+        },
+        {
+          "query": "报送数据按哪天取数",
+          "http_status": 200,
+          "item_count": 5,
+          "top_titles": [
+            "ybt_customer_id_policy.md",
+            "ybt_customer_id_policy.md",
+            "ybt_customer_id_policy.md"
+          ],
+          "top_scores": [
+            0,
+            0,
+            0
+          ],
+          "latency_ms": 1325.5
+        }
+      ],
+      "hit_at_5": 1.0
+    }
+  },
+  "status": "real"
+}

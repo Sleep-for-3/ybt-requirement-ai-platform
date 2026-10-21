@@ -1,0 +1,128 @@
+{
+  "generated_at": "2026-10-21T23:46:57+0800",
+  "submission": {
+    "http_response": {
+      "already_active": false,
+      "id": 7,
+      "institution_id": null,
+      "project_id": 1,
+      "idempotency_key": "4e5c12e7a1b06f0c3e3d36d01bb1672cfed3ff64503b7b88f3203530627480a5",
+      "job_type": "knowledge_embedding_reindex",
+      "celery_task_id": "d96821b1-060c-444e-8316-8a7dcaddafeb",
+      "correlation_id": "7256e3d129a24d1ba316289fe8e2e261",
+      "status": "running",
+      "progress": 1,
+      "current_step": null,
+      "payload_summary_json": {
+        "provider": "local_vllm",
+        "model_name": "BAAI/bge-small-zh-v1.5",
+        "model_fingerprint": "ec2e880fd3f890488e74513b5c37f671cb5c33273a13b68a7b444a6ae10b16df",
+        "vector_dimension": 512,
+        "corpus_hash": "cb1fc2670a8f92dc9e2a188a9043ba232f8a205caf299dea07e0a498809b1d9d",
+        "document_count": 1,
+        "chunk_count": 5,
+        "batch_size": 64,
+        "chunk_strategy_version": "existing-knowledge-unit-v1",
+        "index_config_version": "formal-semantic-index-v1",
+        "force": true,
+        "generation": 3
+      },
+      "result_summary_json": {},
+      "error_message": null,
+      "retry_count": 0,
+      "max_retries": 3,
+      "lease_owner": "LAPTOP-1CLFROQ1:44296:3829a05a574a",
+      "lease_expires_at": "2026-10-21T16:01:58.626928+00:00",
+      "dispatched_at": "2026-10-21T15:46:58.617372+00:00",
+      "queued_at": "2026-10-21T15:46:58.596070+00:00",
+      "started_at": "2026-10-21T15:46:58.626928+00:00",
+      "finished_at": null,
+      "created_by": 1,
+      "created_at": "2026-10-21T15:46:58.550733+00:00",
+      "updated_at": "2026-10-21T15:46:58.624832+00:00",
+      "job_id": 7,
+      "deduplicated": false,
+      "message": "任务已提交",
+      "status_url": "/api/jobs/7"
+    },
+    "submit_latency_ms": 111.4
+  },
+  "job": {
+    "job_id": 7,
+    "final_status": "completed",
+    "celery_task_id": "d96821b1-060c-444e-8316-8a7dcaddafeb",
+    "job_type": "knowledge_embedding_reindex",
+    "queued_at": "2026-10-21T15:46:58.596070Z",
+    "started_at": "2026-10-21T15:46:58.626928Z",
+    "finished_at": "2026-10-21T15:47:04.510290Z",
+    "state_trail": [
+      {
+        "status": "running",
+        "at": "2026-10-21T15:46:58.624832Z"
+      },
+      {
+        "status": "running",
+        "at": "2026-10-21T15:46:59.984952Z"
+      },
+      {
+        "status": "running",
+        "at": "2026-10-21T15:47:01.325524Z"
+      },
+      {
+        "status": "running",
+        "at": "2026-10-21T15:47:01.325524Z"
+      },
+      {
+        "status": "completed",
+        "at": "2026-10-21T15:47:04.508133Z"
+      }
+    ],
+    "result_summary": {
+      "success_count": 1,
+      "failed_count": 0,
+      "index_version_id": 4,
+      "embedding_provider": "local_vllm",
+      "embedding_model": "BAAI/bge-small-zh-v1.5",
+      "vector_dimension": 512,
+      "document_count": 1,
+      "chunk_count": 5,
+      "indexed_count": 5,
+      "collection": "ybt_semantic_p1_v4_ec2e880fd3f8_d512",
+      "validation": {
+        "actual_count": 5,
+        "sample_search_hit_count": 1,
+        "valid": true
+      }
+    },
+    "error_message": null
+  },
+  "index_status": {
+    "mode": "formal",
+    "document_count": 1,
+    "chunk_count": 5,
+    "active_index_id": 4,
+    "milvus_health": {
+      "healthy": true,
+      "collection": "ybt_semantic_p1_v4_ec2e880fd3f8_d512",
+      "collection_exists": true
+    }
+  },
+  "retrieval": {
+    "item_count": 3,
+    "top": [
+      {
+        "final_score": 1.0,
+        "content": "﻿# 一表通监管报送-客户统一标识取值规范（合成测试材料）"
+      },
+      {
+        "final_score": 1.0,
+        "content": "## 2 客户统一标识\n客户统一标识取客户主数据系统 ECIF 的客户号（CUSTOMER_ID），按客户粒度唯一。\n不得使用产品编号（PRODUCT_NO）替"
+      },
+      {
+        "final_score": 1.0,
+        "content": "## 4 借据与产品\n借据号（LOAN_NO）标识单笔贷款业务；产品信息需通过产品编号关联产品主表，并叠加期限与方案维度去重。"
+      }
+    ]
+  },
+  "status": "real"
+}

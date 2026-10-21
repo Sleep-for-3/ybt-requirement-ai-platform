@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-21T21:54:41+0800",
+  "generated_at": "2026-10-21T23:34:44+0800",
   "config": {
     "llm_provider": "openai_compatible",
     "llm_model": "deepseek-v4-flash",
@@ -15,25 +15,33 @@
   "checks": {
     "postgres": {
       "status": "real",
-      "latency_ms": 862.2,
+      "latency_ms": 788.4,
       "tables": 150
     },
     "redis": {
       "status": "real",
-      "latency_ms": 321.4,
+      "latency_ms": 291.8,
       "ping": true,
       "roundtrip": true
     },
     "milvus": {
-      "status": "error",
-      "latency_ms": 7113.9,
-      "error": "ConnectionNotExistException()",
-      "trace": "NoneType: None\n"
+      "status": "real",
+      "latency_ms": 4161.2,
+      "dim": 512,
+      "count": 0,
+      "hits": 0,
+      "top_id": null,
+      "health": {
+        "healthy": true,
+        "collection": "vnext_smoke_1792596888",
+        "collection_exists": false
+      }
     },
     "embeddings": {
-      "status": "blocked",
-      "latency_ms": 1098.1,
-      "error": "RuntimeError('HTTP 500: {\"error\":{\"message\":\"error starting llama-server: llama-server binary not found (checked: /usr/lib/ollama/llama-server, /usr/bin/build/lib/ollama/llama-server, /usr/bin/dist/linux-amd64/lib/ollama/llama-server, /usr/bin/dist/linux_amd64/lib/ollama/llama-server, /build/lib/ollama/llama-server, /dist/')"
+      "status": "real",
+      "latency_ms": 903.3,
+      "dim": 512,
+      "model": "BAAI/bge-small-zh-v1.5"
     },
     "llm": {
       "field_rerank": {
@@ -42,31 +50,31 @@
           "ranking": [
             {
               "id": "SRC1",
-              "score": 0.99,
-              "reason": "客户主键，全行唯一，直接对应客户统一标识"
+              "score": 1.0,
+              "reason": "CUSTOMER_ID 是客户主键且全行唯一，直接满足客户统一标识要求。"
             },
             {
               "id": "SRC2",
-              "score": 0.1,
-              "reason": "产品编号，同一客户多产品时重复，不能唯一标识客户"
+              "score": 0.2,
+              "reason": "PRODUCT_ID 是产品编号，同一客户多产品时重复，不能唯一标识客户。"
             },
             {
               "id": "SRC3",
-              "score": 0.05,
-              "reason": "借据号标识贷款业务，不是客户统一标识"
+              "score": 0.1,
+              "reason": "LOAN_NO 是借据号，标识贷款借据而非客户，不适合作为客户统一标识。"
             }
           ],
           "chosen": "SRC1"
         },
-        "latency_ms": 2421.4,
+        "latency_ms": 2721.4,
         "metadata": {
           "provider": "openai_compatible",
           "model": "deepseek-v4-flash",
-          "latency_ms": 2420,
+          "latency_ms": 2720,
           "token_usage": {
             "prompt_tokens": 195,
-            "completion_tokens": 180,
-            "total_tokens": 375,
+            "completion_tokens": 277,
+            "total_tokens": 472,
             "cached_tokens": 0,
             "usage_available": true
           },
@@ -78,17 +86,17 @@
         "status": "real",
         "payload": {
           "verdict": "unsupported",
-          "reason": "证据明确说明客户统一标识取客户主键 CUSTOMER_ID，报送粒度为客户，即以客户为粒度报送，而非按产品编号报送；两者相互矛盾，故不支持该主张。"
+          "reason": "证据明确客户统一标识取客户主键 CUSTOMER_ID，报送粒度为客户，而非按产品编号报送，与主张相反。"
         },
-        "latency_ms": 1620.7,
+        "latency_ms": 1907.8,
         "metadata": {
           "provider": "openai_compatible",
           "model": "deepseek-v4-flash",
-          "latency_ms": 1620,
+          "latency_ms": 1907,
           "token_usage": {
             "prompt_tokens": 121,
-            "completion_tokens": 109,
-            "total_tokens": 230,
+            "completion_tokens": 99,
+            "total_tokens": 220,
             "cached_tokens": 0,
             "usage_available": true
           },

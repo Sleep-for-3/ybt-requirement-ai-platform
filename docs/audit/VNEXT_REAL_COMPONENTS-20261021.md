@@ -3,7 +3,7 @@
 生成时间：2026-10-21 22:0x（Asia/Shanghai）
 执行人：DSH Lead（本地实测，无公网 SaaS、无在线搜索）
 目标：盘点 WSL 内真实可用组件，指出缺失；用公司 API 的 DeepSeek 配置做真实模型验证（不再考虑 Qwen）。
-结论先行：**PostgreSQL / Redis / Milvus / 公司 DeepSeek 网关 = 真实可用（REAL）；Embedding 服务 = BLOCKED（镜像缺 llama-server）；Celery worker/beat、前端容器、Milvus 语义索引 = 未启动/空索引。** 真实模型引用判定在 10 条合成案例上 7/10 与期望一致，其余 3 条为裁判职责外的治理项（见 §4），不能据此声称真实业务准确率。
+结论先行：**PostgreSQL / Redis / Milvus / Celery worker / Embedding（本机 fastembed 服务）/ 公司 DeepSeek 网关 = 真实可用（REAL）；知识上传→审核→生效→向量索引→混合检索闭环已在真实组件上跑通；Celery beat、前端容器、浏览器验收 = 未验证。** 真实模型引用判定在 10 条合成案例上 7/10 与期望一致，其余 3 条为裁判职责外的治理项（见 §4），不能据此声称真实业务准确率。更新（2026-10-21 23:5x）：用户 VPN 连通后经 hf-mirror 下载权重成功，embedding/Llama-server 阻断已解除，见 §9。
 
 ## 1. 组件清单（实测证据）
 
@@ -13,18 +13,18 @@
 | PostgreSQL 16（compose `ybt-postgres`） | REAL | `postgres:16`，healthy，`127.0.0.1:5432`，库 `ybt_dsh_handoff_v2`，`alembic upgrade head` → 150 张表；冒烟 latency 862ms |
 | PostgreSQL 16（`ybt-pg-host`） | REAL | `127.0.0.1:15432`，user `ybt`，本机通用宿主库 |
 | Redis 7（compose `ybt-redis`） | REAL | `redis:7-alpine`，healthy，`127.0.0.1:6379`，AOF on；PING 与 SET/GET 往返 OK（321ms，空库 0 keys） |
-| Milvus 2.5.4 standalone | REAL | `milvusdb/milvus:v2.5.4` healthy + etcd v3.5.18 + minio；`http://127.0.0.1:19530`；经 `app.services.vector.milvus.MilvusVectorStore` 建集合、512 维写入 3 条、search 命中、count=3、drop 全部成功 |
+| Milvus 2.5.4 standalone | REAL | `milvusdb/milvus:v2.5.4` healthy + etcd v3.5.18 + minio；`http://127.0.0.1:19530`；经 `app.services.vector.milvus.MilvusVectorStore` 建集合、512 维写入 3 条、search 命中、count=3、drop 全部成功；应用真实索引重建生成 `ybt_semantic_p1_v4_ec2e880fd3f8_d512` 并灌入 5 个知识单元 |
 | 公司 LLM 网关（DeepSeek） | REAL | `backend/.env`：`LLM_PROVIDER=openai_compatible`、`LLM_BASE_URL=http://47.101.159.7:29988/v1`、`LLM_MODEL=deepseek-v4-flash`、key 已配置；字段重排 2.42s/375 tokens 判对；引用裁判 1.62s/230 tokens 判对；`/api/ai-runtime/status` 显示 `is_mock=false, configuration_status=configured` |
-| 后端应用（当前源码） | REAL | 本机 uvicorn 8011，`.env` 真实配置启动成功，`/api/health` ok，`/api/ai-runtime/status` 返回非 mock 运行时；Milvus `reachable=true` |
+| 后端应用（当前源码） | REAL | 本机 uvicorn 8011，`.env` 真实配置启动成功，`/api/health` ok，`/api/ai-runtime/status` 返回非 mock 运行时；Milvus `reachable=true`；`TASK_QUEUE_PROVIDER=celery` 下任务经 Redis broker 真实投递并被 worker 执行 |
 | 后端容器 `ybt-dev-app` | 旧镜像 | 运行中但镜像为 `ybt-backend:production-sync-20260909-verified2`，**不是当前源码**；8000 未发布到宿主 |
-| Ollama（`ybt-ollama`，alpine/ollama:0.32.4） | BLOCKED | `127.0.0.1:11434` 可连，模型库里有 `BAAI/bge-small-zh-v1.5`（17MB ollama 格式），但请求 embedding 返回 `HTTP 500: error starting llama-server: llama-server binary not found (checked: /usr/lib/ollama/llama-server, …)`——alpine 镜像内缺推理二进制，模型在库也无法加载 |
-| 本地 embedding 备选（fastembed 0.8.0） | BLOCKED | 进程内 `TextEmbedding("BAAI/bge-small-zh-v1.5")` 触发 HF 下载，5 个文件卡在 0%（300s 超时转后台后终止）→ 当前网络无法取权重 |
-| Docker Hub 拉取 `ollama/ollama:latest`（Debian 版） | BLOCKED（网络） | 拉取 35 分钟未完成（层下载挂起），已终止；本机到 Docker Hub 大镜像带宽受限 |
-| Celery worker / beat | 未启动 | 当前 `ybt-dev` 栈只起 postgres/redis/milvus/etcd/minio/app；旧项目 `ybt-worker`/`ybt-beat` 是 5 周前另一工程，未复用 |
+| Ollama（`ybt-ollama`，alpine/ollama:0.32.4） | 已停用 | 该镜像缺 `llama-server`（请求返回 `HTTP 500: error starting llama-server: llama-server binary not found`）；已 `docker stop ybt-ollama` 让出 11434 端口，改用 fastembed 服务（见下） |
+| Embedding 服务（本机 fastembed，REAL） | REAL | `scripts/local_embedding_server.py`（FastAPI，OpenAI 兼容 `/v1/embeddings`，`BAAI/bge-small-zh-v1.5`，512 维）；权重经 `HF_ENDPOINT=https://hf-mirror.com` + `HF_HUB_DISABLE_XET=1` 下载成功；`/health` 返回 model/dimension，`/v1/embeddings` 单条/批量均 512 维；应用 `embed_documents` 4 条 999ms、`embed_query` 单条约 650ms |
+| Celery worker（真实 Redis broker） | REAL | `celery -A app.workers.celery_app worker --pool=solo` 连 `redis://127.0.0.1:6379/0`，收到 `app.workers.execute_background_job` 任务，任务内真实调用 `http://127.0.0.1:11434/v1/embeddings 200 OK`，`succeeded in 16.0s/5.9s`；job 状态 queued→running→completed，`celery_task_id` 落库 |
+| Celery beat | 未启动 | 定时任务（红线巡检/重投）未验证；不影响单次任务链路 |
+| 知识语料与语义索引 | REAL | 项目 1 上传合成监管材料 → 解析 5 个知识单元 → 送审/审核/生效 → 重建索引 `document_count=1, chunk_count=5, indexed_count=5, valid=true` → 混合检索返回 5 条命中（含 `final_score/vector_score/keyword_score/authority_rank=6`） |
 | 前端 | 未启动 | 3000 未监听；`ybt-frontend` 为 5 周前旧容器 Exited |
-| Milvus 语义索引 | 空 | `/api/ai-runtime/status`：`semantic_index.state=unavailable`、`active_index_count=0`（因无可用 embedding，尚未灌库） |
 
-其它已确认：`jieba 0.42.1` 已装；`pymilvus 2.6.17` 与 2.5.4 服务端兼容（用 `MilvusClient` API）；`fastembed 0.8.0` 已装但无本地权重缓存；`tiktoken` 未使用；仓库内没有任何 Qwen 部署配置。
+其它已确认：`jieba 0.42.1` 已装；`pymilvus 2.6.17` 与 2.5.4 服务端兼容（用 `MilvusClient` API）；`fastembed 0.8.0` 已装且权重已缓存（`HF_ENDPOINT=https://hf-mirror.com`、`HF_HUB_DISABLE_XET=1`）；`tiktoken` 未使用；仓库内没有任何 Qwen 部署配置（用户已明确本轮不考虑 Qwen）。网络实测：`huggingface.co`/`registry-1.docker.io`/`pypi.org` 直连超时或极慢，`hf-mirror.com`、`modelscope.cn` 可达——内网/受限网络下应配置 HF 镜像或离线导入权重。
 注意：当前 WSL 同时存在两套依赖实例——`ybt-postgres`/`ybt-redis`（发布到宿主 5432/6379，应用 `.env` 指向的就是它们，库表与冒烟都在这套）与 `ybt-dev-pg`/`ybt-dev-redis`（compose 内部实例、未发布）。两套并存容易混淆，后续应保留一套并停掉另一套；本次未擅自删除运行中实例。
 
 ## 2. 本轮实际动作
@@ -36,6 +36,10 @@
 5. 以真实 `.env` 启动当前源码后端（`uvicorn app.main:app --port 8011`），确认 PostgreSQL/Milvus/LLM 三项真实可用。
 6. 新增并运行两个真实冒烟脚本（见 §5），结果写入 `docs/audit/VNEXT_REAL_COMPONENT_SMOKE-20261021.json` 与 `docs/audit/VNEXT_REAL_MODEL_GOLDEN-20261021.json`。
 7. 修复引用裁判证据投影缺陷（见 §3），补 2 条回归测试（`tests/test_rag_citation_support.py`，14 passed）。
+8. 用户 VPN 连通后（m01449「你现在尝试一下下载，我VPN应该已经连接网了」）：`HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1` 下载 `BAAI/bge-small-zh-v1.5` 权重成功（653s），`docker stop ybt-ollama` 让出 11434，改由 `scripts/local_embedding_server.py` 提供 OpenAI 兼容 embedding（512 维实测）。
+9. 真实语义检索冒烟：`scripts/vnext_semantic_smoke.py`（应用 embedding + Milvus）4 文档 / 3 中文查询 **Top1 3/3、Top3 3/3**（客户标识 0.7566、借据号 0.6663、统计日期 0.7151），随机向量对照仅 1 命中，证明不是「凡查必中」。
+10. 真实知识闭环：`scripts/vnext_knowledge_smoke.py` 走 API（登录→上传→送审→审核→生效→重建索引→混合检索），并新增 `scripts/vnext_seed_smoke_user.py` 预置登录用户（真实 argon2 哈希）与项目成员关系；发现 optional 匿名模式下 `background_jobs.created_by=0` 违反外键（见 §10）。
+11. 真实 Celery 队列：`TASK_QUEUE_PROVIDER=celery` 重启 API + `celery -A app.workers.celery_app worker --pool=solo`；`scripts/vnext_celery_smoke.py` 记录 queued→running→completed、worker 侧真实调用 embedding 服务、索引集合升级到 `_v4`。
 
 ## 3. 引用裁判的真实缺陷与修复
 
@@ -78,21 +82,23 @@ $env:STORAGE_DIR=(Resolve-Path .\dev_storage_local).Path
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
-## 6. 缺失项与最小修复路径
+## 6. 当时缺口与当前状态（2026-10-21 23:5x 更新）
 
-1. **Embedding（P0，阻塞 Milvus 语义检索）**：三条路都已实测受阻——a) `alpine/ollama:0.32.4` 无 `llama-server` 二进制；b) 拉 `ollama/ollama:latest`（Debian 版）35 分钟未下完（Docker Hub 带宽受限，已终止）；c) fastembed 进程内下载 HF 权重卡 0%。最小修复路径（按可行性排序）：① 在有外网的机器把 `bge-small-zh-v1.5` 权重（~100MB）与 Debian 版 ollama 镜像离线导入内网；② 或用公司内部模型服务提供 OpenAI 兼容 `/v1/embeddings`，只改 `EMBEDDING_BASE_URL`；③ 完成后 `POST /api/ai-runtime/test-embedding` 校验 512 维，再灌 Milvus。完成前所有依赖向量检索的验收保持 BLOCKED，不得用 Mock 结果冒充。
-2. **Celery worker/beat（P1）**：需要真实队列/重投/租约验收时启动 `docker compose -p ybt-dev up -d worker beat`（当前栈未含），并建独立测试库/Redis db。
-3. **前端（P1）**：`npm run dev` 或 compose frontend（3000），再做真实浏览器关键操作验收。
-4. **Milvus 灌库（P1，依赖 1）**：embedding 可用后执行知识入库与 `semantic_index` 重建，校验集合维度、删除同步、重启后可恢复。
-5. **裁判上下文（P1）**：把 `document_version_id`/版本号/生效日与冲突证据一并传入 `check_citation_support`，闭合 C09/C10 类缺口。
+1. **Embedding（原 P0 阻塞）→ 已解除**：走了第三条路（fastembed 进程内 + HF 镜像权重），由 `scripts/local_embedding_server.py` 在同一 11434 端口提供 OpenAI 兼容接口；`/health` 返回 `dimension=512`，应用 `embed_documents`/`embed_query` 真实调用成功。**生产建议仍按内网要求改为公司内部 `/v1/embeddings` 或离线权重目录，不要把 HF 镜像下载当作部署方案。**
+2. **Celery worker（原 P1）→ 已验证**：本机 solo worker 连 Redis 完成真实任务；**beat 未启动**，重投/定时巡检、Worker 崩溃恢复、租约过期仍需专项验收。
+3. **Milvus 灌库（原 P1）→ 已完成**：真实知识单元 5 个入索引，集合名含指纹与维度（`ybt_semantic_p1_v4_ec2e880fd3f8_d512`），`validation.valid=true`；重启恢复与删除同步未测。
+4. **前端（P1）**：仍未启动/未点检，浏览器关键操作 UNVERIFIED。
+5. **裁判上下文（P1）**：C09/C10 类缺口仍需把版本号/生效日/冲突证据传入 `check_citation_support`；C08 需人工定口径。
+6. **optional 模式背景任务外键**（见 §10.1）与 **混合检索分数饱和导致 Top1 并列**（见 §10.2）为本轮新发现缺陷，建议纳入下一工作包修复（均未改测试预期）。
 
 ## 7. 未验证 / 保留声明
 
-- 真实业务准确率、独立人工标注：UNVERIFIED（0 名独立银行专家标注）。
-- Celery 队列语义（重复投递幂等、Worker 崩溃恢复、租约过期）：BLOCKED（worker 未启动）。
+- 真实业务准确率、独立人工标注：UNVERIFIED（0 名独立银行专家标注；本轮知识材料为 Lead 编写的合成测试规范，明确标注「非真实监管文件」）。
+- Celery 队列**异常语义**（重复投递幂等、Worker 崩溃恢复、租约过期、迟到返回不覆盖）：UNVERIFIED（只验证了正常完成链路）。
 - 前端真机操作：UNVERIFIED（未启动/未点检）。
-- Milvus 检索质量：BLOCKED（无 embedding、索引为空）；仅验证了写入/搜索/删除机制可用。
-- 公司 DeepSeek 网关为开发/验证用；生产主模型按任务书仍是项目既定内网模型，本次不改变生产配置。
+- Milvus 检索**质量**：仅 3 条自造查询、4 条自造文档（Top1 3/3），样本量不足以支撑业务准确性结论；重启恢复、删除同步未测。
+- 混合检索排序：发现 `final_score` 饱和为 1.0 后 Top1 由 unit id 兜底（§10.2），真实排序质量待评估。
+- 公司 DeepSeek 网关为开发/验证用；生产主模型按任务书仍是项目既定内网模型，本次不改变生产配置；用户已明确本轮不考虑 Qwen。
 
 ## 8. 运行方式与重启注意事项（实测踩坑）
 
@@ -107,3 +113,46 @@ docker compose -p ybt-dev --profile milvus -f docker-compose.yml -f docker-compo
 - 数据重启后仍在（`ybt-dev_postgres_data`/`ybt-dev_redis_data` 命名卷）：PG 150 张表、Redis AOF 均可恢复；但 Milvus 栈（etcd/minio/milvus）**没有 restart policy**，docker 重启后需手动 `compose up -d milvus`（实测重启后三容器 Exited，手动拉起后 healthy）。
 - 重启后复测证据：`docs/audit/VNEXT_REAL_COMPONENT_SMOKE-20261021-after-restart.json`——postgres real（150 表/1.06s）、redis real（0.44s）、milvus real（512 维/3 条/2 命中/7.2s）、embeddings 仍 BLOCKED（缺 llama-server）。
 - 真实后端（uvicorn，真实 `.env`）已验证 `/api/health` OK、`/api/ai-runtime/status` `is_mock=false`、Milvus `reachable=true`、语义索引 `available=false`；验证后进程已退出，容器保持运行。
+
+## 9. 真实 embedding / 语义检索 / 知识闭环 / Celery（2026-10-21 23:3x–23:4x 实测）
+
+证据文件：
+- `docs/audit/VNEXT_REAL_SEMANTIC_SMOKE-20261021.json`（embedding + Milvus 直接链路）
+- `docs/audit/VNEXT_REAL_KNOWLEDGE_SMOKE-20261021.json`（API 全链路）
+- `docs/audit/VNEXT_REAL_CELERY_QUEUE-20261021.json`（真实队列）
+
+1. **Embedding 服务**：`PYTHONIOENCODING=utf-8 .\.venv\Scripts\python.exe ..\scripts\local_embedding_server.py --port 11434`；`GET /health` → `{"status":"ok","model":"BAAI/bge-small-zh-v1.5","dimension":512}`；服务端以 numpy float32 列表序列化（早期 `list(float32)` 非 JSON 可序列化导致 500，已修）。
+2. **语义检索（应用自身代码路径）**：4 条字段文档（客户标识/产品编号/借据号/统计日期）+ 3 条中文查询，`embed_documents` 512 维/999ms，Milvus upsert 4 条/1053ms，检索 Top1=3/3、Top3=3/3，单查询约 650ms；随机向量对照只命中 1/1（说明必须比语义，而不能只看「有命中」）。
+3. **知识闭环（HTTP API）**：`scripts/vnext_seed_smoke_user.py` 建真实登录用户并绑定项目成员 → `scripts/vnext_knowledge_smoke.py`：login → `POST /api/projects/1/knowledge/documents/upload`（真实 multipart，解析出 5 个知识单元，`parse_status=parsed`）→ `submit-review` → `review` → `activate` → `POST /api/projects/1/semantic-index/reindex {force:true}` → `GET semantic-index/status` 返回 `mode=formal, document_count=1, chunk_count=5, active_index_current=true, milvus_health.healthy=true` → `POST /api/projects/1/knowledge/hybrid-search` 返回 5 条，字段含 `final_score/vector_score/keyword_score/authority_rank=6/lifecycle_status=active`。
+4. **Celery（真实 Redis broker）**：API 以 `TASK_QUEUE_PROVIDER=celery` 启动，worker 用 `--pool=solo`；任务 `app.workers.execute_background_job` 由 worker 接收（`celery_task_id=4c261c01-…`、`d96821b1-…`），worker 日志出现 `POST http://127.0.0.1:11434/v1/embeddings "HTTP/1.1 200 OK"` 与 `succeeded in 16.0s / 5.922s`；job 状态 `queued→running→completed`，`result_summary_json` 含 `indexed_count=5, collection=ybt_semantic_p1_v4_…`。
+5. **复现命令补充**：
+
+```powershell
+# 1) embedding 服务（后台常驻，占 11434）
+$env:HF_ENDPOINT='https://hf-mirror.com'; $env:HF_HUB_DISABLE_XET='1'
+.\.venv\Scripts\python.exe ..\scripts\local_embedding_server.py --port 11434
+
+# 2) 预置登录用户（写真实 PG，仅隔离冒烟库）
+.\.venv\Scripts\python.exe ..\scripts\vnext_seed_smoke_user.py
+
+# 3) 语义检索直接链路 / API 闭环 / Celery 队列
+.\.venv\Scripts\python.exe ..\scripts\vnext_semantic_smoke.py --output ..\docs\audit\VNEXT_REAL_SEMANTIC_SMOKE-20261021.json
+.\.venv\Scripts\python.exe ..\scripts\vnext_knowledge_smoke.py
+.\.venv\Scripts\python.exe ..\scripts\vnext_celery_smoke.py   # 需 API=TASK_QUEUE_PROVIDER=celery + worker 在跑
+```
+
+## 10. 本轮新发现的产品缺陷（未擅自修改业务代码，留证据与最小修复建议）
+
+### 10.1 optional 认证模式下背景任务写入 `created_by=0` 违反外键（真实可复现）
+
+- 现象：`AUTH_MODE=optional`（非生产）时匿名上传知识文档触发 `POST /api/projects/1/knowledge/documents/upload` → 500；PostgreSQL 报 `background_jobs_created_by_fkey` 冲突。
+- 根因：`app/services/auth/dependencies.py:31-33` 匿名 principal 为 `Principal(None, "legacy-system", …)`；`app/services/task_queue/…`/`submit_project_job` 把 `principal.user_id` 直接写入 `background_jobs.created_by`（None→0），而 `users.id` 无 0。
+- 影响：仅 optional/legacy 模式；生产 `AUTH_MODE=required` 不受影响（本次用真实登录用户验证通过）。但开发/演示环境会把「首次上传」变成 500，属可复现真实缺陷。
+- 最小修复：`created_by` 允许为空（迁移）或写 NULL 而非 0；或在 optional 模式下用系统用户占位（需产品口径）。本轮未改源码，避免触碰历史迁移。
+
+### 10.2 混合检索 `final_score` 饱和为 1.0 → Top1 退化到 unit id 兜底（真实可复现）
+
+- 现象：查询「报送数据按哪天取数」时，`## 2 客户统一标识`（vector 0.3831/keyword 0.0524）与 `## 3 报送日期口径`（vector 1.0/keyword 1.0）返回的 `final_score` 都是 `1.0`，排序按 `-knowledge_unit_id` 兜底，导致语义更相关的「报送日期」排第二。
+- 根因：`app/services/retrieval/hybrid_retriever.py:306` 为 `min(1.0, fused + rule_boost)`；`_normalize_scores`（:387-397）把 min-max 结果压到 0.01–1.0，`fused=1.0` 再加 0.05 被截断，多个高分单元并列；:343-347 排序键 `(authority_rank, final_score, -knowledge_unit_id)` 无二级语义信号。
+- 影响：权威等级相同（同为当前生效监管资料）时 Top1 可能不稳定/错误；RAG 引用与字段召回都受影响。属「可复现排序缺陷」，不是测试环境问题。
+- 最小修复建议：排序用未截断的 `fused`（或加 `boosted` 前值）作第二键；`final_score` 仅作展示或按 `fused/(1+boost)` 归一；补「同权威等级、两候选分数并列时按 fused 排序」的回归测试。**未在本次改动**，避免未经真实评测调整排序。

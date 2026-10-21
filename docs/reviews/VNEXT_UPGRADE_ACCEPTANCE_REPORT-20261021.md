@@ -160,11 +160,24 @@
 
 结论（标签严格区分）：
 - **REAL**：PostgreSQL 16（compose，5432，alembic 到 150 张表）、Redis 7（6379，PING+读写）、Milvus 2.5.4（19530，512 维写入/搜索/计数/删除）、公司 DeepSeek 网关（deepseek-v4-flash，字段重排与引用裁判均返回结构化 JSON 并计 token）、当前源码后端以真实配置启动（`/api/health` ok、`/api/ai-runtime/status` `is_mock=false`、Milvus `reachable=true`）。
-- **BLOCKED**：Embedding 服务（`alpine/ollama:0.32.4` 缺 llama-server，embedding 500）；Celery worker/beat 未启动；前端未启动；Milvus 语义索引为空（依赖 embedding）。
+- **BLOCKED（当轮初态，23:4x 已解除，见 G2）**：Embedding 服务（`alpine/ollama:0.32.4` 缺 llama-server，embedding 500）；Celery worker/beat 未启动；前端未启动；Milvus 语义索引为空（依赖 embedding）。
 - **FIX + TESTED_REAL(机制)**：引用裁判证据投影丢失来源/版本/时点信息（`citation_evidence` 只给 citation_id/label/quoted_content）。已透传白名单来源字段并强化判定规则（二手摘要→unknown、版本/时点/覆盖不足→unsupported）；新增 2 条回归测试（`tests/test_rag_citation_support.py` 14 passed）。真实 DeepSeek 上 C 族合成案例 6/10 → **7/10** 一致，平均 2.39s/例、0 降级。
 - **UNVERIFIED**：C08/C09/C10 三条未闭合，分别属“黄金集期望与产品策略口径差”“冲突证据需管线层显式传入”“快照版本未随引用投影”；真实业务准确率仍无独立人工标注。
 
 回归（引用相关批次）：`tests/test_overnight_citation_status.py`、`tests/test_rag_evaluation_fidelity.py`、`tests/test_rag_evaluation_semantic.py`、`tests/test_vnext_regulatory_golden.py`、`tests/test_rag_citation_support.py` → **64 passed**（50 + 14，269.87s + 102.79s）。
 
 本轮新增文件：`scripts/vnext_real_component_smoke.py`、`scripts/vnext_real_model_golden_eval.py`、`docs/audit/VNEXT_REAL_COMPONENTS-20261021.md`；修改：`backend/app/services/rag/citation_support.py`、`backend/tests/test_rag_citation_support.py`。
+
+### G2 真实 embedding / 语义检索 / 知识闭环 / Celery（2026-10-21 23:4x，已解除 G1 的阻塞）
+
+用户口径（m01449 原话）：“你现在尝试一下下载，我VPN应该已经连接网了”。
+
+- **REAL（新增）**：`BAAI/bge-small-zh-v1.5` 权重经 `HF_ENDPOINT=https://hf-mirror.com` + `HF_HUB_DISABLE_XET=1` 下载成功；`scripts/local_embedding_server.py` 提供 OpenAI 兼容 `/v1/embeddings`（512 维，`/health` 可查），应用 `embed_documents` 4 条 999ms、单查询约 650ms。
+- **REAL（语义检索）**：`scripts/vnext_semantic_smoke.py` 用应用自身 embedding + Milvus，4 条字段文档 / 3 条中文查询 **Top1 3/3、Top3 3/3**；随机向量对照仅 1 命中，排除“凡查必中”。
+- **REAL（知识闭环 HTTP）**：`scripts/vnext_knowledge_smoke.py`：真实登录用户（`scripts/vnext_seed_smoke_user.py`，argon2 哈希）→ 上传合成监管材料（解析 5 个知识单元）→ 送审/审核/生效 → 强制重建语义索引（`document_count=1, chunk_count=5, indexed_count=5, valid=true`，集合 `ybt_semantic_p1_v4_…_d512`）→ 混合检索返回 5 条含 `final_score/vector_score/keyword_score/authority_rank`。
+- **REAL（Celery 队列）**：API `TASK_QUEUE_PROVIDER=celery` + `celery -A app.workers.celery_app worker --pool=solo`，job `queued→running→completed`，worker 日志含 `POST http://127.0.0.1:11434/v1/embeddings 200 OK` 与 `succeeded`；`scripts/vnext_celery_smoke.py` 留存证据。
+- **UNVERIFIED**：Celery 异常语义（重复投递/崩溃恢复/租约过期/迟到返回）、beat 定时任务、Milvus 重启恢复与删除同步、前端浏览器点检、真实业务检索质量（样本仅 3 查询 4 文档）。
+- **新发现缺陷（未改业务代码，见审计文档 §10）**：① `AUTH_MODE=optional` 匿名 principal 写入 `background_jobs.created_by=0` 违反外键，导致真实上传 500（生产 required 模式不受影响）；② 混合检索 `final_score` 饱和为 1.0 时 Top1 退化为 unit id 兜底（`hybrid_retriever.py:306` `min(1.0, fused + 0.05)` + :343 排序键），查询「报送数据按哪天取数」时更相关的“报送日期”被“客户统一标识”压到第二。
+
+证据文件：`docs/audit/VNEXT_REAL_SEMANTIC_SMOKE-20261021.json`、`docs/audit/VNEXT_REAL_KNOWLEDGE_SMOKE-20261021.json`、`docs/audit/VNEXT_REAL_CELERY_QUEUE-20261021.json`；新增脚本：`scripts/local_embedding_server.py`、`scripts/vnext_semantic_smoke.py`、`scripts/vnext_knowledge_smoke.py`、`scripts/vnext_knowledge_inspect.py`、`scripts/vnext_knowledge_hits.py`、`scripts/vnext_seed_smoke_user.py`、`scripts/vnext_celery_smoke.py`。
 

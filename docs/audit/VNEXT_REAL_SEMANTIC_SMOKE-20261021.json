@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-10-21T23:34:27+0800",
+  "checks": {
+    "embed_documents": {
+      "status": "real",
+      "dimension": 512,
+      "count": 4,
+      "latency_ms": 872.2,
+      "expected_dimension": 512,
+      "dimension_ok": true
+    },
+    "milvus_upsert": {
+      "status": "real",
+      "collection": "vnext_semantic_1792596870",
+      "rows": 4,
+      "latency_ms": 1222.7
+    },
+    "retrieval": {
+      "status": "real",
+      "cases": [
+        {
+          "query": "客户统一标识取哪个字段",
+          "expected": "field:customer_id",
+          "top_ids": [
+            "field:customer_id",
+            "field:product_no",
+            "field:loan_no"
+          ],
+          "top_score": 0.7566,
+          "hit_at_1": true,
+          "hit_at_3": true,
+          "latency_ms": 607.7
+        },
+        {
+          "query": "借据对应的编号",
+          "expected": "field:loan_no",
+          "top_ids": [
+            "field:loan_no",
+            "field:product_no",
+            "field:stat_date"
+          ],
+          "top_score": 0.6663,
+          "hit_at_1": true,
+          "hit_at_3": true,
+          "latency_ms": 714.3
+        },
+        {
+          "query": "报送数据按哪天取数",
+          "expected": "field:stat_date",
+          "top_ids": [
+            "field:stat_date",
+            "field:customer_id",
+            "field:loan_no"
+          ],
+          "top_score": 0.7151,
+          "hit_at_1": true,
+          "hit_at_3": true,
+          "latency_ms": 720.3
+        }
+      ],
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "random_vector_control": {
+      "top_id": "field:stat_date",
+      "note": "随机向量也会返回最近邻，用于说明仅凭 Milvus 命中不能证明语义质量"
+    },
+    "cleanup": {
+      "collection_dropped": "vnext_semantic_1792596870"
+    }
+  },
+  "config": {
+    "embedding_provider": "local_vllm",
+    "embedding_model": "BAAI/bge-small-zh-v1.5",
+    "embedding_base_url": "http://127.0.0.1:11434/v1",
+    "embedding_dimension": 512,
+    "vector_store": "milvus",
+    "milvus_uri": "http://127.0.0.1:19530"
+  },
+  "status": "real",
+  "total_ms": 9351.4
+}
