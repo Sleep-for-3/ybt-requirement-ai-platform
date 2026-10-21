@@ -220,3 +220,10 @@
 - **TESTED_MOCK**：上述 4 项各自的 pytest 级回归（sqlite/单测替身），与真实层结果相互印证。
 - **UNVERIFIED（保留）**：独立银行专家标注的业务准确率、Celery 崩溃即时自愈（当前靠扫描重投）、Milvus 重启恢复与删除同步、跨浏览器/移动端、大规模检索排序质量。
 - **BLOCKED（保留）**：生产 Qwen 3.8 27B 的部署与验收（用户 m00984 明确本轮不纳入）；本轮真实模型为公司网关 `deepseek-v4-flash`。
+
+### H6 全量回归（最终门禁，2026-10-22 03:2x）
+
+- 命令（backend）：`AUTH_MODE=optional TASK_QUEUE_PROVIDER=inline STORAGE_DIR=<repo>/dev_storage_local .venv\Scripts\python.exe -m pytest -q --no-header -p no:cacheprovider`
+- 结果：**1910 passed, 1 skipped, 0 failed in 3971.16s (1:06:11)**，退出码 0。原始输出 `docs/audit/pytest-full-20261022.log`。
+- 说明（诚实记录）：本轮第一次全量跑（commit 前）出现 1 例 `test_llm_runtime.py::test_docker_contexts_exclude_host_build_artifacts` 失败，原因是我用 PowerShell `Set-Content` 改 `.gitignore` 时写入了 BOM，测试按 `utf-8` 读首行断言落空——属本次自伤而非产品缺陷。去掉 BOM 并修正条目后该用例通过（`test_llm_runtime + test_version_consistency + 新用例` 49 passed），随后重跑全量得到上面的 0 failed 结果。
+- 环境说明：本次全量使用 `TASK_QUEUE_PROVIDER=inline`（与历次全量一致），真实 Celery/Redis 的验收由 §11.3 的专项脚本单独覆盖。

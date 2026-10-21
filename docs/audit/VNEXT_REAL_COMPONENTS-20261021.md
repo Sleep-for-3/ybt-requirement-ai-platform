@@ -208,3 +208,7 @@ $env:HF_ENDPOINT='https://hf-mirror.com'; $env:HF_HUB_DISABLE_XET='1'
 | 控制台/接口洁净 | pass（无 JS 异常；仅 4 条来自非管理员访问 `/api/admin/*` 的 403，属 RBAC 预期） |
 
 - 仍未验证（诚实保留）：需求生成/重试/候选采用等需要真实模型长链路的交互（本节点检只读渲染 + 导航）；跨浏览器（仅 chromium）；移动端（任务书明确不需要）。
+
+### 11.5 全量回归（最终门禁）
+
+`backend` 全量 pytest：**1910 passed, 1 skipped, 0 failed / 3971.16s**（2026-10-22 03:2x，退出码 0），原始输出 `docs/audit/pytest-full-20261022.log`。中途一次失败为改 `.gitignore` 引入 BOM 的自伤，已修复并全量重跑通过（详见验收报告 §H6）。
