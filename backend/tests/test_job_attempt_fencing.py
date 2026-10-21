@@ -246,6 +246,54 @@ def test_dispatch_undelivered_ignores_delivered_and_running_jobs(env):
     assert fake.calls == []
 
 
+def test_dispatch_undelivered_republishes_a_crashed_running_job(env):
+    """N13: a worker that dies mid-handler leaves a ``running`` job whose lease expires.
+
+    Nothing re-publishes it, so before this sweep the job stayed ``running`` forever (the queued
+    sweep only looked at jobs that were never delivered). Re-publishing is safe because the claim
+    only takes over an *expired* lease, and at most one consumer wins it.
+    """
+
+    factory, user_id = env
+    now = datetime.now(UTC)
+    with factory() as db:
+        crashed = _job(db, user_id, key="n13-crashed",
+                       created_at=now - timedelta(seconds=3600))
+        crashed.status = "running"
+        crashed.started_at = now - timedelta(seconds=3600)
+        crashed.lease_owner = "dead-worker:1:attempt"
+        crashed.lease_expires_at = now - timedelta(seconds=1800)
+        crashed.dispatched_at = now - timedelta(seconds=3600)
+        # A healthy in-flight job with a live lease must never be touched.
+        healthy = _job(db, user_id, key="n13-healthy",
+                       created_at=now - timedelta(seconds=3600))
+        healthy.status = "running"
+        healthy.started_at = now - timedelta(seconds=30)
+        healthy.lease_owner = "live-worker:2:attempt"
+        healthy.lease_expires_at = now + timedelta(seconds=600)
+        healthy.dispatched_at = now - timedelta(seconds=30)
+        # A running row that never recorded a lease (legacy/manual) stays out of the sweep.
+        bare = _job(db, user_id, key="n13-bare", created_at=now - timedelta(seconds=3600))
+        bare.status = "running"
+        db.commit()
+        crashed_id = crashed.id
+
+        fake = _FakeCelery()
+        report = CeleryTaskQueue(fake).dispatch_undelivered(db)
+
+    assert report["candidates"] == 0, report
+    assert report["stale_running_candidates"] == 1, report
+    assert report["stale_running_published"] == [crashed_id], report
+    assert fake.calls == [("app.workers.execute_background_job", [crashed_id])]
+
+    # The re-publish refreshes the delivery marker, so the next sweep does not publish again.
+    with factory() as db:
+        again = _FakeCelery()
+        second = CeleryTaskQueue(again).dispatch_undelivered(db)
+        assert second["stale_running_candidates"] == 0, second
+        assert again.calls == []
+
+
 def test_dispatch_undelivered_reports_a_failing_publish_without_aborting(env):
     factory, user_id = env
     with factory() as db:

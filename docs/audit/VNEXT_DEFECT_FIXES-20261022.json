@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-10-21T16:36:00+00:00",
+  "engine": "real PostgreSQL(compose 5432) + real Redis/Celery + real Milvus + local embedding(11434) + company DeepSeek gateway",
+  "defect_1_optional_anonymous_created_by_fk": {
+    "label": "FIX + TESTED_REAL(service layer, real PostgreSQL)",
+    "root_cause": "task_queue submissions wrote int(principal.user_id or 0) into background_jobs.created_by (NOT NULL FK to users.id); anonymous legacy principal has user_id=None -> 0 -> FK violation -> HTTP 500",
+    "fix": [
+      "backend/app/services/auth/actors.py: ensure_actor_user_id() materialises users row username='legacy-system' once and reuses it",
+      "backend/app/services/task_queue/idempotency.py:101: created_by=ensure_actor_user_id(db, created_by or None)",
+      "backend/app/services/lineage/ingestion.py: ensure_actor_user_id re-exported, lineage submissions go through the same resolver"
+    ],
+    "real_pg_probe": {
+      "job_id": 14,
+      "status": "failed",
+      "created_by": 2,
+      "actor_username": "legacy-system",
+      "fk_ok": true,
+      "note": "probe handler is a placeholder lambda therefore the inline run marks the job failed; the INSERT itself (the defect) succeeded. Row deleted after the probe."
+    },
+    "regression_tests": {
+      "file": "backend/tests/test_task_queue_legacy_actor.py",
+      "tests": 2,
+      "fail_before": "sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) FOREIGN KEY constraint failed on INSERT background_jobs ... created_by 0",
+      "green_after": "24 passed (test_task_queue_legacy_actor + test_job_attempt_fencing + test_knowledge_reindex) in 168.33s"
+    }
+  },
+  "defect_2_hybrid_final_score_saturation": {
+    "label": "FIX + TESTED_REAL(HTTP API, real Milvus collection ybt_semantic_p1_v4_..._d512)",
+    "root_cause": "backend/app/services/retrieval/hybrid_retriever.py:305-306 final_score = min(1.0, fused + 0.05); :343-347 sort key (authority_rank, final_score, -knowledge_unit_id) -> ties at 1.0 resolved by unit id",
+    "fix": [
+      "hybrid_retriever.py: ranking_by_id[unit_id] = fused.get(...) + rule_boost (unclamped)",
+      "sort key uses the unclamped ranking score as second key, final_score stays as the displayed clamped value"
+    ],
+    "real_query_after_fix": {
+      "query": "报送数据按哪天取数",
+      "top1": {"knowledge_unit_id": 9, "heading": "## 3 报送日期口径", "final_score": 1.0, "vector_score": 1.0, "keyword_score": 1.0},
+      "old_top1_before_fix": {"knowledge_unit_id": 8, "heading": "## 2 客户统一标识", "vector_score": 0.3831, "keyword_score": 0.0524},
+      "verdict": "the semantically relevant reporting-date unit is now Top1 instead of being pushed to #2 by the unit-id tie-break"
+    },
+    "regression_tests": {
+      "file": "backend/tests/test_hybrid_score_saturation.py",
+      "tests": 3,
+      "green_after": "31 passed (hybrid retriever + fusion + reranker) in 13.20s"
+    }
+  }
+}

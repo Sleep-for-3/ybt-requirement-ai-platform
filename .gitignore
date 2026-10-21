@@ -23,6 +23,7 @@ npm-debug.log*
 /storage/
 /backend/storage/
 /backend/dev_storage*/
+/dev_storage*/
 /backend/.smoke-run/
 /uat_local_packs/
 /.local-run/

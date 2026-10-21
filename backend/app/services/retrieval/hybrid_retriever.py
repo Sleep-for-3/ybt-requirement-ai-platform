@@ -266,6 +266,7 @@ class HybridRetriever:
             ).all()
         } if candidate_units else {}
         items = []
+        ranking_by_id: dict[int, float] = {}
         for unit_id in ids:
             unit = unit_by_id.get(unit_id)
             if not unit or not _visible(
@@ -303,7 +304,13 @@ class HybridRetriever:
             if authority_rank >= 5:
                 reasons.append("当前生效监管资料")
             rule_boost = 0.05 if reasons else 0.0
-            final_score = min(1.0, fused.get(unit_id, 0.0) + rule_boost)
+            # ``ranking_score`` keeps the pre-clamp value: the API contract caps
+            # ``final_score`` at 1.0, but two strong candidates with the rule boost hit
+            # that cap together and a clamped-score sort would fall back to ``-id``,
+            # dropping the genuinely better fused candidate below an older, weaker one.
+            ranking_score = fused.get(unit_id, 0.0) + rule_boost
+            ranking_by_id[unit_id] = ranking_score
+            final_score = min(1.0, ranking_score)
             items.append({
                 "knowledge_unit_id": unit.id,
                 "project_id": unit.project_id,
@@ -342,7 +349,11 @@ class HybridRetriever:
             })
         items = sorted(
             items,
-            key=lambda item: (item["authority_rank"], item["final_score"], -item["knowledge_unit_id"]),
+            key=lambda item: (
+                item["authority_rank"],
+                ranking_by_id[item["knowledge_unit_id"]],
+                -item["knowledge_unit_id"],
+            ),
             reverse=True,
         )[:top_k]
         # The reranker is inert unless settings.reranker_enabled is True; when it

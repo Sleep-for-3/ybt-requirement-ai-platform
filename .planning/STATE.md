@@ -4,10 +4,10 @@ milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
 current_phase: "vnext-2026-10"
 current_phase_name: banking-semantic-agent-vnext
-status: auditing
-stopped_at: "2026-10-21 DSH VNext 审计：阶段0/1 回归与缺陷修复（见 docs/audit、docs/reviews）"
-last_updated: "2026-10-21T14:40:00+08:00"
-last_activity: 2026-10-21
+status: followups-verified
+stopped_at: "2026-10-22 补充验收完成：optional 外键/检索饱和两缺陷修复、Celery 异常语义 4/4、前端浏览器点检 5/5（见 docs/audit/VNEXT_REAL_COMPONENTS-20261021.md §11、docs/reviews 报告 §H）"
+last_updated: "2026-10-22T00:45:00+08:00"
+last_activity: 2026-10-22
 last_activity_desc: >-
   实际分支 dsh/banking-semantic-agent-v2（HEAD 7495676，非 Phase 11）。
   本文件 Phase 11 段落是 2026-08-25 的历史快照，保留不改；

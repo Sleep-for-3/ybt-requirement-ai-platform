@@ -181,3 +181,42 @@
 
 证据文件：`docs/audit/VNEXT_REAL_SEMANTIC_SMOKE-20261021.json`、`docs/audit/VNEXT_REAL_KNOWLEDGE_SMOKE-20261021.json`、`docs/audit/VNEXT_REAL_CELERY_QUEUE-20261021.json`；新增脚本：`scripts/local_embedding_server.py`、`scripts/vnext_semantic_smoke.py`、`scripts/vnext_knowledge_smoke.py`、`scripts/vnext_knowledge_inspect.py`、`scripts/vnext_knowledge_hits.py`、`scripts/vnext_seed_smoke_user.py`、`scripts/vnext_celery_smoke.py`。
 
+
+## H. 补充验收：两个真实缺陷修复 + Celery 异常语义 + 前端真实点检（2026-10-22）
+
+用户口径（m01788 原话）：“需要，制定完整的计划，按计划推进”。本节落实 G2 末尾列出的两项缺陷与三项 UNVERIFIED。详细证据见 `docs/audit/VNEXT_REAL_COMPONENTS-20261021.md` §11。
+
+### H1 缺陷① `AUTH_MODE=optional` 匿名任务外键（FIX + TESTED_REAL 服务层）
+
+- 根因：任务投递写 `int(principal.user_id or 0)` 到 `background_jobs.created_by`（NOT NULL FK → `users.id`），匿名 legacy principal 没有 user → 0 → 外键冲突 → 500。
+- 修复：新增 `backend/app/services/auth/actors.py::ensure_actor_user_id`，缺省 actor 时物化一次性系统用户 `legacy-system`；`backend/app/services/task_queue/idempotency.py:101` 与 `backend/app/services/lineage/ingestion.py` 统一走该解析器。`AUTH_MODE=required` 有真实 user_id 时行为不变（匿名仍 401）。
+- 证据：`backend/tests/test_task_queue_legacy_actor.py` 改前可复现 `sqlalchemy.exc.IntegrityError … FOREIGN KEY constraint failed`，改后 24 passed；真实 compose PostgreSQL 上用匿名 principal 投递，INSERT 成功且 `created_by=2 → users.username='legacy-system'`（`docs/audit/VNEXT_DEFECT_FIXES-20261022.json`）。
+
+### H2 缺陷② 混合检索 `final_score` 饱和导致 Top1 退化（FIX + TESTED_REAL API）
+
+- 修复：`backend/app/services/retrieval/hybrid_retriever.py` 排序第二键改用未截断的 `fused + rule_boost`，展示字段 `final_score` 口径不变。
+- 真实改后：查询「报送数据按哪天取数」在真实 Milvus 集合上 Top1 变为 unit 9「## 3 报送日期口径」；改前该位置是「## 2 客户统一标识」（vector 0.3831/keyword 0.0524）。
+- 回归：新增 `backend/tests/test_hybrid_score_saturation.py`（3 条），hybrid/fusion/reranker 31 passed。
+
+### H3 Celery 异常语义（原 UNVERIFIED → TESTED_REAL，4/4）
+
+- 重复投递：同 key 返回同 job id、`deduplicated=true`、仅 1 行、索引增量 1；消息重放 0 增量、`finished_at` 不变。
+- Worker 崩溃：真实 kill 后 job 停在 `running`（lease_owner 保留，无自动恢复）；redispatch 扫描挑选并重投（`stale_running_published=[12]`），最终 completed。
+- 迟到返回：接管后 B 结果保留，旧 attempt 写入被 fencing 拒绝（`late_writer_blocked=true`）。
+- beat：真实日志 `Sending due task redispatch-undelivered-jobs`。
+- 改动：`backend/app/services/task_queue/celery.py::dispatch_undelivered` 增加 stale-running 重投；`backend/tests/test_job_attempt_fencing.py` 19 passed。
+- 运营注意：worker/beat 无 restart policy，崩溃需人工拉起或用扫描重投，非立即自愈。
+
+### H4 前端真实浏览器点检（原 UNVERIFIED → TESTED_REAL，5/5）
+
+- 环境：`next dev`（3000）+ 当前源码后端 8011 + 真实 PG 种子（`scripts/vnext_seed_workspace_fixture.py`，项目 1 / 机构 VNEXT-SYNTH / `EAST_YBT_CUSTOMER` / `CUSTOMER_ID`、`PRODUCT_ID` / 需求「根据借据信息取得产品信息（VNext 真实页面点检）」）。
+- 脚本：`scripts/vnext_workspace_browser_smoke.mjs`（Playwright chromium），输出 `docs/audit/VNEXT_WORKSPACE_BROWSER-20261022.json` 与整页截图。
+- 通过：真实登录 → 工作区加载预置需求 → 文档渲染（5 Tab：结构化口径/血缘/证据/待确认/文档预览，字段范围与版本可见）→ Tab 逐一切换 → 无 JS 异常（仅非管理员访问 `/api/admin/*` 的 4 条 403，属 RBAC 预期）。
+- 仍未点检：需求生成/重试/候选采用等真实模型长链路交互；仅 chromium。
+
+### H5 标签汇总（截至本节）
+
+- **FIX + TESTED_REAL**：H1（服务层真实 PG）、H2（HTTP API + 真实 Milvus）、H3（真实 PG/Redis/Celery）、H4（真实浏览器 + 真实后端/DB）。
+- **TESTED_MOCK**：上述 4 项各自的 pytest 级回归（sqlite/单测替身），与真实层结果相互印证。
+- **UNVERIFIED（保留）**：独立银行专家标注的业务准确率、Celery 崩溃即时自愈（当前靠扫描重投）、Milvus 重启恢复与删除同步、跨浏览器/移动端、大规模检索排序质量。
+- **BLOCKED（保留）**：生产 Qwen 3.8 27B 的部署与验收（用户 m00984 明确本轮不纳入）；本轮真实模型为公司网关 `deepseek-v4-flash`。

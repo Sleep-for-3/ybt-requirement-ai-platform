@@ -1,0 +1,164 @@
+ 
+ -------------- celery@LAPTOP-1CLFROQ1 v5.6.3 (recovery)
+--- ***** ----- 
+-- ******* ---- Windows-11-10.0.26200-SP0 2026-10-22 00:14:37
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         ybt_governance:0x15a77904e00
+- ** ---------- .> transport:   redis://127.0.0.1:6379/0
+- ** ---------- .> results:     redis://127.0.0.1:6379/1
+- *** --- * --- .> concurrency: 1 (solo)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> celery           exchange=celery(direct) key=celery
+                
+
+[tasks]
+  . app.workers.execute_background_job
+  . app.workers.poll_lineage_repositories
+  . app.workers.redispatch_undelivered_jobs
+  . app.workers.version_report
+
+[2026-10-22 00:14:37,554: INFO/MainProcess] Connected to redis://127.0.0.1:6379/0
+[2026-10-22 00:14:37,559: INFO/MainProcess] mingle: searching for neighbors
+[2026-10-22 00:14:38,597: INFO/MainProcess] mingle: all alone
+[2026-10-22 00:14:38,634: INFO/MainProcess] celery@LAPTOP-1CLFROQ1 ready.
+[2026-10-22 00:14:38,638: INFO/MainProcess] Task app.workers.execute_background_job[b4bde18a-3694-440e-a5cf-1c86fce2f387] received
+[2026-10-22 00:14:41,386: INFO/MainProcess] setup plugin alembic.autogenerate.schemas
+[2026-10-22 00:14:41,386: INFO/MainProcess] setup plugin alembic.autogenerate.tables
+[2026-10-22 00:14:41,386: INFO/MainProcess] setup plugin alembic.autogenerate.types
+[2026-10-22 00:14:41,386: INFO/MainProcess] setup plugin alembic.autogenerate.constraints
+[2026-10-22 00:14:41,386: INFO/MainProcess] setup plugin alembic.autogenerate.defaults
+[2026-10-22 00:14:41,386: INFO/MainProcess] setup plugin alembic.autogenerate.comments
+[2026-10-22 00:14:41,388: INFO/MainProcess] setup plugin alembic.ext.checkconstraint_byname
+[2026-10-22 00:14:47,516: INFO/MainProcess] HTTP Request: POST http://127.0.0.1:11434/v1/embeddings "HTTP/1.1 200 OK"
+[2026-10-22 00:14:50,863: INFO/MainProcess] Task app.workers.execute_background_job[b4bde18a-3694-440e-a5cf-1c86fce2f387] succeeded in 12.23399999999674s: None
+[2026-10-22 00:14:52,809: INFO/MainProcess] Task app.workers.execute_background_job[96e8f016-6d3c-4dbb-85c5-ba7d6529f728] received
+[2026-10-22 00:14:52,817: INFO/MainProcess] Task app.workers.execute_background_job[96e8f016-6d3c-4dbb-85c5-ba7d6529f728] succeeded in 0.01600000000325963s: None
+[2026-10-22 00:14:52,822: INFO/MainProcess] Task app.workers.execute_background_job[2709c6bd-80d3-46fe-ab3a-551797d44bca] received
+[2026-10-22 00:14:52,830: INFO/MainProcess] Task app.workers.execute_background_job[2709c6bd-80d3-46fe-ab3a-551797d44bca] succeeded in 0.01600000000325963s: None
+[2026-10-22 00:15:04,917: INFO/MainProcess] Task app.workers.execute_background_job[cd677c3b-49b5-45b0-be79-a13554ea5e55] received
+ 
+ -------------- celery@LAPTOP-1CLFROQ1 v5.6.3 (recovery)
+--- ***** ----- 
+-- ******* ---- Windows-11-10.0.26200-SP0 2026-10-22 00:15:19
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         ybt_governance:0x1f166afd070
+- ** ---------- .> transport:   redis://127.0.0.1:6379/0
+- ** ---------- .> results:     redis://127.0.0.1:6379/1
+- *** --- * --- .> concurrency: 1 (solo)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> celery           exchange=celery(direct) key=celery
+                
+
+[tasks]
+  . app.workers.execute_background_job
+  . app.workers.poll_lineage_repositories
+  . app.workers.redispatch_undelivered_jobs
+  . app.workers.version_report
+
+[2026-10-22 00:15:20,028: INFO/MainProcess] Connected to redis://127.0.0.1:6379/0
+[2026-10-22 00:15:20,040: INFO/MainProcess] mingle: searching for neighbors
+[2026-10-22 00:15:21,084: INFO/MainProcess] mingle: all alone
+[2026-10-22 00:15:21,117: INFO/MainProcess] celery@LAPTOP-1CLFROQ1 ready.
+[2026-10-22 00:15:21,123: INFO/MainProcess] Task app.workers.execute_background_job[67d03609-242d-4f96-bbf7-bff2788be695] received
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.autogenerate.schemas
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.autogenerate.tables
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.autogenerate.types
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.autogenerate.constraints
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.autogenerate.defaults
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.autogenerate.comments
+[2026-10-22 00:15:23,853: INFO/MainProcess] setup plugin alembic.ext.checkconstraint_byname
+[2026-10-22 00:15:29,416: INFO/MainProcess] HTTP Request: POST http://127.0.0.1:11434/v1/embeddings "HTTP/1.1 200 OK"
+[2026-10-22 00:15:32,265: INFO/MainProcess] Task app.workers.execute_background_job[67d03609-242d-4f96-bbf7-bff2788be695] succeeded in 11.14000000001397s: None
+[2026-10-22 00:15:44,440: INFO/MainProcess] Task app.workers.poll_lineage_repositories[13a14c11-9e8b-42a6-9c2b-c9b1a4479055] received
+[2026-10-22 00:15:44,463: INFO/MainProcess] Task app.workers.poll_lineage_repositories[13a14c11-9e8b-42a6-9c2b-c9b1a4479055] succeeded in 0.01600000000325963s: {'checked_count': 0, 'enqueued_count': 0, 'skipped_active_count': 0, 'failed_count': 0, 'repository_ids': (), 'job_ids': (), 'failures': ()}
+[2026-10-22 00:16:44,223: INFO/MainProcess] Task app.workers.redispatch_undelivered_jobs[7878acf7-3f66-41b9-b7c8-1fe03a9a04d8] received
+[2026-10-22 00:16:44,238: INFO/MainProcess] Task app.workers.redispatch_undelivered_jobs[7878acf7-3f66-41b9-b7c8-1fe03a9a04d8] succeeded in 0.01600000000325963s: {'candidates': 0, 'published': 0, 'stale_running_candidates': 0, 'stale_running_published': [], 'failed': []}
+[2026-10-22 00:16:44,356: INFO/MainProcess] Task app.workers.poll_lineage_repositories[95ea68a7-3455-45b7-b25d-7b31a0471257] received
+[2026-10-22 00:16:44,364: INFO/MainProcess] Task app.workers.poll_lineage_repositories[95ea68a7-3455-45b7-b25d-7b31a0471257] succeeded in 0.01600000000325963s: {'checked_count': 0, 'enqueued_count': 0, 'skipped_active_count': 0, 'failed_count': 0, 'repository_ids': (), 'job_ids': (), 'failures': ()}
+ 
+ -------------- celery@LAPTOP-1CLFROQ1 v5.6.3 (recovery)
+--- ***** ----- 
+-- ******* ---- Windows-11-10.0.26200-SP0 2026-10-22 00:17:25
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         ybt_governance:0x177b97fd070
+- ** ---------- .> transport:   redis://127.0.0.1:6379/0
+- ** ---------- .> results:     redis://127.0.0.1:6379/1
+- *** --- * --- .> concurrency: 1 (solo)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> celery           exchange=celery(direct) key=celery
+                
+
+[tasks]
+  . app.workers.execute_background_job
+  . app.workers.poll_lineage_repositories
+  . app.workers.redispatch_undelivered_jobs
+  . app.workers.version_report
+
+[2026-10-22 00:17:25,928: INFO/MainProcess] Connected to redis://127.0.0.1:6379/0
+[2026-10-22 00:17:25,939: INFO/MainProcess] mingle: searching for neighbors
+[2026-10-22 00:17:26,981: INFO/MainProcess] mingle: all alone
+[2026-10-22 00:17:27,010: INFO/MainProcess] celery@LAPTOP-1CLFROQ1 ready.
+[2026-10-22 00:17:27,016: INFO/MainProcess] Task app.workers.execute_background_job[b41df916-4dc5-4ddc-9a4b-66bd5de36060] received
+[2026-10-22 00:17:29,714: INFO/MainProcess] setup plugin alembic.autogenerate.schemas
+[2026-10-22 00:17:29,714: INFO/MainProcess] setup plugin alembic.autogenerate.tables
+[2026-10-22 00:17:29,714: INFO/MainProcess] setup plugin alembic.autogenerate.types
+[2026-10-22 00:17:29,714: INFO/MainProcess] setup plugin alembic.autogenerate.constraints
+[2026-10-22 00:17:29,715: INFO/MainProcess] setup plugin alembic.autogenerate.defaults
+[2026-10-22 00:17:29,715: INFO/MainProcess] setup plugin alembic.autogenerate.comments
+[2026-10-22 00:17:29,715: INFO/MainProcess] setup plugin alembic.ext.checkconstraint_byname
+[2026-10-22 00:17:35,212: INFO/MainProcess] HTTP Request: POST http://127.0.0.1:11434/v1/embeddings "HTTP/1.1 200 OK"
+[2026-10-22 00:17:38,633: INFO/MainProcess] Task app.workers.execute_background_job[b41df916-4dc5-4ddc-9a4b-66bd5de36060] succeeded in 11.60999999998603s: None
+[2026-10-22 00:17:41,066: INFO/MainProcess] Task app.workers.execute_background_job[54ac8dfc-9c88-4126-82f8-cbdd32ddcc32] received
+[2026-10-22 00:17:41,085: INFO/MainProcess] Task app.workers.execute_background_job[54ac8dfc-9c88-4126-82f8-cbdd32ddcc32] succeeded in 0.01600000000325963s: None
+[2026-10-22 00:17:41,093: INFO/MainProcess] Task app.workers.execute_background_job[da00c6a6-893a-4eb0-aa80-b553e48defe9] received
+[2026-10-22 00:17:41,106: INFO/MainProcess] Task app.workers.execute_background_job[da00c6a6-893a-4eb0-aa80-b553e48defe9] succeeded in 0.01600000000325963s: None
+[2026-10-22 00:17:53,144: INFO/MainProcess] Task app.workers.execute_background_job[080e4981-2360-4c53-85e6-66e5961b394c] received
+ 
+ -------------- celery@LAPTOP-1CLFROQ1 v5.6.3 (recovery)
+--- ***** ----- 
+-- ******* ---- Windows-11-10.0.26200-SP0 2026-10-22 00:18:08
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         ybt_governance:0x22799290230
+- ** ---------- .> transport:   redis://127.0.0.1:6379/0
+- ** ---------- .> results:     redis://127.0.0.1:6379/1
+- *** --- * --- .> concurrency: 1 (solo)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> celery           exchange=celery(direct) key=celery
+                
+
+[tasks]
+  . app.workers.execute_background_job
+  . app.workers.poll_lineage_repositories
+  . app.workers.redispatch_undelivered_jobs
+  . app.workers.version_report
+
+[2026-10-22 00:18:08,542: INFO/MainProcess] Connected to redis://127.0.0.1:6379/0
+[2026-10-22 00:18:08,555: INFO/MainProcess] mingle: searching for neighbors
+[2026-10-22 00:18:09,584: INFO/MainProcess] mingle: all alone
+[2026-10-22 00:18:09,612: INFO/MainProcess] celery@LAPTOP-1CLFROQ1 ready.
+[2026-10-22 00:18:09,615: INFO/MainProcess] Task app.workers.execute_background_job[eb738a92-0f15-4330-90b7-0792c897a7ee] received
+[2026-10-22 00:18:12,354: INFO/MainProcess] setup plugin alembic.autogenerate.schemas
+[2026-10-22 00:18:12,354: INFO/MainProcess] setup plugin alembic.autogenerate.tables
+[2026-10-22 00:18:12,354: INFO/MainProcess] setup plugin alembic.autogenerate.types
+[2026-10-22 00:18:12,354: INFO/MainProcess] setup plugin alembic.autogenerate.constraints
+[2026-10-22 00:18:12,354: INFO/MainProcess] setup plugin alembic.autogenerate.defaults
+[2026-10-22 00:18:12,355: INFO/MainProcess] setup plugin alembic.autogenerate.comments
+[2026-10-22 00:18:12,355: INFO/MainProcess] setup plugin alembic.ext.checkconstraint_byname
+[2026-10-22 00:18:17,923: INFO/MainProcess] HTTP Request: POST http://127.0.0.1:11434/v1/embeddings "HTTP/1.1 200 OK"
+[2026-10-22 00:18:21,315: INFO/MainProcess] Task app.workers.execute_background_job[eb738a92-0f15-4330-90b7-0792c897a7ee] succeeded in 11.702999999979511s: None
+[2026-10-22 00:18:35,448: INFO/MainProcess] Task app.workers.redispatch_undelivered_jobs[ca787d73-91db-496b-aac7-a008bd23b367] received
+[2026-10-22 00:18:35,485: INFO/MainProcess] Task app.workers.redispatch_undelivered_jobs[ca787d73-91db-496b-aac7-a008bd23b367] succeeded in 0.031000000017229468s: {'candidates': 0, 'published': 0, 'stale_running_candidates': 0, 'stale_running_published': [], 'failed': []}
+[2026-10-22 00:18:35,503: INFO/MainProcess] Task app.workers.poll_lineage_repositories[93698019-3faa-4b7f-a756-8940fa948d5e] received
+[2026-10-22 00:18:35,556: INFO/MainProcess] Task app.workers.poll_lineage_repositories[93698019-3faa-4b7f-a756-8940fa948d5e] succeeded in 0.045999999972991645s: {'checked_count': 0, 'enqueued_count': 0, 'skipped_active_count': 0, 'failed_count': 0, 'repository_ids': (), 'job_ids': (), 'failures': ()}

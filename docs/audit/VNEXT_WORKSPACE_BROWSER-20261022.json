@@ -1,0 +1,88 @@
+{
+  "generated_at": "2026-10-21T16:35:37.312Z",
+  "web_url": "http://127.0.0.1:3000",
+  "browser": "chromium (playwright)",
+  "results": [
+    {
+      "check": "login_through_ui",
+      "pass": true,
+      "method": "ui_form",
+      "url": "http://127.0.0.1:3000/projects",
+      "project_visible": true,
+      "project_list_snippet": "监管数据智能治理平台\n需求文档 · 数据血缘\n核心任务\n需求文档\n智能体任务台\n数据血缘\n资料与数据\n数据架构与表归属\n统一批量导入\n设置\n⌄\n智能能力配置中心\n项目管理\n审核与我的工作\n语义目录\n质量期望\n安全查询\n验收管理\n通知\n后台任务\n审计\n银行内网业务系统 · 人工确认优先\n合成银行\nVNEXT 真实组件冒烟 20261021\n搜索资产、语义、需求与血缘\n快捷键 Ctrl+K\n后台任务正常\n\n前后端发布标识不一致（app_commit:unknown；build_time:unknown），请联系运维核对本次发布。\n\n选择项目\nVNEXT 真实组件冒烟 20261021\nV\nVNext 冒烟账号\n工作台\n项目\n项目\n\n1 个一表通口径项目\n\n新建项目\n合成银行\nVNEXT 真实组件冒烟 20261021\n\n真实 PG/Redis/Milvus/Embedding/DeepSeek",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+      ],
+      "badResponses": [
+        {
+          "url": "http://127.0.0.1:8011/api/admin/institutions",
+          "status": 403
+        },
+        {
+          "url": "http://127.0.0.1:8011/api/admin/institutions",
+          "status": 403
+        },
+        {
+          "url": "http://127.0.0.1:8011/api/admin/institutions",
+          "status": 403
+        },
+        {
+          "url": "http://127.0.0.1:8011/api/admin/institutions",
+          "status": 403
+        }
+      ]
+    },
+    {
+      "check": "workspace_lists_seeded_requirement",
+      "pass": true,
+      "options_count": 2,
+      "matched": [
+        "根据借据信息取得产品信息（VNext 真实页面点检） · v1"
+      ]
+    },
+    {
+      "check": "requirement_document_renders",
+      "pass": true,
+      "tabsPresent": true,
+      "tabTexts": [
+        "结构化口径",
+        "血缘",
+        "证据",
+        "待确认",
+        "文档预览"
+      ],
+      "field_range_shown": true,
+      "version_shown": true
+    },
+    {
+      "check": "workspace_tabs_switch",
+      "pass": true,
+      "tabResults": {
+        "结构化口径": true,
+        "血缘": true,
+        "证据": true,
+        "待确认": true,
+        "文档预览": true
+      }
+    },
+    {
+      "check": "browser_console_and_api_clean",
+      "pass": true,
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+      ],
+      "significantConsole": [],
+      "unexpected": [],
+      "expected_permission_403": 4,
+      "note": "403 来自非管理员账号访问 /api/admin/* 的权限探测，属预期"
+    }
+  ],
+  "passed": 5,
+  "total_checks": 5
+}

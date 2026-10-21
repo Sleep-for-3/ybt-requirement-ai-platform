@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.observability import current_request_id
 from app.models import BackgroundJob
+from app.services.auth.actors import ensure_actor_user_id
 from app.services.governance.audit import redact_summary
 
 
@@ -94,7 +95,10 @@ def create_or_get_job(
         queued_at=datetime.now(UTC),
         payload_summary_json=redact_summary(payload_summary),
         result_summary_json={},
-        created_by=created_by,
+        # ``AUTH_MODE=optional`` yields an anonymous legacy principal (user_id None);
+        # ``created_by`` is a NOT NULL FK to ``users`` so 0/None would raise
+        # ForeignKeyViolation.  Materialise the shared legacy user instead.
+        created_by=ensure_actor_user_id(db, created_by or None),
     )
     savepoint = db.begin_nested()
     try:

@@ -21,6 +21,7 @@ from app.services.lineage.version_diff import ChangeItemSpec, VersionDiffResult,
 from app.services.lineage.revisions import LineageRevisionService
 from app.services.storage.base import StorageService
 from app.services.governance.audit import record_audit
+from app.services.auth.actors import ensure_actor_user_id  # re-exported for existing callers
 
 
 ALLOWED_SCRIPT_EXTENSIONS = {".sql", ".sh", ".ksh", ".bash", ".txt"}
@@ -478,12 +479,3 @@ def _semantic_text(content: str) -> str:
 def _file_type(suffix: str) -> str:
     return "sql" if suffix == ".sql" else "shell" if suffix in {".sh", ".ksh", ".bash"} else "text"
 
-
-def ensure_actor_user_id(db: Session, actor_user_id: int | None) -> int:
-    if actor_user_id is not None:
-        return actor_user_id
-    user = db.scalar(select(User).where(User.username == "legacy-system"))
-    if user is None:
-        user = User(username="legacy-system", display_name="Legacy system", status="active")
-        db.add(user); db.flush()
-    return user.id

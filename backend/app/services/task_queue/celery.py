@@ -77,8 +77,18 @@ class CeleryTaskQueue:
     def dispatch_undelivered(self, db: Session, *, limit: int = 50) -> dict[str, Any]:
         """N11: compensating dispatcher for jobs committed but never published.
 
-        Only ``queued`` jobs without a delivery marker are considered, so a running or finished job
-        is never re-sent.  A publish failure is reported and counted instead of aborting the sweep.
+        Two classes of job are recovered:
+
+        * ``queued`` jobs without a delivery marker (the outbox case: the process died between
+          committing the row and publishing it);
+        * ``running`` jobs whose lease already expired — a worker (or its host) died mid-handler.
+          Nothing re-publishes those, so without this sweep such a job stays ``running`` forever.
+          Re-publishing is safe: ``_claim_job`` only takes over a running job whose lease expired,
+          and the handler is expected to be idempotent per job row.
+
+        A running job is re-published at most once per grace period (``dispatched_at`` is refreshed
+        by :meth:`_publish`), so a permanently dead worker does not create a publish storm. A
+        publish failure is reported and counted instead of aborting the sweep.
         """
 
         from sqlalchemy import and_, or_, select
@@ -87,9 +97,9 @@ class CeleryTaskQueue:
         # ``created_at``; for a retry the job row is old, so ``queued_at`` is the attempt's own queue
         # time. Using only ``created_at`` (plus a stale ``dispatched_at``) is exactly what let a
         # retried, never-published job stay invisible to the sweep forever.
-        stale_before = datetime.now(UTC) - timedelta(seconds=self.dispatch_grace_seconds)
-        attempt_queued_before = datetime.now(UTC) - timedelta(
-            seconds=self.retry_dispatch_grace_seconds)
+        now = datetime.now(UTC)
+        stale_before = now - timedelta(seconds=self.dispatch_grace_seconds)
+        attempt_queued_before = now - timedelta(seconds=self.retry_dispatch_grace_seconds)
         pending = list(db.scalars(
             select(BackgroundJob)
             .where(
@@ -104,16 +114,42 @@ class CeleryTaskQueue:
             .order_by(BackgroundJob.id)
             .limit(limit)
         ))
+        # A running job only becomes a takeover candidate once its lease expired. Requiring a
+        # recorded lease and start time keeps legacy/manually-inserted rows out of the sweep.
+        stale_running = list(db.scalars(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.status == "running",
+                BackgroundJob.started_at.is_not(None),
+                BackgroundJob.lease_expires_at.is_not(None),
+                BackgroundJob.lease_expires_at < now,
+                or_(
+                    BackgroundJob.dispatched_at.is_(None),
+                    BackgroundJob.dispatched_at < stale_before,
+                ),
+            )
+            .order_by(BackgroundJob.id)
+            .limit(limit)
+        ))
         published = 0
         failed: list[dict[str, Any]] = []
-        for job in pending:
+        for job in [*pending, *stale_running]:
             try:
                 self._publish(db, job)
                 published += 1
             except Exception as exc:  # noqa: BLE001 - one bad publish must not stop the sweep
                 db.rollback()
                 failed.append({"job_id": job.id, "error": type(exc).__name__ + ": " + str(exc)[:160]})
-        return {"candidates": len(pending), "published": published, "failed": failed}
+        return {
+            "candidates": len(pending),
+            "published": published,
+            "stale_running_candidates": len(stale_running),
+            "stale_running_published": [
+                job.id for job in stale_running if job.id not in
+                {entry["job_id"] for entry in failed}
+            ],
+            "failed": failed,
+        }
 
     def get_status(self, db: Session, job_id: int) -> BackgroundJob | None:
         return db.get(BackgroundJob, job_id)

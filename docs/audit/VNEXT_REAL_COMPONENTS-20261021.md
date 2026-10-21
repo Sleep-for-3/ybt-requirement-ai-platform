@@ -89,15 +89,15 @@ $env:STORAGE_DIR=(Resolve-Path .\dev_storage_local).Path
 3. **Milvus 灌库（原 P1）→ 已完成**：真实知识单元 5 个入索引，集合名含指纹与维度（`ybt_semantic_p1_v4_ec2e880fd3f8_d512`），`validation.valid=true`；重启恢复与删除同步未测。
 4. **前端（P1）**：仍未启动/未点检，浏览器关键操作 UNVERIFIED。
 5. **裁判上下文（P1）**：C09/C10 类缺口仍需把版本号/生效日/冲突证据传入 `check_citation_support`；C08 需人工定口径。
-6. **optional 模式背景任务外键**（见 §10.1）与 **混合检索分数饱和导致 Top1 并列**（见 §10.2）为本轮新发现缺陷，建议纳入下一工作包修复（均未改测试预期）。
+6. **optional 模式背景任务外键**（见 §10.1）与 **混合检索分数饱和导致 Top1 并列**（见 §10.2）为本轮新发现缺陷；**2026-10-22 已修复并带回归测试与真实证据，见 §11.1 / §11.2**。
 
 ## 7. 未验证 / 保留声明
 
 - 真实业务准确率、独立人工标注：UNVERIFIED（0 名独立银行专家标注；本轮知识材料为 Lead 编写的合成测试规范，明确标注「非真实监管文件」）。
-- Celery 队列**异常语义**（重复投递幂等、Worker 崩溃恢复、租约过期、迟到返回不覆盖）：UNVERIFIED（只验证了正常完成链路）。
-- 前端真机操作：UNVERIFIED（未启动/未点检）。
+- Celery 队列**异常语义**（重复投递幂等、Worker 崩溃恢复、租约过期、迟到返回不覆盖）：**2026-10-22 已真实测，见 §11.3（4/4）**；worker/beat 无 restart policy 仍属运维注意事项。
+- 前端真机操作：**2026-10-22 已真实浏览器点检 5/5，见 §11.4**；生成/重试等长链路交互仍未点检。
 - Milvus 检索**质量**：仅 3 条自造查询、4 条自造文档（Top1 3/3），样本量不足以支撑业务准确性结论；重启恢复、删除同步未测。
-- 混合检索排序：发现 `final_score` 饱和为 1.0 后 Top1 由 unit id 兜底（§10.2），真实排序质量待评估。
+- 混合检索排序：`final_score` 饱和缺陷已于 §11.2 修复（排序改用未截断分数），真实查询 Top1 已验证；更大规模排序质量仍待评估。
 - 公司 DeepSeek 网关为开发/验证用；生产主模型按任务书仍是项目既定内网模型，本次不改变生产配置；用户已明确本轮不考虑 Qwen。
 
 ## 8. 运行方式与重启注意事项（实测踩坑）
@@ -156,3 +156,55 @@ $env:HF_ENDPOINT='https://hf-mirror.com'; $env:HF_HUB_DISABLE_XET='1'
 - 根因：`app/services/retrieval/hybrid_retriever.py:306` 为 `min(1.0, fused + rule_boost)`；`_normalize_scores`（:387-397）把 min-max 结果压到 0.01–1.0，`fused=1.0` 再加 0.05 被截断，多个高分单元并列；:343-347 排序键 `(authority_rank, final_score, -knowledge_unit_id)` 无二级语义信号。
 - 影响：权威等级相同（同为当前生效监管资料）时 Top1 可能不稳定/错误；RAG 引用与字段召回都受影响。属「可复现排序缺陷」，不是测试环境问题。
 - 最小修复建议：排序用未截断的 `fused`（或加 `boosted` 前值）作第二键；`final_score` 仅作展示或按 `fused/(1+boost)` 归一；补「同权威等级、两候选分数并列时按 fused 排序」的回归测试。**未在本次改动**，避免未经真实评测调整排序。
+
+## 11. 缺陷修复与补充真实验收（2026-10-22 00:0x–00:4x，用户口径 m01788）
+
+证据 JSON：`docs/audit/VNEXT_DEFECT_FIXES-20261022.json`、`docs/audit/VNEXT_CELERY_RECOVERY-20261022.json`、`docs/audit/VNEXT_WORKSPACE_BROWSER-20261022.json`（+ 截图 `VNEXT_WORKSPACE_BROWSER-20261022.png`）。本节覆盖 §6/§7/§10 中已解除的项；未被本节提及的 UNVERIFIED 结论保持不变。
+
+### 11.1 缺陷 §10.1 修复：optional 模式匿名任务不再违反 `background_jobs_created_by_fkey`
+
+- 根因确认：任务投递把 `int(principal.user_id or 0)` 写入 `background_jobs.created_by`（`NOT NULL` FK → `users.id`）；匿名 legacy principal 的 `user_id=None` → 0 → 外键冲突 → 请求 500。
+- 修复（新增 1 文件 + 改 2 文件）：
+  - 新增 `backend/app/services/auth/actors.py`：`ensure_actor_user_id(db, actor_user_id)` 在缺省 actor 时物化一次性系统用户 `username='legacy-system'`（`status='active'`）并复用；有真实 user_id 时原样返回，因此生产 `AUTH_MODE=required` 行为不变。
+  - `backend/app/services/task_queue/idempotency.py:101`：`created_by=ensure_actor_user_id(db, created_by or None)`。
+  - `backend/app/services/lineage/ingestion.py`：改用同一解析器，避免第二处写 0。
+- 回归：新增 `backend/tests/test_task_queue_legacy_actor.py`（2 条）。**改前可复现失败**：`sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) FOREIGN KEY constraint failed`（INSERT `background_jobs` … `created_by` 0）；改后 `task_queue_legacy_actor + job_attempt_fencing + knowledge_reindex` **24 passed / 168.33s**。
+- 真实 PG 证明（服务层，非 mock）：在 compose PostgreSQL（150 表）上用 `Principal(None, "legacy-system", …)` 投递任务，INSERT 成功且 `created_by=2`、`users.username='legacy-system'`（`fk_ok=true`；探针 handler 为占位 lambda 故该行状态 failed，与缺陷无关，行已清理）。
+- 标签：**FIX + TESTED_REAL（服务层真实库）**；`AUTH_MODE=required` 生产路径未改变（匿名仍 401）。
+
+### 11.2 缺陷 §10.2 修复：混合检索分数饱和不再让 Top1 退化为 unit id 兜底
+
+- 根因确认：`backend/app/services/retrieval/hybrid_retriever.py:305-306` `final_score = min(1.0, fused + 0.05)`，而 :343-347 排序键 `(authority_rank, final_score, -knowledge_unit_id)`；多个候选 fused 接近 1.0 时并列，排序退化为 id 升序。
+- 修复：排序第二键改用**未截断**的 `fused + rule_boost`（`ranking_by_id`），`final_score` 仍按原口径截断用于展示/兼容响应契约；不改变返回字段与历史 API。
+- 回归：新增 `backend/tests/test_hybrid_score_saturation.py`（3 条：同权威等级并列、规则加分、仅向量命中），`hybrid + fusion + reranker` **31 passed / 13.20s**。
+- 真实**改后**结果（真实 Milvus 集合 `ybt_semantic_p1_v4_…_d512`，5 个知识单元，HTTP `POST /api/projects/1/knowledge/hybrid-search`）：
+  - 查询「报送数据按哪天取数」→ Top1 = unit 9「## 3 报送日期口径」（`final_score=1.0`，vector/keyword 均 1.0）；**改前**同一查询 Top1 是 unit 8「## 2 客户统一标识」（vector 0.3831/keyword 0.0524），日期口径被压到 #2。
+- 标签：**FIX + TESTED_REAL（HTTP API + 真实向量库）**。注意：`final_score` 仍可能显示 1.0（展示口径未变），判断排序正确性请看返回顺序而非仅仅该字段。
+
+### 11.3 Celery 异常语义真实验收（原 §7 UNVERIFIED → 已测）
+
+证据：`docs/audit/VNEXT_CELERY_RECOVERY-20261022.json`（4/4 pass），环境为真实 PostgreSQL + Redis broker + Celery worker(solo)/beat + 本地 embedding。
+
+| 检查 | 实测结果 |
+| --- | --- |
+| 重复投递幂等 | 同一 `idempotency_key` 两次提交返回**同一 job id**，`deduplicated=true`，该键只有 1 行；索引版本增量 1；消息重放后 0 增量、`finished_at` 不变 |
+| Worker 崩溃恢复 | 真实 kill 运行中的 worker 后 job 停在 `running`（`lease_owner` 保留），**没有自动恢复**；手工触发 redispatch 扫描 → `stale_running_published=[12]` → 重新投递后最终 `completed`，增量 1 |
+| 迟到返回不覆盖 | 接管后结果为 `{"attempt":"B"}`；旧 attempt 的迟到写入被 fencing 拒绝，最终仍为 B（`late_writer_blocked=true`） |
+| beat 定时扫描 | beat 日志出现 `Scheduler: Sending due task redispatch-undelivered-jobs`，任务真实进入队列 |
+
+- 代码改动：`backend/app/services/task_queue/celery.py::dispatch_undelivered` 增加「运行中但租约已过期 / 长时间未被重新投递」的 stale-running 重投，报告字段 `stale_running_candidates / stale_running_published`（原逻辑只扫 queued）；新增用例 `test_dispatch_undelivered_republishes_a_crashed_running_job`，`test_job_attempt_fencing.py` **19 passed / 171.66s**。
+- 仍需注意（保留 UNVERIFIED/运维项）：worker/beat 容器**没有自动 restart policy**（本机 compose 实测），崩溃后需人工拉起；「真实 kill 后无自动恢复、依赖扫描重投」是当前设计，不是立即自愈。
+
+### 11.4 前端真实页面点检（原 §7 UNVERIFIED → 已测）
+
+证据：`docs/audit/VNEXT_WORKSPACE_BROWSER-20261022.json` + 整页截图 `VNEXT_WORKSPACE_BROWSER-20261022.png`。环境：`next dev`（真实 3000 端口）+ 当前源码后端 8011 + 真实 PG 种子数据（`scripts/vnext_seed_workspace_fixture.py`：项目 1、机构 VNEXT-SYNTH、一表通客户信息表 `EAST_YBT_CUSTOMER`、字段 `CUSTOMER_ID`/`PRODUCT_ID`、需求「根据借据信息取得产品信息（VNext 真实页面点检）」）。脚本：`scripts/vnext_workspace_browser_smoke.mjs`（Playwright chromium）。
+
+| 检查 | 结果 |
+| --- | --- |
+| 登录页真实登录 | pass（`input[name=username]/password` + submit → 跳转工作区） |
+| 工作区列出预置需求 | pass（需求下拉从后端加载到「…（VNext 真实页面点检）· v1」） |
+| 需求文档渲染 | pass（5 个 Tab：结构化口径/血缘/证据/待确认/文档预览，字段范围与版本可见） |
+| Tab 逐一切换 | pass（5/5 内容区切换正常） |
+| 控制台/接口洁净 | pass（无 JS 异常；仅 4 条来自非管理员访问 `/api/admin/*` 的 403，属 RBAC 预期） |
+
+- 仍未验证（诚实保留）：需求生成/重试/候选采用等需要真实模型长链路的交互（本节点检只读渲染 + 导航）；跨浏览器（仅 chromium）；移动端（任务书明确不需要）。

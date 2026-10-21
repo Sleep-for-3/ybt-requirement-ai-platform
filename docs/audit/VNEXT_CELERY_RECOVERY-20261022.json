@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-10-21T16:18:37.861193+00:00",
+  "base_url": "http://127.0.0.1:8011/api",
+  "engine": "real PostgreSQL + Redis + Celery(worker/beat) + local OpenAI-compatible embedding(@127.0.0.1:11434)",
+  "results": [
+    {
+      "check": "duplicate_submission_is_idempotent",
+      "status": "real",
+      "same_job_id": true,
+      "deduplicated_flag": true,
+      "job_rows_for_key": 1,
+      "job_status": "completed",
+      "index_versions_delta": 1,
+      "index_versions_delta_after_message_replay": 0,
+      "finished_at_unchanged_after_replay": true,
+      "status_after_message_replay": "completed",
+      "pass": true
+    },
+    {
+      "check": "crashed_worker_job_is_recovered_by_sweep",
+      "status": "real",
+      "job_id": 12,
+      "status_after_kill": "running",
+      "lease_owner_after_kill": "LAPTOP-1CLFROQ1:1236:3bfc69904abd",
+      "auto_recovered_without_sweep": false,
+      "sweep_stale_running_candidates": 1,
+      "sweep_stale_running_published": [
+        12
+      ],
+      "final_status": "completed",
+      "index_versions_delta": 1,
+      "pass": true,
+      "index_versions_before_crash": 7,
+      "started_at_at_kill": "2026-10-21 16:17:53.148256+00:00"
+    },
+    {
+      "check": "late_return_cannot_overwrite_takeover",
+      "status": "real",
+      "job_id": 13,
+      "status_after_takeover": "completed",
+      "result_after_takeover": {
+        "attempt": "B"
+      },
+      "final_status": "completed",
+      "final_result": {
+        "attempt": "B"
+      },
+      "old_attempt_returned_status": "completed",
+      "late_writer_blocked": true,
+      "pass": true
+    },
+    {
+      "check": "beat_dispatches_redispatch_sweep",
+      "status": "real",
+      "redispatch_task_seen": true,
+      "beat_log_tail": "[2026-10-22 00:18:34,886: INFO/MainProcess] beat: Starting...\n[2026-10-22 00:18:35,376: INFO/MainProcess] Scheduler: Sending due task redispatch-undelivered-jobs (app.workers.redispatch_undelivered_jobs)\n[2026-10-22 00:18:35,494: INFO/MainProcess] Scheduler: Sending due task lineage-repository-monitor (app.workers.poll_lineage_repositories)\n",
+      "pass": true
+    }
+  ],
+  "passed": 4,
+  "total_checks": 4
+}
