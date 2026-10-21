@@ -1,4 +1,4 @@
-﻿# 银行监管数据智能平台 VNext 升级实施与验收报告（2026-10-21）
+# 银行监管数据智能平台 VNext 升级实施与验收报告（2026-10-21）
 
 - 仓库：`C:\Users\李儒伟\Desktop\ai-platform-dsh-20260930-150943 (2)\ai-platform`
 - 分支：`dsh/banking-semantic-agent-v2`（基线 HEAD `7495676`）→ 工作分支 `dsh/vnext-business-accuracy-20261021`
@@ -11,11 +11,11 @@
 
 | 维度 | 判断 | 依据 |
 | --- | --- | --- |
-| 后端工程完成度 | 高（成熟） | 全量 1888+ 测试通过，仅 2 例与环境 DNS 相关失败；1886→1888 基线来自 2026-10-19 夜间；本轮基线 3 failed/1883 passed（其中 1 例 jieba 缺失、2 例环境 DNS） |
+| 后端工程完成度 | 高（成熟） | 全量 1902 passed / 2 failed（均为环境 DNS）/ 1 skipped；1886→1888 基线来自 2026-10-19 夜间；本轮基线 3 failed/1883 passed（其中 1 例 jieba 缺失，已安装修复） |
 | AI 真实业务准确性 | 低 / 未知 | 新黄金集 60 例仅完成构建与指标函数（label_status=UNVERIFIED、independent_labeled=0）；仓库无 Qwen 配置（`backend/app/**` 搜 qwen/27b 0 命中）；真实 Top1/Top3、Citation Precision/Recall 均无独立标注数据 → UNVERIFIED，禁止声称达标 |
 | Agent 自主处理 | 未验证 | `agent/planner.py`(656 行)、`state_machine.py`(133 行) 存在且有 `test_agent_planner_validation.py`；本轮未新增五场景独立用例（信息足/缺输入/技能未绑定/待人工确认/驳回） |
 | 监管口径可追溯 | 中（有实现，真实数据未验） | 引用/主张两级判定、证据版本、置信度降级链路齐全（`rag/citation_validator.py`、`grounded_answer_service.py`）；本轮修 2 处 claim-level 误记；真实制度库未接入 |
-| 需求文档可开发（可交付） | 中（SQLite 下端到端可跑） | `test_requirement_formal_delivery.py` + `_e2e.py` 覆盖 三级审核→finalize→xlsx/docx 内容断言→重复 finalize 幂等；真实 Word/Excel 审批未走 |
+| 需求文档可开发（可交付） | 中（SQLite 下端到端可跑） | `test_requirement_formal_delivery.py` + `_e2e.py` 覆盖 三级审核→finalize→xlsx/docx 内容断言→重复 finalize 幂等；本轮新增 `test_vnext_phase2_closed_loop.py` 串起 问题→快照→阻断→审批→交付→修订 单一闭环；真实 Word/Excel 审批未走 |
 | 内网部署 | 未验证/部分 BLOCKED | 无 Qwen 端点、无 Milvus/Redis/Celery 真实实例可测；`.env:21` 是 DeepSeek（仅开发期）。见 `docs/audit/VNEXT_PHASE3_INTRANET_MODEL-20261021.md` |
 | 人工审核与正式交付 | 中（规则齐全，状态语义有坑） | 待确认问题阻断/结案链路本轮补齐回归；`accept`（已接收待处理）仍阻断易被误解为已解锁 |
 
@@ -53,10 +53,11 @@
 - `version=vnext-regulatory-golden-2026-10-21.v1`、`label_status=UNVERIFIED`、`independent_labeled=0`（无独立领域人员标注，真实指标不得声称达标）。
 - 指标函数：`field_retrieval_metrics`（Recall@K/Top1/Top3/MRR，分子分母+样本量）、`citation_metrics`（Citation Support Precision/Recall/False Supported Rate/Unsupported Detection Rate/Claim Coverage/Citation Coverage/Judge Timeout Rate，引用级与主张级分开）、`document_metrics`、`agent_decision_metrics`；比例一律 `_ratio` 校验分母、无样本返回 `None` 而不是伪造 0。
 - 回归：`tests/test_vnext_regulatory_golden.py`（覆盖率≥60 且每族≥8、重复 id/缺族拒绝、无样本不伪造比例、字段指标数学正确）。
+- 人工标注入口（当前为空）：直接编辑 `vnext_golden_set_v1.json` 每一例的 `expectation`（positive/negative/ambiguous）、`expected.correct_candidates/distractors`、`reviewer_id`（标注人唯一标识；`dataset_summary` 以"是否填了 reviewer_id"统计 `independent_labeled`，`label_source` 只记录来源不参与计数，默认 `synthetic_designer`），然后用 `load_golden_set()` + `dataset_summary()` 校验并重算；标注不合规会在加载时报 `GoldenSetError`，不会静默计入分母。
 
 ### B4 阶段2 人工待确认问题闭环（TESTED_MOCK，行为未改）
 
-- 发现：`tests/` 对 `PendingQuestion` 零覆盖；`requirement_scope.document_content`（约 109-117 行）把未解决人工问题投影成 `manual:<id>` gap，`review_readiness` 据此阻断送审。
+- 发现（本轮改动前）：`tests/` 对 `PendingQuestion` 零覆盖；`requirement_scope.document_content`（约 109-117 行）把未解决人工问题投影成 `manual:<id>` gap，`review_readiness` 据此阻断送审。
 - 曾误判 `accept` 应解锁并改动白名单，被仓库既有规格 `tests/test_requirement_scope.py:54-58`（accepted 仍是"已接收待处理"→阻断）当场证伪，**已回退**，未改任何既有测试预期。
 - 新增 `tests/test_vnext_phase2_manual_question.py`（2 用例）：open→阻断；answer 有依据但未结案仍阻断；accept 仍阻断；close+依据→解除；close 无依据→仍阻断且提示"缺少解决依据"。
 - 真实发现（保持待改进，未擅自改语义）：全仓库无写入方把状态置为 `"resolved"`（仅读过滤命中），实际闭环路径是 `answer(text) → close`；`accept` 是易误读的中间态。
@@ -65,15 +66,32 @@
 
 `test_requirement_formal_delivery.py` / `_e2e.py` 已验证：revision 快照 → generation-runs（inline queue + patched candidate）→ adopt → review-readiness → 三级角色审批（business/technical/final）→ `finalize_formal_delivery` → xlsx 内容断言（"正式交付"/content_version/审核人）→ 重复 finalize 幂等 → `append_revision` 不改变已冻结 formal_file；HTTP 层同路径 + 审批前 finalize 返回 409。
 
+### B6 阶段2 单一完整闭环 e2e（新增，TESTED_MOCK）
+
+任务书阶段2 的验收句是"至少一个完整案例可从需求输入到可审核文档交付且证据可回溯"。既有覆盖虽多但分散，本轮新增 `backend/tests/test_vnext_phase2_closed_loop.py`，用一条 HTTP 用例把 8 步串起来（SQLite + TestClient，不连外部服务）：
+
+1. 业务对"产品ID因期限/方案重复"提出 `uniqueness` 待确认问题（真实业务语义，非自定口径）；
+2. `POST /revisions` 冻结内容版本 → 未解决人工问题进入 `content_json.gaps`，id 为 `manual:<question_id>`；
+3. `review-readiness` 因该 gap 返回 `eligible=false`，`POST /review-submissions` 返回 409（AI/自动流程无法绕过人工门控）；
+4. 人工 `answer`（写入唯一性规则依据）+ `close` → 问题结案；再采纳完整候选内容（模拟 generation adopt 刷新快照，代码内注明真实链路靠重新生成/采纳，冻结快照不会因结案自动清 gap）；
+5. `review-readiness` 通过；
+6. 三级审批：审批前 `finalize` 409 → 按 business/technical/final 三个 `ReviewTask` 逐级 approved；
+7. `finalize` 201 → 导出 xlsx/docx：`X-Requirement-Snapshot-Hash` 等于 `RequirementFormalDelivery.snapshot_hash`（内容 + 审批记录），`content_hash` 等于审核通过的 revision 哈希，xlsx 含"正式交付"、docx 正文含已确认的字段定义与加工逻辑；
+8. 对 v1 发起修订 → v2 为 `draft`，v1 内容与已冻结交付文件逐字节不变。
+
+顺带澄清一个易误读点：导出头的 `X-Requirement-Snapshot-Hash` **不是** revision 的 `content_hash`，而是交付快照（内容 + `formal_delivery` 审批元数据）的摘要；两者都必须记录，审核追溯时不能混用。
+
+局限（如实标注）：仍是 TESTED_MOCK——SQLite、Mock 存储与 Mock 模型，审批人是测试夹具造的用户，不是真实银行审批系统与真实 Qwen；第 4 步的候选采纳在测试里直接写库，真实链路需走 generation-runs/adopt（已有 `test_requirement_formal_delivery.py` 覆盖）。
+
 ## C. 改前 / 改后对比
 
 | 项目 | 改前 | 改后 |
 | --- | --- | --- |
-| 全量后端测试 | 3 failed / 1883 passed / 1 skipped（1887 收集，2536s，含 jieba 缺失） | 2 failed / 1901 passed / 1 skipped（1904 收集，2014s）；2 例仍为环境 DNS 的 `test_llm_runtime`，`provider_quota_exhaustion…` 与 `fallback_can_target_a_separate_endpoint…` |
-| 新增测试数 | — | +17（golden 11、manual-question 2、tournament 2、citation-level 2） |
+| 全量后端测试 | 3 failed / 1883 passed / 1 skipped（1887 收集，2536s，含 jieba 缺失） | 2 failed / 1902 passed / 1 skipped（1905 收集，2046s）；2 例仍为环境 DNS 的 `test_llm_runtime`，`provider_quota_exhaustion…` 与 `fallback_can_target_a_separate_endpoint…` |
+| 新增测试数 | — | +18（golden 11、manual-question 2、tournament 2、citation-level 2、阶段2 完整闭环 1） |
 | 字段重排：尾部候选进决赛 | 结构上不可能（按批截断） | 可晋级；oracle-mock 证明；真实 Top1/Top3 = N/A（无 Qwen） |
 | 引用：citation-level 冒充 claim verified | 会发生（supported_claims 全填） | 不可能；claim 级计数全 0 |
-| 人工待确认问题 | 零测试 | 2 条回归覆盖阻断/结案语义 |
+| 人工待确认问题 | 零测试 | 阻断/结案语义 + 一条"问题→快照→审批→交付→修订"完整闭环 e2e |
 | 黄金集 | 无独立于原 benchmark 的银行监管集 | 60 例、6 族各 10；真实指标 not_run（无标注/无模型） |
 | 111 例合成机制回归 | 改前全过（历史） | 随全量测试一并跑（未单独重跑） |
 | SQL 语义 36/39 | 任务书基线 | 本轮未重跑（脚本依赖未验证）→ UNVERIFIED |
@@ -86,13 +104,14 @@
 2. **真实业务准确率无独立标注**（UNVERIFIED）：黄金集 60 例 by Lead，`independent_labeled=0`；最小后续=组织 1~2 名领域人员按 `reviewer_id` 标注 ≥30 例后重算指标。
 3. **2 例 `test_llm_runtime` 环境失败**（BLOCKED 环境）：本机 DNS fake-IP 使 `example.net` 被判非公网；不要放宽 SSRF 白名单（会破坏 `test_model_profiles.py` 防滥用用例）；最小后续=CI 环境用可控 DNS 或改测试域名。
 4. **`accept` 语义易误读**（IMPROVE）：业务人员以为"已接收"即解锁；最小后续=UI 文案或 API 文档标注"仍需结案"，或产品决策后统一语义（需人工确认，不擅自改）。
-5. **PendingQuestion 状态迁移仍缺系统回归**（IMPROVE）：仅 2 例；reject/close 权限拒绝、导出脱敏未覆盖。
+5. **PendingQuestion 状态迁移仍有缺口**（IMPROVE）：阻断与结案链路现由 2 条语义测试 + 1 条完整闭环 e2e 覆盖；`reject`/`close` 的越权拒绝、导出脱敏仍缺回归。
 6. **Agent 五场景、SQL 方言、工作台真机验收未做**（UNVERIFIED）：见后续工作包。
+7. **冻结快照的"事后新增问题"不回溯**（IMPROVE）：人工问题只在冻结时进入 `content_json.gaps`；冻结后再提的问题不会自动重新阻断，需重新生成/修订内容版本。是否要在 `review_readiness` 实时检查未闭问题，属产品口径决策，需人工确认后再改。
 
 ## E. 后续工作包（≤5，按优先级）
 
 1. **P0 真实模型验收包**：Qwen 端点接入 → 黄金集全量观测（字段召回/重排、引用判定、文档必需字段）→ 出真实 Top1/Top3 与 Citation Precision/Recall（BLOCKED 解除条件明确）。
-2. **P0 端到端真实交付包**：在 TestClient 之外用真实浏览器完成 需求→生成→人工确认→审核→导出→变更复核 一轮，记录人工修改工作量与阻断准确性。
+2. **P0 端到端真实交付包**：TestClient 闭环已通（B6），下一步在真实浏览器把 需求→生成→人工确认→审核→导出→变更复核 跑一轮，记录人工修改工作量与阻断准确性。
 3. **P1 Agent 决策五场景包**：补齐信息足/缺输入/技能未绑定/待人工确认/驳回的独立用例与阻塞恢复证据。
 4. **P1 SQL 变更影响包**：GBase/Hive 方言回归集 + order_by/top_limit/cte 三族正反例，复用 36/39 基线先测后修。
 5. **P2 工作台收敛包**：模型已比较/仅召回标注、失败态与空态区分、人工未保存保护，按 `docs/audit/VNEXT_PHASE5_WORKSPACE-20261021.md` 逐项真机验收。
@@ -110,7 +129,7 @@
 
 命令（cwd=backend；AUTH_MODE=optional、TASK_QUEUE_PROVIDER=inline、PYTHONIOENCODING=utf-8、STORAGE_DIR=<repo>\dev_storage_local）：`python -m pytest -q`
 
-结果：**2 failed, 1901 passed, 1 skipped, 12 warnings in 2014.11s (0:33:34)**，日志 `pytest-final-20261021.log`。
+结果：**2 failed, 1902 passed, 1 skipped, 12 warnings in 2046.30s (0:34:06)**，日志 `pytest-final-20261021-round3.log`（2026-10-21 19:32 启动；该轮在收集时已包含新增闭环测试，收集后又给该测试追加了"重复 finalize 幂等"断言，追加后在隔离环境重跑该文件 1 passed，见 `pytest tests/test_vnext_phase2_closed_loop.py`）。
 失败仅两例，均为环境级（本机 DNS 把 `*.example.net` 解析到代理 fake-IP 198.18.0.x，出站策略判定非公网）：
 - `tests/test_llm_runtime.py::test_provider_quota_exhaustion_moves_to_the_fallback_provider`
 - `tests/test_llm_runtime.py::test_fallback_can_target_a_separate_endpoint_and_key`
@@ -126,6 +145,7 @@
 - `backend/tests/test_overnight_citation_status.py`（追加 citation-level 用例）
 - `backend/app/services/evaluation/regulatory_golden.py` + `data/vnext_golden_set_v1.json` + `backend/tests/test_vnext_regulatory_golden.py`（新增）
 - `backend/tests/test_vnext_phase2_manual_question.py`（新增）
+- `backend/tests/test_vnext_phase2_closed_loop.py`（新增：阶段2 单一完整闭环 e2e）
 - `.planning/STATE.md`（仅事实同步）
 - `docs/audit/VNEXT_PHASE0_CAPABILITY_MATRIX-20261021.md`（新增）
 - 回滚：以上均为工作分支未提交改动，`git checkout -- <file>` 即可逐文件回退；或 `git switch dsh/banking-semantic-agent-v2` 保留分支不动。
