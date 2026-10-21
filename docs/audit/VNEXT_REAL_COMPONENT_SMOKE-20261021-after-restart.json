@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-10-21T22:32:09+0800",
+  "config": {
+    "llm_provider": "openai_compatible",
+    "llm_model": "deepseek-v4-flash",
+    "llm_base_url": "http://47.101.159.7:29988/v1",
+    "database": "127.0.0.1:5432/ybt_dsh_handoff_v2",
+    "redis_url": "redis://127.0.0.1:6379/0",
+    "milvus_uri": "http://127.0.0.1:19530",
+    "embedding_provider": "local_vllm",
+    "embedding_model": "BAAI/bge-small-zh-v1.5",
+    "embedding_base_url": "http://127.0.0.1:11434/v1",
+    "embedding_dimension": 512
+  },
+  "checks": {
+    "postgres": {
+      "status": "real",
+      "latency_ms": 1059.1,
+      "tables": 150
+    },
+    "redis": {
+      "status": "real",
+      "latency_ms": 441.5,
+      "ping": true,
+      "roundtrip": true
+    },
+    "milvus": {
+      "status": "real",
+      "latency_ms": 7195.4,
+      "dim": 512,
+      "count": 3,
+      "hits": 2,
+      "top_id": "smoke-1",
+      "health": {
+        "healthy": true,
+        "collection": "vnext_smoke_1792593137",
+        "collection_exists": false
+      }
+    },
+    "embeddings": {
+      "status": "blocked",
+      "latency_ms": 1660.4,
+      "error": "RuntimeError('HTTP 500: {\"error\":{\"message\":\"error starting llama-server: llama-server binary not found (checked: /usr/lib/ollama/llama-server, /usr/bin/build/lib/ollama/llama-server, /usr/bin/dist/linux-amd64/lib/ollama/llama-server, /usr/bin/dist/linux_amd64/lib/ollama/llama-server, /build/lib/ollama/llama-server, /dist/')"
+    }
+  }
+}

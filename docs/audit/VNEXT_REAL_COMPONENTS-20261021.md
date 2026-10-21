@@ -93,3 +93,17 @@ $env:STORAGE_DIR=(Resolve-Path .\dev_storage_local).Path
 - 前端真机操作：UNVERIFIED（未启动/未点检）。
 - Milvus 检索质量：BLOCKED（无 embedding、索引为空）；仅验证了写入/搜索/删除机制可用。
 - 公司 DeepSeek 网关为开发/验证用；生产主模型按任务书仍是项目既定内网模型，本次不改变生产配置。
+
+## 8. 运行方式与重启注意事项（实测踩坑）
+
+启动（WSL 内；目录含中文，必须显式 `-p`）：
+
+```bash
+cd /mnt/c/Users/李儒伟/Documents/智能分析智能体平台
+docker compose -p ybt-dev --profile milvus -f docker-compose.yml -f docker-compose.dev-ports.yml up -d postgres redis milvus
+```
+
+- **WSL 会空闲回收**：本机 `.wslconfig` 为 `networkingMode=mirrored`。没有任何 WSL 进程时发行版停止，Windows 侧 `127.0.0.1:5432/6379/19530/11434` 立即变成「积极拒绝」；下次执行 `wsl` 命令时容器才重新拉起（`docker ps` 显示 Up 几秒）。**必须保持一个常驻 WSL 进程**（例如计划任务运行 `wsl -d Ubuntu -- bash -lc "sleep infinity"`），否则 uvicorn、浏览器验收会间歇性连不上。
+- 数据重启后仍在（`ybt-dev_postgres_data`/`ybt-dev_redis_data` 命名卷）：PG 150 张表、Redis AOF 均可恢复；但 Milvus 栈（etcd/minio/milvus）**没有 restart policy**，docker 重启后需手动 `compose up -d milvus`（实测重启后三容器 Exited，手动拉起后 healthy）。
+- 重启后复测证据：`docs/audit/VNEXT_REAL_COMPONENT_SMOKE-20261021-after-restart.json`——postgres real（150 表/1.06s）、redis real（0.44s）、milvus real（512 维/3 条/2 命中/7.2s）、embeddings 仍 BLOCKED（缺 llama-server）。
+- 真实后端（uvicorn，真实 `.env`）已验证 `/api/health` OK、`/api/ai-runtime/status` `is_mock=false`、Milvus `reachable=true`、语义索引 `available=false`；验证后进程已退出，容器保持运行。
