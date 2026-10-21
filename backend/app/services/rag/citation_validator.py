@@ -499,22 +499,16 @@ async def check_citation_support(
             result["claim_coverage_dimension"] = "citation_level"
             result["claim_coverage_numerator"] = 0
             result["claim_coverage_denominator"] = len(claim_list)
-        result["supported_claims"] = [] if tallied["unsupported_count"] else list(claim_list)
-        result["unsupported_claims"] = (
-            list(claim_list) if tallied["unsupported_count"] else []
-        )
-        result["unknown_claims"] = (
-            list(claim_list)
-            if tallied["unknown_count"] and not tallied["unsupported_count"]
-            else []
-        )
-        claim_verdicts = (
-            len(claim_list) if tallied["unsupported_count"] == 0 and tallied["unknown_count"] == 0 else 0,
-            len(claim_list) if tallied["unsupported_count"] else 0,
-            len(claim_list)
-            if tallied["unknown_count"] and not tallied["unsupported_count"]
-            else 0,
-        )
+        # Citation-level verdicts say whether the *evidence* is entailed, not whether each
+        # conclusion was independently checked.  Reporting every claim as supported (or every
+        # claim as unsupported) under this mode contradicted ``claims_judged=0`` and let a
+        # consumer count unjudged claims as verified.  Claim attribution therefore stays empty:
+        # nothing was judged at claim level, so every claim is unknown here; the citation-level
+        # verdicts remain visible on their own fields.
+        result["supported_claims"] = []
+        result["unsupported_claims"] = []
+        result["unknown_claims"] = list(claim_list)
+        claim_verdicts = (0, 0, len(claim_list))
     result["uncovered_claims"] = list(uncovered)
     result["verification"] = _verification(
         degraded=bool(error_type),

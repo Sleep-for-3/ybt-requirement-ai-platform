@@ -2,13 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Regulatory Data Intelligence V2
-current_phase: 11
-current_phase_name: semantic-catalog-ui
-status: verifying
-stopped_at: Completed 11-09-PLAN.md
-last_updated: "2026-08-25T12:44:45.071Z"
-last_activity: 2026-08-25
-last_activity_desc: Phase 11 gap-closure plans verified and ready to execute
+current_phase: "vnext-2026-10"
+current_phase_name: banking-semantic-agent-vnext
+status: auditing
+stopped_at: "2026-10-21 DSH VNext 审计：阶段0/1 回归与缺陷修复（见 docs/audit、docs/reviews）"
+last_updated: "2026-10-21T14:40:00+08:00"
+last_activity: 2026-10-21
+last_activity_desc: >-
+  实际分支 dsh/banking-semantic-agent-v2（HEAD 7495676，非 Phase 11）。
+  本文件 Phase 11 段落是 2026-08-25 的历史快照，保留不改；
+  2026-10-21 起以 docs/audit/ 与 docs/reviews/ 的 VNext 证据为准。
 progress:
   total_phases: 4
   completed_phases: 4
@@ -23,9 +26,10 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-08-20)
 
 **Core value:** 监管语义、口径、证据、血缘和治理关系是核心资产，AI 不能越过人工确认。
-**Current focus:** Phase 11 — semantic-catalog-ui
+**Current focus (2026-10-21 修正):** VNext 银行监管数据智能平台升级（分支 dsh/banking-semantic-agent-v2，HEAD 7495676）。
+下文 Phase 11 段落是 2026-08-25 历史状态，保留作为历史存档。
 
-## Current Position
+## Current Position（历史快照，2026-08-25）
 
 Phase: 11 (semantic-catalog-ui) — EXECUTING
 Plan: 9 of 9

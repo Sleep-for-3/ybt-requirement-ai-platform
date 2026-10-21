@@ -503,6 +503,10 @@ async def rerank_fields(db, principal, payload):
         batch_rankings.append(ranking)
     decisive_metadata = batch_metadatas[-1] if batch_metadatas else None
     decisive = None
+    tournament_rounds = 0
+    tournament_calls = 0
+    tournament_comparisons = 0
+    tournament_truncated = False
     if degraded is not None:
         pass
     elif len(batches) == 1:
@@ -511,34 +515,83 @@ async def rerank_fields(db, principal, payload):
         decisive = batch_rankings[0]
         finalists = [item.candidate_id for item in decisive.ranking]
     else:
-        # Only what fits one decisive prompt: the finalist set is capped by the measured capacity
-        # and chosen round-robin across batches, so a small capacity costs finalist breadth only.
-        finalists = _select_finalists(leaders_per_batch, capacity)
-        if len(finalists) > 1:
-            # One decisive call over the calibration-free finalist set only: scores from different
-            # batches are never compared against each other, so the model's global ordering here is
-            # the only cross-batch comparison that happens.
-            finalist_ids = set(finalists)
-            finalist_facts = [fact for fact in envelope.facts if fact.id in finalist_ids]
-            call_envelope = envelope.model_copy(update={"facts": finalist_facts})
-            result, expired, ranking, calls, metadata = await _call_once(call_envelope)
+        calls_before_tournament = metadata_calls
+
+        async def _run_group(group_ids):
+            """Compare one bounded group in one decisive prompt and account for the call."""
+
+            nonlocal metadata_calls, tokens_reported, decisive_metadata
+            group_facts = [fact for fact in envelope.facts if fact.id in set(group_ids)]
+            result, expired, ranking, calls, metadata = await _call_once(
+                envelope.model_copy(update={"facts": group_facts}))
             metadata_calls += calls
             tokens_reported += int((metadata.get("token_usage") or {}).get("total_tokens") or 0)
             decisive_metadata = metadata
             if expired:
-                degraded = (RERANK_TIMEOUT_CODE, metadata)
-            elif ranking is None:
-                degraded = (metadata.get("degraded_reason") or "model_output_unavailable", metadata)
-            else:
-                decisive = ranking
-                finalists = [item.candidate_id for item in ranking.ranking]
-        elif len(finalists) == 1:
-            # A single finalist needs no decisive call: it is already the only model-placed candidate.
-            only = finalists[0]
-            decisive = FieldRankingCandidate(ranking=[RankedCandidate(
-                candidate_id=only, score=max(0.0, min(1.0, screened_scores.get(only, 0.0))),
-                rationale="该候选是其所在批次的模型首位，无需额外决赛调用（未跨批比较）。",
-                evidence_refs=[only])])
+                return None, RERANK_TIMEOUT_CODE
+            if ranking is None:
+                return None, metadata.get("degraded_reason") or "model_output_unavailable"
+            return ranking, None
+
+        # A bounded knockout over the batch leaders.  The earlier round-robin finalist cut kept
+        # only the first ``capacity`` leaders, so with capacity 3 and 7 batches the leaders of
+        # batches 4..7 never entered any decisive comparison: a correct candidate sitting late in
+        # recall order could not win no matter what the model saw inside its batch.  Here a leader
+        # is eliminated only after losing a model comparison inside one prompt, and the number of
+        # extra calls stays inside ``RERANK_MAX_MODEL_CALLS``.  When capacity cannot hold a second
+        # leader, one leader per batch advances.
+        leader_limit = max(1, min(RERANK_FINALISTS_PER_BATCH, capacity - 1))
+        leaders_per_batch = [leaders[:leader_limit] for leaders in leaders_per_batch]
+        pool = [leader for leaders in leaders_per_batch for leader in leaders]
+        while capacity >= 2 and len(pool) > capacity:
+            groups = [pool[index:index + capacity] for index in range(0, len(pool), capacity)]
+            needed = sum(1 for group in groups if len(group) > 1)
+            # Reserve one call for the final decisive round: a budget that cannot pay for it must
+            # truncate visibly instead of half-running a comparison nobody can reproduce.
+            if metadata_calls + needed + 1 > RERANK_MAX_MODEL_CALLS:
+                tournament_truncated = True
+                break
+            winners: list[str] = []
+            for group in groups:
+                if len(group) == 1:
+                    winners.append(group[0])
+                    continue
+                ranking, error = await _run_group(group)
+                if error is not None:
+                    degraded = (error, decisive_metadata)
+                    break
+                winner = sorted(ranking.ranking,
+                                key=lambda entry: (-entry.score, candidate_ordinal(entry.candidate_id))
+                                )[0].candidate_id
+                if winner not in set(group):
+                    degraded = ("model_output_unavailable", decisive_metadata)
+                    break
+                tournament_comparisons += 1
+                winners.append(winner)
+            if degraded is not None:
+                break
+            tournament_rounds += 1
+            pool = winners
+        if degraded is None:
+            if len(pool) > capacity:
+                # Truncation is deterministic (recall/batch order) and reported, never silent.
+                pool = pool[:capacity]
+            finalists = pool
+            if len(pool) > 1:
+                ranking, error = await _run_group(pool)
+                if error is not None:
+                    degraded = (error, decisive_metadata)
+                else:
+                    decisive = ranking
+                    finalists = [item.candidate_id for item in ranking.ranking]
+            elif len(pool) == 1:
+                # A single survivor needs no further call: it won every comparison it entered.
+                only = pool[0]
+                decisive = FieldRankingCandidate(ranking=[RankedCandidate(
+                    candidate_id=only, score=max(0.0, min(1.0, screened_scores.get(only, 0.0))),
+                    rationale="该候选在限定预算内经过比较后唯一晋级，无需额外决赛调用。",
+                    evidence_refs=[only])])
+        tournament_calls = metadata_calls - calls_before_tournament
     coverage = coverage_info(current, model_evaluated_ids=batch_screened,
                             recall_ordered_ids=recall_ids, admitted=admitted)
     scope_info = candidate_scope(len(current["candidates"]), admitted)
@@ -557,6 +610,10 @@ async def rerank_fields(db, principal, payload):
         "rerank_batch_capacity": capacity,
         "rerank_batch_count": len(batches),
         "rerank_finalists": len(finalists),
+        "rerank_tournament_rounds": tournament_rounds,
+        "rerank_tournament_calls": tournament_calls,
+        "rerank_tournament_comparisons": tournament_comparisons,
+        "rerank_tournament_truncated": tournament_truncated,
         "rerank_max_model_calls": RERANK_MAX_MODEL_CALLS,
         "rerank_tokens_reported": tokens_reported,
         "rerank_wall_seconds": wall_seconds,

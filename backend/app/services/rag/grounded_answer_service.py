@@ -204,7 +204,12 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
         "answer": answer,
         "confidence_level": confidence_level,
         "citations": citations,
-        "supported_claims": [] if invalid_output else (supported_claims or [answer]),
+        # When a judge ran, only claims the judge actually confirmed may appear as supported.
+        # The historical ``[answer]`` fallback survives only for the switch-off / no-judgement
+        # path; otherwise a citation-level or all-unknown judgement would reintroduce the very
+        # claim (the whole answer) that the judge never confirmed.
+        "supported_claims": [] if invalid_output else (
+            supported_claims if claim_support is not None else (supported_claims or [answer])),
         "unsupported_claims": unsupported_claims,
         "open_questions": open_questions
         or ["来源字段和适用场景仍需业务与科技人员确认。"],

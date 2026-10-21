@@ -336,3 +336,101 @@ def test_permission_and_snapshot_changes_still_block_before_any_model_call(twent
         db.commit()
     response = submit_rerank(client, query, baseline)
     assert response.status_code == 403, response.text
+
+
+def test_a_late_batch_leader_can_win_the_decisive_comparison(twenty, monkeypatch):
+    """容量 2 × 7 批时，第 8 位（第 4 批）候选必须能经有界淘汰赛进入决赛并拿第一。
+
+    这是改前实现的确定缺陷：`_select_finalists` 只保留前 ``capacity`` 个批次首位，容量 2 时
+    第 3~7 批的首位从未进入任何决赛比较，即便模型在其批次内把它排第一也无缘 Top1。这里用一个
+    "只要目标出现就把它排第一"的 oracle Mock 证明**机制**：淘汰赛让它一路晋级到最后。
+    该 Mock 不是真实模型，不代表真实排序质量；真实模型下 Top1 仍属未验证。
+    """
+
+    from app.services.llm import factory as llm_factory
+    from app.services.llm.mock import MockLLMService
+
+    baseline = twenty["baseline"]
+    ids = [item["candidate_id"] for item in baseline["candidates"]]
+    marker = ids[7]  # 1-based 第 8 位，落在第 4 批
+    real = field_rerank.measure_batch_capacity
+    monkeypatch.setattr(field_rerank, "measure_batch_capacity", lambda *a, **k: min(2, real(*a, **k)))
+
+    class OracleMock(MockLLMService):
+        async def chat_json(self, system_prompt, user_prompt):
+            payload = await super().chat_json(system_prompt, user_prompt)
+            if not system_prompt.startswith("[AI_SKILL_FIELD_RERANK_V1]"):
+                return payload
+            ranking = payload["candidate"]["ranking"]
+            present = {entry["candidate_id"] for entry in ranking}
+            if marker in present:
+                for entry in ranking:
+                    entry["score"] = min(float(entry["score"]), 0.9)
+                target = next(entry for entry in ranking if entry["candidate_id"] == marker)
+                target["score"] = 1.0
+                ranking.remove(target)
+                ranking.insert(0, target)
+            return payload
+
+    monkeypatch.setattr(llm_factory, "MockLLMService", OracleMock)
+    body = submit_rerank(twenty["client"], twenty["query"], baseline).json()
+
+    assert body["ranking_mode"] == "model_rerank", body["rerank"]
+    assert body["candidates"][0]["candidate_id"] == marker
+    assert body["candidates"][0]["rank_source"] == field_rerank.RANK_SOURCE_MODEL
+    metadata = body["rerank"]["model_metadata"]
+    assert metadata["rerank_batch_capacity"] == 2
+    assert metadata["rerank_batch_count"] == 7
+    # 第 4 批的首位必须真的参加过淘汰赛，而不是只在自己的批次里被评过一次。
+    assert metadata["rerank_tournament_calls"] > 0
+    assert metadata["rerank_tournament_comparisons"] > 0
+    assert metadata["rerank_tournament_truncated"] is False
+    assert metadata["rerank_model_calls"] <= field_rerank.RERANK_MAX_MODEL_CALLS
+    # 目标候选在它自己的批次内被模型排第一（证明它确实作为批次首位进入淘汰赛）。
+    assert marker in {item["candidate_id"] for item in body["candidates"]
+                      if item["rank_source"] == field_rerank.RANK_SOURCE_MODEL}
+
+def test_a_late_batch_leader_can_still_win_the_decisive_comparison(twenty, monkeypatch):
+    """容量 2 × 7 批时，第 8 位（第 4 批）候选必须能经有界淘汰赛进入决赛并拿第一。
+
+    旧实现把决赛集合截成前 ``capacity`` 个批次首位，第 4 批之后的首位永远进不了决赛；
+    这里用"把目标候选排在本批第一"的脚本模型证明：修复后淘汰赛必须让第 4 批首位晋级，
+    且它后面的批首位也能通过比较被淘汰或晋级，而不是被顺序截断。真实模型 Top1 质量仍未验证。
+    """
+
+    from app.services.llm import factory as llm_factory
+    from app.services.llm.mock import MockLLMService
+
+    baseline = twenty["baseline"]
+    ids = [item["candidate_id"] for item in baseline["candidates"]]
+    marker = ids[7]  # 1-based 第 8 位，落在容量 2 时的第 4 批
+    real = field_rerank.measure_batch_capacity
+    monkeypatch.setattr(field_rerank, "measure_batch_capacity", lambda *a, **k: min(2, real(*a, **k)))
+
+    class OracleMock(MockLLMService):
+        async def chat_json(self, system_prompt, user_prompt):
+            payload = await super().chat_json(system_prompt, user_prompt)
+            if not system_prompt.startswith("[AI_SKILL_FIELD_RERANK_V1]"):
+                return payload
+            ranking = payload["candidate"]["ranking"]
+            if marker in {entry["candidate_id"] for entry in ranking}:
+                target = next(entry for entry in ranking if entry["candidate_id"] == marker)
+                for entry in ranking:
+                    if entry is not target:
+                        entry["score"] = min(float(entry["score"]), 0.9)
+                target["score"] = 1.0
+                ranking.remove(target)
+                ranking.insert(0, target)
+            return payload
+
+    monkeypatch.setattr(llm_factory, "MockLLMService", OracleMock)
+    body = submit_rerank(twenty["client"], twenty["query"], baseline).json()
+
+    assert body["ranking_mode"] == "model_rerank", body["rerank"]
+    assert body["candidates"][0]["candidate_id"] == marker
+    assert body["candidates"][0]["rank_source"] == field_rerank.RANK_SOURCE_MODEL
+    metadata = body["rerank"]["model_metadata"]
+    assert metadata["rerank_batch_capacity"] == 2
+    assert metadata["rerank_batch_count"] == 7
+    assert metadata["rerank_tournament_calls"] > 0
+    assert metadata["rerank_model_calls"] <= field_rerank.RERANK_MAX_MODEL_CALLS

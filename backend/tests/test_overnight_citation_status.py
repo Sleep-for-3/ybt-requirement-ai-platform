@@ -580,3 +580,74 @@ def test_evaluator_records_citation_support_and_downgraded_status(db, monkeypatc
     assert summary["citation_support_denominator"] == 1
     assert summary["citation_support_unsupported_count"] == 1
     assert summary["citation_support_claim_coverage"] == 1.0
+
+
+def test_citation_level_verdicts_never_count_as_judged_claims(db, monkeypatch):
+    """裁判只回答引用级时，不得把整段答案算成“已判定支持的主张”。
+
+    改前：`citation_validator` 在 citation_level 分支把全部 claims 填进
+    ``supported_claims`` 并给出 ``claims_supported == len(claims)``，而
+    ``claims_judged`` 仍为 0；随后 grounded_answer 把整段 answer 当作 supported_claims。
+    引用级判定只能说明“证据被蕴含”，不能说明“每条结论都被独立核对”。
+    """
+
+    monkeypatch.setattr(get_settings(), "citation_support_check", "judge", raising=False)
+    judge = _ScriptedJudge(
+        {"verdicts": [{"citation_id": "knowledge-unit-1", "verdict": "supported", "reason": "引文一致"}]}
+    )
+    result = _run_grounded(
+        db,
+        monkeypatch,
+        answer=FULL_ANSWER,
+        supported_claims=[SUPPORTED_ANSWER, UNSUPPORTED_ANSWER],
+        judge=judge,
+    )
+    support = result["citation_support"]
+
+    # 维度必须自报为 citation_level，且主张级判定计数为 0。
+    assert support["claim_judgement"] == "citation_level"
+    assert support["claims_judged"] == 0
+    assert support["claims_supported"] == support["claims_unsupported"] == 0
+    assert support["supported_claims"] == []
+    assert support["unknown_claims"] == [SUPPORTED_ANSWER, UNSUPPORTED_ANSWER]
+    # 引用级覆盖率可以单独给出，但不得冒充主张覆盖率。
+    assert support["citation_coverage"] == 1.0
+    assert support["claim_coverage"] == 0.0
+    # 引用全支持也不得升级为 verified / grounded / high。
+    assert support["verification"] == "partially_supported"
+    assert result["answer_status"] == "needs_confirmation"
+    assert result["confidence_level"] == "low"
+    assert result["supported_claims"] == []
+    assert set(result["unverified_claims"]) == {SUPPORTED_ANSWER, UNSUPPORTED_ANSWER}
+    assert result["trustworthiness"]["grade"] == "C"
+
+def test_citation_level_verdicts_never_claim_claim_level_support(db, monkeypatch):
+    """裁判只按引用作答时，不得把“引用被支持”记成“主张已验证”。
+
+    改前：citation_level 分支把所有主张写进 supported_claims、claims_supported=len(claims)，
+    但 claims_judged=0、claim_coverage=0——分子与分母矛盾，下游会把未判定主张当已验证。
+    改后：supported_claims=[]、claims_supported=0、unknown_claims=全部、claim_coverage=0。
+    """
+
+    monkeypatch.setattr(get_settings(), "citation_support_check", "judge", raising=False)
+    judge = _ScriptedJudge({"verdicts": [
+        {"citation_id": "knowledge-unit-1", "verdict": "supported", "reason": "引文一致"},
+    ]})
+    result = _run_grounded(db, monkeypatch, answer=FULL_ANSWER,
+                           supported_claims=[SUPPORTED_ANSWER, UNSUPPORTED_ANSWER], judge=judge)
+    support = result["citation_support"]
+
+    assert support["claim_judgement"] == "citation_level"
+    assert support["citation_coverage"] == 1.0
+    assert support["claim_coverage"] == 0.0
+    assert support["claims_judged"] == 0
+    assert support["claims_supported"] == 0
+    assert support["claims_unsupported"] == 0
+    assert support["supported_claims"] == []
+    assert support["unknown_claims"] == [SUPPORTED_ANSWER, UNSUPPORTED_ANSWER]
+    assert support["verification"] == "partially_supported"
+
+    assert result["answer_status"] == "needs_confirmation"
+    assert result["confidence_level"] == "low"
+    assert result["supported_claims"] == []
+    assert result["unverified_claims"] == [SUPPORTED_ANSWER, UNSUPPORTED_ANSWER]
