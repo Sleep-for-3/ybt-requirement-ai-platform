@@ -1,0 +1,208 @@
+{
+  "generated_at": "2026-10-21T22:05:42+0800",
+  "mode": "CITATION_SUPPORT_CHECK=judge, RAGAS_JUDGE_ENABLED=true, real DB session",
+  "model": "deepseek-v4-flash",
+  "cases": 10,
+  "citation_verdict_exact_match": 7,
+  "citation_verdict_accuracy": 0.7,
+  "citation_verdict_counts": {
+    "supported": 4,
+    "unsupported": 6,
+    "unknown": 1
+  },
+  "degraded_cases": 0,
+  "avg_latency_ms": 2392.3,
+  "label_status": "UNVERIFIED",
+  "label_note": "黄金集由 Lead 合成并人工转写输入，无独立银行专家标注；真实业务准确率不成立。",
+  "results": [
+    {
+      "case": "C01",
+      "expected": {
+        "c1": "supported"
+      },
+      "verdicts": {
+        "c1": "supported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": true,
+      "latency_ms": 4114.2,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C02",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": true,
+      "latency_ms": 1647.8,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C03",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": true,
+      "latency_ms": 3081.8,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C04",
+      "expected": {
+        "c1": "unsupported",
+        "c2": "supported"
+      },
+      "verdicts": {
+        "c1": "unsupported",
+        "c2": "supported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": true,
+      "latency_ms": 4577.6,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C05",
+      "expected": {
+        "_none": "unknown"
+      },
+      "verdicts": {},
+      "skip_reason": "no_citations",
+      "claim_judgement": null,
+      "matched": true,
+      "latency_ms": 0.0,
+      "model_name": null,
+      "degraded": false,
+      "degraded_reason": null
+    },
+    {
+      "case": "C06",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": true,
+      "latency_ms": 1617.6,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C07",
+      "expected": {
+        "c1": "unknown"
+      },
+      "verdicts": {
+        "c1": "unknown"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": true,
+      "latency_ms": 2021.5,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C08",
+      "expected": {
+        "c1": "supported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": false,
+      "latency_ms": 2222.8,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C09",
+      "expected": {
+        "c1": "unsupported",
+        "c2": "unsupported"
+      },
+      "verdicts": {
+        "c1": "supported",
+        "c2": "unsupported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": false,
+      "latency_ms": 2065.8,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    },
+    {
+      "case": "C10",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "supported"
+      },
+      "missing_verdicts": [],
+      "claim_judgement": "citation_level",
+      "matched": false,
+      "latency_ms": 2573.7,
+      "model_name": "deepseek-v4-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "claims_judged": 0,
+      "claim_coverage": 0.0,
+      "supported_claims": []
+    }
+  ]
+}

@@ -150,3 +150,21 @@
 - `docs/audit/VNEXT_PHASE0_CAPABILITY_MATRIX-20261021.md`（新增）
 - 回滚：以上均为工作分支未提交改动，`git checkout -- <file>` 即可逐文件回退；或 `git switch dsh/banking-semantic-agent-v2` 保留分支不动。
 
+## G. 补充验收：真实组件与真实模型（2026-10-21 晚，WSL + 公司 DeepSeek）
+
+用户口径（当轮原话）：“真实模型就使用公司api 的deepseek的配置,无需考虑qwen”。因此 D1 的 Qwen 阻断按“不适用”处理，真实模型验证改用公司网关。
+
+详见 `docs/audit/VNEXT_REAL_COMPONENTS-20261021.md` 与两份 JSON 证据：
+- `docs/audit/VNEXT_REAL_COMPONENT_SMOKE-20261021.json`
+- `docs/audit/VNEXT_REAL_MODEL_GOLDEN-20261021.json`
+
+结论（标签严格区分）：
+- **REAL**：PostgreSQL 16（compose，5432，alembic 到 150 张表）、Redis 7（6379，PING+读写）、Milvus 2.5.4（19530，512 维写入/搜索/计数/删除）、公司 DeepSeek 网关（deepseek-v4-flash，字段重排与引用裁判均返回结构化 JSON 并计 token）、当前源码后端以真实配置启动（`/api/health` ok、`/api/ai-runtime/status` `is_mock=false`、Milvus `reachable=true`）。
+- **BLOCKED**：Embedding 服务（`alpine/ollama:0.32.4` 缺 llama-server，embedding 500）；Celery worker/beat 未启动；前端未启动；Milvus 语义索引为空（依赖 embedding）。
+- **FIX + TESTED_REAL(机制)**：引用裁判证据投影丢失来源/版本/时点信息（`citation_evidence` 只给 citation_id/label/quoted_content）。已透传白名单来源字段并强化判定规则（二手摘要→unknown、版本/时点/覆盖不足→unsupported）；新增 2 条回归测试（`tests/test_rag_citation_support.py` 14 passed）。真实 DeepSeek 上 C 族合成案例 6/10 → **7/10** 一致，平均 2.39s/例、0 降级。
+- **UNVERIFIED**：C08/C09/C10 三条未闭合，分别属“黄金集期望与产品策略口径差”“冲突证据需管线层显式传入”“快照版本未随引用投影”；真实业务准确率仍无独立人工标注。
+
+回归（引用相关批次）：`tests/test_overnight_citation_status.py`、`tests/test_rag_evaluation_fidelity.py`、`tests/test_rag_evaluation_semantic.py`、`tests/test_vnext_regulatory_golden.py`、`tests/test_rag_citation_support.py` → **64 passed**（50 + 14，269.87s + 102.79s）。
+
+本轮新增文件：`scripts/vnext_real_component_smoke.py`、`scripts/vnext_real_model_golden_eval.py`、`docs/audit/VNEXT_REAL_COMPONENTS-20261021.md`；修改：`backend/app/services/rag/citation_support.py`、`backend/tests/test_rag_citation_support.py`。
+

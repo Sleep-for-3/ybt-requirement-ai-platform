@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.core.settings import get_settings
+from app.services.rag.citation_support import MAX_PROVENANCE_CHARS, citation_evidence
 from app.models import (
     KnowledgeDocument,
     KnowledgeDocumentVersion,
@@ -351,3 +352,32 @@ def test_validate_citations_visibility_rule_is_unchanged(db):
     assert validate_citations(db, [{"knowledge_unit_id": unit.id}], project_id=project.id) is None
     with pytest.raises(ValueError, match="对当前项目不可见"):
         validate_citations(db, [{"knowledge_unit_id": unit.id}], project_id=project.id + 1000)
+
+
+
+def test_citation_evidence_carries_provenance_for_the_judge():
+    """裁判必须看得见“这是不是原文/哪个版本”，否则无法判断二手摘要与版本冲突。"""
+    evidence = citation_evidence([{
+        "citation_id": "c1",
+        "source_name": "一表通数据项说明",
+        "location_text": "第 4.2 条",
+        "version": "2026 修订版",
+        "effective_date": "2026-01-01",
+        "quoted_content": "贷款余额按借据余额汇总，不含已核销。",
+    }])
+    assert evidence[0]["source_name"] == "一表通数据项说明"
+    assert evidence[0]["location_text"] == "第 4.2 条"
+    assert evidence[0]["version"] == "2026 修订版"
+    assert evidence[0]["effective_date"] == "2026-01-01"
+    assert "quoted_content" in evidence[0]
+
+
+def test_citation_evidence_bounds_provenance_and_ignores_blank_values():
+    evidence = citation_evidence([{
+        "citation_id": "c1",
+        "source_name": "x" * (MAX_PROVENANCE_CHARS + 50),
+        "location_text": "   ",
+        "quoted_content": "正文",
+    }])
+    assert len(evidence[0]["source_name"]) == MAX_PROVENANCE_CHARS
+    assert "location_text" not in evidence[0]

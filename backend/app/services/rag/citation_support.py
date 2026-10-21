@@ -85,6 +85,7 @@ MAX_CLAIMS = MAX_CLAIMS_PER_CALL
 #: that is reported as *explicitly uncovered* rather than silently cut off.
 MAX_JUDGE_BATCHES = 3
 MAX_QUOTE_CHARS = 1200
+MAX_PROVENANCE_CHARS = 200
 MAX_REASON_CHARS = 300
 #: Marker used when a verdict carries no usable key (neither claim_id nor citation_id).
 UNKEYED_VERDICT = "<unkeyed>"
@@ -92,6 +93,12 @@ UNKEYED_VERDICT = "<unkeyed>"
 CITATION_SUPPORT_SYSTEM_PROMPT = (
     "你是银行一表通知识问答的引用蕴含校验裁判（[AI_SKILL_CITATION_SUPPORT_V1]）。"
     "对每一条引用，判断其引文是否在逻辑上支持结论中的对应断言。"
+    "判定规则："
+    "1) 只有正式制度原文或正式条款可以判 supported；培训材料、PPT 转述、二手摘要、"
+    "未给原始出处的综述，即使内容看似吻合也一律判 unknown；"
+    "2) 引文的版本、生效日期、适用范围与结论不一致时判 unsupported；"
+    "3) 引文只覆盖结论多个条件中的一部分时，该引用对整条断言判 unsupported；"
+    "4) 引文与断言字面相近但口径范围不同（如表内/表外、含/不含）判 unsupported。"
     "只允许输出 JSON，格式为 "
     '{"verdicts": [{"citation_id": "<引用编号>", "verdict": "supported|unsupported|unknown", '
     '"reason": "<不超过50字的理由>"}]}。'
@@ -221,7 +228,14 @@ def claim_payloads(claims: list[str]) -> list[dict]:
 
 
 def citation_evidence(citations: Any) -> list[dict]:
-    """Project citations onto the minimal evidence payload handed to the judge."""
+    """Project citations onto the minimal evidence payload handed to the judge.
+
+    Provenance travels with the quote: a judge that only sees text cannot tell a
+    regulation article from a training deck, or a v2 quote from the v1 the snapshot
+    froze. Those are exactly the citation-trust decisions the product needs, so the
+    whitelisted metadata is included when the caller supplied it (bounded, so a long
+    field cannot grow the prompt without limit).
+    """
     evidence: list[dict] = []
     for index, citation in enumerate(citations or []):
         if not isinstance(citation, dict):
@@ -231,6 +245,22 @@ def citation_evidence(citations: Any) -> list[dict]:
             "label": str(citation.get("label") or ""),
             "quoted_content": str(citation.get("quoted_content") or "")[:MAX_QUOTE_CHARS],
         }
+        for source_key, target_key in (
+            ("source_name", "source_name"),
+            ("title", "source_name"),
+            ("location_text", "location_text"),
+            ("locator", "location_text"),
+            ("version", "version"),
+            ("effective_date", "effective_date"),
+            ("published_at", "published_at"),
+        ):
+            if target_key in entry:
+                continue
+            value = citation.get(source_key)
+            if isinstance(value, str):
+                value = value.strip()
+            if value not in (None, ""):
+                entry[target_key] = str(value)[:MAX_PROVENANCE_CHARS]
         if citation.get("knowledge_unit_id") is not None:
             entry["knowledge_unit_id"] = citation["knowledge_unit_id"]
         evidence.append(entry)

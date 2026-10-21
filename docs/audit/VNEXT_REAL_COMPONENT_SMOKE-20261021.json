@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-10-21T21:54:41+0800",
+  "config": {
+    "llm_provider": "openai_compatible",
+    "llm_model": "deepseek-v4-flash",
+    "llm_base_url": "http://47.101.159.7:29988/v1",
+    "database": "127.0.0.1:5432/ybt_dsh_handoff_v2",
+    "redis_url": "redis://127.0.0.1:6379/0",
+    "milvus_uri": "http://127.0.0.1:19530",
+    "embedding_provider": "local_vllm",
+    "embedding_model": "BAAI/bge-small-zh-v1.5",
+    "embedding_base_url": "http://127.0.0.1:11434/v1",
+    "embedding_dimension": 512
+  },
+  "checks": {
+    "postgres": {
+      "status": "real",
+      "latency_ms": 862.2,
+      "tables": 150
+    },
+    "redis": {
+      "status": "real",
+      "latency_ms": 321.4,
+      "ping": true,
+      "roundtrip": true
+    },
+    "milvus": {
+      "status": "error",
+      "latency_ms": 7113.9,
+      "error": "ConnectionNotExistException()",
+      "trace": "NoneType: None\n"
+    },
+    "embeddings": {
+      "status": "blocked",
+      "latency_ms": 1098.1,
+      "error": "RuntimeError('HTTP 500: {\"error\":{\"message\":\"error starting llama-server: llama-server binary not found (checked: /usr/lib/ollama/llama-server, /usr/bin/build/lib/ollama/llama-server, /usr/bin/dist/linux-amd64/lib/ollama/llama-server, /usr/bin/dist/linux_amd64/lib/ollama/llama-server, /build/lib/ollama/llama-server, /dist/')"
+    },
+    "llm": {
+      "field_rerank": {
+        "status": "real",
+        "payload": {
+          "ranking": [
+            {
+              "id": "SRC1",
+              "score": 0.99,
+              "reason": "客户主键，全行唯一，直接对应客户统一标识"
+            },
+            {
+              "id": "SRC2",
+              "score": 0.1,
+              "reason": "产品编号，同一客户多产品时重复，不能唯一标识客户"
+            },
+            {
+              "id": "SRC3",
+              "score": 0.05,
+              "reason": "借据号标识贷款业务，不是客户统一标识"
+            }
+          ],
+          "chosen": "SRC1"
+        },
+        "latency_ms": 2421.4,
+        "metadata": {
+          "provider": "openai_compatible",
+          "model": "deepseek-v4-flash",
+          "latency_ms": 2420,
+          "token_usage": {
+            "prompt_tokens": 195,
+            "completion_tokens": 180,
+            "total_tokens": 375,
+            "cached_tokens": 0,
+            "usage_available": true
+          },
+          "retry_count": 0,
+          "http_status": 200
+        }
+      },
+      "citation_support": {
+        "status": "real",
+        "payload": {
+          "verdict": "unsupported",
+          "reason": "证据明确说明客户统一标识取客户主键 CUSTOMER_ID，报送粒度为客户，即以客户为粒度报送，而非按产品编号报送；两者相互矛盾，故不支持该主张。"
+        },
+        "latency_ms": 1620.7,
+        "metadata": {
+          "provider": "openai_compatible",
+          "model": "deepseek-v4-flash",
+          "latency_ms": 1620,
+          "token_usage": {
+            "prompt_tokens": 121,
+            "completion_tokens": 109,
+            "total_tokens": 230,
+            "cached_tokens": 0,
+            "usage_available": true
+          },
+          "retry_count": 0,
+          "http_status": 200
+        }
+      }
+    }
+  }
+}
