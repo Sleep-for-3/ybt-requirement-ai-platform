@@ -112,7 +112,7 @@ docker compose -p ybt-dev --profile milvus -f docker-compose.yml -f docker-compo
 - **WSL 会空闲回收**：本机 `.wslconfig` 为 `networkingMode=mirrored`。没有任何 WSL 进程时发行版停止，Windows 侧 `127.0.0.1:5432/6379/19530/11434` 立即变成「积极拒绝」；下次执行 `wsl` 命令时容器才重新拉起（`docker ps` 显示 Up 几秒）。**必须保持一个常驻 WSL 进程**（例如计划任务运行 `wsl -d Ubuntu -- bash -lc "sleep infinity"`），否则 uvicorn、浏览器验收会间歇性连不上。
 - 数据重启后仍在（`ybt-dev_postgres_data`/`ybt-dev_redis_data` 命名卷）：PG 150 张表、Redis AOF 均可恢复；但 Milvus 栈（etcd/minio/milvus）**没有 restart policy**，docker 重启后需手动 `compose up -d milvus`（实测重启后三容器 Exited，手动拉起后 healthy）。
 - 重启后复测证据：`docs/audit/VNEXT_REAL_COMPONENT_SMOKE-20261021-after-restart.json`——postgres real（150 表/1.06s）、redis real（0.44s）、milvus real（512 维/3 条/2 命中/7.2s）、embeddings 仍 BLOCKED（缺 llama-server）。
-- 真实后端（uvicorn，真实 `.env`）已验证 `/api/health` OK、`/api/ai-runtime/status` `is_mock=false`、Milvus `reachable=true`、语义索引 `available=false`；验证后进程已退出，容器保持运行。
+- 真实后端（uvicorn，真实 `.env`）已验证 `/api/health` OK、`/api/ai-runtime/status` `is_mock=false`、Milvus `reachable=true`、语义索引 `available=false`（该次会话早于 embedding 可用；23:4x 后同一接口为 `semantic_index.state=ready, active_index_count=1`，见 §9）。
 
 ## 9. 真实 embedding / 语义检索 / 知识闭环 / Celery（2026-10-21 23:3x–23:4x 实测）
 
