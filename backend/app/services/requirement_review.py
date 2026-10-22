@@ -21,6 +21,7 @@ from app.models import (
     User,
     WorkflowInstance,
 )
+from app.services.requirement_delivery_safety import unresolved_question_risks
 from app.services.requirement_gaps import field_gaps
 from app.services.requirement_revisions import load_revision, lock_requirement
 from app.services.requirement_scope import content_digest, export_document
@@ -82,6 +83,9 @@ def review_readiness(
     requirement = lock_requirement(db, project_id, requirement_id)
     revision = load_revision(db, project_id, requirement_id, content_version)
     reasons = _unresolved(revision.content_json)
+    # 当前交付安全检查层：冻结快照之后新增/未结案的人工问题必须继续阻断，
+    # 但不改写历史冻结内容（冻结事实层保持不可变）。
+    reasons.extend(unresolved_question_risks(db, requirement))
     from app.services.requirement_script_basis import script_basis_changes
     reasons.extend({**change, "field_id": None} for change in script_basis_changes(db, project_id, revision.content_json))
     if requirement.content_version != content_version:
@@ -342,6 +346,13 @@ def finalize_formal_delivery(
     if (script_basis_changes(db, project_id, revision.content_json) or comparison_issues(revision.content_json)
             or path_issues(revision.content_json)):
         raise HTTPException(409, "脚本需求依据已变化，须复核并建立新修订后交付")
+    # 定稿时再查一次当前风险，堵住“审批通过后、定稿前”新增问题绕过交付的窗口。
+    risks = unresolved_question_risks(db, requirement)
+    if risks:
+        raise HTTPException(
+            409,
+            f"存在 {len(risks)} 项当前待确认问题，须结案并补充解决依据后再正式交付",
+        )
     version_no = (db.scalar(select(func.max(RequirementFormalDelivery.version_no)).where(
         RequirementFormalDelivery.requirement_id == requirement.id,
     )) or 0) + 1

@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
+from app.services.requirement_delivery_safety import lock_project_requirements
 from app.schemas.deliverables import (
     DeliverableCreateRequest,
     PendingQuestionCreateRequest,
@@ -304,6 +305,8 @@ def create_question(project_id: int, payload: PendingQuestionCreateRequest, prin
     if values["assigned_user_id"] is not None:
         membership = db.scalar(select(ProjectMembership.id).where(ProjectMembership.project_id == project_id, ProjectMembership.user_id == values["assigned_user_id"], ProjectMembership.status == "active"))
         if membership is None: raise HTTPException(400, "指派的用户不是该项目的有效成员")
+    # 与 finalize-formal-delivery 的 Requirement 行锁串行化：避免“检查通过后才新增问题”的竞态。
+    lock_project_requirements(db, project_id)
     question = PendingQuestion(institution_id=project.institution_id, project_id=project_id, target_table_id=table.id, target_field_id=values["target_field_id"], scenario_id=values["scenario_id"], question_type=values["question_type"], question_text=values["question_text"], priority=values["priority"], assigned_role=values["assigned_role"], assigned_user_id=values["assigned_user_id"], source_type=values["source_type"], source_id=values["source_id"], question_status="assigned" if values["assigned_user_id"] or values["assigned_role"] else "open")
     db.add(question); db.flush(); record_audit(db, action="create_question", resource_type="pending_question", resource_id=question.id, actor_user_id=principal.user_id, institution_id=project.institution_id, project_id=project_id, after={"question_type": question.question_type, "priority": question.priority})
     if question.assigned_user_id:
@@ -1051,6 +1054,7 @@ def _ensure_generation_questions(db, package: DeliverablePackage, field_id: int)
     for question_type, assigned_role, missing_label, evidence_id in checks:
         if evidence_id is not None:
             continue
+        lock_project_requirements(db, package.project_id)
         existing = db.scalar(select(PendingQuestion.id).where(
             PendingQuestion.project_id == package.project_id,
             PendingQuestion.target_table_id == package.target_table_id,
