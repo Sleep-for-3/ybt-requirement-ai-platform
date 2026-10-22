@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,9 +20,14 @@ from .citation_support import (
     UNSUPPORTED,
     claim_payloads,
     citation_evidence,
-    run_judge,
+    run_judge_with_conflicts,
     split_claims_all,
     tally_verdicts,
+)
+from .citation_trust import (
+    downgrade_conflicting_verdicts,
+    normalize_conflicts,
+    version_violations,
 )
 
 #: Answer-level verification verdicts. ``partially_supported`` is deliberately **not** a new
@@ -124,6 +130,15 @@ def _base_support_result(check: str, enabled: bool) -> dict:
         "judged_citation_count": 0,
         "unreferenced_evidence_ids": [],
         "claim_judgement": None,
+        # --- deterministic trust rules (version pinning / conflicting evidence).
+        "version_violations": [],
+        "conflicts": [],
+        "conflict_count": 0,
+        # 版本冲突若能被“快照固定版本”确定性裁决（落后版本已判 unsupported），
+        # 就不再作为无法消解的冲突降级可用证据，只在这里留痕。
+        "resolved_conflicts": [],
+        "trust_blockers": [],
+        "pinned_versions": {},
     }
 
 
@@ -146,6 +161,10 @@ def _merge_citation_verdicts(
     dropped_ids: list[str] = []
     unkeyed: list[dict] = []
     for verdict in verdicts:
+        if verdict.get("dimension") == "claim":
+            # A claim-only verdict is not an answer about a citation. Treating it as "unkeyed"
+            # would let it be paired positionally with a citation that got no verdict at all.
+            continue
         citation_id = verdict.get("citation_id")
         if not citation_id:
             unkeyed.append(verdict)
@@ -236,6 +255,10 @@ def _align_claim_verdicts(
                 continue
             by_id[key] = verdict
             continue
+        if verdict.get("dimension") == "citation":
+            # A citation-level verdict says nothing about a single claim; it must not be counted
+            # as a dropped claim verdict either.
+            continue
         dropped_ids.append(UNKEYED_VERDICT)
 
     aligned: list[dict] = []
@@ -286,6 +309,7 @@ async def check_citation_support(
     conflict_unit_ids: list[int] | None = None,
     project_id: int | None = None,
     confidentiality_levels: list[str] | None = None,
+    pinned_versions: dict[str, Any] | None = None,
 ) -> dict:
     """Judge whether each citation's evidence entails the conclusion it is attached to.
 
@@ -329,6 +353,7 @@ async def check_citation_support(
     batches, uncovered = _claim_batches(claim_list)
     evidence = citation_evidence(usable)
     all_verdicts: list[dict] = []
+    raw_conflicts: list[dict] = []
     batch_payloads: list[dict] = []
     batch_count = 0
     error_type: str | None = None
@@ -343,8 +368,11 @@ async def check_citation_support(
             "claims": payloads,
             "citations": evidence if index == 0 else [],
         }
+        if index == 0 and pinned_versions:
+            # 需求快照固定的版本随输入一起给出，让裁判知道“哪个版本才是本次交付依据”。
+            request["pinned_versions"] = dict(pinned_versions)
         batch_count += 1
-        verdicts, batch_facts, error_type = await run_judge(
+        verdicts, conflicts, batch_facts, error_type = await run_judge_with_conflicts(
             db,
             CITATION_SUPPORT_PROMPT_KEY,
             CITATION_SUPPORT_SYSTEM_PROMPT,
@@ -354,6 +382,8 @@ async def check_citation_support(
         )
         facts = batch_facts or facts
         all_verdicts.extend(verdicts)
+        if index == 0:
+            raw_conflicts.extend(conflicts)
         batch_payloads.extend(payloads)
         if error_type:
             break
@@ -409,6 +439,110 @@ async def check_citation_support(
         ]
         result["unreferenced_evidence_ids"] = dropped_units
     result["judged_citation_count"] = len(result["verdicts"])
+
+    # --- 确定性可信规则（不依赖模型判断，先于任何“可信度”结论生效）-------------------------
+    # 1) 版本一致性：需求快照已固定来源版本时，引用其它版本是硬缺陷，直接判 unsupported；
+    #    这类判断不该交给 LLM——模型看两条版本本身没有“对错”可言。
+    violations = version_violations(usable, pinned_versions)
+    result["pinned_versions"] = dict(pinned_versions or {})
+    result["version_violations"] = violations
+    if violations:
+        violation_by_id = {str(item["citation_id"]): item for item in violations}
+        patched: list[dict] = []
+        for verdict in result["verdicts"]:
+            violation = violation_by_id.get(str(verdict.get("citation_id")))
+            if violation is None:
+                patched.append(verdict)
+                continue
+            patched.append({
+                **verdict,
+                "verdict": UNSUPPORTED,
+                "reason": f"version_mismatch: {violation['message']}",
+                "deterministic": True,
+                "pinned_version": violation["pinned_version"],
+                "cited_version": violation["cited_version"],
+            })
+        result["verdicts"] = patched
+        result["trust_blockers"].extend(
+            f"version_mismatch:{item['citation_id']}" for item in violations
+        )
+
+    # 2) 冲突证据：同一主张的两份有效来源互相矛盾时，涉及引用的判定降级为 unknown。
+    #    “检索排在前面的那条更像 supported”不是确认口径的依据，静默合并矛盾结论同样不行。
+    known_citation_ids = {str(item.get("citation_id")) for item in result["verdicts"]}
+    alias_to_citation: dict[str, str] = {}
+    for verdict in result["verdicts"]:
+        unit_id = verdict.get("knowledge_unit_id")
+        if unit_id is not None:
+            alias_to_citation[str(unit_id)] = str(verdict.get("citation_id"))
+    for raw_conflict in raw_conflicts:
+        raw_ids = raw_conflict.get("citation_ids") or raw_conflict.get("citations") or []
+        if isinstance(raw_ids, str):
+            raw_ids = [raw_ids]
+        mapped = [alias_to_citation.get(str(raw_id), str(raw_id)) for raw_id in raw_ids]
+        raw_conflict["citation_ids"] = mapped
+    conflicts = normalize_conflicts(raw_conflicts, known_citation_ids)
+    result["conflicts"] = conflicts
+    result["conflict_count"] = len(conflicts)
+    # 版本冲突分两种：需求快照已固定版本时，“落后版本”已被上面的确定性规则判 unsupported，
+    # 冲突即被裁决（可用证据是固定版本那一份），此时不应把仍然有效的引用一起降级——否则
+    # “新版制度更严格但正确”的证据会被无差别打成 unknown，等于用保守掩盖可用结论。
+    # 没有固定版本、或冲突来自适用范围/真实矛盾时，仍然是无解的冲突，必须降级并阻断。
+    violation_ids = {str(item["citation_id"]) for item in violations}
+    resolved_conflicts: list[dict] = []
+    unresolved_conflicts: list[dict] = []
+    for conflict in conflicts:
+        participants = {str(cid) for cid in conflict["citation_ids"]}
+        adjudicated = (
+            conflict.get("conflict_type") == "version"
+            and bool(pinned_versions)
+            and bool(participants & violation_ids)
+        )
+        (resolved_conflicts if adjudicated else unresolved_conflicts).append(conflict)
+    if resolved_conflicts:
+        result["resolved_conflicts"] = [
+            {
+                **conflict,
+                "resolution": "pinned_version",
+                "rejected_citation_ids": sorted(
+                    str(cid) for cid in conflict["citation_ids"] if str(cid) in violation_ids
+                ),
+            }
+            for conflict in resolved_conflicts
+        ]
+    if unresolved_conflicts:
+        result["verdicts"] = downgrade_conflicting_verdicts(
+            result["verdicts"], unresolved_conflicts
+        )
+        result["trust_blockers"].extend(
+            "conflicting_evidence:" + ",".join(conflict["citation_ids"])
+            for conflict in unresolved_conflicts
+        )
+    if unresolved_conflicts:
+        conflicted_claim_ids = {
+            str(conflict["claim_id"]) for conflict in unresolved_conflicts if conflict.get("claim_id")
+        }
+        if conflicted_claim_ids:
+            aligned_claims = [
+                {
+                    **item,
+                    "verdict": UNKNOWN,
+                    "reason": str(item.get("reason") or "") or "conflicting_evidence",
+                    "conflict_type": next(
+                        (
+                            conflict["conflict_type"]
+                            for conflict in unresolved_conflicts
+                            if str(conflict.get("claim_id")) == item["claim_id"]
+                        ),
+                        "contradiction",
+                    ),
+                }
+                if item["judged"] and item["claim_id"] in conflicted_claim_ids
+                else item
+                for item in aligned_claims
+            ]
+            result["claims"] = aligned_claims
+
     tallied = tally_verdicts(result["verdicts"])
     result["supported_count"] = tallied["supported_count"]
     result["unsupported_count"] = tallied["unsupported_count"]
@@ -528,6 +662,16 @@ async def check_citation_support(
         result["degraded"] = True
         result["degraded_reason"] = error_type
         return result
+    if result["trust_blockers"] and result["verification"] == VERIFIED:
+        # 版本不一致或存在冲突证据时，绝不给出 verified —— 保守降级为部分支持。
+        result["verification"] = PARTIALLY_SUPPORTED
+    if (
+        result["version_violations"]
+        and result["verdicts"]
+        and len(result["version_violations"]) >= len(result["verdicts"])
+    ):
+        # 所有引用都指向与快照固定版本不符的来源：本次交付依据整体不成立。
+        result["verification"] = UNSUPPORTED_VERIFICATION
     result["judged"] = True
     return result
 

@@ -91,17 +91,28 @@ MAX_REASON_CHARS = 300
 UNKEYED_VERDICT = "<unkeyed>"
 
 CITATION_SUPPORT_SYSTEM_PROMPT = (
-    "你是银行一表通知识问答的引用蕴含校验裁判（[AI_SKILL_CITATION_SUPPORT_V1]）。"
-    "对每一条引用，判断其引文是否在逻辑上支持结论中的对应断言。"
+    "你是银行一表通知识问答的引用蕴含校验裁判（[AI_SKILL_CITATION_SUPPORT_V2]）。"
+    "输入包含 answer、claims（claim_id 与原子断言）、citations（citation_id、引文、来源或版本）。"
+    "请完成三件事："
+    "1) 对每条引用判断它是否支持 claims 中至少一条原子断言：supported=至少蕴含一条；"
+    "unsupported=与断言矛盾或完全不涉及；unknown=证据不足、只有培训/PPT/二手转述、或无法判断。"
+    "2) 对每条原子断言判断所有引用合起来是否支持它，取值同上；断言只被覆盖了一部分条件时，"
+    "该断言不得判 supported，应判 unsupported 或 unknown。"
+    "3) 若两条及以上正式来源对同一主张给出互相矛盾的表述，必须列入 conflicts（citation_ids "
+    "至少两条）并说明 conflict_type：version（版本差异）/ scope（适用范围差异）/ "
+    "contradiction（真实矛盾）；禁止静默合并互相矛盾的结论。"
     "判定规则："
     "1) 只有正式制度原文或正式条款可以判 supported；培训材料、PPT 转述、二手摘要、"
     "未给原始出处的综述，即使内容看似吻合也一律判 unknown；"
     "2) 引文的版本、生效日期、适用范围与结论不一致时判 unsupported；"
-    "3) 引文只覆盖结论多个条件中的一部分时，该引用对整条断言判 unsupported；"
-    "4) 引文与断言字面相近但口径范围不同（如表内/表外、含/不含）判 unsupported。"
+    "3) 引文与断言字面相近但口径范围不同（如表内/表外、含/不含）判 unsupported。"
     "只允许输出 JSON，格式为 "
     '{"verdicts": [{"citation_id": "<引用编号>", "verdict": "supported|unsupported|unknown", '
-    '"reason": "<不超过50字的理由>"}]}。'
+    '"supported_claim_ids": ["<claim-1>"], "reason": "<不超过50字的理由>"}], '
+    '"claims": [{"claim_id": "<claim-1>", "verdict": "supported|unsupported|unknown", '
+    '"reason": "<不超过50字的理由>"}], '
+    '"conflicts": [{"claim_id": "<claim-1>", "citation_ids": ["<引用编号>", "<引用编号>"], '
+    '"conflict_type": "version|scope|contradiction", "reason": "<不超过50字的理由>"}]}。'
     "证据不足以判断时输出 unknown，不得推测，不得输出任何额外文字。"
 )
 
@@ -131,36 +142,47 @@ def _reason(value: Any) -> str:
     return value.strip()[:MAX_REASON_CHARS]
 
 
+def _raw_verdict_items(payload: Any) -> list[dict]:
+    """Collect every candidate verdict item from a judge payload.
+
+    ``[AI_SKILL_CITATION_SUPPORT_V2]`` asks for *two* lists (``verdicts`` per citation and
+    ``claims`` per claim). The V1 shape nested a single list under one of
+    :data:`VERDICT_CONTAINER_KEYS`; both are accepted so older prompts keep working.
+    """
+    if isinstance(payload, str):
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    items: list[dict] = []
+    seen_containers = False
+    for key in VERDICT_CONTAINER_KEYS:
+        candidate = payload.get(key)
+        if isinstance(candidate, list):
+            seen_containers = True
+            items.extend(item for item in candidate if isinstance(item, dict))
+        elif isinstance(candidate, dict):
+            seen_containers = True
+            items.append(candidate)
+    if not seen_containers:
+        items.append(payload)
+    return items
+
+
 def parse_judge_verdicts(payload: Any) -> list[dict]:
     """Normalise a judge payload into ``[{"verdict": ..., "reason": ..., ...}, ...]``.
 
     Accepts a bare list, a dict nesting the list under one of
     :data:`VERDICT_CONTAINER_KEYS`, or a single verdict object. Unparseable input yields an
     empty list (the caller then degrades to unknown) — this function never raises.
-    """
-    if isinstance(payload, str):
-        return []
-    if isinstance(payload, list):
-        raw_items = payload
-    elif isinstance(payload, dict):
-        raw_items = []
-        for key in VERDICT_CONTAINER_KEYS:
-            candidate = payload.get(key)
-            if isinstance(candidate, list):
-                raw_items = candidate
-                break
-            if isinstance(candidate, dict):
-                raw_items = [candidate]
-                break
-        else:
-            raw_items = [payload]
-    else:
-        return []
 
+    Each item is tagged with ``dimension``: ``citation`` (keyed by citation_id),
+    ``claim`` (keyed by claim_id only) or ``pair`` (both). Without the tag a claim-only
+    verdict could be paired positionally with an unanswered citation.
+    """
     verdicts: list[dict] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
+    for item in _raw_verdict_items(payload):
         verdict = {
             "verdict": normalize_verdict(item.get("verdict") or item.get("label") or item.get("result")),
             "reason": _reason(item.get("reason") or item.get("rationale")),
@@ -175,10 +197,34 @@ def parse_judge_verdicts(payload: Any) -> list[dict]:
                 break
         if item.get("claim_id") not in (None, ""):
             verdict["claim_id"] = str(item["claim_id"])
+        supported_claims = item.get("supported_claim_ids") or item.get("supported_claims")
+        if isinstance(supported_claims, list):
+            verdict["supported_claim_ids"] = [str(value) for value in supported_claims if value]
+        conflicts = item.get("conflicts")
+        if isinstance(conflicts, list) and conflicts:
+            verdict["conflicts"] = conflicts
         if item.get("knowledge_unit_id") is not None:
             verdict["knowledge_unit_id"] = item["knowledge_unit_id"]
+        has_citation = "citation_id" in verdict
+        has_claim = "claim_id" in verdict or "claim" in verdict
+        verdict["dimension"] = "pair" if has_citation and has_claim else ("citation" if has_citation else ("claim" if has_claim else "unknown"))
         verdicts.append(verdict)
     return verdicts
+
+
+def parse_judge_conflicts(payload: Any) -> list[dict]:
+    """Pull the raw ``conflicts`` list out of a judge payload (normalisation happens later)."""
+    if isinstance(payload, dict):
+        candidate = payload.get("conflicts") or payload.get("conflict")
+        if isinstance(candidate, list):
+            return [item for item in candidate if isinstance(item, dict)]
+        return []
+    raw: list[dict] = []
+    for item in _raw_verdict_items(payload):
+        candidate = item.get("conflicts")
+        if isinstance(candidate, list):
+            raw.extend(entry for entry in candidate if isinstance(entry, dict))
+    return raw
 
 def tally_verdicts(verdicts: list[dict]) -> dict:
     """Count supported/unsupported/unknown verdicts."""
@@ -206,17 +252,50 @@ def split_claims(text: str) -> list[str]:
 
 
 
+_COMPOUND_MARKER = re.compile(r"(?:条件|口径|范围|包括|包含|分别为|分别|如下|以下)\s*[:：]")
+_ENUMERATION_SPLIT = re.compile(r"[、，,]")
+MAX_COMPOUND_ITEMS = 8
+
+
+def _expand_compound_claim(sentence: str) -> list[str]:
+    """Split a "subject + enumerated conditions" sentence into atomic claims.
+
+    A regulator sentence such as ``报送范围包括：表内贷款、表外担保、贴现。`` carries three
+    independent conditions. Judging it as one claim lets a single citation that only covers
+    ``表内贷款`` look like full support — exactly the C08 defect. Splitting keeps coverage
+    honest: 1/3 covered is partial support, not "verified".
+    """
+    match = _COMPOUND_MARKER.search(sentence)
+    if match is None:
+        return [sentence]
+    head = sentence[: match.start()].strip()
+    tail = sentence[match.end():].rstrip("。；;.!！ ").strip()
+    items = [item.strip() for item in _ENUMERATION_SPLIT.split(tail) if item.strip()]
+    if len(items) < 2 or len(items) > MAX_COMPOUND_ITEMS:
+        return [sentence]
+    # 只有一项带冒号的普通句子（如「说明：xxx」之外的描述）不应被拆碎
+    if not head:
+        return [sentence]
+    return [f"{head}：{item}。" for item in items]
+
+
 def split_claims_all(text: str) -> list[str]:
     """Split a whole answer into atomic claims **without truncation**.
 
     The caller needs the real total to publish a coverage denominator: silently keeping the
     first N claims is exactly the defect where an answer looks fully verified while its tail was
     never judged. Punctuation is preserved so a supported claim can be shown verbatim.
+    Enumerated compound conclusions are expanded into one claim per condition.
     """
     if not text:
         return []
     parts = (part.strip() for part in re.split(r"(?<=[。；;])", str(text)))
-    return [part for part in parts if part]
+    claims: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        claims.extend(_expand_compound_claim(part))
+    return claims
 
 
 def claim_payloads(claims: list[str]) -> list[dict]:
@@ -283,6 +362,27 @@ async def run_judge(
     error type so the caller can report a graceful degradation. This helper never raises and
     never writes ModelCallLog rows or commits — judge results stay side-effect free.
     """
+    verdicts, _conflicts, facts, error_type = await run_judge_with_conflicts(
+        db,
+        prompt_key,
+        system_prompt,
+        user_prompt,
+        confidentiality_levels=confidentiality_levels,
+        project_id=project_id,
+    )
+    return verdicts, facts, error_type
+
+
+async def run_judge_with_conflicts(
+    db: Session,
+    prompt_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    confidentiality_levels: list[str] | None = None,
+    project_id: int | None = None,
+) -> tuple[list[dict], list[dict], dict, str | None]:
+    """Same as :func:`run_judge` but also returns the raw ``conflicts`` the judge reported."""
     facts: dict[str, Any] = {
         "model_profile_id": None,
         "provider_type": None,
@@ -304,7 +404,7 @@ async def run_judge(
             project_id=project_id,
         )
         payload = await service.chat_json(system_prompt, guarded_input)
-        return parse_judge_verdicts(payload), facts, None
+        return parse_judge_verdicts(payload), parse_judge_conflicts(payload), facts, None
     except prompt_runtime.LLMRuntimeError as exc:
         error_type = exc.error_type
     except Exception as exc:  # noqa: BLE001 - the judge must never break the caller
@@ -315,7 +415,7 @@ async def run_judge(
         project_id,
         error_type,
     )
-    return [], facts, error_type
+    return [], [], facts, error_type
 
 
 def _base_result(enabled: bool, prompt_key: str) -> dict:

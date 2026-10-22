@@ -3,7 +3,7 @@
 - 仓库：`Sleep-for-3/ybt-requirement-ai-platform`
 - 工作分支：`dsh/vnext-business-accuracy-20261021`
 - 本轮起始 HEAD：`6b75384e4bacd94dfae70c58900f09282c7fcde5`（与 `origin/dsh/vnext-business-accuracy-20261021` 一致，工作树干净）
-- 环境：Windows + `ai-platform/backend/.venv`（Python 3.12）；真实组件栈运行在 WSL 的 docker compose（ybt-postgres 127.0.0.1:5432 / ybt-redis 127.0.0.1:6379 / Milvus 19530）；开发验收模型为公司 DeepSeek 网关 `deepseek-v4-flash`（`LLM_PROVIDER=openai_compatible`，密钥只存于被忽略的 `backend/.env`）。
+- 环境：Windows + `ai-platform/backend/.venv`（Python 3.12）；真实组件栈运行在 WSL 的 docker compose（ybt-postgres 127.0.0.1:5432 / ybt-redis 127.0.0.1:6379 / Milvus 19530）；开发验收模型为公司 DeepSeek 网关，`LLM_PROVIDER=openai_compatible`，密钥只存于被忽略的 `backend/.env`。**2026-10-22 实测网关已下线 `deepseek-v4-flash`**（422 model not found），开发验收改用 `deepseek-v4.1-flash`；历史证据文件记录的 `deepseek-v4-flash` 结果仍是当时真实调用，不做改写。
 - 状态口径：`TODO / IN_PROGRESS / TESTED / BLOCKED / DONE / REJECTED`；证据级别：`MOCK / REAL_COMPONENT / REAL_MODEL / BUSINESS_VERIFIED / UNVERIFIED`。只有实际执行且证据成立才允许 `DONE`。
 
 ## 环境前置（已核实）
@@ -30,11 +30,24 @@
   - 相邻回归 `tests/test_deliverables.py tests/test_reviewed_content_immutability.py` → **21 passed**（AUTH_MODE=optional + inline 队列）
 - 未覆盖/下一步：冻结后新增问题是否应自动生成 `RequirementRecheck`（当前只在 SQL 变化时生成），属 P0-A 延伸，见下方“剩余缺口”。
 
-### P0-B RAG 引用裁判与证据可信性（C08/C09/C10）　`TODO`
+### P0-B RAG 引用裁判与证据可信性（C08/C09/C10）　`DONE`
 
-- 证据基线：`docs/audit/VNEXT_REAL_MODEL_GOLDEN-20261021.json` 记录真实 DeepSeek 对 10 个合成引用案例 7/10（非银行专家真值）。
-- 待做：逐案复现 C08（引用只支持部分结论）、C09（冲突证据）、C10（需求固定 v1 vs 知识库 v2）；区分“引用级 supported”与“主张级覆盖率”；确定性规则优先（版本不匹配/越权/引用不存在）；裁判失败保守降级；成本与缓存边界。
-- 禁止：修改黄金期望把失败改成通过。
+- 证据基线：`docs/audit/VNEXT_REAL_MODEL_GOLDEN-20261021.json` 记录真实 DeepSeek 对 10 个合成引用案例 7/10（非银行专家真值，全部 `claim_judgement="citation_level"`、`claims_judged=0`、`claim_coverage=0.0`）。
+- 真实原因（已定位）：
+  - C08 属产品契约缺陷：旧裁判规则 3 把“只覆盖部分条件”的引用直接判 unsupported，而黄金集要求“引用级 supported + 主张覆盖率不足 → 整体不得 verified”。系统缺少把复合监管结论拆成原子主张的能力（`split_claims_all` 只按句号切）。
+  - C09 属产品缺陷：裁判没有“冲突识别”契约，两份互相矛盾的有效来源中排序靠前者被当作 supported，矛盾被静默合并。
+  - C10 前半属评测转写缺陷（`scripts/vnext_real_model_golden_eval.py` 未传“需求快照固定 v1”的上下文，模型无从判断版本不一致），后半属产品缺陷（版本一致性这种可确定性判定的问题不该交给 LLM）。
+- 最小修复：
+  - 新增 `backend/app/services/rag/citation_trust.py`：版本归一/来源标题归一/版本违规（`version_violations`）/冲突类型归一（version|scope|contradiction）/冲突 → 引用判定降级（`downgrade_conflicting_verdicts`），全部为纯确定性函数，不调用模型。
+  - `backend/app/services/rag/citation_support.py`：裁判 prompt 升级为 `[AI_SKILL_CITATION_SUPPORT_V2]`（同时输出 verdicts + claims + conflicts，verdict 带 `supported_claim_ids`）；`parse_judge_verdicts` 支持双列表并按 `dimension` 区分引用级/主张级判定（避免 claim-only 判定被按位置错配）；复合结论按“条件/包括/分别为 + 顿号逗号枚举”拆原子主张。
+  - `backend/app/services/rag/citation_validator.py`：`check_citation_support(..., pinned_versions=...)` 新增可选参数（默认 None，向后兼容）；版本违规→强制 unsupported（`deterministic=True`）；冲突中**版本冲突且快照已固定版本**时只淘汰落后版本（`resolved_conflicts`，resolution=pinned_version），其余冲突（无固定版本/适用范围/真实矛盾）降级 unknown 并阻断；`trust_blockers` 禁止整体 verified。
+- 影响范围：RAG 引用判定、grounded answer 状态机（未改取值）、评测脚本；不改数据库结构。
+- 测试：
+  - `pytest tests/test_vnext2_citation_trust.py -q` → **18 passed**（MOCK：C08 部分覆盖、C09 冲突暴露、C10 确定性版本、C04 版本冲突裁决、无固定版本的版本冲突仍为 unknown 等）
+  - 相邻回归 `tests/test_rag_citation_support.py tests/test_overnight_citation_status.py` → **27 passed**
+  - 真实模型 `scripts/vnext_real_model_golden_eval.py` → **10/10 判定与黄金集期望一致，0 degraded，9/10 走主张级判定，冲突暴露 2 例，失败但未 verified 2 例**，avg 4338.6ms，证据 `docs/audit/VNEXT_CITATION_TRUST-20261022.json`（REAL_MODEL，标签仍 UNVERIFIED）。
+- 关键环境事实：公司网关已下线 `deepseek-v4-flash`（`POST /chat/completions` 返回 422 `model not found`，`GET /models` 只剩 `deepseek-v4.1-flash / deepseek-flash / deepseek-v4-pro / cc/* / qwen3.8-flash / glm-5.3-flash`），本轮开发验收改用 `deepseek-v4.1-flash`（`backend/.env` 已改，文件本身被 gitignore，不进提交）。
+- 未覆盖/下一步：`pinned_versions` 目前只有评测脚本传入，产品生成路径（`backend/app/services/rag/grounded_answer_service.py:166`）还没有从需求快照推导固定版本——需在 P0-C 打通“需求冻结时的知识版本 → 引用裁判固定版本”，否则 C10 确定性规则在产品内不会自动生效。
 
 ### P0-C 真实监管需求生成与正式交付 E2E　`TODO`
 

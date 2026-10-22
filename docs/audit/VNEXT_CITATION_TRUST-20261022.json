@@ -1,0 +1,353 @@
+{
+  "generated_at": "2026-10-22T21:18:03+0800",
+  "mode": "CITATION_SUPPORT_CHECK=judge, RAGAS_JUDGE_ENABLED=true, real DB session",
+  "prompt": "[AI_SKILL_CITATION_SUPPORT_V2]",
+  "model": "deepseek-v4.1-flash",
+  "cases": 10,
+  "citation_verdict_exact_match": 10,
+  "citation_verdict_accuracy": 1.0,
+  "claim_level_cases": 9,
+  "conflict_cases_exposed": 2,
+  "failed_but_still_not_verified": 0,
+  "citation_verdict_counts": {
+    "supported": 3,
+    "unsupported": 5,
+    "unknown": 4
+  },
+  "degraded_cases": 0,
+  "avg_latency_ms": 4338.6,
+  "label_status": "UNVERIFIED",
+  "label_note": "黄金集由 Lead 合成并人工转写输入，无独立银行专家标注；真实业务准确率不成立。",
+  "transcription_note": "C08 补回 c2、C09 保留两份冲突证据、C10/C04 传入 pinned_versions，期望值全部取自黄金集，未修改真值。",
+  "results": [
+    {
+      "case": "C01",
+      "title": "正确引用：制度条款支持字段口径",
+      "expected": {
+        "c1": "supported"
+      },
+      "verdicts": {
+        "c1": "supported"
+      },
+      "verdict_reasons": {
+        "c1": "引文与断言完全一致，且为正式数据项说明条款"
+      },
+      "verification": "verified",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 1,
+      "claims_unknown": 0,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 3536.1,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C02",
+      "title": "引用错误章节：引用了无关条款",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "verdict_reasons": {
+        "c1": "引文只讲客户基本信息，与贷款余额的汇总口径完全无关"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 0,
+      "claims_unknown": 0,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 2663.1,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C03",
+      "title": "引用存在但不支持结论：同义词替换过度",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "verdict_reasons": {
+        "c1": "仅定义表内贷款，未涉及贷款余额或表外贷款，与断言无关"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 0,
+      "claims_unknown": 1,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 3840.9,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C04",
+      "title": "旧版制度冲突：新版为准",
+      "expected": {
+        "c1": "unsupported",
+        "c2": "supported"
+      },
+      "verdicts": {
+        "c1": "unsupported",
+        "c2": "supported"
+      },
+      "verdict_reasons": {
+        "c1": "version_mismatch: 引用版本 2024 与需求快照固定的 2026 不一致，不能作为本次交付依据",
+        "c2": "2026修订版第2.1条明确取客户主键CUSTOMER_ID"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 1,
+      "claims_unknown": 0,
+      "claim_coverage": 1.0,
+      "conflict_count": 1,
+      "resolved_conflicts": [
+        {
+          "claim_id": "claim-1",
+          "citation_ids": [
+            "c1",
+            "c2"
+          ],
+          "conflict_type": "version",
+          "reason": "2024旧版取客户号，2026修订版取客户主键",
+          "resolution": "pinned_version",
+          "rejected_citation_ids": [
+            "c1"
+          ]
+        }
+      ],
+      "version_violations": [
+        "c1"
+      ],
+      "trust_blockers": [
+        "version_mismatch:c1"
+      ],
+      "latency_ms": 4631.1,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C05",
+      "title": "证据缺失：结论无任何引用",
+      "expected": {
+        "_none": "unknown"
+      },
+      "verdicts": {},
+      "verdict_reasons": {},
+      "verification": "unknown",
+      "claim_judgement": null,
+      "claims_total": 0,
+      "claims_judged": 0,
+      "claims_supported": 0,
+      "claims_unknown": 0,
+      "claim_coverage": 0.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 0.0,
+      "model_name": null,
+      "degraded": false,
+      "degraded_reason": null,
+      "skip_reason": "no_citations",
+      "match_basis": "no_citations→unknown（与黄金集 c1=unknown 语义等价）",
+      "matched": true
+    },
+    {
+      "case": "C06",
+      "title": "适用时点不同：制度生效日早于报送期",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "verdict_reasons": {
+        "c1": "制度自2026年施行，不能支持2025年报送期按该口径计算"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 0,
+      "claims_unknown": 0,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 2934.6,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C07",
+      "title": "引用二手摘要而非原文",
+      "expected": {
+        "c1": "unknown"
+      },
+      "verdicts": {
+        "c1": "unknown"
+      },
+      "verdict_reasons": {
+        "c1": "培训PPT转述属二手材料，不能作为正式制度依据"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 0,
+      "claims_unknown": 1,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 2199.7,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C08",
+      "title": "覆盖不足：多条件只引一条",
+      "expected": {
+        "c1": "supported",
+        "c2": "unknown"
+      },
+      "verdicts": {
+        "c1": "supported",
+        "c2": "unknown"
+      },
+      "verdict_reasons": {
+        "c1": "引文明确贷款余额不含已核销，支持该条件。",
+        "c2": "仅定义逾期贷款，未涉及余额剔除90天以上。"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 3,
+      "claims_judged": 3,
+      "claims_supported": 1,
+      "claims_unknown": 2,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [],
+      "latency_ms": 9295.4,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C09",
+      "title": "冲突资料静默合并",
+      "expected": {
+        "c1": "unknown"
+      },
+      "verdicts": {
+        "c1": "unknown",
+        "c2": "unknown"
+      },
+      "verdict_reasons": {
+        "c1": "conflicting_evidence: A、B制度对客户统一标识取值表述不一致",
+        "c2": "conflicting_evidence: A、B制度对客户统一标识取值表述不一致"
+      },
+      "verification": "partially_supported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 0,
+      "claims_unknown": 1,
+      "claim_coverage": 1.0,
+      "conflict_count": 1,
+      "resolved_conflicts": [],
+      "version_violations": [],
+      "trust_blockers": [
+        "conflicting_evidence:c1,c2"
+      ],
+      "latency_ms": 9345.2,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    },
+    {
+      "case": "C10",
+      "title": "证据版本与快照不一致",
+      "expected": {
+        "c1": "unsupported"
+      },
+      "verdicts": {
+        "c1": "unsupported"
+      },
+      "verdict_reasons": {
+        "c1": "version_mismatch: 引用版本 2 与需求快照固定的 1 不一致，不能作为本次交付依据"
+      },
+      "verification": "unsupported",
+      "claim_judgement": "claim_level",
+      "claims_total": 1,
+      "claims_judged": 1,
+      "claims_supported": 0,
+      "claims_unknown": 0,
+      "claim_coverage": 1.0,
+      "conflict_count": 0,
+      "resolved_conflicts": [],
+      "version_violations": [
+        "c1"
+      ],
+      "trust_blockers": [
+        "version_mismatch:c1"
+      ],
+      "latency_ms": 4940.1,
+      "model_name": "deepseek-v4.1-flash",
+      "degraded": false,
+      "degraded_reason": null,
+      "missing_verdicts": [],
+      "matched": true
+    }
+  ]
+}
