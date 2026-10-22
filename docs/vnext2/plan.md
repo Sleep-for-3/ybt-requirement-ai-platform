@@ -63,17 +63,23 @@
 
 - 复用 `backend/app/services/agent/{planner,runtime,state_machine,dependencies,gate_policy,tools/}`；信息充分 / 缺输入 / Skill 未绑定 / 需人工确认 / 人工否决；恢复与并发安全复用 AgentRun/AgentStep/ToolCall/BackgroundJob/租约。
 
-### P1-B 复杂 SQL 与监管口径变化　`IN_PROGRESS`（top_limit/cte 已归因、复合业务键与需求关联已修，剩余 GBase/Hive 语法矩阵与文档）
+### P1-B 复杂 SQL 与监管口径变化　`DONE`（证据：`docs/vnext2/p1b-sql-semantics.md`、`docs/audit/VNEXT2_SQL_DIALECT_MATRIX-20261023.json`；级别 `REAL_COMPONENT` / 合成期望）
 
 - 已完成的语义补强（不改既有 group_by/distinct/union_mode/having/join_type 逻辑）：
   - `top_limit`：新增行数上限维度，`ORDER BY ... LIMIT/TOP` 与 `ROW_NUMBER() ... WHERE rn <= n` 都会归因为“影响样本范围”；只改格式/常量不影响。
-  - `cte`：CTE 定义签名（名称+列+内部过滤/聚合）参与比较，CTE 内部过滤变化可归因，别名重命名静默。
+  - `cte`：CTE 定义签名（投影+WHERE+聚合多重集，**不含名称**）参与比较，CTE 内部过滤/投影变化可归因；CTE 名称与表别名按位置规范化，等价重命名静默。
   - `order_by`：**明确 limitation**，保持 `unsupported`，理由记录在比较器与文档：仅影响展示顺序的排序不应自动认定影响监管值，产品不伪造归因。
   - 覆盖度由 36/39 提升到 38/39（`SQL_SEMANTIC_CLASSES` 统计），不为凑 39/39 输出假归因。
 - 复合业务键（P1-B 4）：`backend/app/services/lineage/join_plan.py` 新增 `declared_key_columns` / `key_coverage` / `partial_unique_keys`，只有关联覆盖**完整**声明唯一键才允许 1:1 / N:1；仅按 `PRODUCT_ID` 关联 `(PRODUCT_ID, TERM_NO)` 维度时基数保持 unknown 并生成 `missing_join_cardinality` 待确认问题（文案含“复合唯一键”“不得视为一对一”“记录数或金额可能重复累计”），且**不自动拼接**缺失键。
 - SQL 变化 → 需求（P1-B 5）：修复真实缺陷 `semantic_impact.py` 把 `target_field_ids` 当 `requirement_ids` 返回（`_impact_scope_dict` 又按 TargetField 反查，导致“关联需求”实际是目标字段）。现在按 `Requirement.project_id + scope_json.field_ids` 求真实需求 id，`_impact_scope_dict` 返回需求摘要（name/content_version/target_table_id/field_ids）；无关需求与其他项目不误关联，格式/注释类变化不产生复核任务，JOIN 类型变化仍生成 impact + ReviewTask。
-- 测试：`tests/test_vnext2_sql_rowlimit_cte.py`（12）、`tests/test_vnext2_composite_business_key.py`（3）、`tests/test_vnext2_sql_impact_requirement_link.py`（4，含 2 正例 2 反例）；SQL/血缘相邻回归 110 passed；`tests/test_sql_lineage.py` 的 requirement 断言已按正确契约更新（原断言把字段 id 当需求 id）。
-- 待办：GBase/Hive 混合语法矩阵（多层 INSERT SELECT/临时表/窗口函数/NULL CONCAT/变量替换等）真实解析与 limitation 清单；`docs/vnext2/p1b-sql-semantics.md`。
+- 本轮又修复 5 个真实缺陷（均由语法矩阵与本项测试暴露）：
+  1. `gbase`/`hive` 方言字符串直接传给 `sqlglot.parse(read=...)` 抛 `ValueError: Unknown dialect` → 上传 GBase 脚本后变化分析整段 500；改为统一 `resolve_dialect`（`backend/app/services/lineage/dialects.py`）。
+  2. 普通 SELECT 的 WHERE 谓词变化无结构化维度承接，掉进 AST 兜底桶 → 新增 `StatementSemantics.filters` + `filter_changed`（边层已有归因时不重复计数）。
+  3. AST 兜底项按 category 表判定，导致“未归因变化”也宣称可能改变口径 → `ChangeItemSpec.attributed` 标志；未归因项 `affects_caliber=False` 且 label 标注“（未归因 AST 变化）”。
+  4. CTE/表别名重命名在 AST 文本层不同 → 报未归因变化；新增 `_canonicalize_cte_names` / `_canonicalize_table_aliases` / 裸列限定符不敏感比较。
+  5. CTE 名称参与签名导致纯重命名报口径变化 → 签名不含名称。
+- 测试：`tests/test_vnext2_sql_rowlimit_cte.py`（12）、`tests/test_vnext2_composite_business_key.py`（3）、`tests/test_vnext2_sql_impact_requirement_link.py`（4，含 2 正例 2 反例）、语法矩阵 `scripts/vnext2_sql_dialect_matrix.py`（15 解析用例 15/15 一致、8 变更用例 8/8 一致）；`pytest -k "sql or lineage or semantic or impact"` → 365 passed；`tests/test_sql_lineage.py` 的 requirement 断言已按正确契约更新（原断言把字段 id 当需求 id）。
+- 限制（已写入文档）：`order_by` 单独变化不归因；未归因变化只提示人工核对；方言白名单外的 GBase 8a 专有语法可能落到 partially_parsed/failed；字段级血缘完整性依赖元数据登记。
 
 ### P1-C 黄金集评测体系　`TODO`
 

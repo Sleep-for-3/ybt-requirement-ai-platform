@@ -1,0 +1,475 @@
+{
+  "generated_at": "2026-10-23",
+  "kind": "synthetic_dialect_matrix",
+  "evidence_level": "REAL_COMPONENT",
+  "truth_level": "UNVERIFIED",
+  "note": "合成 SQL 语法矩阵；不代表任何银行的真实生产脚本，也不构成监管准确率。",
+  "parse_cases": [
+    {
+      "name": "multi_layer_insert_join",
+      "dialect": "gbase",
+      "note": "借据-合同-产品-产品期限四表关联；库表限定名",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 15,
+      "edge_count": 9,
+      "targets": [
+        "MART.DW_LOAN_SNAPSHOT"
+      ],
+      "warnings": [],
+      "expected_target": "DW_LOAN_SNAPSHOT"
+    },
+    {
+      "name": "temp_table_two_step",
+      "dialect": "gbase",
+      "note": "DROP/CREATE TABLE AS + INSERT 两段式",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 3,
+      "node_count": 21,
+      "edge_count": 13,
+      "targets": [
+        "MART.DW_LOAN_SNAPSHOT",
+        "TMP.LOAN_BASE"
+      ],
+      "warnings": [],
+      "expected_target": "DW_LOAN_SNAPSHOT"
+    },
+    {
+      "name": "cte_hive_partition",
+      "dialect": "hive",
+      "note": "CTE + INSERT OVERWRITE 分区",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 11,
+      "edge_count": 6,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: #{bizdate}"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "union_all_hive",
+      "dialect": "hive",
+      "note": "UNION ALL 两支",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 11,
+      "edge_count": 7,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: #{bizdate}"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "group_by_case_when",
+      "dialect": "gbase",
+      "note": "GROUP BY + CASE WHEN 码值折算",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 11,
+      "edge_count": 6,
+      "targets": [
+        "mart.dw_loan_balance"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: ${bizdate}"
+      ],
+      "expected_target": "dw_loan_balance"
+    },
+    {
+      "name": "window_row_number",
+      "dialect": "hive",
+      "note": "ROW_NUMBER 去重取最新",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 10,
+      "edge_count": 5,
+      "targets": [
+        "mart.dw_loan_latest"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: #{bizdate}"
+      ],
+      "expected_target": "dw_loan_latest"
+    },
+    {
+      "name": "full_outer_join",
+      "dialect": "hive",
+      "note": "FULL OUTER JOIN + COALESCE",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 10,
+      "edge_count": 6,
+      "targets": [
+        "mart.dw_product_diff"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: #{bizdate}"
+      ],
+      "expected_target": "dw_product_diff"
+    },
+    {
+      "name": "subquery_date_range",
+      "dialect": "gbase",
+      "note": "子查询 + 日期区间变量",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 10,
+      "edge_count": 5,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "template_variable_resolved",
+      "dialect": "gbase",
+      "note": "变量替换 ${bizdate}",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 6,
+      "edge_count": 3,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "template_variable_unresolved",
+      "dialect": "gbase",
+      "note": "未配置变量保留证据并告警，不静默猜测",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 6,
+      "edge_count": 3,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: ${bizdate}"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "null_concat_gbase",
+      "dialect": "gbase",
+      "note": "NULL 参与 CONCAT + IFNULL 兜底",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 7,
+      "edge_count": 4,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: ${bizdate}"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "hive_functions",
+      "dialect": "hive",
+      "note": "Hive 特有函数 concat_ws/nvl/from_unixtime/get_json_object",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 11,
+      "edge_count": 6,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: #{bizdate}"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "column_alias_rename",
+      "dialect": "gbase",
+      "note": "来源列与目标列同名、别名重命名",
+      "expected_status": "parsed",
+      "actual_status": "parsed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 6,
+      "edge_count": 3,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: ${bizdate}"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    },
+    {
+      "name": "unparsable_single",
+      "dialect": "gbase",
+      "note": "无法解析时不伪造血缘",
+      "expected_status": "failed",
+      "actual_status": "failed",
+      "status_ok": true,
+      "statement_count": 1,
+      "node_count": 0,
+      "edge_count": 0,
+      "targets": [],
+      "warnings": [
+        "Statement 1 parse failed: Expected table name but got None. Line 3, Col: 17.\n  \ninsert into mart.dw_loan_snapshot (iou_no)\nselect amt from \u001b[4m(\u001b[0m\n"
+      ],
+      "expected_target": null
+    },
+    {
+      "name": "partially_parsed_script",
+      "dialect": "gbase",
+      "note": "首段正常、次段不可解析",
+      "expected_status": "partially_parsed",
+      "actual_status": "partially_parsed",
+      "status_ok": true,
+      "statement_count": 2,
+      "node_count": 6,
+      "edge_count": 3,
+      "targets": [
+        "mart.dw_loan_snapshot"
+      ],
+      "warnings": [
+        "Unknown template variable preserved: ${bizdate}",
+        "Statement 2 parse failed: Expected table name but got None. Line 4, Col: 17.\n  \n\ninsert into mart.dw_loan_snapshot (iou_no)\nselect amt from \u001b[4m(\u001b[0m\n"
+      ],
+      "expected_target": "dw_loan_snapshot"
+    }
+  ],
+  "change_cases": [
+    {
+      "name": "join_type_inner_to_left",
+      "dialect": "gbase",
+      "note": "JOIN 类型变化改变最终统计范围（正例）",
+      "expected_category": "join_type_changed",
+      "expected_semantic_change": true,
+      "semantic_changed": true,
+      "categories": [
+        "join_type_changed"
+      ],
+      "caliber_affecting_count": 1,
+      "caliber_categories": [
+        "join_type_changed"
+      ],
+      "severity": "high",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "group_by_key_added",
+      "dialect": "gbase",
+      "note": "GROUP BY 粒度变化（正例）",
+      "expected_category": "group_by_changed",
+      "expected_semantic_change": true,
+      "semantic_changed": true,
+      "categories": [
+        "group_by_changed"
+      ],
+      "caliber_affecting_count": 1,
+      "caliber_categories": [
+        "group_by_changed"
+      ],
+      "severity": "high",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "row_limit_changed",
+      "dialect": "gbase",
+      "note": "TOP/LIMIT 改变样本范围（正例）",
+      "expected_category": "top_limit_changed",
+      "expected_semantic_change": true,
+      "semantic_changed": true,
+      "categories": [
+        "top_limit_changed"
+      ],
+      "caliber_affecting_count": 1,
+      "caliber_categories": [
+        "top_limit_changed"
+      ],
+      "severity": "high",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "cte_inner_filter_changed",
+      "dialect": "gbase",
+      "note": "CTE 内部过滤变化（正例）",
+      "expected_category": "cte_changed",
+      "expected_semantic_change": true,
+      "semantic_changed": true,
+      "categories": [
+        "cte_changed",
+        "filter_changed"
+      ],
+      "caliber_affecting_count": 2,
+      "caliber_categories": [
+        "cte_changed",
+        "filter_changed"
+      ],
+      "severity": "high",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "formatting_and_comments_only",
+      "dialect": "gbase",
+      "note": "仅格式与注释（反例：不得误报口径变化）",
+      "expected_category": null,
+      "expected_semantic_change": false,
+      "semantic_changed": false,
+      "categories": [
+        "non_semantic"
+      ],
+      "caliber_affecting_count": 0,
+      "caliber_categories": [],
+      "severity": "low",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "alias_rename_only",
+      "dialect": "gbase",
+      "note": "等价重写：CTE 与别名重命名（反例）",
+      "expected_category": null,
+      "expected_semantic_change": false,
+      "semantic_changed": false,
+      "categories": [
+        "non_semantic"
+      ],
+      "caliber_affecting_count": 0,
+      "caliber_categories": [],
+      "severity": "low",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "order_by_only",
+      "dialect": "gbase",
+      "note": "单独 ORDER BY：变化存在但无法归因，且不声称影响口径（显式 limitation）",
+      "expected_category": null,
+      "expected_semantic_change": true,
+      "semantic_changed": true,
+      "categories": [
+        "transformation_changed"
+      ],
+      "caliber_affecting_count": 0,
+      "caliber_categories": [],
+      "severity": "medium",
+      "requires_human_confirmation": true,
+      "unattributed": [
+        "transformation_changed"
+      ],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    },
+    {
+      "name": "function_variant_same_semantics",
+      "dialect": "hive",
+      "note": "方言等价函数替换（ifnull -> nvl）：不得误报为口径变化",
+      "expected_category": null,
+      "expected_semantic_change": false,
+      "semantic_changed": false,
+      "categories": [
+        "non_semantic"
+      ],
+      "caliber_affecting_count": 0,
+      "caliber_categories": [],
+      "severity": "low",
+      "requires_human_confirmation": true,
+      "unattributed": [],
+      "unsupported_families": [
+        "order_by"
+      ],
+      "family_coverage": {
+        "detected": 38,
+        "total": 39
+      }
+    }
+  ],
+  "summary": {
+    "parse_cases": 15,
+    "parse_status_matched": 15,
+    "change_cases": 8,
+    "change_expectations_matched": 8
+  }
+}

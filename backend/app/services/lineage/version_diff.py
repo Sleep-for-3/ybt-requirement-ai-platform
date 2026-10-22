@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import sqlglot
 
 from app.services.lineage.preprocessing import preprocess_sql
+from app.services.lineage.dialects import dialect_summary, resolve_dialect
 from app.services.lineage.sql_parser import LineageEdgeSpec, parse_sql_lineage
 from app.services.lineage.shell_parser import parse_shell_dependencies
 
@@ -32,11 +33,18 @@ class VersionDiffResult:
 
 
 def compare_sql_versions(old_sql: str, new_sql: str, *, dialect: str = "") -> VersionDiffResult:
+    resolution = resolve_dialect(dialect)
+    dialect = resolution.effective
+    dialect_meta = dialect_summary(resolution)
     old_ast = _semantic_ast(old_sql, dialect)
     new_ast = _semantic_ast(new_sql, dialect)
     if old_ast == new_ast:
         item = ChangeItemSpec("non_semantic", "script", {"normalized": old_ast}, {"normalized": new_ast}, "low")
-        return VersionDiffResult(False, "low", (item,), {"semantic_changed": False, "categories": ["non_semantic"]})
+        return VersionDiffResult(False, "low", (item,), {
+            "semantic_changed": False,
+            "categories": ["non_semantic"],
+            "dialect": dialect_meta,
+        })
 
     old = parse_sql_lineage(old_sql, dialect=dialect)
     new = parse_sql_lineage(new_sql, dialect=dialect)
@@ -54,7 +62,10 @@ def compare_sql_versions(old_sql: str, new_sql: str, *, dialect: str = "") -> Ve
     _condition_changes(items, old.edges, new.edges, "join_condition", "join_changed", "high")
     _condition_changes(items, old.edges, new.edges, "code_mapping_rule", "code_mapping_changed", "high")
     _condition_changes(items, old.edges, new.edges, "aggregation_rule", "aggregation_changed", "high")
-    _condition_changes(items, old.edges, new.edges, "transformation_expression", "transformation_changed", "high")
+    _condition_changes(
+        items, old.edges, new.edges, "transformation_expression", "transformation_changed", "high",
+        normalizer=_normalize_transformation,
+    )
     if old.parse_status != new.parse_status:
         items.append(ChangeItemSpec("parse_quality_changed", "script_version", {"status": old.parse_status}, {"status": new.parse_status}, "high"))
     _statement_semantic_changes(items, old, new)
@@ -71,6 +82,7 @@ def compare_sql_versions(old_sql: str, new_sql: str, *, dialect: str = "") -> Ve
         "categories": sorted({item.change_category for item in items}),
         "old_parse_status": old.parse_status,
         "new_parse_status": new.parse_status,
+        "dialect": dialect_meta,
     })
 
 
@@ -89,15 +101,98 @@ def compare_shell_versions(old_content: str, new_content: str) -> VersionDiffRes
     return VersionDiffResult(True, "high", (item,), {"semantic_changed": True, "categories": ["script_dependency_changed"]})
 
 
+def _canonicalize_table_aliases(expression) -> None:
+    """Rewrite table aliases to their physical table name.
+
+    ``... from base b`` and ``... from loan_base x`` are the same query once the CTE
+    names are canonical and the local aliases are resolved to the table they denote.
+    Keeping the local alias made an equivalent refactor look like an unattributed
+    change, which is exactly the noise the task book forbids.
+    """
+
+    alias_map: dict[str, str] = {}
+    try:
+        tables = list(expression.find_all(sqlglot.exp.Table))
+    except Exception:
+        return
+    for table in tables:
+        real = (table.name or "").lower()
+        alias = (table.alias or "").upper()
+        if real and alias:
+            alias_map[alias] = real
+        if real and alias:
+            try:
+                table.set("alias", None)
+            except Exception:
+                continue
+    if not alias_map:
+        return
+    for column in expression.find_all(sqlglot.exp.Column):
+        qualifier = (column.table or "").upper()
+        target = alias_map.get(qualifier)
+        if target is None:
+            continue
+        try:
+            column.set("table", target)
+        except Exception:
+            continue
+
+
 def _semantic_ast(sql: str, dialect: str) -> str:
     prepared = preprocess_sql(sql)
     try:
         expressions = sqlglot.parse(prepared.parse_sql, read=dialect or None)
-        return ";".join(expression.sql(dialect=dialect or None, pretty=False, normalize=True, comments=False) for expression in expressions if expression)
+        canonical: list[str] = []
+        for expression in expressions:
+            if not expression:
+                continue
+            _canonicalize_cte_names(expression)
+            _canonicalize_table_aliases(expression)
+            canonical.append(expression.sql(dialect=dialect or None, pretty=False, normalize=True, comments=False))
+        return ";".join(canonical)
     except sqlglot.errors.ParseError:
         without_block = re.sub(r"/\*.*?\*/", "", prepared.parse_sql, flags=re.S)
         without_line = re.sub(r"(?m)--.*?$", "", without_block)
         return re.sub(r"\s+", " ", without_line).strip().lower()
+
+
+def _canonicalize_cte_names(expression) -> None:
+    """Rename CTEs positionally before comparing rendered AST text.
+
+    ``WITH base AS (...)`` -> ``WITH loan_base AS (...)`` with a matching rewrite of the
+    references is a pure refactor: the physical provenance and the CTE body are
+    unchanged.  Without canonical names the rendered text differs and the whole diff
+    collapsed into ``unattributed_ast_change``, which reads like an unverified caliber
+    change to a reviewer.
+    """
+
+    scope = expression.args.get("with")
+    if scope is None:
+        return
+    ctes = list(scope.expressions or ())
+    if not ctes:
+        return
+    mapping: dict[str, str] = {}
+    for index, cte in enumerate(ctes, start=1):
+        alias = cte.alias_or_name
+        canonical = f"__cte_{index}"
+        if alias:
+            mapping[alias.upper()] = canonical
+        try:
+            cte.set("alias", sqlglot.exp.TableAlias(this=sqlglot.exp.to_identifier(canonical)))
+        except Exception:
+            return
+    if not mapping:
+        return
+    for table in expression.find_all(sqlglot.exp.Table):
+        name = table.name
+        replacement = mapping.get((name or "").upper())
+        if replacement is None:
+            continue
+        try:
+            table.set("this", sqlglot.exp.to_identifier(replacement))
+        except Exception:
+            continue
 
 
 def _edge_key(edge: LineageEdgeSpec) -> tuple[str, str, str]:
@@ -107,9 +202,39 @@ def _edge_key(edge: LineageEdgeSpec) -> tuple[str, str, str]:
 def _edge_value(edge: LineageEdgeSpec) -> dict:
     return {"source": edge.source.logical_name, "target": edge.target.logical_name, "edge_type": edge.edge_type}
 
-def _condition_changes(items: list[ChangeItemSpec], old_edges, new_edges, attr: str, category: str, severity: str) -> None:
-    old_values = {_normalize(getattr(item, attr)) for item in old_edges if getattr(item, attr)}
-    new_values = {_normalize(getattr(item, attr)) for item in new_edges if getattr(item, attr)}
+_BARE_COLUMN = re.compile(r"^[`\"\[]?([A-Za-z_][\w$]*)[`\"\]]?\.([`\"\[]?[A-Za-z_][\w$]*[`\"\]]?)$")
+
+
+def _normalize_transformation(value: str | None) -> str:
+    """Ignore table qualifiers when the projection is a bare column reference.
+
+    ``select b.iou_no ... from base b`` and ``select x.iou_no ... from loan_base x`` are
+    the same projection; only the alias differs.  The physical provenance of both sides
+    is identical (the edge source is the real table), so keeping the alias in the
+    transformation text reported an equivalent rename as a caliber change.
+    """
+
+    text = _normalize(value)
+    if not text:
+        return ""
+    match = _BARE_COLUMN.match(text)
+    if match:
+        return match.group(2)
+    return text
+
+
+def _condition_changes(
+    items: list[ChangeItemSpec],
+    old_edges,
+    new_edges,
+    attr: str,
+    category: str,
+    severity: str,
+    normalizer=None,
+) -> None:
+    normalizer = normalizer or _normalize
+    old_values = {normalizer(getattr(item, attr)) for item in old_edges if getattr(item, attr)}
+    new_values = {normalizer(getattr(item, attr)) for item in new_edges if getattr(item, attr)}
     if old_values != new_values:
         items.append(ChangeItemSpec(category, "lineage_edge", {attr: sorted(old_values)}, {attr: sorted(new_values)}, severity))
 

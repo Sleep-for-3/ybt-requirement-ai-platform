@@ -10,6 +10,7 @@ from sqlglot.lineage import lineage as trace_column_lineage
 from sqlglot.tokens import TokenType
 
 from app.services.lineage.preprocessing import preprocess_sql
+from app.services.lineage.dialects import resolve_dialect
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,10 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
 
     prepared = preprocess_sql(sql, variables)
     warnings = list(prepared.warnings)
+    resolution = resolve_dialect(dialect)
+    dialect = resolution.effective
+    if resolution.warning:
+        warnings.append(resolution.warning)
     statements: list[ParsedStatementSpec] = []
     _statement_semantics_list: list[StatementSemantics] = []
     edges: list[LineageEdgeSpec] = []
@@ -222,11 +227,15 @@ def statement_semantics(expression: exp.Expression, statement_index: int) -> Sta
             union_modes.add("union_all" if union.args.get("distinct") is False else "union")
         for join in query.find_all(exp.Join):
             join_types.add(_join_kind(join))
-        cte_names.update(cte.alias_or_name for cte in query.find_all(exp.CTE) if cte.alias_or_name)
-        for cte in query.find_all(exp.CTE):
-            signature = _cte_signature(cte)
-            if signature:
-                cte_signatures.add(signature)
+    # The WITH node of "WITH ... INSERT INTO ... SELECT" hangs off the statement, so CTE
+    # names and signatures must be collected from the root; reading them from the inner
+    # query silently produced empty cte_signatures and mislabelled CTEs as physical tables.
+    for cte in expression.find_all(exp.CTE):
+        if cte.alias_or_name:
+            cte_names.add(cte.alias_or_name)
+        signature = _cte_signature(cte)
+        if signature:
+            cte_signatures.add(signature)
     return StatementSemantics(
         statement_index=statement_index,
         group_by=rendered(group_by),
@@ -339,6 +348,7 @@ def _statement_edges(statement: exp.Expression, statement_index: int, original_s
     target_table, target_columns, query = _write_target(statement)
     if query is None:
         return []
+    query = _scope_query_with_ctes(statement, query)
     sources, aliases = _source_tables(query)
     filter_sql = " AND ".join(where.this.sql() for where in query.find_all(exp.Where)) or None
     join_sql = " AND ".join(join.args["on"].sql() for join in query.find_all(exp.Join) if join.args.get("on")) or None
@@ -532,6 +542,28 @@ def _write_target(statement: exp.Expression) -> tuple[LineageNodeSpec | None, li
     if isinstance(statement, exp.Select):
         return None, [], statement
     return None, [], None
+
+
+def _scope_query_with_ctes(statement: exp.Expression, query: exp.Expression) -> exp.Expression:
+    """Attach the statement-level WITH scope to the write query before tracing.
+
+    ``WITH base AS (...) INSERT INTO t SELECT ... FROM base`` keeps the ``With`` node on
+    the ``Insert``; the inner ``Select`` does not own it.  Tracing columns with the bare
+    ``Select`` therefore stopped at a table literally named ``base`` and emitted lineage
+    that pointed at a non-existent physical table.  Copying the scope onto a private query
+    copy keeps the statement untouched while letting the tracer follow CTEs to the real
+    source tables.
+    """
+
+    scope = statement.args.get("with")
+    if scope is None or query.args.get("with") is not None:
+        return query
+    try:
+        widened = query.copy()
+        widened.set("with", scope.copy())
+        return widened
+    except Exception:  # defensive: tracing still degrades to the previous behaviour
+        return query
 
 
 def _source_tables(query: exp.Expression) -> tuple[list[LineageNodeSpec], dict[str, LineageNodeSpec]]:
