@@ -89,9 +89,13 @@
 - 测试：`tests/test_vnext2_sql_rowlimit_cte.py`（12）、`tests/test_vnext2_composite_business_key.py`（3）、`tests/test_vnext2_sql_impact_requirement_link.py`（4，含 2 正例 2 反例）、语法矩阵 `scripts/vnext2_sql_dialect_matrix.py`（15 解析用例 15/15 一致、8 变更用例 8/8 一致）；`pytest -k "sql or lineage or semantic or impact"` → 365 passed；`tests/test_sql_lineage.py` 的 requirement 断言已按正确契约更新（原断言把字段 id 当需求 id）。
 - 限制（已写入文档）：`order_by` 单独变化不归因；未归因变化只提示人工核对；方言白名单外的 GBase 8a 专有语法可能落到 partially_parsed/failed；字段级血缘完整性依赖元数据登记。
 
-### P1-C 黄金集评测体系　`TODO`
+### P1-C 黄金集评测体系　`DONE`（框架与标注治理；业务准确率仍 `UNVERIFIED`）
 
-- 60 例保留；`reviewer_id` 非空不足以证明独立标注，需结构化标注元数据与 `not_run` 显式；指标带样本量与真实性级别，无人工真值不得宣称准确率。
+- 60 例保留、`expected` 一字未改（`git diff --numstat` 仅 +12 行元数据）。新增 `GoldenAnnotation`：案例作者 / 预期答案作者 / 独立标注人 / 角色 / 标注时间 / 标注依据 / 状态（`draft/in_review/accepted/disputed/rejected`）/ 争议说明；`accepted` 必须能证明独立性（标注人 ≠ 作者）且有日期与依据，否则加载即报错；`disputed` 必须有争议说明且不计入已验证。
+- 修复真实缺陷：原 `dataset_summary()` 以 `reviewer_id` 非空计 `independent_labeled`，等于允许开发 Agent 自行写个字符串宣称业务验证完成。现在历史 `reviewer_id` 只作候选，状态默认 `draft`，`verified` 需满足全部条件；`label_status` 由已验证比例决定（当前 `UNVERIFIED`）。
+- `evaluate_golden_set()` 新增 `coverage`（按 kind 的 `cases/scored/not_run/truth_level`）与每个指标的 `truth_level`；未执行族显式 `not_run`、`ratio=None`，不再出现无分母的 100%。
+- 证据：`docs/vnext2/p1c-golden-evaluation.md`、`docs/audit/VNEXT2_GOLDEN_REPORT-20261023.json`（脚本 `scripts/vnext2_golden_report.py`）；测试 `tests/test_vnext2_golden_annotation.py`（8 例）+ 既有 `tests/test_vnext_regulatory_golden.py` → 19 passed。
+- 真实执行边界：C 引用族有真实模型专项执行（P0-B，未回灌 case 级映射）；SQL 语义真实执行见 P1-B 矩阵；交付真实执行见 P0-C；其余 50 例标 `not_run`，需下一轮逐族准备夹具。任何准确率均不得表述为真实监管准确率。
 
 ### P2-A 真实组件稳定性与内网可用性　`TODO`
 

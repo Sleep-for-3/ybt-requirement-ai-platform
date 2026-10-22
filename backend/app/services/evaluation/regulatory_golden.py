@@ -33,12 +33,130 @@ FAMILIES = (
 KINDS = ("field_retrieval", "citation", "document", "agent_decision", "delivery")
 EXPECTATIONS = ("positive", "negative", "ambiguous")
 DIFFICULTIES = ("easy", "medium", "hard")
+ANNOTATION_STATUSES = ("draft", "in_review", "accepted", "disputed", "rejected")
 MIN_CASES = 60
 MIN_CASES_PER_FAMILY = 8
 
 
 class GoldenSetError(ValueError):
     """黄金集数据不合法。消息必须指出具体 case 与字段，便于人工修数据。"""
+
+
+@dataclass(frozen=True)
+class GoldenAnnotation:
+    """一条用例的标注元数据。
+
+    独立标注不能只靠“填了一个 reviewer 字符串”来证明：
+    - ``status`` 必须是 ``accepted``（``disputed``/``rejected`` 不算通过，``draft``/``in_review`` 未完成）；
+    - 必须能证明独立性：``case_author`` 与 ``expected_author`` 都要记录，且 ``reviewer_id`` 不得是其中任一人；
+    - 必须记录 ``reviewed_at``（ISO 日期）与 ``basis``（标注依据），否则视为“填了名字但没有依据”。
+    历史数据只有顶层 ``reviewer_id`` 时按 ``draft`` 处理，不再自动算作已独立标注。
+    """
+
+    case_author: str | None = None
+    expected_author: str | None = None
+    reviewer_id: str | None = None
+    reviewer_role: str | None = None
+    reviewed_at: str | None = None
+    basis: str | None = None
+    status: str = "draft"
+    dispute_note: str | None = None
+
+    @property
+    def independence_proven(self) -> bool:
+        return bool(
+            self.case_author
+            and self.expected_author
+            and self.reviewer_id
+            and self.reviewer_id not in {self.case_author, self.expected_author}
+        )
+
+    @property
+    def verified(self) -> bool:
+        """只有 accepted + 独立性可证 + 有依据 + 有标注时间才计入独立标注。"""
+        return bool(
+            self.status == "accepted"
+            and self.independence_proven
+            and (self.reviewed_at or "").strip()
+            and (self.basis or "").strip()
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "case_author": self.case_author,
+            "expected_author": self.expected_author,
+            "reviewer_id": self.reviewer_id,
+            "reviewer_role": self.reviewer_role,
+            "reviewed_at": self.reviewed_at,
+            "basis": self.basis,
+            "status": self.status,
+            "dispute_note": self.dispute_note,
+            "independence_proven": self.independence_proven,
+            "verified": self.verified,
+        }
+
+
+def _parse_annotation(
+    raw: Mapping[str, Any],
+    case_id: str,
+    legacy_reviewer: str | None,
+    defaults: Mapping[str, Any] | None = None,
+) -> GoldenAnnotation:
+    payload = raw.get("annotation")
+    if payload is None:
+        payload = {}
+    _require(isinstance(payload, Mapping), f"case {case_id} annotation 必须是对象")
+    defaults = dict(defaults or {})
+
+    def _text(key: str) -> str | None:
+        value = payload.get(key)
+        if value is None:
+            value = defaults.get(key)
+        _require(value is None or isinstance(value, str), f"case {case_id} annotation.{key} 必须是字符串或 null")
+        return (value or "").strip() or None
+
+    reviewer = _text("reviewer_id") or (legacy_reviewer or "").strip() or None
+    status = str(payload.get("status") or "draft")
+    _require(status in ANNOTATION_STATUSES, f"case {case_id} annotation.status 非法: {status!r}")
+    reviewed_at = _text("reviewed_at")
+    if reviewed_at is not None:
+        _require(
+            _is_iso_date(reviewed_at),
+            f"case {case_id} annotation.reviewed_at 必须是 YYYY-MM-DD，当前 {reviewed_at!r}",
+        )
+    if legacy_reviewer and not payload:
+        # 历史数据：只有一个 reviewer 字符串，缺少作者/依据/时间，不能算独立标注。
+        status = "draft"
+    annotation = GoldenAnnotation(
+        case_author=_text("case_author"),
+        expected_author=_text("expected_author"),
+        reviewer_id=reviewer,
+        reviewer_role=_text("reviewer_role"),
+        reviewed_at=reviewed_at,
+        basis=_text("basis"),
+        status=status,
+        dispute_note=_text("dispute_note"),
+    )
+    if status == "accepted":
+        _require(
+            annotation.independence_proven,
+            f"case {case_id} 标注为 accepted，但无法证明独立标注：需要 case_author/expected_author，"
+            "且 reviewer_id 不能是作者本人",
+        )
+        _require(annotation.reviewed_at and annotation.basis, f"case {case_id} accepted 标注缺少 reviewed_at 或 basis")
+    if status == "disputed":
+        _require(bool(annotation.dispute_note), f"case {case_id} disputed 必须记录 dispute_note")
+    return annotation
+
+
+def _is_iso_date(value: str) -> bool:
+    import datetime as _dt
+
+    try:
+        _dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -54,6 +172,7 @@ class GoldenCase:
     difficulty: str = "medium"
     reviewer_id: str | None = None
     label_source: str = "synthetic_designer"
+    annotation: GoldenAnnotation = GoldenAnnotation()
 
 
 def _require(condition: bool, message: str) -> None:
@@ -61,7 +180,7 @@ def _require(condition: bool, message: str) -> None:
         raise GoldenSetError(message)
 
 
-def parse_case(raw: Mapping[str, Any], index: int) -> GoldenCase:
+def parse_case(raw: Mapping[str, Any], index: int, defaults: Mapping[str, Any] | None = None) -> GoldenCase:
     case_id = str(raw.get("id") or "")
     _require(bool(case_id), f"case[{index}] 缺少 id")
     family = str(raw.get("family") or "")
@@ -78,6 +197,7 @@ def parse_case(raw: Mapping[str, Any], index: int) -> GoldenCase:
     _require(reviewer is None or isinstance(reviewer, str), f"case {case_id} reviewer_id 必须是字符串或 null")
     notes = str(raw.get("notes") or "")
     label_source = str(raw.get("label_source") or "synthetic_designer")
+    annotation = _parse_annotation(raw, case_id, reviewer, defaults)
     return GoldenCase(
         case_id=case_id,
         family=family,
@@ -88,12 +208,14 @@ def parse_case(raw: Mapping[str, Any], index: int) -> GoldenCase:
         expected=dict(expected),
         notes=notes,
         difficulty=difficulty,
-        reviewer_id=reviewer,
+        reviewer_id=reviewer if isinstance(reviewer, str) else None,
         label_source=label_source,
+        annotation=annotation,
     )
 
 
-def load_golden_set(path: Path | str = DEFAULT_DATASET_PATH) -> list[GoldenCase]:
+def load_golden_set_with_meta(path: Path | str = DEFAULT_DATASET_PATH) -> tuple[list[GoldenCase], dict[str, Any]]:
+    """加载黄金集，同时返回数据集级元数据（版本、标注政策、作者）。"""
     dataset_path = Path(path)
     _require(dataset_path.exists(), f"黄金集文件不存在: {dataset_path}")
     payload = json.loads(dataset_path.read_text(encoding="utf-8"))
@@ -101,7 +223,12 @@ def load_golden_set(path: Path | str = DEFAULT_DATASET_PATH) -> list[GoldenCase]
     _require(payload.get("version") == GOLDEN_SET_VERSION, f"黄金集版本不匹配: {payload.get('version')!r}")
     raw_cases = payload.get("cases")
     _require(isinstance(raw_cases, Sequence) and not isinstance(raw_cases, str), "cases 必须是数组")
-    cases = [parse_case(raw, i) for i, raw in enumerate(raw_cases)]
+    meta = payload.get("annotation")
+    _require(meta is None or isinstance(meta, Mapping), "数据集 annotation 必须是对象")
+    meta = dict(meta or {})
+    defaults = meta.get("defaults")
+    _require(defaults is None or isinstance(defaults, Mapping), "数据集 annotation.defaults 必须是对象")
+    cases = [parse_case(raw, i, defaults) for i, raw in enumerate(raw_cases)]
     _require(len(cases) >= MIN_CASES, f"黄金集至少 {MIN_CASES} 例，当前 {len(cases)} 例")
     ids = [case.case_id for case in cases]
     _require(len(ids) == len(set(ids)), "黄金集 case id 重复")
@@ -151,25 +278,60 @@ def load_golden_set(path: Path | str = DEFAULT_DATASET_PATH) -> list[GoldenCase]
                 isinstance(fields, list) and fields,
                 f"case {case.case_id} document 需要非空 required_fields",
             )
+    return cases, meta
+
+
+def load_golden_set(path: Path | str = DEFAULT_DATASET_PATH) -> list[GoldenCase]:
+    """兼容入口：只要用例列表。"""
+    cases, _ = load_golden_set_with_meta(path)
     return cases
 
 
-def dataset_summary(cases: Sequence[GoldenCase]) -> dict[str, Any]:
+def _truth_level(cases: Sequence[GoldenCase]) -> str:
+    """标注真实性级别：没有一条被独立标注过就只能是 UNVERIFIED。"""
+    if not cases:
+        return "UNVERIFIED"
+    verified = sum(1 for case in cases if case.annotation.verified)
+    if verified == 0:
+        return "UNVERIFIED"
+    if verified == len(cases):
+        return "VERIFIED"
+    return "PARTIALLY_VERIFIED"
+
+
+def dataset_summary(cases: Sequence[GoldenCase], meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    meta = dict(meta or {})
     by_family = {family: sum(1 for case in cases if case.family == family) for family in FAMILIES}
     by_kind = {kind: sum(1 for case in cases if case.kind == kind) for kind in KINDS}
-    reviewer_ids = {case.reviewer_id for case in cases if case.reviewer_id}
-    independent = sum(1 for case in cases if case.reviewer_id)
+    reviewer_ids = {case.annotation.reviewer_id for case in cases if case.annotation.reviewer_id}
+    verified = sum(1 for case in cases if case.annotation.verified)
+    status_counts = {status: 0 for status in ANNOTATION_STATUSES}
+    for case in cases:
+        status_counts[case.annotation.status] = status_counts.get(case.annotation.status, 0) + 1
+    claimed_accepted = [case for case in cases if case.annotation.status == "accepted"]
+    unproven = [case.case_id for case in claimed_accepted if not case.annotation.independence_proven]
+    disputed = [case.case_id for case in cases if case.annotation.status == "disputed"]
     return {
         "version": GOLDEN_SET_VERSION,
+        "dataset_version": meta.get("dataset_version") or GOLDEN_SET_VERSION,
         "case_count": len(cases),
         "by_family": by_family,
         "by_kind": by_kind,
         "reviewer_count": len(reviewer_ids),
-        "independent_labeled": independent,
-        "independent_labeled_ratio": _ratio(independent, len(cases), "independent_labeled_ratio"),
-        "label_status": "UNVERIFIED" if independent == 0 else "PARTIALLY_VERIFIED",
+        "independent_labeled": verified,
+        "independent_labeled_ratio": _ratio(verified, len(cases), "independent_labeled_ratio"),
+        "annotation_status_counts": status_counts,
+        "accepted_without_provable_independence": unproven,
+        "disputed_cases": disputed,
+        "label_status": _truth_level(cases),
         "label_source": sorted({case.label_source for case in cases}),
+        "annotation_policy": meta.get("annotation_policy") or {
+            "independent_requires": ["case_author", "expected_author", "distinct reviewer_id", "reviewed_at", "basis"],
+            "statuses": list(ANNOTATION_STATUSES),
+        },
+        "case_authors": sorted({case.annotation.case_author for case in cases if case.annotation.case_author}),
     }
+
 
 
 def _ratio(numerator: int | float, denominator: int | float, name: str) -> dict[str, Any]:
@@ -422,25 +584,71 @@ def agent_decision_metrics(
 def evaluate_golden_set(
     cases: Sequence[GoldenCase],
     observations: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    meta: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """汇总评测；observations 未覆盖的用例进入 not_run（不伪造通过）。"""
+    """汇总评测；observations 未覆盖的用例进入 not_run（不伪造通过）。
+
+    每个指标都带 ``truth_level``：只有被独立标注（见 :class:`GoldenAnnotation`）的用例才可能
+    是 ``VERIFIED``；本轮 60 例无独立银行专家标注，因此对外只能报 ``UNVERIFIED``。
+    覆盖率按 kind 给出 scored/not_run，避免“只跑了引用 10 例”被误解为整套 60 例通过。
+    """
     observations = observations or {}
-    return {
-        "dataset": dataset_summary(cases),
-        "metrics": {
-            "field_retrieval": field_retrieval_metrics(cases, observations.get("field_retrieval")),
-            "citation": citation_metrics(cases, observations.get("citation")),
-            "document": document_metrics(cases, observations.get("document")),
-            "agent_decision": agent_decision_metrics(cases, observations.get("agent_decision")),
-        },
-        "not_run_case_ids": [
-            case.case_id
+    kind_to_metric = {
+        "field_retrieval": "field_retrieval",
+        "citation": "citation",
+        "document": "document",
+        "delivery": "document",
+        "agent_decision": "agent_decision",
+    }
+
+    def _scored_cases(metric_key: str) -> list[GoldenCase]:
+        bundles = {
+            "field_retrieval": observations.get("field_retrieval") or {},
+            "citation": observations.get("citation") or {},
+            "document": {**(observations.get("document") or {}), **(observations.get("delivery") or {})},
+            "agent_decision": observations.get("agent_decision") or {},
+        }
+        observed_ids = set(bundles.get(metric_key) or {})
+        wanted = {"document", "delivery"} if metric_key == "document" else {metric_key}
+        return [
+            case
             for case in cases
-            if case.case_id
-            not in {
-                case_id
-                for kind_map in observations.values()
-                for case_id in kind_map
-            }
+            if case.kind in wanted and case.case_id in observed_ids
+        ]
+
+    metrics = {
+        "field_retrieval": field_retrieval_metrics(cases, observations.get("field_retrieval")),
+        "citation": citation_metrics(cases, observations.get("citation")),
+        "document": document_metrics(cases, observations.get("document")),
+        "agent_decision": agent_decision_metrics(cases, observations.get("agent_decision")),
+    }
+    for metric_key, payload in metrics.items():
+        payload["truth_level"] = _truth_level(_scored_cases(metric_key))
+        if payload.get("status") == "not_run":
+            payload["scored_cases"] = 0
+
+    ranked_ids = {
+        case_id
+        for kind_map in observations.values()
+        for case_id in (kind_map or {})
+    }
+    coverage: dict[str, Any] = {}
+    for kind in KINDS:
+        of_kind = [case for case in cases if case.kind == kind]
+        scored = [case for case in of_kind if case.case_id in ranked_ids]
+        coverage[kind] = {
+            "cases": len(of_kind),
+            "scored": len(scored),
+            "not_run": len(of_kind) - len(scored),
+            "truth_level": _truth_level(scored),
+        }
+    return {
+        "dataset": dataset_summary(cases, meta),
+        "coverage": coverage,
+        "metrics": metrics,
+        "not_run_case_ids": [
+            case.case_id for case in cases if case.case_id not in ranked_ids
         ],
     }
+

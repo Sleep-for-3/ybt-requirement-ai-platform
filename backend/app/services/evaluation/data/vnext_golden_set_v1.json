@@ -1,6 +1,18 @@
 {
   "version": "vnext-regulatory-golden-2026-10-21.v1",
   "description": "银行监管数据智能平台 VNext 独立业务准确性黄金集。全部为合成银行监管场景（借据/产品/客户/一表通/Mart），不含真实机构数据；当前无独立领域人员标注，independent_labeled=0，指标只能标 UNVERIFIED。",
+  "annotation": {
+    "dataset_version": "vnext-regulatory-golden-2026-10-21.v1+annotation-2026-10-23",
+    "defaults": {
+      "case_author": "vnext2-synthetic-design-v1",
+      "expected_author": "vnext2-synthetic-design-v1"
+    },
+    "annotation_policy": {
+      "statuses": ["draft", "in_review", "accepted", "disputed", "rejected"],
+      "independent_requires": ["case_author", "expected_author", "distinct reviewer_id", "reviewed_at", "basis"],
+      "notes": "用例作者与预期作者相同（均为合成设计），不得自我标注为 accepted；独立标注必须由不同银行专家在 accepted 状态下填写 reviewed_at 与 basis，并记录争议。"
+    }
+  },
   "cases": [
     {"id": "A01", "family": "A_field_semantics", "kind": "field_retrieval", "title": "借据产品信息：产品ID+期限决定有效产品记录", "scenario": "需求要求『根据借据信息取得产品信息』。产品表同一产品ID因期限/方案存在多条有效记录，需以产品ID+期限定位唯一记录。", "expectation": "positive", "difficulty": "medium", "expected": {"correct_candidates": ["src:PRODUCT_INFO.product_id", "src:LOAN.product_id", "src:PRODUCT_TERM.product_id"], "distractors": ["src:PRODUCT_INFO.product_name"]}, "notes": "唯一性由产品ID+期限组合保证，不能简单拼接字段破坏外部引用。", "reviewer_id": null},
     {"id": "A02", "family": "A_field_semantics", "kind": "field_retrieval", "title": "客户号命名差异：ECIF CUST_ID 与核心 CUSTOMER_NO", "scenario": "目标字段『客户统一标识』，来源系统叫 CUST_ID，核心系统叫 CUSTOMER_NO，语义相同但命名不同。", "expectation": "positive", "difficulty": "easy", "expected": {"correct_candidates": ["src:ECIF.CUST_ID", "src:CORE.CUSTOMER_NO"], "distractors": ["src:ACCOUNT.ACCT_NO"]}, "notes": "名异义同。", "reviewer_id": null},

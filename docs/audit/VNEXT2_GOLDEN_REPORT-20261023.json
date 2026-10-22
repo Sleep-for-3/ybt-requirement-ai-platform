@@ -1,0 +1,849 @@
+{
+  "dataset": {
+    "version": "vnext-regulatory-golden-2026-10-21.v1",
+    "dataset_version": "vnext-regulatory-golden-2026-10-21.v1+annotation-2026-10-23",
+    "case_count": 60,
+    "by_family": {
+      "A_field_semantics": 10,
+      "B_multitable_join": 10,
+      "C_citation_evidence": 10,
+      "D_sql_semantics": 10,
+      "E_agent_decision": 10,
+      "F_full_delivery": 10
+    },
+    "by_kind": {
+      "field_retrieval": 10,
+      "citation": 10,
+      "document": 10,
+      "agent_decision": 20,
+      "delivery": 10
+    },
+    "reviewer_count": 0,
+    "independent_labeled": 0,
+    "independent_labeled_ratio": {
+      "numerator": 0.0,
+      "denominator": 60.0,
+      "ratio": 0.0,
+      "metric": "independent_labeled_ratio"
+    },
+    "annotation_status_counts": {
+      "draft": 60,
+      "in_review": 0,
+      "accepted": 0,
+      "disputed": 0,
+      "rejected": 0
+    },
+    "accepted_without_provable_independence": [],
+    "disputed_cases": [],
+    "label_status": "UNVERIFIED",
+    "label_source": [
+      "synthetic_designer"
+    ],
+    "annotation_policy": {
+      "statuses": [
+        "draft",
+        "in_review",
+        "accepted",
+        "disputed",
+        "rejected"
+      ],
+      "independent_requires": [
+        "case_author",
+        "expected_author",
+        "distinct reviewer_id",
+        "reviewed_at",
+        "basis"
+      ],
+      "notes": "用例作者与预期作者相同（均为合成设计），不得自我标注为 accepted；独立标注必须由不同银行专家在 accepted 状态下填写 reviewed_at 与 basis，并记录争议。"
+    },
+    "case_authors": [
+      "vnext2-synthetic-design-v1"
+    ]
+  },
+  "coverage": {
+    "field_retrieval": {
+      "cases": 10,
+      "scored": 0,
+      "not_run": 10,
+      "truth_level": "UNVERIFIED"
+    },
+    "citation": {
+      "cases": 10,
+      "scored": 0,
+      "not_run": 10,
+      "truth_level": "UNVERIFIED"
+    },
+    "document": {
+      "cases": 10,
+      "scored": 0,
+      "not_run": 10,
+      "truth_level": "UNVERIFIED"
+    },
+    "agent_decision": {
+      "cases": 20,
+      "scored": 0,
+      "not_run": 20,
+      "truth_level": "UNVERIFIED"
+    },
+    "delivery": {
+      "cases": 10,
+      "scored": 0,
+      "not_run": 10,
+      "truth_level": "UNVERIFIED"
+    }
+  },
+  "metrics": {
+    "field_retrieval": {
+      "scored_cases": 0,
+      "recall_at_k": {
+        "numerator": 0.0,
+        "denominator": 0,
+        "ratio": null,
+        "metric": "recall@5"
+      },
+      "status": "not_run",
+      "truth_level": "UNVERIFIED"
+    },
+    "citation": {
+      "scored_cases": 0,
+      "status": "not_run",
+      "truth_level": "UNVERIFIED"
+    },
+    "document": {
+      "scored_cases": 0,
+      "status": "not_run",
+      "truth_level": "UNVERIFIED"
+    },
+    "agent_decision": {
+      "scored_cases": 0,
+      "status": "not_run",
+      "truth_level": "UNVERIFIED"
+    }
+  },
+  "not_run_case_ids": [
+    "A01",
+    "A02",
+    "A03",
+    "A04",
+    "A05",
+    "A06",
+    "A07",
+    "A08",
+    "A09",
+    "A10",
+    "B01",
+    "B02",
+    "B03",
+    "B04",
+    "B05",
+    "B06",
+    "B07",
+    "B08",
+    "B09",
+    "B10",
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "C07",
+    "C08",
+    "C09",
+    "C10",
+    "D01",
+    "D02",
+    "D03",
+    "D04",
+    "D05",
+    "D06",
+    "D07",
+    "D08",
+    "D09",
+    "D10",
+    "E01",
+    "E02",
+    "E03",
+    "E04",
+    "E05",
+    "E06",
+    "E07",
+    "E08",
+    "E09",
+    "E10",
+    "F01",
+    "F02",
+    "F03",
+    "F04",
+    "F05",
+    "F06",
+    "F07",
+    "F08",
+    "F09",
+    "F10"
+  ],
+  "evidence_level": "NOT_EXECUTED",
+  "note": "本报告只反映实际执行到的案例族；未执行的案例族为 not_run。60 例当前无独立银行专家标注，任何准确率都不得对外表述为真实监管准确率。",
+  "annotation_gaps": [
+    {
+      "case_id": "A01",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A02",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A03",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A04",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A05",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A06",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A07",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A08",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A09",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "A10",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B01",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B02",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B03",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B04",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B05",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B06",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B07",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B08",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B09",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "B10",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C01",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C02",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C03",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C04",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C05",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C06",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C07",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C08",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C09",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "C10",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D01",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D02",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D03",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D04",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D05",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D06",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D07",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D08",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D09",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "D10",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E01",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E02",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E03",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E04",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E05",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E06",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E07",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E08",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E09",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "E10",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F01",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F02",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F03",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F04",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F05",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F06",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F07",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F08",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F09",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    },
+    {
+      "case_id": "F10",
+      "status": "draft",
+      "case_author": "vnext2-synthetic-design-v1",
+      "reviewer_id": null,
+      "missing": [
+        "independent_reviewer",
+        "reviewed_at",
+        "basis"
+      ]
+    }
+  ]
+}
