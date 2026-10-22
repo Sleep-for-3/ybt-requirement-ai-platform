@@ -59,9 +59,17 @@
 - 浏览器闭环顺带修复的真实缺陷：①前后端契约不一致导致 `adopt` 422（business 候选勾选 evidence/physical_references 越界，`requirement_candidates.py` `SPECIAL_FIELDS` 与前端复选框范围对齐）；②已关闭缺口仍渲染“关闭缺口”按钮且后端静默 201 不产生新版本（前端区分 open/closed + 后端 409「该缺口已关闭」）；③字段派生缺口被误提供“填写说明关闭”入口（前端按 `/^\d+:/` 识别并给出补齐指引）；④阻断项“重试失败项”在单轮内耗尽重试预算后 409（后端在无 failed/blocked 项时 409 明确提示，前端引导“重新点击生成候选创建新一轮”）；⑤`/admin/institutions` 对所有角色无差别请求产生必然 403（projects 页改为按 `can_view_admin` 能力再取）。
 - 仍未接入：前端独立“缺口关闭 + 修订原因”编辑器之外的批量能力、`pinned_versions` 产品化（详见第 1 节剩余缺口）。
 
-### P1-A Agent 五类业务决策　`TODO`
+### P1-A Agent 五类业务决策　`DONE`（证据：`docs/vnext2/p1a-agent-decisions.md`；级别 `MOCK`/机制级，业务准确率 UNVERIFIED）
 
-- 复用 `backend/app/services/agent/{planner,runtime,state_machine,dependencies,gate_policy,tools/}`；信息充分 / 缺输入 / Skill 未绑定 / 需人工确认 / 人工否决；恢复与并发安全复用 AgentRun/AgentStep/ToolCall/BackgroundJob/租约。
+- 复用 `backend/app/services/agent/{planner,runtime,state_machine,dependencies,gate_policy,tools/}`，未引入第二套调度框架；五类决策各有运行时测试（`backend/tests/test_vnext2_agent_decisions.py`，5 例）：
+  1. **信息充分**：确定性模板 `field_mapping` 计划可被 `materialize` 成真实步骤并执行，工具调用落在计划内、证据进入交付物，`confirm` 门禁把取舍停在 `waiting_human`（不自作主张确认）。
+  2. **缺少输入**：没有 `Requirement`/生成输入时生成类任务被明确阻断（`GenerationBlockedError` → `task.blocked` + `blocked_reason_code`），不产出看似完成的空草稿。
+  3. **Skill 未绑定**：仅“已发布但未固定”的 Skill 存在时视为缺失绑定，给出明确待办而不是静默绑定最新版本。
+  4. **需要人工确认**：工具返回多个候选、无法唯一判定时进入 `waiting_human`，已取得的证据保留在 `step.output_summary_json`，收到人工决定后恢复执行。
+  5. **人工否决**：`decision=reject` → 步骤 `blocked` + `error_code=human_rejected` + artifact `rejected`；`retry_task` 拒绝把被否决的步骤直接重跑（见下），只允许有边界的 `replan_task`（计划版本递增、原步骤 `skipped/replanned`）。
+- 本轮修复真实缺陷：`backend/app/services/agent/runtime.py` 的 `retry_task` 原实现会把 `human_rejected` 的步骤重置为 `pending` 并用同一计划重跑，等于把人工否决的结论悄悄重新产出；现在先检查 `status=blocked and error_code=human_rejected` 的步骤并返回 409 `human_rejected_requires_replan`（附 `rejected_step_keys`），引导走 `replan`。
+- 恢复与安全复用既有 `AgentTask/AgentPlan/AgentStep/ToolCall/BackgroundJob` 与租约，未新增状态机；`replan_task` 保留 `rejected` artifact 供审计。
+- 未完成：五类决策的“业务收益”指标（正确阻断次数、错误继续率、人工返工、单任务模型调用数）尚无独立标注真值，仅能给出机制级断言；`agent_metrics` 已提供 `model_execution_rate`/`deterministic_fallback_rate`/`human_reanalysis_rate` 三个可计算比率。
 
 ### P1-B 复杂 SQL 与监管口径变化　`DONE`（证据：`docs/vnext2/p1b-sql-semantics.md`、`docs/audit/VNEXT2_SQL_DIALECT_MATRIX-20261023.json`；级别 `REAL_COMPONENT` / 合成期望）
 

@@ -1719,6 +1719,20 @@ def retry_task(db, principal: Principal, task: AgentTask) -> dict[str, Any]:
     PermissionService(db, principal).require_project_permission(task.project_id, RUN_PERMISSION)
     if task.status in sm.TASK_TERMINAL and task.status != sm.TASK_FAILED:
         raise HTTPException(status_code=409, detail={"error_code": "task_not_retryable"})
+    # A human rejection is a business decision, not an execution fault. Re-running the same
+    # step would regenerate the very conclusion a named reviewer refused, so retry must not
+    # silently re-adopt it: the only lawful recovery is a bounded replan that records the
+    # rejected step as skipped and changes the remaining plan.
+    rejected = [step for step in db.scalars(
+        select(AgentStep).where(AgentStep.task_id == task.id)).all()
+        if step.status == sm.STEP_BLOCKED and step.error_code == "human_rejected"]
+    if rejected:
+        raise HTTPException(status_code=409, detail={
+            "error_code": "human_rejected_requires_replan",
+            "message": "被人工否决的步骤不能直接重试：请先发起有边界的需求重分析（replan），"
+                       "再由新的计划重新收集证据。",
+            "rejected_step_keys": [step.step_key for step in rejected][:20],
+        })
     reset = 0
     for step in db.scalars(select(AgentStep).where(AgentStep.task_id == task.id)).all():
         if step.status in {sm.STEP_FAILED, sm.STEP_BLOCKED}:
