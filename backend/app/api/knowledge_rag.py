@@ -12,6 +12,7 @@ from app.services.auth.dependencies import CurrentPrincipal, RealPrincipal
 from app.services.retrieval.planned_search import PlannedSearchRequest, planned_search
 from app.services.auth.permission_service import PermissionService
 from app.services.rag import grounded_answer
+from app.services.requirement_pins import pinned_versions_for_revision
 from app.services.knowledge_evidence import mode_knowledge_types
 from app.services.rag.data_field_answer_service import data_field_answer, project_entity
 from app.services.rag.document_preview_service import authorized_version, preview_document, original_content
@@ -49,6 +50,9 @@ SOURCE_CATEGORIES={"regulatory_formal","regulatory_qa","internal_policy","intern
 class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_id:int|None=None;knowledge_types:list[str]=Field(default_factory=list);top_k:int=Field(20,ge=1,le=50);retrieval_mode:str="hybrid";include_history:bool=False;historical_as_of:datetime|None=None
 class AskRequest(SearchRequest):
     answer_mode: Literal["regulatory", "data_field"] | None = None
+    # C10: 可选地以“冻结需求版本”为判定基准，引用裁判据此钉扎制度版本。
+    requirement_id: int | None = None
+    requirement_content_version: int | None = None
 
 class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None;model_call_log_id:int|None=None;output_hash:str|None=None;execution_kind:Literal["real_model","mock_model","deterministic","degraded"]|None=None;execution_metadata_json:dict|None=None
 class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";query_text:str;target_field_id:int|None=None;scenario_id:int|None=None;expected_knowledge_unit_ids_json:list[int]=Field(default_factory=list);expected_source_system:str|None=None;expected_table_name:str|None=None;expected_field_name:str|None=None;expected_answer_keywords_json:list[str]=Field(default_factory=list);enabled:bool=True
@@ -238,10 +242,21 @@ async def ask(project_id:int,payload:AskRequest,principal:CurrentPrincipal,db:Se
     if not payload.query.strip():raise HTTPException(400,"问题内容不能为空")
     if payload.retrieval_mode not in {"keyword_only","vector_only","hybrid"}:
         raise HTTPException(400,"检索模式取值不合法")
+    if (payload.requirement_id is None) != (payload.requirement_content_version is None):
+        raise HTTPException(400,"按冻结需求判定时需要同时提供 requirement_id 与 requirement_content_version")
+    pinned_versions={}
+    if payload.requirement_id is not None:
+        # C10: 只接受本项目、且哈希校验通过的冻结版本；版本钉扎为空时保守拒绝，
+        # 不允许把“按当前最新制度判定”冒充“按历史冻结版本判定”。
+        pinned_versions=pinned_versions_for_revision(db,project_id,payload.requirement_id,payload.requirement_content_version)
+        if not pinned_versions:
+            raise HTTPException(422,"该需求版本未固定任何制度版本，无法按冻结版本判定引用；请先固定知识资料版本或取消版本钉扎")
     filters=dict(target_field_id=payload.target_field_id,scenario_id=payload.scenario_id,
                  knowledge_types=mode_knowledge_types(payload.answer_mode,payload.knowledge_types) if payload.answer_mode else payload.knowledge_types,
                  top_k=payload.top_k,retrieval_mode=payload.retrieval_mode,
                  include_history=payload.include_history,historical_as_of=payload.historical_as_of)
+    if pinned_versions:
+        filters["pinned_versions"]=pinned_versions
     try:
         service=data_field_answer if payload.answer_mode=="data_field" else grounded_answer
         result=await service(db,project_id,payload.query,**filters)
@@ -249,12 +264,17 @@ async def ask(project_id:int,payload:AskRequest,principal:CurrentPrincipal,db:Se
         raise HTTPException(400,str(exc)) from exc
     result["answer_mode"]=payload.answer_mode
     result.setdefault("sections",None)
+    if payload.requirement_id is not None:
+        result["version_pin"]={"requirement_id":payload.requirement_id,
+                               "content_version":payload.requirement_content_version,
+                               "source":"frozen_revision","pinned_count":len(pinned_versions)}
     citations=result.get("citations") or []
     needs_confirmation=not citations and "待确认" in str(result.get("answer") or "") and bool(result.get("open_questions"))
     result.setdefault("answer_status","needs_confirmation" if needs_confirmation else "grounded")
     common={"actor_user_id":principal.user_id,"institution_id":project.institution_id,"project_id":project_id,
             "after":{"citation_count":len(citations),"retrieval_mode":payload.retrieval_mode,
-                     "answer_status":result["answer_status"],"answer_mode":payload.answer_mode}}
+                     "answer_status":result["answer_status"],"answer_mode":payload.answer_mode,
+                     "version_pinned_count":len(pinned_versions)}}
     record_audit(db,action="knowledge_ask",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common)
     record_audit(db,action="model_call",resource_type="rag_answer",resource_id=result.get("retrieval_log_id"),**common)
     db.commit()

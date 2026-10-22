@@ -29,25 +29,34 @@ _VERSION_NOISE = re.compile(
 def normalize_version(value: Any) -> tuple[str, ...] | None:
     """把版本标识归一成可比较的元组；无法识别时返回 ``None``。
 
-    ``v2`` / ``2.0`` -> ``("2", ...)``；``2024 旧版`` -> ``("2024",)``。
-    纯年份不会再拆分，避免 ``2024`` 变成 ``("2", "0", "2", "4")``。
+    ``v2`` / ``2.0`` -> ``("2", ...)``；``2024 旧版`` -> ``("2024",)``；
+    ``2026-v1`` -> ``("2026", "1")``，``2026-v2`` -> ``("2026", "2")``。
+
+    纯年份不会再拆分，避免 ``2024`` 变成 ``("2", "0", "2", "4")``；但**年份后的修订号
+    必须保留**——只比年份会把 ``2026-v1`` 与 ``2026-v2`` 判成同一版本，导致“需求固定 v1、
+    知识库已启用 v2”的引用被静默接受（C10 的真实失效模式）。
     """
     if value is None:
         return None
     text = str(value).strip()
     if not text:
         return None
+    tokens: list[str] = []
+    remainder = text
     year = _YEAR_INLINE.search(text)
     if year:
-        return (year.group(1),)
-    core = _VERSION_CORE.match(text)
-    if not core:
+        tokens.append(year.group(1))
+        remainder = f"{text[: year.start()]} {text[year.end():]}".strip()
+    core = _VERSION_CORE.search(remainder) or re.search(r"(?i)(?:v\s*)?(\d+(?:\.\d+)*)", remainder)
+    if core:
+        tokens.extend(core.group(1).split("."))
+    elif not tokens:
         # 形如 "第 2 版" 的写法
         embedded = re.search(r"(\d+(?:\.\d+)*)\s*版", text)
-        if embedded:
-            return tuple(embedded.group(1).split("."))
-        return None
-    return tuple(core.group(1).split("."))
+        if not embedded:
+            return None
+        tokens.extend(embedded.group(1).split("."))
+    return tuple(tokens)
 
 
 def base_source_title(source_name: Any) -> str:

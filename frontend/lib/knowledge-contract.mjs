@@ -76,10 +76,24 @@ export function supportCounts(support) {
 export function coverageText(value) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(0)}%` : "—";
 }
-export function askPayload(mode, query, target, scenario, includeHistory = false, historicalAsOf = "") {
+export function askPayload(mode, query, target, scenario, includeHistory = false, historicalAsOf = "", pin = null) {
+  // 版本钉扎只在需求与内容版本同时给出时才发送；任一缺失都不猜测，交由后端一致性校验。
+  const pinFields = pin && pin.requirementId && pin.contentVersion
+    ? { requirement_id: Number(pin.requirementId), requirement_content_version: Number(pin.contentVersion) }
+    : {};
   return { query: query.trim(), answer_mode: answerMode(mode), top_k: 8,
     ...(includeHistory ? { include_history: true, ...(historicalAsOf ? { historical_as_of: historicalAsOf } : {}) } : {}),
-    ...(mode === "data_field" ? { target_field_id: target || null, scenario_id: scenario || null } : {}) };
+    ...(mode === "data_field" ? { target_field_id: target || null, scenario_id: scenario || null } : {}),
+    ...pinFields };
+}
+/** 钉扎状态的用户可见说明：不得把“未固定”渲染成“已固定”。 */
+export function pinNotice(pin, versionPin) {
+  if (!pin) return { tone: "none", text: "" };
+  const label = `需求 v${pin.contentVersion}`;
+  if (!versionPin) return { tone: "warn", text: `已请求固定${label}的监管版本，但本次回答未回显固定版本，结论需人工核对。` };
+  const pinned = versionPin.pinned_versions && typeof versionPin.pinned_versions === "object"
+    ? Object.entries(versionPin.pinned_versions).map(([title, version]) => `${title}=${version}`) : [];
+  return { tone: "pinned", text: `本次回答固定使用${label}冻结的监管版本：${pinned.length ? pinned.join("；") : "（该需求未记录具体制度版本）"}` };
 }
 export function citationLocator(c) {
   return { page_no: c.source_page_no, sheet_name: c.source_sheet_name, cell_range: c.source_cell_range,

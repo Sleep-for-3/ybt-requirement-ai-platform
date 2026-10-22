@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MODES, answerMode, askPayload, citationLocator, locateBlock, viewerFormat, ownedBlobUrl, evidenceTarget, askErrorMessage } from "../lib/knowledge-contract.mjs";
+import { MODES, answerMode, askPayload, pinNotice, citationLocator, locateBlock, viewerFormat, ownedBlobUrl, evidenceTarget, askErrorMessage } from "../lib/knowledge-contract.mjs";
 
 test("explicit modes send only compatible filters",()=>{
   assert.equal(answerMode(null),"regulatory");
@@ -13,6 +13,22 @@ test("explicit modes send only compatible filters",()=>{
   assert.notEqual(MODES.regulatory.example,MODES.data_field.example);
 });
 
+test("requirement version pinning is only sent when both ids are present",()=>{
+  assert.deepEqual(askPayload("regulatory","q",null,null,false,"",null),{query:"q",answer_mode:"regulatory",top_k:8});
+  assert.deepEqual(askPayload("regulatory","q",null,null,false,"",{requirementId:"5",contentVersion:"9"}),
+    {query:"q",answer_mode:"regulatory",top_k:8,requirement_id:5,requirement_content_version:9});
+  // 只给其中一个不得猜测版本：缺 contentVersion 时不发送钉扎字段。
+  assert.equal(askPayload("regulatory","q",null,null,false,"",{requirementId:5}).requirement_id,undefined);
+  assert.equal(askPayload("regulatory","q",null,null,false,"",{contentVersion:9}).requirement_content_version,undefined);
+  // 展示口径必须区分“已固定”与“请求了但未回显”。
+  assert.deepEqual(pinNotice(null,{pinned_versions:{}}),{tone:"none",text:""});
+  assert.match(pinNotice({requirementId:5,contentVersion:9},null).text,/未回显固定版本/);
+  const pinned=pinNotice({requirementId:5,contentVersion:9},{pinned_versions:{"客户风险分类管理办法":"2026-v1"}});
+  assert.equal(pinned.tone,"pinned");
+  assert.match(pinned.text,/需求 v9/);
+  assert.match(pinned.text,/客户风险分类管理办法=2026-v1/);
+  assert.match(pinNotice({requirementId:5,contentVersion:9},{pinned_versions:{}}).text,/未记录具体制度版本/);
+});
 test("question failures distinguish permissions, network and invalid input without raw diagnostics",()=>{
   assert.match(askErrorMessage({status:403}),/无权/);
   assert.match(askErrorMessage({status:0}),/网络/);

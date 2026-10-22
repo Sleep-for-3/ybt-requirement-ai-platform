@@ -200,9 +200,16 @@ export function RequirementDeliveryPanel({
       </div> : null}
       {dirty ? <p className="flex items-center gap-1 text-xs text-amber-700"><AlertTriangle size={14} />请先保存当前编辑再送审。</p> : null}
       {contentVersion && contentHash ? (
-        <p className="text-xs text-slate-500">
-          当前内容 v{contentVersion} · 冻结快照哈希 {contentHash.slice(0, 12)}…（下载文件与该快照一致，历史版本不会被覆盖）
-        </p>
+        <div className="space-y-1 text-xs text-slate-500">
+          <p>当前内容 v{contentVersion} · 冻结快照哈希 {contentHash.slice(0, 12)}…（下载文件与该快照一致，历史版本不会被覆盖）</p>
+          <p>
+            <Link className="font-medium text-pine-700 hover:text-pine-800"
+              href={`/knowledge/ask?mode=regulatory&projectId=${projectId}&requirementId=${requirementId}&contentVersion=${contentVersion}`}>
+              带本版本制度版本提问
+            </Link>
+            <span className="ml-1">（问答只引用本需求版本冻结的制度版本，知识库更新不会替换它）</span>
+          </p>
+        </div>
       ) : null}
       {rechecks.data?.length ? <div className="border-l-2 border-gold-400 pl-3 text-xs text-slate-600">
         <p className="font-semibold text-ink">SQL 变化复核：{statusLabel(rechecks.data[0].status)}</p>

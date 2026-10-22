@@ -245,7 +245,7 @@ PG/Redis/Milvus 真实冒烟、本地 Embedding、知识上传审核生效检索
 
 1. **真实案例独立标注**：与业务方共建 20–30 条脱敏真实案例，产出 `BUSINESS_VERIFIED` 基线。
 2. **检索规模与权威优先**：按给定容量做小/中/大三档测评（延迟、召回、误召回、同分稳定性、重排成本）。
-3. **生成链路版本固定**：把 `pinned_versions` 接入需求生成与导出，形成“制度 v1 冻结、v2 只触发复核”的闭环。
+3. **生成链路版本固定（Round 6 已部分完成，见第十部分）**：`pinned_versions` 已接入需求快照与问答链路；剩余工作是“新制度自动触发复核提醒”与生成候选侧的版本引用审计。
 4. **部署韧性**：systemd/Docker 重启策略 + Milvus/Redis 断连演练 + 长任务租约续期验证。
 5. **工作台收口**：AI 候选阶段标识、跨页待办入口、知识上传播链的浏览器化。
 
@@ -284,3 +284,55 @@ PG/Redis/Milvus 真实冒烟、本地 Embedding、知识上传审核生效检索
 - 大规模知识库下的检索质量与延迟；
 - 推理型模型在超长输入下可能返回空正文（系统会明确失败并可重试，不会伪造内容）；
 - 产品 ID 与期限等复合业务键：只有制度或人工依据支持时才会采用，系统不会自动拼接键。
+
+---
+
+## 第十部分：Round 6 增补（引用版本钉扎闭环，2026-10-23）
+
+本部分补充第八部分第 3 项在本轮的实际落地，以及过程中发现的确定性缺陷。
+
+### 10.1 原问题
+
+P0-B 阶段已让引用裁判支持 `pinned_versions`（需求冻结时固定的制度版本），但**没有任何产品调用方传入它**：
+`backend/app/services/rag/grounded_answer_service.py` 调用 `check_citation_support(...)` 时未带钉扎参数，
+`backend/app/api/knowledge_rag.py` 的问答接口也不接受需求版本。结果：
+
+- 需求固定制度 v1、知识库已启用 v2 时，问答会用 v2 的引用去回答 v1 的问题；
+- 裁判看不到“版本不匹配”这一确定性信号，只能靠语义判断，导致 C10 场景实际不可控；
+- 冻结快照只保存哈希，用户无法在问答里“只看我这一版对应的制度”。
+
+### 10.2 实际改动
+
+1. 新增 `backend/app/services/requirement_pins.py::pinned_versions_for_requirement(db, project_id, requirement_id, content_version)`：
+   从冻结的 `RequirementRevision.content_json` 推导 `{来源标题: 监管版本}`；走 `load_revision` 的哈希完整性校验；
+   空白/占位版本不参与；同一标题出现多个版本时标记为 `_conflicting:<标题>` 并排除，避免钉扎一个自相矛盾的版本。
+2. `backend/app/services/rag/grounded_answer_service.py`：把钉扎版本传给 `check_citation_support`，成功时在响应回显 `version_pin`。
+3. `backend/app/api/knowledge_rag.py`：`AskRequest` 新增 `requirement_id` / `requirement_content_version`；
+   只给其一时 400（不猜测）；该版本没有任何可用钉扎时 422 保守拒绝；成功时回显 `version_pin`。
+4. **修复的真实缺陷**：`backend/app/services/rag/citation_trust.py::normalize_version` 原实现只解析年份，
+   `2026-v1` 与 `2026-v2` 归一化后相等 —— 需求固定 v1 时，v2 的引用不会被判为版本违规。
+   现保留 `v<数字>` 修订号，`2026-v1 != 2026-v2`。
+5. 前端接线（`ai-platform/frontend`）：
+   - `lib/knowledge-contract.mjs` 的 `askPayload` 支持可选钉扎参数（缺任一 id 不发送，绝不默认“最新版本”）；
+   - 新增 `pinNotice(pin, versionPin)` 纯函数，区分“已固定”和“请求固定但未回显”；
+   - `app/knowledge/ask/page.tsx` 读取 `requirementId` + `contentVersion`，提交时携带，并在页面顶部显示钉扎状态；
+   - `components/requirement-workspace/RequirementDeliveryPanel.tsx` 增加“带本版本制度版本提问”入口（携带需求与内容版本）。
+
+### 10.3 验证
+
+| 验证项 | 命令 | 结果 |
+| --- | --- | --- |
+| 版本钉扎后端 | `pytest tests/test_vnext2_pinned_versions.py -q` | 10 passed |
+| 引用信任域 | 同上 + `tests/test_vnext2_citation_trust.py` | 28 passed |
+| 引用/知识/问答域回归 | `pytest tests -k "citation or rag or knowledge or grounded or ask or pin"` | 334 passed（900.65s） |
+| 前端契约 | `node --test tests/knowledge-contract.test.mjs` | 6 passed |
+| 类型检查 | `npx tsc --noEmit -p tsconfig.json` | 通过（exit 0） |
+
+证据级别：`REAL_COMPONENT`（真实 PostgreSQL 驱动的服务级测试 + 真实前端契约测试）；
+“业务准确率”仍为 `UNVERIFIED`（无银行专家独立标注）。
+
+### 10.4 仍然缺口
+
+- 新制度发布后**自动提醒**“该需求引用的 v1 已被 v2 取代、需要复核”：目前只有引用裁判在问答时拒绝越版引用，没有主动推送。
+- 需求生成（generation-run）链路的候选仍在提示层使用当前知识库内容，未把钉扎版本传给生成模型输入；候选审计里也还没有“引用版本”字段。
+- 前端问答入口只在需求工作台与知识问答页，尚未在“待确认问题处理”页内直接带版本提问。

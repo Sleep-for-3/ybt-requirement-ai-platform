@@ -47,7 +47,7 @@
   - 相邻回归 `tests/test_rag_citation_support.py tests/test_overnight_citation_status.py` → **27 passed**
   - 真实模型 `scripts/vnext_real_model_golden_eval.py` → **10/10 判定与黄金集期望一致，0 degraded，9/10 走主张级判定，冲突暴露 2 例，失败但未 verified 2 例**，avg 4338.6ms，证据 `docs/audit/VNEXT_CITATION_TRUST-20261022.json`（REAL_MODEL，标签仍 UNVERIFIED）。
 - 关键环境事实：公司网关已下线 `deepseek-v4-flash`（`POST /chat/completions` 返回 422 `model not found`，`GET /models` 只剩 `deepseek-v4.1-flash / deepseek-flash / deepseek-v4-pro / cc/* / qwen3.8-flash / glm-5.3-flash`），本轮开发验收改用 `deepseek-v4.1-flash`（`backend/.env` 已改，文件本身被 gitignore，不进提交）。
-- 未覆盖/下一步：`pinned_versions` 目前只有评测脚本传入，产品生成路径（`backend/app/services/rag/grounded_answer_service.py:166`）还没有从需求快照推导固定版本——需在 P0-C 打通“需求冻结时的知识版本 → 引用裁判固定版本”，否则 C10 确定性规则在产品内不会自动生效。
+- 未覆盖/下一步：**已于 2026-10-23 关闭**（原缺口：“`pinned_versions` 只有评测脚本传入，产品链路不会从需求快照推导”）。现由 `backend/app/services/requirement_pins.py` 从冻结 `RequirementRevision` 推导钉扎（复用 `load_revision` 的哈希校验；空/占位版本不参与），`grounded_answer` 把它交给裁判，`POST .../knowledge/ask` 支持 `requirement_id` + `requirement_content_version`（缺一 400、该版本无钉扎 422、成功回显 `version_pin`）；同时修复 `citation_trust.normalize_version` 丢失年份后修订号的确定性缺陷（`2026-v1` 与 `2026-v2` 曾判为同一版本）。证据：`backend/tests/test_vnext2_pinned_versions.py` **10 passed**，引用相关套件 **28 passed**。仍有缺口：需求侧自动“按当前版本回答”的前端入口尚未接入（API 已可用）。
 
 ### P0-C 真实监管需求生成与正式交付 E2E　`DONE`（后端 REAL_COMPONENT+REAL_MODEL，浏览器 REAL_COMPONENT 全链路）
 

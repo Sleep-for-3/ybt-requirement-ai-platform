@@ -86,6 +86,6 @@
 ## 5. 未解决 / 需注意
 
 1. **C08 存在运行间波动**：第一次真实运行模型把 c2 判 unsupported，第二次判 unknown。两者都不改变“整体不得 verified”的结论，但说明“无法判断”与“不支持”的边界在模型侧不稳定。本轮没有为了让它对上而写文本启发式规则（例如把“未涉及”映射成 unknown），保留为公开的残余问题。
-2. **`pinned_versions` 尚未接入产品主链路**：目前只有评测脚本传参；`backend/app/services/rag/grounded_answer_service.py:166` 的真实问答链路还不会从需求快照推导固定版本。这决定 C10 的确定性规则在产品里是否自动生效，需在 P0-C 打通。
+2. **`pinned_versions` 已接入产品主链路（2026-10-23 补齐，原缺口关闭）**：`backend/app/services/rag/grounded_answer_service.py` 接受 `pinned_versions` 并交给裁判；新增 `backend/app/services/requirement_pins.py` 从**冻结的** `RequirementRevision.content_json` 推导 `{来源标题: 监管版本}`（复用 `load_revision` 做哈希完整性校验，缺失 404、被篡改 409）；`POST /projects/{pid}/knowledge/ask` 支持 `requirement_id` + `requirement_content_version`，两者必须同时给出（400），该版本没有任何可用版本钉扎时**保守拒绝 422**，成功时响应回显 `version_pin` 与 `pinned_versions`。同时修复一个此前未被测出的确定性缺陷：`citation_trust.normalize_version` 对含 4 位年份的版本只返回年份，导致 `2026-v1` 与 `2026-v2` 被判为同一版本（需求固定 v1 时 v2 引用会被静默接受）。现在年份与修订号一起参与比较。证据：`backend/tests/test_vnext2_pinned_versions.py` 10 例 + 既有引用套件（28 passed）。
 3. **成本**：每例单次调用，`MAX_CLAIMS_PER_CALL=20`、`MAX_JUDGE_BATCHES=3` 的上限未触发；本轮无缓存、无跨例复用。全量 10 例约 43 秒、10 次调用，未记录 token 用量（网关响应未回传 usage）。
 4. **黄金集仍是开发侧期望**，没有银行专家独立标注，因此本文件所有数字只能表述为“与合成期望一致率”，不能称为真实监管准确率。

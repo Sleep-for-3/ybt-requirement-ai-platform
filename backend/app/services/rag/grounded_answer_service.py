@@ -179,6 +179,9 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             }) or None,
             project_id=project_id,
             confidentiality_levels=[_highest_confidentiality(items)],
+            # C10: 需求冻结快照固定的制度版本随请求一起交给裁判，避免知识库升级后
+            # 按“当前最新版本”追认历史结论，或把旧版本引用误判为不一致。
+            pinned_versions=filters.get("pinned_versions") or None,
         )
         claim_support = claim_support_summary(citation_support)
     db.commit()
@@ -229,6 +232,10 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             claim_support["unsupported_claims"], claim_support["unknown_claims"])
     if citation_support is not None:
         result["citation_support"] = citation_support
+    pins = dict(filters.get("pinned_versions") or {})
+    if pins:
+        # 回显钉扎便于前端/审计说明“本次结论是按哪个版本判定的”。
+        result["pinned_versions"] = pins
     return result
 
 
