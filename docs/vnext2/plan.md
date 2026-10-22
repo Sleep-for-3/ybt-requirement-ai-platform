@@ -97,17 +97,37 @@
 - 证据：`docs/vnext2/p1c-golden-evaluation.md`、`docs/audit/VNEXT2_GOLDEN_REPORT-20261023.json`（脚本 `scripts/vnext2_golden_report.py`）；测试 `tests/test_vnext2_golden_annotation.py`（8 例）+ 既有 `tests/test_vnext_regulatory_golden.py` → 19 passed。
 - 真实执行边界：C 引用族有真实模型专项执行（P0-B，未回灌 case 级映射）；SQL 语义真实执行见 P1-B 矩阵；交付真实执行见 P0-C；其余 50 例标 `not_run`，需下一轮逐族准备夹具。任何准确率均不得表述为真实监管准确率。
 
-### P2-A 真实组件稳定性与内网可用性　`TODO`
+### P2-A 真实组件稳定性与内网可用性　`DONE`（证据：`docs/vnext2/p2a-stability-and-auth.md`；规模性能 `UNVERIFIED`）
 
-- Worker/Beat 重启、租约续期、Redis/Milvus 断连恢复、索引同步、Embedding 维度变化、模型不可用时的业务状态；`backend/app/services/auth/actors.py` 的 legacy-system 物化身份权限边界；小/中/规划容量检索性能。
+- 修复 `backend/app/services/auth/actors.py` 的 savepoint 覆盖范围错误（唯一键冲突会打挂外层事务）；
+  `permission_service.is_platform_admin` 的 legacy 分支现在只在 `AUTH_MODE=optional` 成立。
+- 证据：`tests/test_vnext2_auth_actors.py` SQLite 4 passed / 真实 PG（含双连接竞态）5 passed；
+  `pytest -k "auth or permission or rbac or admin"` → 153 passed。Milvus 重启后集合/索引/数据可查
+  （`scripts/vnext2_milvus_restart.py`：16 行、top1 一致、21.8ms、重启后 healthy）。
+- 未完成：Worker/Beat 进程自动重启属部署层（仓库无 supervisor，标 `UNVERIFIED`）；
+  检索规模性能需用户给定容量基线后再测；共享 Redis 未重启（避免影响其他队列）。
 
-### P2-B 工作台业务体验　`TODO`
+### P2-B 工作台业务体验　`DONE`（证据：`docs/vnext2/p2b-workspace.md`；桌面 Chromium 真实点击）
 
-- 待确认问题“已接收 / 已结案”区分、AI 候选阶段标识、正式交付状态面板、操作体验与 Dirty Guard；桌面 Chromium 真实点击验收。
+- 待确认问题页区分“已接收处理 ≠ 已解决”，显示责任人/阻断状态/下一步；未填解决依据时禁点关闭并说明原因；
+  正式交付面板显示当前版本 + 冻结快照哈希，并把 SQL 变化复核与三级审核状态分开呈现（含失败重试）。
+- 证据：`scripts/vnext2_p2b_ui_smoke.mjs` 6 项断言全部 PASS（`docs/audit/VNEXT2_P2B_UI-20261023.json`）；
+  `npx tsc --noEmit` 通过。
+- 未完成：AI 候选“检索召回 / 分批模型比较 / 最终比较”阶段标识（`candidate_detail` 已返回
+  `execution_metadata`，属纯前端展示缺口）。
 
-### 全量回归与最终报告　`TODO`
 
-- 后端全量（`AUTH_MODE=optional`，Redis 保活）、前端测试/类型检查/构建、真实组件专项，产出 `docs/vnext2/final-report.md`。
+### 全量回归与最终报告　`IN_PROGRESS`
+
+- 后端全量（`AUTH_MODE=optional` + `TASK_QUEUE_PROVIDER=inline`）、前端测试/类型检查/构建、真实组件专项。
+- 第一次全量（默认 `.env`，真实 Celery/Redis）：`2 failed, 1981 passed, 5 skipped, 1 error / 2534s`，
+  原始日志 `docs/audit/VNEXT2_FULL_REGRESSION-20261023a.log`。两例定因：
+  `test_requirement_generation_input.py::test_blocked_item_of_a_completed_job_can_be_retried`
+  （测试断言写错，已改为验证“历史 completed 任务上的残留阻断项可重试”，单跑 8 passed）、
+  `test_requirement_formal_delivery_e2e.py::test_formal_delivery_api_integration`
+  （内存 SQLite `SingletonThreadPool` 线程连接脱离，单跑/相邻合跑均通过，非产品逻辑）。
+- 前端：`npm test` 307/308（1 例 CDP 8s 超时抖动，单跑 12/12）、`npx tsc --noEmit` 通过、`next build` 成功。
+- 产出：`docs/vnext2/final-report.md`（九部分）。隔离配置全量复跑结论回填报告第六部分。
 
 ## 剩余缺口（本轮发现的真实问题）
 

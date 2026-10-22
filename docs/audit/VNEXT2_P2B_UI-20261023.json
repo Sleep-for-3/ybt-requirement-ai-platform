@@ -1,0 +1,43 @@
+{
+  "started_at": "2026-10-22T17:15:08.161Z",
+  "web": "http://127.0.0.1:3010",
+  "api": "http://127.0.0.1:8011/api",
+  "steps": [
+    {
+      "name": "questions:责任人",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "questions:状态语义",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "questions:阻断提示",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "delivery:冻结快照哈希",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "delivery:审核与复核分开",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "console:无错误",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "ok": true,
+  "screenshots": [
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p2b-ui\\questions.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p2b-ui\\delivery.png"
+  ],
+  "finished_at": "2026-10-22T17:15:17.224Z"
+}

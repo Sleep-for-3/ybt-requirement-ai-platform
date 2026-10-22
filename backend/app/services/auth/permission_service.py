@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.models import Institution, InstitutionMembership, Project, ProjectMembership
 from app.services.auth.dependencies import Principal
 
@@ -50,7 +51,9 @@ class PermissionService:
 
     def is_platform_admin(self) -> bool:
         if self.principal.is_legacy_system:
-            return True
+            # 匿名 dev principal 只在 optional 模式存在（required 模式在依赖层直接 401）。
+            # 这里再显式要求 optional，避免将来接线错误时把“开发便利”带进生产。
+            return get_settings().auth_mode == "optional"
         if self.principal.user_id is None:
             return False
         return self.db.scalar(select(InstitutionMembership.id).join(

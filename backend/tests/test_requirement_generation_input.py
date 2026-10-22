@@ -154,8 +154,11 @@ def test_blocked_item_of_a_completed_job_can_be_retried(snapshot_api, monkeypatc
     assert response.status_code == 201, response.text
     job = db.get(BackgroundJob, response.json()["job_id"])
     item = db.scalar(select(RequirementGenerationItem))
-    # 合规闸门只阻断单个候选项，任务本身正常结束；这种残留阻断项必须仍可由页面重试。
-    assert job.status == "completed" and item.status == "blocked"
+    assert item.status == "blocked"
+    # 历史任务/旧队列可能把"全部被阻断"记成 completed，页面仍必须能重试残留阻断项；
+    # 修复前队列 retry 只接受 failed/partially_completed/cancelled，会直接 409。
+    job.status = "completed"
+    db.commit()
     retry = client.post(base + f"/generation-runs/{response.json()['input_id']}/retry", json={"job_id": job.id})
     assert retry.status_code == 200, retry.text
     db.refresh(item)

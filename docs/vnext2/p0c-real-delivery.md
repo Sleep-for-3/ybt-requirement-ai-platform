@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 后端真实业务闭环（生成→候选→采用→人工补录→修订→三级审核→正式交付→Word/Excel 导出→交付后复核）跑通 | **REAL_COMPONENT + REAL_MODEL** | `backend/tests/test_vnext2_p0c_real_delivery.py` 4 例；真实模型开启时 4 passed / 159.94s |
 | 冻结快照后新增问题阻断送审与正式交付 | **REAL_COMPONENT（PostgreSQL 并发另见 P0-A）** | 同测试文件 `test_new_question_after_freeze_blocks_new_delivery` |
-| 真实浏览器全操作闭环 | **未完成（UNVERIFIED）** | 既有 `scripts/vnext_workspace_browser_smoke.mjs` 仅覆盖登录/页面/Tab；本工作包暂未扩展，列为 P0-C 剩余子项 |
+| 真实浏览器全操作闭环 | **REAL_COMPONENT（已完成，见第 8 节）** | `scripts/vnext2_p0c_browser_e2e.mjs`：66 步 PASS / 1019 次 API，真实模型 + 真实 Celery + 真实 Next.js |
 | 业务准确率 | **UNVERIFIED** | 场景为合成监管口径，无银行专家独立标注，不得宣称真实监管准确率 |
 
 ## 2. 合成业务场景（不代表任何真实银行口径）
@@ -100,7 +100,7 @@
 
 ## 7. 剩余缺口
 
-1. **真实浏览器全操作闭环未完成**：需要扩展 `scripts/vnext_workspace_browser_smoke.mjs`（或在真实前端服务下新增脚本），由真实页面触发新建需求/生成/采用/编辑/送审/多角色审核/交付/下载/修订复核。当前前端已有生成面板、采用清单、交付面板控件，但“缺口关闭（resolve_gap）”尚无 UI 入口——需与 P2-B 工作台一并补。
+1. **~~真实浏览器全操作闭环未完成~~（已完成）**：`scripts/vnext2_p0c_browser_e2e.mjs` 在真实 Next.js + 真实后端 + 真实 Celery + 真实 `deepseek-v4.1-flash` 上跑通 66 步 / 1019 次 API 调用，覆盖登录、生成、候选采用、缺口关闭、人工技术确认、血缘快照刷新、送审、业务/技术/终审三级审批、正式交付、Excel/Word 下载与哈希校验、交付后新建修订与历史不可变、以及“交付前新建问题阻断”的反例。证据：`docs/audit/VNEXT2_P0C_BROWSER-20261022.json` 与 `docs/audit/vnext2-p0c-browser/*.png`、`requirement-v1.{docx,xlsx}`。
 2. **`pinned_versions` 未接入产品生成路径**：P0-B 的确定性版本裁决目前只在引用裁判与评测脚本生效；需求生成时的制度快照固定版本仍依赖 `script_basis.policy_snapshot`。
-3. **知识文档/版本/单元为夹具直插**：产品路径已有 `test_knowledge_rag.py` 覆盖上传→审核→激活→检索，但 P0-C 主链路未在真实页面重复该段，需在浏览器闭环中补齐。
+3. **知识文档/版本/单元在浏览器闭环中为夹具直插**：产品路径已有 `test_knowledge_rag.py` 覆盖上传→审核→激活→检索，但 P0-C 浏览器主链路未重复该段（API 级链路已覆盖）。
 4. **真实模型稳定性**：推理型网关在长输入下仍可能因预算不足返回空正文；当前会明确失败（blocked/failed）而不是伪造候选，但需要产品侧配置 `LLM_MAX_OUTPUT_TOKENS` 与提示词长度预算（`requirement_max_input_bytes`）匹配。

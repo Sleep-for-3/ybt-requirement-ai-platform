@@ -37,6 +37,17 @@ type FormalDelivery = {
   approved_at: string;
 };
 
+// SQL 变化触发的复核（backend/app/services/requirement_recheck.py）：历史正式交付不变，
+// 但需要人工复核并建立新修订，所以工作台必须把它和审核状态分开显示。
+type RequirementRecheck = {
+  id: number;
+  content_version: number;
+  status: string;
+  resolution?: string | null;
+  replacement_content_version?: number | null;
+  tasks: Array<{ id: number; status: string }>;
+};
+
 export function RequirementDeliveryPanel({
   projectId,
   requirementId,
@@ -80,12 +91,18 @@ export function RequirementDeliveryPanel({
     enabled: canView,
     queryFn: ({ signal }) => apiGet<FormalDelivery[]>(`${base}/formal-deliveries`, { signal }),
   });
+  const rechecks = useQuery({
+    queryKey: ["requirement-rechecks", projectId, requirementId],
+    enabled: canView,
+    queryFn: ({ signal }) => apiGet<RequirementRecheck[]>(`${base}/rechecks`, { signal }),
+  });
 
   async function refresh() {
     await Promise.all([
       readiness.refetch(),
       canView ? submissions.refetch() : Promise.resolve(),
       canView ? deliveries.refetch() : Promise.resolve(),
+      canView ? rechecks.refetch() : Promise.resolve(),
     ]);
     onChanged();
   }
@@ -159,6 +176,7 @@ export function RequirementDeliveryPanel({
   // must name that one and offer its own retry instead of one merged "read failed" line.
   const submissionsState = classifyQueryState({ isPending: submissions.isPending, isError: submissions.isError, error: submissions.error, hasData: Boolean(submissions.data), itemCount: submissions.data?.length || 0 });
   const deliveriesState = classifyQueryState({ isPending: deliveries.isPending, isError: deliveries.isError, error: deliveries.error, hasData: Boolean(deliveries.data), itemCount: deliveries.data?.length || 0 });
+  const rechecksState = classifyQueryState({ isPending: rechecks.isPending, isError: rechecks.isError, error: rechecks.error, hasData: Boolean(rechecks.data), itemCount: rechecks.data?.length || 0 });
   return <section className="panel mb-3" id="requirement-delivery" aria-label="审核与正式交付">
     <div className="panel-header flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -181,6 +199,19 @@ export function RequirementDeliveryPanel({
         {ready.blocking_count > 5 ? <p className="mt-1">另有 {ready.blocking_count - 5} 项，请在待确认视图处理。</p> : null}
       </div> : null}
       {dirty ? <p className="flex items-center gap-1 text-xs text-amber-700"><AlertTriangle size={14} />请先保存当前编辑再送审。</p> : null}
+      {contentVersion && contentHash ? (
+        <p className="text-xs text-slate-500">
+          当前内容 v{contentVersion} · 冻结快照哈希 {contentHash.slice(0, 12)}…（下载文件与该快照一致，历史版本不会被覆盖）
+        </p>
+      ) : null}
+      {rechecks.data?.length ? <div className="border-l-2 border-gold-400 pl-3 text-xs text-slate-600">
+        <p className="font-semibold text-ink">SQL 变化复核：{statusLabel(rechecks.data[0].status)}</p>
+        <ul className="mt-1 space-y-1">{rechecks.data.slice(0, 3).map((recheck) => <li key={recheck.id}>
+          · 内容 v{recheck.content_version} · {statusLabel(recheck.status)}
+          {recheck.replacement_content_version ? ` · 已形成新修订 v${recheck.replacement_content_version}` : " · 需复核后建立新修订"}
+        </li>)}</ul>
+        <p className="mt-1 text-slate-500">历史正式交付文件保持不变；复核完成前新的正式交付已被阻断。</p>
+      </div> : null}
       {canSubmit && ready?.eligible && ready.revision_status === "draft" ?
         <button className="button-primary" disabled={busy || dirty || !contentHash} onClick={() => void submit()} type="button">
           <Send size={15} />{busy ? "处理中…" : `提交内容 v${contentVersion} 审核`}
@@ -204,6 +235,8 @@ export function RequirementDeliveryPanel({
       {submissionsState.kind === "forbidden" ? <p role="status" className="text-xs text-amber-700">没有查看审核记录的权限。</p> : null}
       {isRetryable(deliveriesState.kind) ? <p role="alert" className="text-xs text-coral-700">正式交付记录读取失败：{deliveriesState.message}<button className="ml-2 underline" onClick={() => void deliveries.refetch()} type="button">重试</button></p> : null}
       {deliveriesState.kind === "forbidden" ? <p role="status" className="text-xs text-amber-700">没有查看正式交付记录的权限。</p> : null}
+      {isRetryable(rechecksState.kind) ? <p role="alert" className="text-xs text-coral-700">SQL 变化复核读取失败：{rechecksState.message}<button className="ml-2 underline" onClick={()=>void rechecks.refetch()} type="button">重试</button></p> : null}
+      {rechecksState.kind === "forbidden" ? <p role="status" className="text-xs text-amber-700">没有查看 SQL 变化复核的权限。</p> : null}
 
       {canView && deliveries.data?.length ? <div className="border-t border-line pt-3">
         <h3 className="text-xs font-semibold text-ink">历史正式交付</h3>

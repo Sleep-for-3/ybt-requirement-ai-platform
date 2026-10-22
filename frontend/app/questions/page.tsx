@@ -26,6 +26,25 @@ function statusBadge(status: string) {
   return "badge-neutral";
 }
 
+// 产品契约（backend/app/services/requirement_scope.py 与 requirement_delivery_safety.py）：
+// 只有“关闭/已解决 + 填写解决依据”才解除阻断；accepted 只表示有人接手，rejected 表示问题本身
+// 不成立，两者都仍需补写解决依据并结案，否则会继续阻断送审与正式交付。
+function statusMeaning(status: string) {
+  if (status === "open") return "待处理：尚未分派，会阻断送审与正式交付";
+  if (status === "assigned") return "已分派：已有责任人接手，但仍未解决";
+  if (status === "answered") return "已回答：需确认回答是否可作为解决依据并关闭";
+  if (status === "accepted") return "已接收处理：仅表示接手，尚未结案，仍阻断交付";
+  if (status === "rejected") return "已驳回：问题本身不成立，仍需写明依据并关闭后才解除阻断";
+  if (status === "closed") return "已结案：需确认已填写解决依据，否则仍阻断交付";
+  return statusLabel(status);
+}
+
+function blocksDelivery(question: PendingQuestion) {
+  const resolved = ["resolved", "closed", "rejected"].includes(question.question_status);
+  const hasBasis = Boolean((question.resolution_text || "").trim());
+  return !resolved || !hasBasis;
+}
+
 export default function Page() {
   const { projectId } = useProjectWorkspace();
   const permissions = useProjectPermissions(projectId);
@@ -250,6 +269,20 @@ export default function Page() {
                   当前回答：{question.resolution_text}
                 </p>
               ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-600">{statusMeaning(question.question_status)}</span>
+                <span className="text-slate-500">
+                  责任人：{question.assigned_user_id ? `用户 #${question.assigned_user_id}` : "未分派"}
+                  {question.assigned_role ? ` · ${projectRoleLabel(question.assigned_role)}` : ""}
+                </span>
+                {blocksDelivery(question) ? (
+                  <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-800">
+                    阻断中：请提交真实回答后关闭（缺解决依据仍会阻断）
+                  </span>
+                ) : (
+                  <span className="rounded bg-pine-50 px-2 py-0.5 text-pine-800">已解除阻断</span>
+                )}
+              </div>
               <div className="mt-3 grid gap-2 lg:grid-cols-[1fr_auto_auto_auto]">
                 {permissions.can("question.answer") ? (
                   <>
@@ -293,16 +326,33 @@ export default function Page() {
                 ) : null}
               </div>
               {permissions.can("question.manage") ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button className="button-secondary" disabled={question.question_status !== "answered"} onClick={() => decide(question.id, "accept")}>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    className="button-secondary"
+                    disabled={question.question_status !== "answered"}
+                    title="接受表示接手处理，不等于已解决；结案仍需关闭并填写解决依据"
+                    onClick={() => decide(question.id, "accept")}
+                  >
                     接受
                   </button>
-                  <button className="button-danger" onClick={() => decide(question.id, "reject")}>
+                  <button
+                    className="button-danger"
+                    title="驳回表示问题本身不成立；请在回答中写明依据后再关闭，否则仍会阻断交付"
+                    onClick={() => decide(question.id, "reject")}
+                  >
                     驳回
                   </button>
-                  <button className="button-secondary" onClick={() => decide(question.id, "close")}>
+                  <button
+                    className="button-secondary"
+                    disabled={!question.resolution_text?.trim()}
+                    title={question.resolution_text?.trim() ? "关闭表示结案并解除阻断" : "请先提交回答作为解决依据再关闭"}
+                    onClick={() => decide(question.id, "close")}
+                  >
                     关闭
                   </button>
+                  {!question.resolution_text?.trim() ? (
+                    <span className="text-xs text-slate-500">关闭前请先提交回答作为解决依据，否则关闭后仍会阻断。</span>
+                  ) : null}
                 </div>
               ) : null}
             </div>
