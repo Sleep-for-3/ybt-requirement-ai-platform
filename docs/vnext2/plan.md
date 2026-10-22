@@ -117,7 +117,7 @@
   `execution_metadata`，属纯前端展示缺口）。
 
 
-### 全量回归与最终报告　`IN_PROGRESS`
+### 全量回归与最终报告　`DONE`
 
 - 后端全量（`AUTH_MODE=optional` + `TASK_QUEUE_PROVIDER=inline`）、前端测试/类型检查/构建、真实组件专项。
 - 第一次全量（默认 `.env`，真实 Celery/Redis）：`2 failed, 1981 passed, 5 skipped, 1 error / 2534s`，
@@ -127,7 +127,8 @@
   `test_requirement_formal_delivery_e2e.py::test_formal_delivery_api_integration`
   （内存 SQLite `SingletonThreadPool` 线程连接脱离，单跑/相邻合跑均通过，非产品逻辑）。
 - 前端：`npm test` 307/308（1 例 CDP 8s 超时抖动，单跑 12/12）、`npx tsc --noEmit` 通过、`next build` 成功。
-- 产出：`docs/vnext2/final-report.md`（九部分）。隔离配置全量复跑结论回填报告第六部分。
+- 隔离配置全量复跑：**`1983 passed, 5 skipped, 0 failed / 2362.45s`**（`docs/audit/VNEXT2_FULL_REGRESSION-20261023b.log`）。
+- 产出：`docs/vnext2/final-report.md`（九部分，含 A–G 验收结论与剩余缺口）。
 
 ## 剩余缺口（本轮发现的真实问题）
 

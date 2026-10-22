@@ -63,25 +63,24 @@
 
 ## 当前阻断项
 
-1. 全量后端回归正在后台重跑（`ai-platform/pytest-final-vnext2b.log`，`AUTH_MODE=optional` +
-   `TASK_QUEUE_PROVIDER=inline`），结论未出。第一次全量（默认 `.env`，真实 Celery/Redis）
-   结果见 `docs/audit/VNEXT2_FULL_REGRESSION-20261023a.log`：`2 failed, 1981 passed, 5 skipped, 1 error`，
-   两例分析：
-   - `tests/test_requirement_generation_input.py::test_blocked_item_of_a_completed_job_can_be_retried`
-     —— 测试自身断言写错（任务全部被阻断时 worker 把 blocked 计入 failed_count，job 实为 `failed`）。
-     已把用例改为“人工把历史的 completed 任务上的残留 blocked 项重试”，覆盖本次新增的状态兜底分支，
-     单跑 **8 passed**。
-   - `tests/test_requirement_formal_delivery_e2e.py::test_formal_delivery_api_integration`
-     —— `AssertionError: can't 'checkout' a detached connection fairy`（内存 SQLite +
-     `SingletonThreadPool` 在 TestClient 线程间的连接脱离），单跑与相邻文件合跑均 **2 passed / 5 passed**，
-     判定为测试夹具的顺序依赖抖动，非产品逻辑；曾尝试把 `tests/conftest.py` 改成 `StaticPool`
-     定向验证 `test_knowledge_rag.py` 出现 18 failed（共享连接破坏跨会话可见性），已回滚。
+1. 全量后端回归已完成：隔离配置复跑 **`1983 passed, 5 skipped, 0 failed / 2362.45s`**
+   （`docs/audit/VNEXT2_FULL_REGRESSION-20261023b.log`）。第一次默认环境全量
+   （`docs/audit/VNEXT2_FULL_REGRESSION-20261023a.log`）的 2 例已定因：
+   `tests/test_requirement_generation_input.py::test_blocked_item_of_a_completed_job_can_be_retried`
+   是测试自身断言写错（job 实为 `failed`，已改为验证“历史 completed 任务上的残留 blocked 项可重试”），
+   `tests/test_requirement_formal_delivery_e2e.py::test_formal_delivery_api_integration`
+   是内存 SQLite `SingletonThreadPool` 在 TestClient 线程间的连接脱离（单跑/相邻合跑均通过）；
+   曾尝试把 `tests/conftest.py` 改 `StaticPool`，定向验证 `test_knowledge_rag.py` 出现 18 failed
+   （共享连接破坏跨会话可见性），已回滚。
 2. 检索规模性能（小/中/规划容量）`UNVERIFIED`：缺容量基线语料。
 3. Worker/Beat 进程自动重启属部署层，仓库无 supervisor，`UNVERIFIED`。
 4. AI 候选“分批模型比较 / 进入最终比较”阶段标识：候选数据结构目前只记录 `runtime` 与
    `execution_metadata`，没有可靠的阶段字段，属新增能力缺口（未在本轮实现）。
+5. `pinned_versions` 尚未接入产品生成链路（引用裁判已支持确定性裁决，
+   生成侧仍依赖 `script_basis.policy_snapshot`）。
 
 ## 下一步准确动作
 
-1. 收全量后端重跑结果，把日志归档到 `docs/audit/` 并回填 `docs/vnext2/final-report.md` 第六部分。
-2. 提交 P2-A/P2-B 与全量回归记录，确认工作树干净。
+本轮 A–G 验收门槛已闭合，`docs/vnext2/final-report.md` 已给出九部分结论。下一轮按报告第八部分推进：
+①真实案例独立标注；②容量分档检索测评；③`pinned_versions` 进生成/导出闭环；
+④部署韧性与长任务租约；⑤工作台 AI 候选阶段标识与跨页待办。

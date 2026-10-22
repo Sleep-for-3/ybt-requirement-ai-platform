@@ -14,8 +14,8 @@
 | 仓库 | `https://github.com/Sleep-for-3/ybt-requirement-ai-platform` |
 | 分支 | `dsh/vnext-business-accuracy-20261021` |
 | 本轮起始 HEAD | `6b75384e4bacd94dfae70c58900f09282c7fcde5`（与 `origin/` 同名分支一致，工作树干净） |
-| 本轮结束 HEAD | `a5249f3` + 本报告所在 P2 提交（见文末提交表） |
-| 提交序列 | `08f8e9b` P0-A → `b5e5ae8` P0-B → `525190d` P0-C 后端 → `7d37cc7` P0-C 浏览器/P1-B 一 → `182d479` P1-B 二 → `2475d46` P1-A → `a5249f3` P1-C → P2-A/P2-B 提交 |
+| 本轮结束 HEAD | 见 `git log`（本轮提交序列如下，全部在开发分支，未合并 `main`、未推送远端） |
+| 提交序列 | `08f8e9b` P0-A → `b5e5ae8` P0-B → `525190d` P0-C 后端 → `7d37cc7` P0-C 浏览器/P1-B 一 → `182d479` P1-B 二 → `2475d46` P1-A → `a5249f3` P1-C → `34ef423` P2-A/P2-B → 全量回归与报告归档提交 |
 | 开发/验收模型 | 公司 DeepSeek 网关 `deepseek-v4.1-flash`（`openai_compatible`）；`deepseek-v4-flash` 本轮已从网关下线 |
 | 数据库 | PostgreSQL 16（WSL2 Docker，`ybt-postgres`，库 `ybt_dsh_handoff_v2`） |
 | 队列 | Redis 7 + Celery（worker `--pool=solo`，Beat 3 条计划任务） |
@@ -132,9 +132,10 @@
 
 ### 3.2 修复缺陷
 
-第 1–25 条全部修复，其中影响最大的是：冻结后问题绕过（P0-A）、引用裁判版本/冲突（P0-B）、
-真实模型空正文伪造候选（P0-C）、`refresh-lineage` 500、需求关联错位（P1-B）、
-legacy savepoint 打挂事务（P2-A）、人工否决后重试重跑（P1-A）。
+第 1–25 条均已定因并落地处置：除第 5 条（C10 的 `pinned_versions` 尚未接入产品生成链路，
+见 3.4 与本部分风险第 5 项）之外，其余均已修复并有回归或真实组件证据。其中影响最大的是：
+冻结后问题绕过（P0-A）、引用裁判版本/冲突（P0-B）、真实模型空正文伪造候选（P0-C）、`refresh-lineage` 500、
+需求关联错位（P1-B）、legacy savepoint 打挂事务（P2-A）、人工否决后重试重跑（P1-A）。
 
 ### 3.3 已有能力验收（未重做，仅核对）
 
@@ -210,7 +211,7 @@ PG/Redis/Milvus 真实冒烟、本地 Embedding、知识上传审核生效检索
 | 项目 | 结果 |
 | --- | --- |
 | 后端定向回归（各工作包） | P0-A 9+3、P0-B 18+27、P0-C 4（真实模型 4/159.94s）、P1-A 5（agent 全量 224）、P1-B 365、P1-C 19、P2-A 5（真实 PG）、auth 子集 153 |
-| 后端全量回归 | 第一次（默认 `.env`：真实 Celery/Redis）`2 failed, 1981 passed, 5 skipped, 1 error / 2534s`，原始日志 `docs/audit/VNEXT2_FULL_REGRESSION-20261023a.log`；两例均已定因（一例测试断言写错已修、一例内存 SQLite 线程连接抖动，单跑通过），隔离配置重跑结论见本节末“全量回归复跑” |
+| 后端全量回归 | 第一次（默认 `.env`：真实 Celery/Redis）`2 failed, 1981 passed, 5 skipped, 1 error / 2534s`，原始日志 `docs/audit/VNEXT2_FULL_REGRESSION-20261023a.log`；两例均已定因（一例测试断言写错已修、一例内存 SQLite 线程连接抖动，单跑通过）。复跑（`AUTH_MODE=optional` + `TASK_QUEUE_PROVIDER=inline`）**`1983 passed, 5 skipped, 0 failed / 2362.45s`**，日志 `docs/audit/VNEXT2_FULL_REGRESSION-20261023b.log` |
 | 前端 `npm test` | 308 例：307 passed / 1 failed（`semantic-catalog-browser` CDP 8s 超时，单跑 12/12 通过，判定并行负载时序抖动） |
 | 前端 TypeScript | `npx tsc --noEmit` 通过 |
 | 前端构建 | `next build` 成功（`exit 0`，日志 `docs/audit/VNEXT2_FRONTEND_BUILD-20261023.log`） |
