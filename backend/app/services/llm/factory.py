@@ -66,7 +66,7 @@ def get_llm_service(
         model=model or settings.llm_model,
         provider=selected_provider,
         json_mode=bool(options.get("json_mode", True)),
-        max_output_tokens=int(options.get("max_output_tokens", 2048)),
+        max_output_tokens=int(options.get("max_output_tokens", settings.llm_max_output_tokens)),
         temperature=float(options.get("temperature", 0.2)),
         timeout_seconds=resolved_timeout,
         retry_count=resolved_retries,

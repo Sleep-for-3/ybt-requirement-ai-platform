@@ -16,7 +16,7 @@ from app.models import (
     RequirementRevision,
     SourceTable,
 )
-from app.services.requirement_revisions import lock_requirement, load_revision, revision_document, initialize_content, edit_field, refresh_lineage
+from app.services.requirement_revisions import lock_requirement, load_revision, revision_document, initialize_content, edit_field, refresh_lineage, resolve_gap
 from app.services.auth.dependencies import CurrentPrincipal, RealPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.governance.audit import record_audit
@@ -696,6 +696,33 @@ def update_field_content(project_id: int, requirement_id: int, field_id: int, pa
     return result
 
 
+class ResolveGapInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_content_version: int = Field(gt=0)
+    resolution_text: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/projects/{project_id}/requirements/{requirement_id}/gaps/{gap_id}/resolve", status_code=201)
+def resolve_requirement_gap(project_id: int, requirement_id: int, gap_id: str,
+                            payload: ResolveGapInput, principal: CurrentPrincipal,
+                            db: Session = Depends(get_db)):
+    """人工填写解决依据关闭一个缺口（AI 候选缺口等），生成新内容版本。"""
+    permissions = PermissionService(db, principal).effective_project_permissions(project_id)
+    if not ({"business.edit", "technical.edit"} & permissions):
+        raise HTTPException(403, "缺少编辑业务或技术口径的权限")
+    project = PermissionService(db, principal).require_project_permission(project_id, "project.view")
+    requirement = lock_requirement(db, project_id, requirement_id)
+    revision = resolve_gap(db, requirement, payload.expected_content_version, gap_id,
+                           payload.resolution_text, principal.user_id)
+    record_audit(db, action="resolve_requirement_gap", resource_type="requirement",
+                 resource_id=requirement_id, actor_user_id=principal.user_id,
+                 institution_id=project.institution_id, project_id=project_id,
+                 after={"gap_id": gap_id, "content_version": revision.content_version})
+    result = revision_document(revision)
+    db.commit()
+    return result
+
+
 @router.get("/projects/{project_id}/requirements/{requirement_id}/revisions/{content_version}/lineage")
 def get_revision_lineage(project_id: int, requirement_id: int, content_version: int,
                         principal: CurrentPrincipal, db: Session = Depends(get_db)):
@@ -724,8 +751,10 @@ def refresh_requirement_lineage(project_id: int, requirement_id: int, content_ve
 
     requirement = lock_requirement(db, project_id, requirement_id)
     new_revision = refresh_lineage(db, requirement, content_version, principal.user_id)
-    record_audit(db, "requirement_lineage_refresh", requirement.project_id, principal.user_id,
-                 f"需求 {requirement_id} 刷新血缘快照至内容版本 {new_revision.content_version}")
+    record_audit(db, action="refresh_requirement_lineage", resource_type="requirement",
+                 resource_id=requirement_id, actor_user_id=principal.user_id, project_id=project_id,
+                 after={"content_version": new_revision.content_version,
+                        "graph_updated": new_revision.content_json.get("lineage_graph") is not None})
     db.commit()
 
     return {

@@ -29,7 +29,8 @@ class MockLLMService(LLMService):
             return {"claims": [], "gaps": [{"code": "mock_model", "message": "Mock 仅验证 Mapping 草稿流程"}],
                     "candidate": {"final_content_draft": "Mock 合成映射草稿，业务规则与物理来源需人工核验。",
                                   "confidence_level": "low", "open_questions": ["请核验实际来源和加工规则。"]}}
-        if system_prompt.startswith("[AI_SKILL_REQUIREMENT_V1]"):
+        if __import__("os").environ.get("VNEXT_DEBUG_MOCK"): print("MOCK_SYS", system_prompt[:160])
+        if "[AI_SKILL_REQUIREMENT_V1]" in system_prompt:
             return {"claims": [], "gaps": [{"code": "mock_model", "message": "Mock 仅验证候选流程，业务内容待人工核验"}],
                     "candidate": {"final_content": "Mock 合成候选，不作为真实监管口径。",
                                   "gaps": ["Mock 未生成可采纳业务结论"]}}

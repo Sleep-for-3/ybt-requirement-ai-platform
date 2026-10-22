@@ -171,7 +171,14 @@ def compile_input(db, definition, version, envelope: SkillInputEnvelope) -> Comp
     if content.output_schema_key != expected_schema:
         fail(422, "skill_output_schema_mismatch")
     if definition.task_key == "requirement_candidate_generation":
-        validate_requirement_output(RequirementCandidate(final_content=""), envelope)
+        # 负向控制：空正文候选必须被引用契约拒绝。这里只验证契约确实生效，
+        # 不能因为探针本身抛错就让编译输入失败。
+        try:
+            validate_requirement_output(RequirementCandidate(final_content=""), envelope)
+        except ValueError:
+            pass
+        else:
+            fail(422, "requirement_contract_missing_empty_body_guard")
     elif definition.task_key in MAPPING_TASKS:
         mapping_constraint(envelope)
     if definition.task_key == FIELD_RERANK_TASK:

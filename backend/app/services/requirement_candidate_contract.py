@@ -6,8 +6,12 @@ existing lease, concurrency and explicit human-adoption checks.
 from copy import deepcopy
 from typing import Annotated, Literal
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field
 
+
+_CHINESE_TEXT = re.compile(r"[\u4e00-\u9fff]")
 
 ReferenceId = Annotated[int, Field(strict=True, gt=0)]
 
@@ -76,6 +80,14 @@ def check_candidate_compliance(context: dict, candidate: dict) -> list[str]:
     rule_ids = {rule["rule_id"] for rule in context.get("script_basis", {}).get("rules", [])}
     if not set(candidate.get("script_rule_ids", [])) <= rule_ids:
         violations.append("候选引用了范围外脚本规则")
+
+    final_content = (candidate.get("final_content") or "").strip()
+    if not final_content:
+        violations.append("候选未给出可交付的需求正文")
+    elif not _CHINESE_TEXT.search(final_content):
+        # 银行需求正文必须是中文业务描述。模型在格式修复路径上可能返回
+        # schema 合法但语义空洞的占位文本，这类候选不能进入人工采用环节。
+        violations.append("需求正文必须使用中文业务描述，当前候选未包含中文正文")
 
     from app.services.requirement_policy_comparison import NORMATIVE_CATEGORIES
     normative_ids = {u["unit_id"] for u in context.get("evidence", []) if u.get("source_category") in NORMATIVE_CATEGORIES}

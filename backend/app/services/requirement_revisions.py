@@ -6,6 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select, update
 
 from app.models import Requirement, RequirementRevision
+from app.services.requirement_gaps import field_gaps
 from app.services.requirement_scope import content_digest, live_document_content
 
 EDITABLE = {
@@ -234,4 +235,41 @@ def refresh_lineage(db, requirement, version, actor_id):
                 })
 
     content["assessment"] = "gaps" if content["gaps"] else "clear"
+    return append_revision(db, requirement, content, version, actor_id)
+
+
+def resolve_gap(db, requirement, version, gap_id, resolution_text, actor_id):
+    """Close one non-derivable gap (e.g. an AI candidate gap) with a human basis.
+
+    Field gaps produced by ``field_gaps`` cannot be closed by a note alone: they
+    disappear only when the field content actually provides the missing fact.
+    """
+    if not requirement.content_version or requirement.content_version != version:
+        raise HTTPException(409, "请重新加载当前需求内容版本")
+    previous = load_revision(db, requirement.project_id, requirement.id, version)
+    if previous.status != "draft":
+        raise HTTPException(409, "当前版本已锁定，请通过修订流程建立新草稿")
+    note = (resolution_text or "").strip()
+    if not note:
+        raise HTTPException(422, "请填写解决依据后再关闭缺口")
+    content = deepcopy(previous.content_json)
+    gap = next((item for item in content.get("gaps", []) if str(item.get("id")) == str(gap_id)), None)
+    if gap is None:
+        raise HTTPException(404, "缺口不在当前需求版本")
+    if gap.get("status") in {"resolved", "closed"}:
+        return previous
+    record = next((row for row in content.get("fields", [])
+                   if row["field"]["id"] == gap.get("field_id")), None)
+    if record is not None:
+        derivable = {item["id"] for item in field_gaps(record)}
+        if str(gap.get("id")) in derivable:
+            raise HTTPException(409, "该缺口需通过补齐字段内容解决，不能用说明直接关闭")
+    gap["status"] = "resolved"
+    gap["resolution_basis"] = {"kind": "manual_resolution", "actor_id": actor_id,
+                               "content_version": version + 1, "note": note}
+    content.setdefault("gap_history", []).append({
+        "id": str(gap.get("id")), "field_id": gap.get("field_id"), "message": gap.get("message"),
+        "status": "resolved", "resolution_basis": gap["resolution_basis"]})
+    content["assessment"] = "gaps" if any(
+        item.get("status") not in {"resolved", "closed"} for item in content.get("gaps", [])) else "clear"
     return append_revision(db, requirement, content, version, actor_id)

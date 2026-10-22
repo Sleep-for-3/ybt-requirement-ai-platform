@@ -10,20 +10,22 @@ from sqlalchemy.orm import Session, sessionmaker
 # spend external-model quota during collection.  Set the isolated defaults
 # before importing application modules; individual runtime tests can still
 # override them with ``monkeypatch`` or explicit ``Settings`` values.
-for _name, _value in {
-    "LLM_PROVIDER": "mock",
-    "LLM_BASE_URL": "",
-    "LLM_MODEL": "",
-    "LLM_API_KEY_ENV_NAME": "",
-    "EMBEDDING_PROVIDER": "mock",
-    "EMBEDDING_BASE_URL": "",
-    "EMBEDDING_MODEL": "",
-    "EMBEDDING_DIMENSION": "0",
-    "EMBEDDING_API_KEY_ENV_NAME": "",
-    "VECTOR_STORE_PROVIDER": "mock",
-    "MILVUS_URI": "",
-}.items():
-    os.environ[_name] = _value
+# 需要真实模型专项验收时显式设置 VNEXT_ALLOW_REAL_RUNTIME=1（默认仍然全部隔离）。
+if os.environ.get("VNEXT_ALLOW_REAL_RUNTIME") != "1":
+    for _name, _value in {
+        "LLM_PROVIDER": "mock",
+        "LLM_BASE_URL": "",
+        "LLM_MODEL": "",
+        "LLM_API_KEY_ENV_NAME": "",
+        "EMBEDDING_PROVIDER": "mock",
+        "EMBEDDING_BASE_URL": "",
+        "EMBEDDING_MODEL": "",
+        "EMBEDDING_DIMENSION": "0",
+        "EMBEDDING_API_KEY_ENV_NAME": "",
+        "VECTOR_STORE_PROVIDER": "mock",
+        "MILVUS_URI": "",
+    }.items():
+        os.environ[_name] = _value
 
 from app.core.database import Base
 from app.core.observability import _lock, _rate_windows

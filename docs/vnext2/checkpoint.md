@@ -1,73 +1,68 @@
 # VNext 2 检查点（docs/vnext2/checkpoint.md）
 
-更新时间：2026-10-22 21:40（Asia/Shanghai）
+更新时间：2026-10-22 22:35（Asia/Shanghai）
 
 ## 当前状态
 
 - 当前分支：`dsh/vnext-business-accuracy-20261021`
 - 起始 HEAD：`6b75384e4bacd94dfae70c58900f09282c7fcde5`
-- 已提交：`08f8e9b fix(vnext2-p0a): 冻结快照后新增待确认问题继续阻断送审与正式交付`（P0-A）
-- 当前工作包：**P0-B RAG 引用裁判（C08/C09/C10）—— 已完成修复、定向回归与真实模型复跑**
-- 下一个工作包：**P0-C 真实监管需求生成与正式交付 E2E**
+- 已提交：`08f8e9b`（P0-A）、`b5e5ae8`（P0-B）
+- 当前工作包：**P0-C 真实监管需求生成与正式交付 E2E —— 后端链路已跑通（真实模型），待提交**
+- 下一个工作包：P0-C 浏览器子项 → P1-A（Agent 五类决策）
 
-## 已完成改动（P0-B，未提交）
+## 当前未提交改动（P0-C）
 
-1. 新增 `backend/app/services/rag/citation_trust.py`（纯确定性，无模型调用）
-   - `normalize_version` / `base_source_title` / `citation_version` / `find_pinned_version`
-   - `version_violations(citations, pinned_versions)`：引用版本与快照固定版本不一致 → 违规记录
-   - `normalize_conflict_type` / `normalize_conflicts` / `downgrade_conflicting_verdicts`
-2. `backend/app/services/rag/citation_support.py`
-   - `CITATION_SUPPORT_SYSTEM_PROMPT` 升级为 `[AI_SKILL_CITATION_SUPPORT_V2]`：同时输出 verdicts（含 `supported_claim_ids`）+ claims + conflicts
-   - `parse_judge_verdicts` 支持多容器列表与 `dimension`（citation/claim/pair），避免 claim-only 判定按位置错配
-   - 新增 `parse_judge_conflicts`、`run_judge_with_conflicts`（`run_judge` 签名保持不变）
-   - `split_claims_all` 支持复合监管结论拆原子主张（条件/口径/包括/包含/分别为 + 顿号逗号枚举）
-3. `backend/app/services/rag/citation_validator.py`
-   - `check_citation_support(..., pinned_versions=None)`（向后兼容）
-   - 版本违规确定性判 unsupported；冲突降级 unknown；`resolved_conflicts` 表示版本冲突已被快照固定版本裁决（只淘汰落后版本）
-   - `trust_blockers` 禁止整体 verified；版本违规覆盖全部引用时判 unsupported
-4. 测试与脚本
-   - 新增 `backend/tests/test_vnext2_citation_trust.py`（18 例，MOCK）
-   - 重写 `scripts/vnext_real_model_golden_eval.py`：按黄金集忠实转写 C01–C10，输出 `verdict_reasons` / `resolved_conflicts` / `claim_*` / `trust_blockers`，标签 `UNVERIFIED`
-5. 文档
-   - `docs/vnext2/p0b-citation-trust.md`（改前/改后、逐案结果、未解决问题）
-   - `docs/audit/VNEXT_CITATION_TRUST-20261022.json`（真实模型证据）
-   - `docs/vnext2/plan.md`（P0-B 标 DONE）
+1. `backend/app/api/requirements.py`
+   - 修复 `POST .../revisions/{cv}/refresh-lineage` 的 `record_audit` 签名错误（原实现必抛 TypeError 500），改为关键字调用并写结构化 `after`。
+   - 新增 `POST .../gaps/{gap_id}/resolve`（201，body `ResolveGapInput{expected_content_version>0, resolution_text 1..2000}`，需 business.edit/technical.edit），写审计 `resolve_requirement_gap`。
+2. `backend/app/services/requirement_revisions.py`：新增 `resolve_gap(...)`（空白说明 422；缺口不存在 404；字段派生缺口 409 不可用说明关闭；通过后 status=resolved、resolution_basis、gap_history、重算 assessment、`append_revision` 生成新版本）。
+3. `backend/app/services/requirement_candidate_contract.py`：`check_candidate_compliance` 新增正文守门——空正文 → 「候选未给出可交付的需求正文」；不含中文 → 「需求正文必须使用中文业务描述，当前候选未包含中文正文」。
+4. `backend/app/services/requirement_generation_worker.py`：提示词按 section 要求中文正文与证据引用；证据在范围内却未被引用时追加待确认 gap。
+5. `backend/app/services/llm/openai_compatible.py`：`content` 为空 → 明确报错「模型未返回结构化正文（finish_reason=…, reasoning_chars=…）」；`chat_structured` 在 invalid response 为空时**不再进入格式修复路径**（防止伪造占位候选）。
+6. `backend/app/core/settings.py` + `backend/app/services/llm/factory.py`：新增 `LLM_MAX_OUTPUT_TOKENS`（默认 4096，范围 256–8192，含校验），替代硬编码 2048；开发 `.env` 设 8192（gitignore，不提交）。
+7. `backend/app/services/ai_skills/runtime.py`：编译期空候选探针改为真正的负向控制（空正文必须被拒不 500）。
+8. `backend/app/services/llm/mock.py`：AI Skill 需求分支 marker 判定由 `startswith` 改为 `in`。
+9. `backend/tests/conftest.py`：新增 `VNEXT_ALLOW_REAL_RUNTIME=1` 开关，默认仍强制 mock/隔离；真实模型专项验收显式开启。
+10. `backend/tests/test_requirement_candidate_contract.py`：新增空正文/中文守门回归。
+11. 新增 `backend/tests/test_vnext2_p0c_real_delivery.py`（4 例：主链路、失败可见、派生缺口不可用说明关闭、冻结后新问题阻断新交付）。
+12. 文档：`docs/vnext2/p0c-real-delivery.md`；`docs/vnext2/plan.md` P0-C 标 `IN_PROGRESS`（后端 DONE，浏览器 TODO）。
 
 ## 测试结果
 
 | 命令 | 结果 |
 | --- | --- |
-| `pytest tests/test_vnext2_citation_trust.py -q` | 18 passed |
-| `pytest tests/test_rag_citation_support.py tests/test_overnight_citation_status.py -q` | 27 passed |
-| `python ../scripts/vnext_real_model_golden_eval.py`（真实网关） | 10/10 一致，0 degraded，9/10 主张级，冲突暴露 2，avg 4338.6ms |
-| `pytest tests/test_vnext2_review_freshness.py -q`（P0-A） | 9 passed |
-| `VNEXT_PG_URL=... pytest tests/test_vnext2_review_freshness_pg.py -q` | 3 passed（真实 PG） |
+| `pytest tests/test_vnext2_p0c_real_delivery.py -q`（真实模型 `deepseek-v4.1-flash` + `LLM_MAX_OUTPUT_TOKENS=8192`） | **4 passed / 159.94s** |
+| 同上（mock/隔离运行时） | 4 passed |
+| 相邻回归 10 文件（llm_runtime、ai_skill_requirement、candidate_contract、p0c、requirement_scope、formal_delivery、draft_snapshots、phase2_closed_loop、manual_question、review_freshness） | **102 passed / 54.38s** |
 
 ## 环境事实（重要）
 
-- **网关已下线 `deepseek-v4-flash`**：`POST /chat/completions` 返回 422 `model not found`；`/models` 只剩 `deepseek-v4.1-flash`、`deepseek-flash`、`deepseek-v4-pro`、`cc/*`、`qwen3.8-flash`、`glm-5.3-flash`。开发验收模型改为 `deepseek-v4.1-flash`（`backend/.env`，gitignore，不进提交）。
-- 模型名错误时系统全部 `degraded=true / provider_error`，verdict 即使碰巧正确也不计通过——这是期望的保守行为。
-- WSL 空闲会自动停机：真实组件测试前先 `wsl -e sh -lc "sleep 7200"`（后台）再等 5432/6379。
-- 后端定向测试统一 `AUTH_MODE=optional`，不需要真实队列时加 `TASK_QUEUE_PROVIDER=inline`。
+- 开发验收网关：`http://47.101.159.7:29988/v1`，`deepseek-v4.1-flash`（推理型：先写 `reasoning_content`，`max_tokens` 不足时 `content` 为空且 `finish_reason=length`）。
+- `deepseek-v4-flash` 已下线（422 model not found）。
+- 真实组件（PG/Redis/Milvus）在 WSL docker；WSL 空闲会自动停机，需 `wsl -e sh -lc "sleep 7200"` 保活后再等端口。
+- 后端定向测试统一 `AUTH_MODE=optional`；不需要真实队列时加 `TASK_QUEUE_PROVIDER=inline`。
 
 ## 恢复命令
 
 ```powershell
 cd ai-platform/backend
 $env:AUTH_MODE="optional"; $env:TASK_QUEUE_PROVIDER="inline"
-.\.venv\Scripts\python.exe -m pytest tests/test_vnext2_citation_trust.py -q
-.\.venv\Scripts\python.exe ..\scripts\vnext_real_model_golden_eval.py --output ..\docs\audit\VNEXT_CITATION_TRUST-20261022.json
-wsl -e sh -lc "sleep 7200"   # 需要真实 PG 时后台保活
+.\.venv\Scripts\python.exe -m pytest tests/test_vnext2_p0c_real_delivery.py -q
+# 真实模型（约 3 次生成，2.5 分钟）：
+$env:VNEXT_ALLOW_REAL_RUNTIME="1"; $env:VNEXT2_P0C_REAL_MODEL="1"; $env:LLM_MAX_OUTPUT_TOKENS="8192"
+.\.venv\Scripts\python.exe -m pytest tests/test_vnext2_p0c_real_delivery.py -q
 ```
 
 ## 当前阻断项
 
 - 无硬阻断。已知缺口：
-  1. `pinned_versions` 尚未接入产品主链路（`grounded_answer_service.py:166` 不传），C10 的确定性规则在产品内不会自动生效 → 放进 P0-C。
-  2. C08 的 `unknown` vs `unsupported` 存在运行间波动，未用文本启发式硬拗。
-  3. 冻结后新增人工问题仍不会自动生成 `RequirementRecheck`（P0-A 已记录）。
+  1. P0-C 真实浏览器全操作闭环未完成（现有浏览器脚本只覆盖登录/页面/Tab）。
+  2. 前端没有“缺口关闭（resolve_gap）”入口（API 已有）。
+  3. `pinned_versions` 仍未接入产品生成路径。
+  4. 冻结后新增人工问题不会自动生成 `RequirementRecheck`。
 
 ## 下一步准确动作
 
-1. 提交 P0-B（代码 + 测试 + 脚本 + docs/vnext2 + 证据 JSON）。
-2. 进入 P0-C：先读 `backend/tests/test_vnext2_phase2_closed_loop.py`、生成链路（generation-run / adopt API）与文档导出实现，设计“借据→合同→产品→期限方案→客户→集市→一表通”的合成场景，跑通真实模型生成 → 候选 → 采用 → 修订 → 三级审核 → 正式交付 → Word/Excel 导出，并在生成路径接入 `pinned_versions`。
+1. 提交 P0-C 当前改动（代码 + 测试 + docs/vnext2）。
+2. 扩展真实浏览器闭环：优先打通“真实页面新建需求→生成→查看候选/证据→采用→编辑→送审→多角色审核→正式交付→下载 Word”。
+3. 随后进入 P1-A（Agent 五类决策）。

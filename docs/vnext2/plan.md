@@ -49,10 +49,13 @@
 - 关键环境事实：公司网关已下线 `deepseek-v4-flash`（`POST /chat/completions` 返回 422 `model not found`，`GET /models` 只剩 `deepseek-v4.1-flash / deepseek-flash / deepseek-v4-pro / cc/* / qwen3.8-flash / glm-5.3-flash`），本轮开发验收改用 `deepseek-v4.1-flash`（`backend/.env` 已改，文件本身被 gitignore，不进提交）。
 - 未覆盖/下一步：`pinned_versions` 目前只有评测脚本传入，产品生成路径（`backend/app/services/rag/grounded_answer_service.py:166`）还没有从需求快照推导固定版本——需在 P0-C 打通“需求冻结时的知识版本 → 引用裁判固定版本”，否则 C10 确定性规则在产品内不会自动生效。
 
-### P0-C 真实监管需求生成与正式交付 E2E　`TODO`
+### P0-C 真实监管需求生成与正式交付 E2E　`IN_PROGRESS`（后端链路 DONE，浏览器子项 TODO）
 
 - 痛点：`backend/tests/test_vnext_phase2_closed_loop.py` 的 `_adopt_complete_content` 直接写已确认内容，未证明「真实请求 → 模型生成 → 候选 → 采用 → 修订 → 审批 → 正式交付 → 导出」。
-- 待做：借据/合同/产品/产品期限方案/客户/来源库/数据集市/一表通目标表的合成场景；产品 ID 重复、复合业务键、一对多、日期有效期、空值、历史与当前制度；26 步 API 链路；Word/Excel 内容与快照哈希校验；浏览器真实操作扩展。
+- 已完成（REAL_COMPONENT + REAL_MODEL）：新增 `backend/tests/test_vnext2_p0c_real_delivery.py`，合成“借据→合同→产品→产品期限方案→客户→来源库→数据集市→一表通”场景，主链路全部走 HTTP API（生成走 inline 队列真实执行 worker，真实网关 `deepseek-v4.1-flash` 生成候选），覆盖：冻结 v1 → generation-inputs/runs → 读候选 hash 与 changes → 批量 adopt → 人工补业务/技术口径 → refresh-lineage → gaps resolve → readiness → 三级审核 → finalize → xlsx/docx 导出（校验正文与 `X-Requirement-Snapshot-Hash`）→ 交付后新增问题阻断新交付且旧文件不变 → 建立新修订历史交付仍不变。失败反例：非法结构 → item failed/blocked 且不产生假正文；派生缺口不可用说明关闭；空白说明 422。
+- 顺带修复的真实缺陷：①`refresh-lineage` 接口 `record_audit` 调用签名错误导致 100% 500；②AI 候选 gaps 无关闭通道造成需求永久不可送审（新增 `resolve_gap` + `POST .../gaps/{gap_id}/resolve`）；③真实推理模型空正文被“格式修复”伪造成英文占位候选（`openai_compatible.py` 空正文明确失败且不进入修复、新增 `LLM_MAX_OUTPUT_TOKENS`、候选正文必须非空且中文、worker 提示词按 section 要求中文与证据引用）。
+- 测试：`pytest tests/test_vnext2_p0c_real_delivery.py -q`（真实模型）→ **4 passed / 159.94s**；相邻回归 10 个文件 → **102 passed**。
+- 未完成：真实浏览器全操作闭环（现只有登录/页面/Tab 的 `scripts/vnext_workspace_browser_smoke.mjs`）；前端“缺口关闭”入口；详见 `docs/vnext2/p0c-real-delivery.md` 第 7 节。
 
 ### P1-A Agent 五类业务决策　`TODO`
 

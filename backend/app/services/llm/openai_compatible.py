@@ -142,9 +142,16 @@ class OpenAICompatibleLLMService(LLMService):
             invalid_response = json.dumps(payload, ensure_ascii=False)
             return response_schema.model_validate(payload)
         except (LLMResponseError, ValidationError) as first_error:
+
             first_metadata = _copy_metadata(self.last_call)
             if isinstance(first_error, LLMResponseError) and first_error.raw_response:
                 invalid_response = first_error.raw_response
+            if not invalid_response.strip():
+                # Nothing to repair: an empty/truncated answer carries no content
+                # for the formatter to fix, and asking it to "repair" empty text
+                # produced fabricated placeholder prose that the business flow
+                # then mistook for an adopted candidate.
+                raise first_error
             repair_prompt = (
                 "Return one JSON object that conforms exactly to this JSON Schema. "
                 "Do not add commentary or markdown.\n"
@@ -181,15 +188,30 @@ class OpenAICompatibleLLMService(LLMService):
             payload["response_format"] = {"type": "json_object"}
         response = await self._post("/chat/completions", payload)
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            choice = response.json()["choices"][0]
+            content = choice["message"]["content"]
+            finish_reason = str(choice.get("finish_reason") or "")
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise LLMResponseError("Provider response did not contain a chat completion") from exc
         if not isinstance(content, str):
             raise LLMResponseError("Provider chat completion content was not text")
+        if not content.strip():
+            # Reasoning-capable gateways put their thinking in
+            # ``reasoning_content`` and can exhaust ``max_tokens`` before a
+            # single正文 token is emitted.  That is a truncated answer, never a
+            # blank-but-valid candidate, so it must fail loudly instead of
+            # letting the JSON-repair path invent placeholder prose.
+            reasoning = choice["message"].get("reasoning_content") if isinstance(choice.get("message"), dict) else None
+            raise LLMResponseError(
+                "模型未返回结构化正文（"
+                f"finish_reason={finish_reason or 'unknown'}, reasoning_chars={len(str(reasoning or ''))}）",
+                raw_response="",
+            )
         content = _strip_json_fence(content)
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
+
             raise LLMResponseError("Provider response was not valid JSON", raw_response=content) from exc
         if not isinstance(parsed, dict):
             raise LLMResponseError("Provider response JSON must be an object")

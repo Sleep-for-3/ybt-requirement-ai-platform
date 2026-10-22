@@ -72,6 +72,29 @@ def test_model_cannot_assert_human_decision(key):
         RequirementCandidate.model_validate({**candidate(), key: True})
 
 
+@pytest.mark.parametrize("replacement,expected", [
+    ({"final_content": "   "}, "需求正文"),
+    ({"final_content": "Repaired JSON object conforming to the provided schema."}, "中文"),
+])
+def test_empty_or_placeholder_candidates_cannot_pass_compliance(replacement, expected):
+    """真实模型在格式修复路径上会返回 schema 合法但语义空洞的占位正文。
+
+    这类候选不能被人工采用，否则需求正文会变成无证据的伪口径。
+    """
+    parsed = RequirementCandidate.model_validate({**candidate(), **replacement}).model_dump()
+    violations = check_candidate_compliance(frozen_context(), parsed)
+    assert any(expected in item for item in violations), violations
+
+
+def test_business_and_lineage_sections_require_their_own_content():
+    """候选正文不能只是英文占位说明（真实模型格式修复路径会这样返回）。"""
+    section_context = {**frozen_context(), "section": "lineage",
+                       "fields": [{"target": {"id": 1}, "authored": {}}]}
+    parsed = RequirementCandidate.model_validate(
+        {**candidate(), "final_content": "Repaired JSON object"}).model_dump()
+    assert any("中文" in item for item in check_candidate_compliance(section_context, parsed))
+
+
 def test_projection_selects_one_target_and_retains_all_evidence_without_mutation():
     frozen = {**frozen_context(), "field_ids": [1, 2], "sections": ["business", "lineage"],
         "fields": [{"target": {"id": 1}, "authored": {"business": {"final_content": "人工正文"}}},

@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     # slow provider, while an interactive request must answer or hand the user
     # back the evidence it already retrieved instead of hanging.
     llm_interactive_timeout_seconds: int = 90
+    # Structured (JSON) generation budget.  Reasoning-capable gateways spend
+    # tokens on ``reasoning_content`` before emitting ``content``; with the old
+    # hard-coded 2048 the正文 was silently truncated and the repair path then
+    # fabricated a placeholder.  Configurable and bounded (schema below).
+    llm_max_output_tokens: int = 4096
     # Field-rerank call budget.  0 keeps the historical behaviour: the rerank call is
     # an explicit user action and the product contract today is "wait for the model",
     # not "degrade when the model is slow".  A positive value is the opt-in switch
@@ -264,6 +269,12 @@ class Settings(BaseSettings):
                 "error",
                 "llm_interactive_timeout_invalid",
                 "LLM_INTERACTIVE_TIMEOUT_SECONDS must be between 1 and 180.",
+            )
+        if not 256 <= self.llm_max_output_tokens <= 8192:
+            add(
+                "error",
+                "llm_max_output_tokens_invalid",
+                "LLM_MAX_OUTPUT_TOKENS must be between 256 and 8192.",
             )
         if self.field_rerank_timeout_seconds != 0 and not 1 <= self.field_rerank_timeout_seconds <= 180:
             add(
