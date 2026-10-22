@@ -1,8 +1,10 @@
 from copy import deepcopy
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
 from app.models import Requirement, RequirementGenerationInput, RequirementGenerationItem, ScenarioBusinessMapping
+from app.services.requirement_candidates import _apply_selection
 from app.services.requirement_scope import content_digest
 from test_requirement_snapshot_api import snapshot_api, snapshot_db
 
@@ -129,3 +131,22 @@ def test_batch_adoption_keeps_sibling_candidates_current_until_one_revision_is_c
     db.refresh(first); db.refresh(second)
     assert first.decision == second.decision == "adopted"
     assert first.adopted_content_version == second.adopted_content_version == 2
+
+
+def test_business_candidate_can_keep_its_evidence_references():
+    """业务口径候选同样可以保留证据引用；否则前端展示的证据勾选会被后端 422 拒绝。"""
+    content = {"fields": [{"field": {"id": 5}, "business": {}, "lineage": {}, "evidence": [], "mart_mappings": []}],
+        "gaps": [], "manual_ownership": {}}
+    generation_input = SimpleNamespace(input_json={"content_version": 1, "evidence": [{"unit_id": 11, "title": "制度片段",
+        "content": "客户统一标识取客户主数据中的客户编号"}], "physical_sources": []})
+    item = SimpleNamespace(id=3, section="business", field_id=5, candidate_hash="c" * 64, input_id=7, candidate_json={
+        "business_definition": "客户统一标识取客户主数据客户编号", "processing_logic": "",
+        "final_content": "以客户主数据中的客户编号作为客户统一标识。", "physical_references": [],
+        "evidence_unit_ids": [11], "gaps": []})
+    _apply_selection(content, generation_input, item,
+        ["business_definition", "final_content", "evidence"], [], actor_id=1, next_version=2)
+    record = content["fields"][0]
+    assert record["business"]["final_content"] == "以客户主数据中的客户编号作为客户统一标识。"
+    assert record["evidence"][0]["evidence_id"] == 11
+    assert record["business"]["business_confirm_status"] == "draft"
+    assert content["manual_ownership"]["5"]["business.final_content"]["kind"] == "ai_adopted"

@@ -979,20 +979,41 @@ class RequirementSnapshotService:
                     estimated_impact="关联键无法确认，需求文档的取数逻辑不可执行",
                 ))
             elif plan.get("structured") and plan.get("cardinality_basis") != "both_sides_declared":
-                incomplete = plan.get("cardinality") == "unknown"
-                gaps.append(_gap(
-                    "missing_join_cardinality",
-                    "关联键已解析，但缺少主键或唯一键证据，无法判定基数"
-                    if incomplete
-                    else "关联键已解析，但只确认了关联一侧的唯一性，另一侧未登记主键或唯一键",
-                    "在元数据中登记主键或唯一键，或由业务确认一对一/一对多关系与数据粒度",
-                    field.id,
-                    "low",
-                    mapping_id=mapping_id,
-                    rationale="项目内没有该关联键的主键声明，无法证明关联基数与粒度",
-                    evidence_refs=list(evidence_refs.get((mapping_type, int(mapping_id)), [])) if mapping_id else [],
-                    estimated_impact="无法确认关联后行数是否放大，可能影响报送金额或户数准确性",
-                ))
+                partial_keys = plan.get("partial_unique_keys") or []
+                if partial_keys:
+                    # Composite unique key only partially covered by the join: the same
+                    # product id may repeat per term/scheme, so row count can multiply.
+                    # The platform flags this for business confirmation instead of
+                    # silently appending the missing key to the join condition.
+                    item = partial_keys[0]
+                    declared = "、".join(str(column) for column in item.get("declared") or [])
+                    covered = "、".join(str(column) for column in item.get("covered") or []) or "仅部分键"
+                    gaps.append(_gap(
+                        "missing_join_cardinality",
+                        f"关联只覆盖了复合唯一键的一部分：声明唯一键为 {declared}，实际关联键为 {covered}",
+                        "确认是否必须把期限/方案等其余业务键一并纳入关联；在业务确认关联基数前不得视为一对一",
+                        field.id,
+                        "medium",
+                        mapping_id=mapping_id,
+                        rationale="复合唯一键未被完整覆盖时，同一业务键可能对应多条期限或方案记录，关联后行数会放大",
+                        evidence_refs=list(evidence_refs.get((mapping_type, int(mapping_id)), [])) if mapping_id else [],
+                        estimated_impact="关联后记录数或金额可能重复累计，直接影响监管报送值",
+                    ))
+                else:
+                    incomplete = plan.get("cardinality") == "unknown"
+                    gaps.append(_gap(
+                        "missing_join_cardinality",
+                        "关联键已解析，但缺少主键或唯一键证据，无法判定基数"
+                        if incomplete
+                        else "关联键已解析，但只确认了关联一侧的唯一性，另一侧未登记主键或唯一键",
+                        "在元数据中登记主键或唯一键，或由业务确认一对一/一对多关系与数据粒度",
+                        field.id,
+                        "low",
+                        mapping_id=mapping_id,
+                        rationale="项目内没有该关联键的主键声明，无法证明关联基数与粒度",
+                        evidence_refs=list(evidence_refs.get((mapping_type, int(mapping_id)), [])) if mapping_id else [],
+                        estimated_impact="无法确认关联后行数是否放大，可能影响报送金额或户数准确性",
+                    ))
 
         declared_rules = [
             text

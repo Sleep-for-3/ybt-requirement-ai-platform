@@ -341,13 +341,21 @@ def test_generation_adoption_review_and_formal_delivery(p0c, monkeypatch):
     assert document.status_code == 200, document.text
     open_gaps = [gap for gap in document.json().get("gaps", [])
                  if gap.get("status") not in {"resolved", "closed"}]
-    for gap in open_gaps:
+    for index, gap in enumerate(open_gaps):
         closed = client.post(base + f"/gaps/{gap['id']}/resolve", json={
             "expected_content_version": content_version,
             "resolution_text": "已人工核对合成制度 2026-v1 第十条与集市映射证据，确认该候选口径可交付。",
         })
         assert closed.status_code == 201, (gap, closed.text)
         content_version = closed.json()["revision"]["content_version"]
+        if index == 0:
+            # 已关闭的缺口不能重复关闭：服务端必须明确拒绝，避免界面反复点同一张卡片却原地打转。
+            repeated = client.post(base + f"/gaps/{gap['id']}/resolve", json={
+                "expected_content_version": content_version,
+                "resolution_text": "重复提交同一条依据。",
+            })
+            assert repeated.status_code == 409, repeated.text
+            assert "已关闭" in repeated.json()["detail"]
 
     readiness = client.get(base + "/review-readiness", params={"content_version": content_version})
     assert readiness.status_code == 200, readiness.text

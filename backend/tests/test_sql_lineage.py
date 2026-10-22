@@ -24,6 +24,7 @@ from app.models import (
     RegulatoryKnowledgeItem, SemanticBinding, SemanticConcept, SemanticConceptVersion, SemanticRelation,
     ScenarioBusinessMapping, ScenarioTechnicalLineage, ScriptChangeSet, ScriptFile as ScriptFileModel, ScriptFileVersion,
     SourceField, SourceTable, SourceToMartMapping, TargetField, TargetTable, TemplateVariable, User,
+    Requirement,
 )
 from app.services.lineage.resolver import resolve_lineage_node
 from app.services.lineage.impact_analyzer import persist_change_impact
@@ -786,8 +787,15 @@ def test_critical_impact_marks_mappings_stale_without_overwriting_final_content(
     business = ScenarioBusinessMapping(project_id=project.id, target_field_id=target.id, scenario_id=scenario.id, final_content="人工业务口径")
     source_mapping = SourceToMartMapping(project_id=project.id, mart_field_id=mart.id, final_content="人工入集市口径")
     ybt_mapping = MartToYbtMapping(project_id=project.id, target_field_id=target.id, mart_field_id=mart.id, final_content="人工上报口径")
+    requirement = Requirement(
+        project_id=project.id,
+        name="A 字段报送需求",
+        version=1,
+        content_version=1,
+        scope_json={"target_table_id": target_table.id, "field_ids": [target.id], "scenario_id": scenario.id},
+    )
     script = ScriptFileModel(project_id=project.id, relative_path="load.sql", file_name="load.sql", file_type="sql", current_version_no=2)
-    db_session.add_all([business, technical, source_mapping, ybt_mapping, script]); db_session.flush()
+    db_session.add_all([business, technical, source_mapping, ybt_mapping, requirement, script]); db_session.flush()
     old = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=1, file_hash="a"*64, normalized_hash="b"*64, raw_content_storage_file_id=1, parse_status="parsed", created_by=user.id)
     new = ScriptFileVersion(project_id=project.id, script_file_id=script.id, version_no=2, file_hash="c"*64, normalized_hash="d"*64, raw_content_storage_file_id=2, parse_status="parsed", created_by=user.id)
     db_session.add_all([old, new]); db_session.flush()
@@ -856,14 +864,17 @@ def test_critical_impact_marks_mappings_stale_without_overwriting_final_content(
     assert set(impact.affected_semantic_version_ids_json) == {term_version.id, regulatory_version.id}
     assert impact.affected_regulatory_rule_ids_json == [regulatory_rule.id]
     assert impact.affected_regulatory_knowledge_item_ids_json == [knowledge_item.id]
-    assert impact.affected_requirement_ids_json == [target.id]
+    # Requirement impact must reference the requirement that owns the frozen scope,
+    # not the target field id that happened to carry the same small integer.
+    assert impact.affected_requirement_ids_json == [requirement.id]
     scope = _impact_scope_dict(db_session, impact)
     assert {item["id"] for item in scope["semantic_concepts"]} == {term.id, regulatory_rule.id}
     assert scope["requirements"] == [{
-        "id": target.id,
+        "id": requirement.id,
+        "name": "A 字段报送需求",
+        "content_version": 1,
         "target_table_id": target_table.id,
-        "field_code": "A",
-        "field_name": "A",
+        "field_ids": [target.id],
     }]
     assert scope["regulatory_knowledge_items"][0]["id"] == knowledge_item.id
     assert technical.lineage_status == source_mapping.lineage_status == ybt_mapping.lineage_status == "stale"

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.settings import get_settings
-from app.models import BackgroundJob, BackgroundJobItem, CodeRepository, ImpactAnalysis, LineageEdge, LineageNode, LineageResolutionCandidate, LineageRevision, Project, RegulatoryKnowledgeItem, ReviewTask, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, SemanticConcept, SemanticConceptVersion, StoredFile, TargetField, WorkflowInstance
+from app.models import BackgroundJob, BackgroundJobItem, CodeRepository, ImpactAnalysis, Requirement, LineageEdge, LineageNode, LineageResolutionCandidate, LineageRevision, Project, RegulatoryKnowledgeItem, ReviewTask, ScriptChangeItem, ScriptChangeSet, ScriptDependency, ScriptFile, ScriptFileVersion, SemanticConcept, SemanticConceptVersion, StoredFile, TargetField, WorkflowInstance
 from app.services.auth.dependencies import CurrentPrincipal
 from app.services.auth.permission_service import PermissionService
 from app.services.asset_display import AssetDisplayResolver
@@ -1051,10 +1051,10 @@ def _impact_scope_dict(db: Session, row: ImpactAnalysis) -> dict:
         SemanticConceptVersion.project_id == row.project_id,
         SemanticConceptVersion.id.in_(row.affected_semantic_version_ids_json or []),
     ).order_by(SemanticConceptVersion.id)).all()) if row.affected_semantic_version_ids_json else []
-    requirements = list(db.scalars(select(TargetField).where(
-        TargetField.project_id == row.project_id,
-        TargetField.id.in_(row.affected_requirement_ids_json or []),
-    ).order_by(TargetField.id)).all()) if row.affected_requirement_ids_json else []
+    requirement_rows = list(db.scalars(select(Requirement).where(
+        Requirement.project_id == row.project_id,
+        Requirement.id.in_(row.affected_requirement_ids_json or []),
+    ).order_by(Requirement.id)).all()) if row.affected_requirement_ids_json else []
     regulatory_items = list(db.scalars(select(RegulatoryKnowledgeItem).where(
         RegulatoryKnowledgeItem.project_id == row.project_id,
         RegulatoryKnowledgeItem.id.in_(row.affected_regulatory_knowledge_item_ids_json or []),
@@ -1069,8 +1069,14 @@ def _impact_scope_dict(db: Session, row: ImpactAnalysis) -> dict:
             for item in versions
         ],
         "requirements": [
-            {"id": item.id, "target_table_id": item.target_table_id, "field_code": item.field_code, "field_name": item.field_name}
-            for item in requirements
+            {
+                "id": item.id,
+                "name": item.name,
+                "content_version": item.content_version,
+                "target_table_id": (item.scope_json or {}).get("target_table_id"),
+                "field_ids": list((item.scope_json or {}).get("field_ids") or []),
+            }
+            for item in requirement_rows
         ],
         "regulatory_knowledge_items": [
             {"id": item.id, "knowledge_type": item.knowledge_type, "target_table_code": item.target_table_code, "target_field_code": item.target_field_code, "source_document_name": item.source_document_name}

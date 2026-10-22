@@ -51,6 +51,8 @@ SEMANTIC_LABELS: dict[str, str] = {
     "distinct_changed": "DISTINCT 去重语义发生变化",
     "union_mode_changed": "UNION / UNION ALL 去重语义发生变化",
     "having_changed": "聚合后过滤（HAVING）条件发生变化",
+    "top_limit_changed": "取数行数范围（TOP/LIMIT）发生变化",
+    "cte_changed": "CTE 内部加工逻辑发生变化",
     "aggregation_changed": "聚合逻辑发生变化",
     "code_mapping_changed": "代码映射（CASE WHEN 等）发生变化",
     "transformation_changed": "取值/加工规则发生变化",
@@ -66,6 +68,7 @@ SEMANTIC_LABELS: dict[str, str] = {
 CALIBER_AFFECTING: frozenset[str] = frozenset({
     "filter_changed", "join_changed", "join_type_changed", "aggregation_changed",
     "group_by_changed", "distinct_changed", "union_mode_changed", "having_changed",
+    "top_limit_changed", "cte_changed",
     "code_mapping_changed", "transformation_changed", "source_column_removed",
     "source_table_changed", "target_column_changed",
 })
@@ -129,15 +132,15 @@ SEMANTIC_FAMILIES: dict[str, SemanticFamilySpec] = {
     ),
     "order_by": SemanticFamilySpec(
         "order_by", "ORDER BY", DETECTION_UNSUPPORTED, None, False,
-        "语句级 ORDER BY 不改变任何 lineage 属性：order by dt → order by amt 只产生无归因回退项；窗口内 ORDER BY 属于 window_function 家族。",
+        "语句级 ORDER BY 本身不改变监管汇总值，只有与 TOP/LIMIT 同时出现时才会改变实际取到的记录；该组合已归入 top_limit 家族（top_limit_changed），因此单独的 ORDER BY 排序变化仍不单独归因，只产生无归因回退项。窗口内 ORDER BY 属于 window_function 家族。",
     ),
     "row_number_order": SemanticFamilySpec(
         "row_number_order", "ROW_NUMBER 排序", DETECTION_COMPARATOR, "transformation_changed", True,
         "排序函数与窗口排序键变化进入 transformation_expression；row_number → rank 亦可能同时触发 aggregation_rule 变化。",
     ),
     "top_limit": SemanticFamilySpec(
-        "top_limit", "TOP · LIMIT", DETECTION_UNSUPPORTED, None, True,
-        "LIMIT/TOP 不进入任何 lineage 属性：limit 10 → limit 100 只产生无归因回退项，行数范围无法被机械定位。",
+        "top_limit", "TOP · LIMIT", DETECTION_COMPARATOR, "top_limit_changed", True,
+        "LIMIT/TOP 与 OFFSET 以规范化文本作为独立维度（statement_semantics.row_limit），行数范围变化得到 top_limit_changed；当同一语句的 ORDER BY 也变化时，排序决定实际取到哪些记录，二者合并为同一行数范围证据。",
     ),
     "date_boundary": SemanticFamilySpec(
         "date_boundary", "日期边界", DETECTION_COMPARATOR, "filter_changed", True,
@@ -224,8 +227,8 @@ SEMANTIC_FAMILIES: dict[str, SemanticFamilySpec] = {
         "子查询文本作为谓词的一部分被捕获；子查询相关列变化会体现为来源列增删。",
     ),
     "cte": SemanticFamilySpec(
-        "cte", "CTE", DETECTION_UNSUPPORTED, None, True,
-        "comparator 不建模 CTE 结构：CTE 内部投影变化只产生无归因回退项；CTE 内谓词变化虽落到 filter_changed 但不携带 CTE 上下文，无法归因到 CTE 家族。",
+        "cte", "CTE", DETECTION_COMPARATOR, "cte_changed", True,
+        "每个 CTE 以「名称 + 规范化投影 + WHERE 谓词」生成签名（statement_semantics.cte_signatures），CTE 内部加工或过滤变化得到 cte_changed；CTE 自身的新增/删除同时体现为签名集合差异。外层投影未变时也不会落到无归因回退项。",
     ),
     "exists": SemanticFamilySpec(
         "exists", "EXISTS", DETECTION_COMPARATOR, "filter_changed", True,
@@ -326,11 +329,21 @@ def change_item(item: ChangeItemSpec) -> dict[str, Any]:
     else:
         detail = "（无文本表达式，需结合 SQL 原文确认）"
     semantic = category != "non_semantic"
-    affects_caliber = category in CALIBER_AFFECTING
+    # Only the comparator's explicit fallback bucket is unattributed; a statement-level
+    # change attributed to a structural family may legitimately use a script entity type.
+    unattributed = not getattr(item, "attributed", True)
+    # An AST difference the comparator could not pin to a structural dimension must not
+    # claim a caliber impact: the fallback bucket is a prompt for a human read, not a
+    # finding.  Otherwise an equivalent rewrite (e.g. a CTE rename) would be reported as
+    # "取值/加工规则发生变化" and inflate caliber_affecting_count.
+    affects_caliber = (not unattributed) and category in CALIBER_AFFECTING
+    if unattributed:
+        label = f"{label}（未归因 AST 变化）"
     return {
         "category": category,
         "label": label,
         "entity_type": item.entity_type,
+        "attributed": item.attributed,
         "severity": item.severity,
         "semantic": semantic,
         "affects_caliber": affects_caliber,
@@ -338,8 +351,12 @@ def change_item(item: ChangeItemSpec) -> dict[str, Any]:
         "after": after,
         "detail": detail,
         "statement": (
-            f"{label}：{detail}；{CALIBER_IMPACT}（interpretation，需 Evidence 与人工确认）"
-            if affects_caliber else f"{label}：{detail}"
+            f"{label}：{detail}；comparator 未能把该变化归因到结构化语义维度，"
+            "需人工对照 SQL 原文判断是否影响口径（unattributed，需人工确认）"
+            if unattributed else (
+                f"{label}：{detail}；{CALIBER_IMPACT}（interpretation，需 Evidence 与人工确认）"
+                if affects_caliber else f"{label}：{detail}"
+            )
         ),
     }
 
@@ -367,9 +384,9 @@ def semantic_fact(item: dict[str, Any], *, index: int, evidence_prefix: str) -> 
         "entity_type": item["entity_type"],
         "severity": item["severity"],
         "attribution": (
-            UNATTRIBUTED_ATTRIBUTION
-            if item["entity_type"] == UNATTRIBUTED_ENTITY_TYPE
-            else STRUCTURAL_ATTRIBUTION
+            STRUCTURAL_ATTRIBUTION
+            if item.get("attributed", True)
+            else UNATTRIBUTED_ATTRIBUTION
         ),
         "before": item["before"],
         "after": item["after"],

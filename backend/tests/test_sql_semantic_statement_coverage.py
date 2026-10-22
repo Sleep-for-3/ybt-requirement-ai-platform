@@ -87,15 +87,15 @@ def test_every_upgraded_family_is_declared_as_a_comparator_family():
         assert SEMANTIC_FAMILIES[code].detection == DETECTION_COMPARATOR, code
 
 
-def test_only_four_families_remain_unsupported_and_none_is_an_upgrade():
-    """Pins the honest boundary: the remaining gaps must not overlap the upgraded set."""
+def test_only_one_family_remains_unsupported_and_it_is_not_an_upgrade():
+    """Pins the honest boundary: the remaining gap must not overlap the upgraded set."""
 
     remaining = {
         code
         for code, spec in SEMANTIC_FAMILIES.items()
         if spec.detection == DETECTION_UNSUPPORTED
     }
-    assert remaining == {"order_by", "top_limit", "cte"}
+    assert remaining == {"order_by"}
     assert not remaining & set(UPGRADED_FAMILIES)
 
 

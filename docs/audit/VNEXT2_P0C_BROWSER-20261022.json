@@ -1,0 +1,907 @@
+{
+  "startedAt": "2026-10-22T16:15:58.152Z",
+  "web": "http://127.0.0.1:3010",
+  "api": "http://127.0.0.1:8011/api",
+  "projectId": 7,
+  "requirementId": 5,
+  "blockedBadge": {
+    "before": "审核与正式交付\n\n业务审核、技术审核和终审全部通过后，固定当前需求版本。\n\n可送审\n\n当前角色可查看审核记录，但不能发起正式送审。\n\n内容 v11已通过 · 2026/10/23 00:24\n固定正式交付\n业务口径审核 · 已通过\n技术血缘审核 · 已通过\n最终审核 · 已通过",
+    "after": "审核与正式交付\n\n业务审核、技术审核和终审全部通过后，固定当前需求版本。\n\n1 项阻断\n\n正式交付暂不可用\n\n· 存在未解决的人工待确认问题：浏览器闭环反例：客户统一标识是否必须按「产品ID+期限编号」组合业务键取值？请提供制度依据。\n\n当前角色可查看审核记录，但不能发起正式送审。"
+  },
+  "delivery": {
+    "latest": {
+      "id": 1,
+      "version_no": 1,
+      "content_version": 11,
+      "content_hash": "c2825d3ccb1a9d32da0058cada3028e34067f58f0904a63102e7ba1df1051a24",
+      "file_hash": "2e94c52abf6b903a0b0b0fc9c3c153afa56c123e3df075b515dda1a80f582dfc",
+      "approved_by": 20,
+      "approved_at": "2026-10-22T16:25:22.203000+00:00",
+      "created_at": "2026-10-22T16:25:46.622970+00:00",
+      "status": "formal"
+    },
+    "xlsx": {
+      "file": "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\requirement-v1.xlsx",
+      "bytes": 13334,
+      "sha256": "2e94c52abf6b903a0b0b0fc9c3c153afa56c123e3df075b515dda1a80f582dfc"
+    },
+    "docx": {
+      "file": "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\requirement-v1.docx",
+      "bytes": 38711,
+      "sha256": "8118d79dc5da6dd629446994f41761b44500c1710617cf584644f9910778e52d"
+    },
+    "exportedAt": "2026-10-22T16:25:49.620Z"
+  },
+  "reviewSubmissions": [
+    {
+      "id": 2,
+      "content_version": 11,
+      "content_hash": "c2825d3ccb1a9d32da0058cada3028e34067f58f0904a63102e7ba1df1051a24",
+      "status": "approved",
+      "submitted_by": 15,
+      "submitted_at": "2026-10-22T16:24:59.472896+00:00",
+      "reviewed_by": 20,
+      "reviewed_at": "2026-10-22T16:25:22.203000+00:00",
+      "workflow": {
+        "id": 2,
+        "status": "approved",
+        "current_step": "final_review"
+      },
+      "tasks": [
+        {
+          "id": 4,
+          "step_key": "business_review",
+          "status": "approved",
+          "assignee_role": "business_reviewer",
+          "assignee_user_id": null
+        },
+        {
+          "id": 5,
+          "step_key": "technical_review",
+          "status": "approved",
+          "assignee_role": "technical_reviewer",
+          "assignee_user_id": null
+        },
+        {
+          "id": 6,
+          "step_key": "final_review",
+          "status": "approved",
+          "assignee_role": "final_reviewer",
+          "assignee_user_id": null
+        }
+      ]
+    }
+  ],
+  "readiness": {
+    "detail": [
+      {
+        "type": "missing",
+        "loc": [
+          "query",
+          "content_version"
+        ],
+        "msg": "Field required"
+      }
+    ],
+    "error_code": "validation_failed",
+    "user_message": "输入数据不完整或格式不正确",
+    "technical_message": null,
+    "trace_id": "9f58ae8de20c42638e0e615bf9c00479",
+    "retryable": false,
+    "suggested_actions": [
+      "补充必填信息后重试"
+    ]
+  },
+  "finishedAt": "2026-10-22T16:26:04.568Z",
+  "ok": true,
+  "steps": [
+    {
+      "step": "login:business_analyst",
+      "ok": true,
+      "detail": "p0c-biz 通过登录页获取会话令牌",
+      "at": "2026-10-22T16:16:01.947Z"
+    },
+    {
+      "step": "workspace:business_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:16:05.168Z"
+    },
+    {
+      "step": "content:present",
+      "ok": true,
+      "detail": "已存在独立内容 v1",
+      "at": "2026-10-22T16:16:05.615Z"
+    },
+    {
+      "step": "business:generate-clicked-1",
+      "ok": true,
+      "detail": "由真实页面触发 generation-runs（Celery 异步）",
+      "at": "2026-10-22T16:16:05.713Z"
+    },
+    {
+      "step": "business:generation",
+      "ok": true,
+      "detail": "真实模型候选已生成：已生成 1",
+      "at": "2026-10-22T16:16:27.866Z"
+    },
+    {
+      "step": "business:adopt",
+      "ok": true,
+      "detail": "当前内容 v2",
+      "at": "2026-10-22T16:16:29.524Z"
+    },
+    {
+      "step": "business:adopt",
+      "ok": true,
+      "detail": "页面采用候选后内容版本 1 → 2（adopt HTTP 200）",
+      "at": "2026-10-22T16:16:29.524Z"
+    },
+    {
+      "step": "login:technical_analyst",
+      "ok": true,
+      "detail": "p0c-tech 通过登录页获取会话令牌",
+      "at": "2026-10-22T16:16:32.707Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:16:35.789Z"
+    },
+    {
+      "step": "lineage:generate-clicked-1",
+      "ok": true,
+      "detail": "由真实页面触发 generation-runs（Celery 异步）",
+      "at": "2026-10-22T16:16:36.338Z"
+    },
+    {
+      "step": "lineage:generation",
+      "ok": true,
+      "detail": "真实模型候选已生成：已生成 1",
+      "at": "2026-10-22T16:17:26.649Z"
+    },
+    {
+      "step": "lineage:adopt",
+      "ok": true,
+      "detail": "当前内容 v3",
+      "at": "2026-10-22T16:17:28.400Z"
+    },
+    {
+      "step": "lineage:adopt",
+      "ok": true,
+      "detail": "页面采用候选后内容版本 2 → 3（adopt HTTP 200）",
+      "at": "2026-10-22T16:17:28.400Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:17:32.843Z"
+    },
+    {
+      "step": "lineage:gap-1-resolved",
+      "ok": true,
+      "detail": "当前内容 v4",
+      "at": "2026-10-22T16:17:34.448Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:17:39.985Z"
+    },
+    {
+      "step": "lineage:gap-2-resolved",
+      "ok": true,
+      "detail": "当前内容 v5",
+      "at": "2026-10-22T16:17:41.557Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:17:46.228Z"
+    },
+    {
+      "step": "lineage:gap-3-resolved",
+      "ok": true,
+      "detail": "当前内容 v6",
+      "at": "2026-10-22T16:17:47.787Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:17:53.274Z"
+    },
+    {
+      "step": "lineage:gap-4-resolved",
+      "ok": true,
+      "detail": "当前内容 v7",
+      "at": "2026-10-22T16:17:54.777Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:18:00.929Z"
+    },
+    {
+      "step": "lineage:gap-5-resolved",
+      "ok": true,
+      "detail": "当前内容 v8",
+      "at": "2026-10-22T16:18:02.525Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:18:08.054Z"
+    },
+    {
+      "step": "lineage:gaps",
+      "ok": true,
+      "detail": "通过页面填写解决依据关闭 5 项分析缺口",
+      "at": "2026-10-22T16:21:08.081Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:21:13.678Z"
+    },
+    {
+      "step": "lineage:refresh",
+      "ok": true,
+      "detail": "当前内容 v9",
+      "at": "2026-10-22T16:21:15.961Z"
+    },
+    {
+      "step": "lineage:refresh",
+      "ok": true,
+      "detail": "由技术分析角色在「血缘」页签刷新血缘快照，形成新的需求修订",
+      "at": "2026-10-22T16:21:15.961Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:21:21.813Z"
+    },
+    {
+      "step": "lineage:manual-source",
+      "ok": true,
+      "detail": "当前内容 v10",
+      "at": "2026-10-22T16:21:24.178Z"
+    },
+    {
+      "step": "lineage:manual-source",
+      "ok": true,
+      "detail": "技术分析角色在「需求独立内容」补齐来源表/字段并保存人工技术确认",
+      "at": "2026-10-22T16:21:24.178Z"
+    },
+    {
+      "step": "workspace:technical_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:21:30.715Z"
+    },
+    {
+      "step": "lineage:refresh",
+      "ok": true,
+      "detail": "当前内容 v11",
+      "at": "2026-10-22T16:21:33.142Z"
+    },
+    {
+      "step": "lineage:refresh",
+      "ok": true,
+      "detail": "由技术分析角色在「血缘」页签刷新血缘快照，形成新的需求修订",
+      "at": "2026-10-22T16:21:33.142Z"
+    },
+    {
+      "step": "workspace:business_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:21:38.731Z"
+    },
+    {
+      "step": "workspace:business_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:21:45.085Z"
+    },
+    {
+      "step": "business:gaps",
+      "ok": true,
+      "detail": "通过页面填写解决依据关闭 0 项分析缺口",
+      "at": "2026-10-22T16:24:45.105Z"
+    },
+    {
+      "step": "workspace:business_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:24:50.593Z"
+    },
+    {
+      "step": "pre-submit:readiness",
+      "ok": true,
+      "detail": "页面显示「可送审」",
+      "at": "2026-10-22T16:24:51.460Z"
+    },
+    {
+      "step": "login:project_manager",
+      "ok": true,
+      "detail": "p0c-pm 通过登录页获取会话令牌",
+      "at": "2026-10-22T16:24:54.838Z"
+    },
+    {
+      "step": "workspace:project_manager",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:24:58.401Z"
+    },
+    {
+      "step": "pre-submit-pm:readiness",
+      "ok": true,
+      "detail": "页面显示「可送审」",
+      "at": "2026-10-22T16:24:59.301Z"
+    },
+    {
+      "step": "review:submit",
+      "ok": true,
+      "detail": "由真实页面提交内容审核",
+      "at": "2026-10-22T16:25:01.891Z"
+    },
+    {
+      "step": "login:business_reviewer",
+      "ok": true,
+      "detail": "p0c-breview 通过登录页获取会话令牌",
+      "at": "2026-10-22T16:25:05.575Z"
+    },
+    {
+      "step": "review:business_reviewer",
+      "ok": true,
+      "detail": "页面审批通过（未选择机构 VNEXT2 P0-C 浏览器闭环 搜索资产、语义、需求与血缘 快捷键 Ctrl+K 后台任务正常 前后端发布标识不一致（app_commit:un）",
+      "at": "2026-10-22T16:25:08.841Z"
+    },
+    {
+      "step": "login:technical_reviewer",
+      "ok": true,
+      "detail": "p0c-treview 通过登录页获取会话令牌",
+      "at": "2026-10-22T16:25:12.405Z"
+    },
+    {
+      "step": "review:technical_reviewer",
+      "ok": true,
+      "detail": "页面审批通过（未选择机构 VNEXT2 P0-C 浏览器闭环 搜索资产、语义、需求与血缘 快捷键 Ctrl+K 后台任务正常 前后端发布标识不一致（app_commit:un）",
+      "at": "2026-10-22T16:25:15.820Z"
+    },
+    {
+      "step": "login:final_reviewer",
+      "ok": true,
+      "detail": "p0c-freview 通过登录页获取会话令牌",
+      "at": "2026-10-22T16:25:19.260Z"
+    },
+    {
+      "step": "review:final_reviewer",
+      "ok": true,
+      "detail": "页面审批通过（未选择机构 VNEXT2 P0-C 浏览器闭环 搜索资产、语义、需求与血缘 快捷键 Ctrl+K 后台任务正常 前后端发布标识不一致（app_commit:un）",
+      "at": "2026-10-22T16:25:22.269Z"
+    },
+    {
+      "step": "workspace:final_reviewer",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:25:25.147Z"
+    },
+    {
+      "step": "question:create",
+      "ok": true,
+      "detail": "由真实页面创建待确认问题（project_manager，目标表 一表通客户信息表）",
+      "at": "2026-10-22T16:25:29.278Z"
+    },
+    {
+      "step": "workspace:final_reviewer",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:25:34.452Z"
+    },
+    {
+      "step": "negative:question-blocks-delivery",
+      "ok": true,
+      "detail": "新增问题后页面阻断：审核与正式交付 业务审核、技术审核和终审全部通过后，固定当前需求版本。 1 项阻断 正式交付暂不可用 · 存在未解决的人工待确认问题：浏览器闭环反例：客户统一标识是否必须按「产品ID+期限编号」组合业务键取值？请提供制度依据。 当前角色可查",
+      "at": "2026-10-22T16:25:35.297Z"
+    },
+    {
+      "step": "negative:finalize-hidden",
+      "ok": true,
+      "detail": "页面在存在阻断时未展示「固定正式交付」按钮",
+      "at": "2026-10-22T16:25:35.329Z"
+    },
+    {
+      "step": "question:answer+close",
+      "ok": true,
+      "detail": "页面提交回答并结案，回答同时作为解决依据",
+      "at": "2026-10-22T16:25:39.670Z"
+    },
+    {
+      "step": "workspace:final_reviewer",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:25:45.403Z"
+    },
+    {
+      "step": "negative:reopened",
+      "ok": true,
+      "detail": "结案并补充解决依据后恢复可送审",
+      "at": "2026-10-22T16:25:46.284Z"
+    },
+    {
+      "step": "v1:download:下载 Excel",
+      "ok": true,
+      "detail": "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\requirement-v1.xlsx (13334 bytes, sha256=2e94c52abf6b903a…)",
+      "at": "2026-10-22T16:25:48.619Z"
+    },
+    {
+      "step": "v1:download:Word 正文",
+      "ok": true,
+      "detail": "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\requirement-v1.docx (38711 bytes, sha256=8118d79dc5da6dd6…)",
+      "at": "2026-10-22T16:25:49.533Z"
+    },
+    {
+      "step": "evidence:delivery-record",
+      "ok": true,
+      "detail": "正式交付记录 file_hash≈2e94c52abf6b903a… 与下载文件哈希一致=true",
+      "at": "2026-10-22T16:25:49.620Z"
+    },
+    {
+      "step": "workspace:business_analyst",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:25:55.203Z"
+    },
+    {
+      "step": "revision:post-delivery",
+      "ok": true,
+      "detail": "当前内容 v12",
+      "at": "2026-10-22T16:25:57.176Z"
+    },
+    {
+      "step": "workspace:final_reviewer",
+      "ok": true,
+      "detail": "打开需求工作台并选择需求 #5",
+      "at": "2026-10-22T16:26:02.915Z"
+    },
+    {
+      "step": "immutability:delivery-unchanged",
+      "ok": true,
+      "detail": "新修订后历史正式交付哈希不变=true（v1）",
+      "at": "2026-10-22T16:26:03.241Z"
+    },
+    {
+      "step": "re-download:download:下载 Excel",
+      "ok": true,
+      "detail": "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\requirement-v1-redownload.xlsx (13334 bytes, sha256=2e94c52abf6b903a…)",
+      "at": "2026-10-22T16:26:04.568Z"
+    },
+    {
+      "step": "immutability:re-download-equal",
+      "ok": true,
+      "detail": "重复下载的历史正式交付文件哈希一致",
+      "at": "2026-10-22T16:26:04.568Z"
+    }
+  ],
+  "apiCalls": [
+    {
+      "method": "POST",
+      "path": "/auth/login",
+      "status": 200,
+      "count": 6
+    },
+    {
+      "method": "GET",
+      "path": "/projects",
+      "status": 200,
+      "count": 53
+    },
+    {
+      "method": "GET",
+      "path": "/version",
+      "status": 200,
+      "count": 47
+    },
+    {
+      "method": "GET",
+      "path": "/auth/me",
+      "status": 200,
+      "count": 202
+    },
+    {
+      "method": "GET",
+      "path": "/admin/institutions",
+      "status": 403,
+      "requestBody": null,
+      "body": "",
+      "count": 23
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/jobs/summary",
+      "status": 200,
+      "count": 67
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirement-workspace",
+      "status": 200,
+      "count": 35
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements",
+      "status": 200,
+      "count": 136
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirement-workspace?target_table_id=7&scenario_id=1",
+      "status": 200,
+      "count": 45
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirement-resources?q=",
+      "status": 200,
+      "count": 34
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirement-workspace/fields/5?scenario_id=1",
+      "status": 200,
+      "count": 45
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/document",
+      "status": 200,
+      "count": 33
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/snapshots",
+      "status": 200,
+      "count": 19
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/generation-runs",
+      "status": 200,
+      "count": 79
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=1",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/revisions",
+      "status": 200,
+      "count": 32
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-submissions",
+      "status": 200,
+      "count": 22
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/formal-deliveries",
+      "status": 200,
+      "count": 23
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/generation-runs",
+      "status": 201,
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/generation-items/23",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/generation-candidates/adopt",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=2",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/generation-items/24",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=3",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/gaps/candidate%3A23%3A5aebacb8bfd0/resolve",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=4",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/gaps/candidate%3A23%3Afbee463f88a5/resolve",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=5",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/gaps/candidate%3A24%3A1dd77b0c7d45/resolve",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=6",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/gaps/candidate%3A24%3A2efed680c89c/resolve",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=7",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/gaps/candidate%3A24%3A8d55f2807e38/resolve",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=8",
+      "status": 200,
+      "count": 3
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/revisions/8/lineage",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/revisions/8/refresh-lineage",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/revisions/9/lineage",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=9",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "PUT",
+      "path": "/projects/7/requirements/5/fields/5",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=10",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/revisions/10/lineage",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/revisions/10/refresh-lineage",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/revisions/11/lineage",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=11",
+      "status": 200,
+      "count": 11
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/review-submissions",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/me/tasks",
+      "status": 200,
+      "count": 9
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/nl-tasks",
+      "status": 200,
+      "count": 6
+    },
+    {
+      "method": "GET",
+      "path": "/review-tasks/4",
+      "status": 200,
+      "count": 3
+    },
+    {
+      "method": "POST",
+      "path": "/review-tasks/4/approve",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/review-tasks/5",
+      "status": 200,
+      "count": 3
+    },
+    {
+      "method": "POST",
+      "path": "/review-tasks/5/approve",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/review-tasks/6",
+      "status": 200,
+      "count": 3
+    },
+    {
+      "method": "POST",
+      "path": "/review-tasks/6/approve",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/questions",
+      "status": 200,
+      "count": 7
+    },
+    {
+      "method": "GET",
+      "path": "/fields?project_id=7",
+      "status": 200,
+      "count": 7
+    },
+    {
+      "method": "GET",
+      "path": "/target-tables?project_id=7",
+      "status": 200,
+      "count": 7
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/members",
+      "status": 200,
+      "count": 7
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/questions",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "POST",
+      "path": "/questions/4/answer",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "POST",
+      "path": "/questions/4/close",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/review-submissions/2/finalize",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/formal-deliveries/1/export?format=xlsx",
+      "status": 200,
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/formal-deliveries/1/export?format=docx",
+      "status": 200,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness",
+      "status": 422,
+      "requestBody": null,
+      "body": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"query\",\"content_version\"],\"msg\":\"Field required\"}],\"error_code\":\"validation_failed\",\"user_message\":\"输入数据不完整或格式不正确\",\"technical_message\":null,\"trace_id\":\"9f58ae8de20c42638e0e615bf9c00479\",\"retryable\":false,\"suggested_actions\":[\"补充必填信息后重试\"]}",
+      "count": 1
+    },
+    {
+      "method": "POST",
+      "path": "/projects/7/requirements/5/revisions/11/revise",
+      "status": 201,
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/projects/7/requirements/5/review-readiness?content_version=12",
+      "status": 200,
+      "count": 2
+    }
+  ],
+  "screenshots": [
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\01-workspace-loaded.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\02-business-candidate-dialog.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\03-lineage-candidate-dialog.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\04-review-business_reviewer.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\05-review-technical_reviewer.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\06-review-final_reviewer.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\07-question-created.png",
+    "C:\\Users\\李儒伟\\Desktop\\ai-platform-dsh-20260930-150943 (2)\\ai-platform\\docs\\audit\\vnext2-p0c-browser\\08-formal-delivery-fixed.png"
+  ]
+}

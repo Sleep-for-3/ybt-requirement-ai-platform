@@ -257,7 +257,7 @@ def resolve_gap(db, requirement, version, gap_id, resolution_text, actor_id):
     if gap is None:
         raise HTTPException(404, "缺口不在当前需求版本")
     if gap.get("status") in {"resolved", "closed"}:
-        return previous
+        raise HTTPException(409, "该缺口已关闭，无需重复处理；如需调整结论请建立新修订")
     record = next((row for row in content.get("fields", [])
                    if row["field"]["id"] == gap.get("field_id")), None)
     if record is not None:

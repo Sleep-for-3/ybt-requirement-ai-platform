@@ -18,7 +18,7 @@ SECTION_FIELDS = {
     "business": ("business_definition", "final_content"),
     "lineage": ("processing_logic", "final_content"),
 }
-SPECIAL_FIELDS = {"lineage": ("physical_references", "evidence")}
+SPECIAL_FIELDS = {"business": ("evidence",), "lineage": ("physical_references", "evidence")}
 
 
 def load_candidate_item(db, project_id, requirement_id, item_id, *, lock=False):

@@ -74,6 +74,17 @@ class StatementSemantics:
     row_limit: tuple[str, ...] = ()
     join_types: tuple[str, ...] = ()
     cte_names: tuple[str, ...] = ()
+    # Statement-level ORDER BY (never a window's ORDER BY, which belongs to the
+    # window expression and is already compared as a transformation).
+    order_by: tuple[str, ...] = ()
+    # Statement-level WHERE predicates outside CTE bodies, normalized for equality.
+    # A predicate rewrite is a filter change even though a plain SELECT's lineage edge
+    # carries no filter condition to compare.
+    filters: tuple[str, ...] = ()
+    # One readable signature per CTE: its name plus the normalized projection and
+    # predicate text.  This is what lets a CTE-internal rewrite be attributed to the
+    # CTE family instead of falling back to "unattributed AST change".
+    cte_signatures: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -172,6 +183,9 @@ def statement_semantics(expression: exp.Expression, statement_index: int) -> Sta
     union_modes: set[str] = set()
     join_types: set[str] = set()
     cte_names: set[str] = set()
+    order_by: list[exp.Expression] = []
+    filters: list[exp.Expression] = []
+    cte_signatures: set[str] = set()
     distinct = False
     for query in queries:
         group = query.args.get("group")
@@ -186,6 +200,16 @@ def statement_semantics(expression: exp.Expression, statement_index: int) -> Sta
         offset = query.args.get("offset")
         if offset is not None:
             limits.append(offset)
+        # CTE bodies are compared through ``cte_signatures``; keeping their predicate
+        # here would report one rewrite twice (filter + CTE).
+        where = query.args.get("where")
+        if isinstance(where, exp.Where) and not isinstance(query.parent, exp.CTE):
+            filters.append(where.this)
+        # Only a query-level ORDER BY is collected here; a window's ORDER BY lives in
+        # the window expression and is compared as a transformation.
+        order = query.args.get("order")
+        if order is not None:
+            order_by.extend(order.expressions)
         # ``distinct`` is either the boolean-ish Select arg or a Distinct node; both
         # forms appear across sqlglot versions and dialects.
         raw_distinct = query.args.get("distinct")
@@ -199,6 +223,10 @@ def statement_semantics(expression: exp.Expression, statement_index: int) -> Sta
         for join in query.find_all(exp.Join):
             join_types.add(_join_kind(join))
         cte_names.update(cte.alias_or_name for cte in query.find_all(exp.CTE) if cte.alias_or_name)
+        for cte in query.find_all(exp.CTE):
+            signature = _cte_signature(cte)
+            if signature:
+                cte_signatures.add(signature)
     return StatementSemantics(
         statement_index=statement_index,
         group_by=rendered(group_by),
@@ -209,7 +237,37 @@ def statement_semantics(expression: exp.Expression, statement_index: int) -> Sta
         row_limit=rendered(limits),
         join_types=tuple(sorted(join_types)),
         cte_names=tuple(sorted(cte_names)),
+        order_by=rendered(order_by),
+        filters=rendered(filters),
+        cte_signatures=tuple(sorted(cte_signatures)),
     )
+
+
+def _cte_signature(cte: exp.CTE) -> str:
+    """Readable, normalized signature of one CTE's own projection and predicate.
+
+    The edge comparator never looks inside a CTE, so a rewrite such as
+    ``select amt from t1`` → ``select amt * 2 as amt from t1`` used to surface only as
+    "unattributed AST change".  Rendering the CTE name with its projection and WHERE
+    text gives the CTE family a structural dimension while still keeping the evidence
+    human-readable.  Anything unrendarable stays absent instead of being guessed.
+    """
+
+    name = (cte.alias_or_name or "").strip()
+    if not name:
+        return ""
+    relation = cte.this
+    if not isinstance(relation, exp.Query):
+        return ""
+    projection = ", ".join(_semantic_text(item) for item in relation.expressions if item is not None)
+    predicate = relation.args.get("where")
+    where_text = _semantic_text(predicate.this) if isinstance(predicate, exp.Where) else ""
+    body = f"{projection} where {where_text}".strip() if where_text else projection
+    # The CTE *name* is deliberately excluded: renaming a CTE while keeping its body and
+    # every reference consistent is an equivalent rewrite, not a caliber change. Bodies
+    # are compared as a normalized multiset, so a real projection/predicate rewrite still
+    # differs while a pure rename stays silent.
+    return body.strip()
 
 
 def _semantic_text(node: exp.Expression) -> str:

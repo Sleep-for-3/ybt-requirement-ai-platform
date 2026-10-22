@@ -51,6 +51,18 @@ SUPPORTED_CASES: dict[str, tuple[str, str, str]] = {
         "insert into tgt select dt, sum(amt) as c from t group by dt having sum(amt) > 0",
         "having_changed",
     ),
+    # P1-B: row limits, order-by-with-limit and CTE-internal rewrites are now their
+    # own comparator dimensions instead of an unattributed fallback.
+    "top_limit": (
+        "insert into tgt select amt from t limit 10",
+        "insert into tgt select amt from t limit 100",
+        "top_limit_changed",
+    ),
+    "cte": (
+        "insert into tgt with c as (select amt from t1) select amt from c",
+        "insert into tgt with c as (select amt * 2 as amt from t1) select amt from c",
+        "cte_changed",
+    ),
     "left_vs_inner_join": (
         "insert into tgt select a.id, b.amt as x from a left join b on a.id = b.id",
         "insert into tgt select a.id, b.amt as x from a join b on a.id = b.id",
@@ -223,14 +235,6 @@ UNSUPPORTED_CASES: dict[str, tuple[str, str]] = {
         "insert into tgt select amt from t order by dt",
         "insert into tgt select amt from t order by amt",
     ),
-    "top_limit": (
-        "insert into tgt select amt from t limit 10",
-        "insert into tgt select amt from t limit 100",
-    ),
-    "cte": (
-        "insert into tgt with c as (select amt from t1) select amt from c",
-        "insert into tgt with c as (select amt * 2 as amt from t1) select amt from c",
-    ),
 }
 
 FORBIDDEN_IN_FACTS = ("interpretation", "人工确认", "口径", "建议")
@@ -320,10 +324,8 @@ def test_unsupported_family_set_is_explicit_and_counted():
     declared = {entry["code"] for entry in diff["unsupported_families"]}
     assert declared == {
         "order_by",
-        "top_limit",
-        "cte",
     }
-    assert diff["family_coverage"] == {"detected": 36, "total": 39}
+    assert diff["family_coverage"] == {"detected": 38, "total": 39}
     assert diff["family_coverage"]["detected"] == 39 - len(declared)
 
 
@@ -356,7 +358,7 @@ def test_comment_and_whitespace_only_change_is_non_semantic_only():
     assert diff["facts"] == []
     assert diff["interpretations"] == []
     assert diff["unsupported_families"], "the gap list is reported for a non-semantic diff too"
-    assert diff["family_coverage"] == {"detected": 36, "total": 39}
+    assert diff["family_coverage"] == {"detected": 38, "total": 39}
 
 
 def test_facts_carry_no_business_conclusion_for_any_covered_pair():

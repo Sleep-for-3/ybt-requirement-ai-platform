@@ -474,7 +474,7 @@ class RetryRequirementGeneration(BaseModel):
 def retry_requirement_generation(project_id: int, requirement_id: int, input_id: int,
                                   payload: RetryRequirementGeneration,
                                   principal: CurrentPrincipal, db: Session = Depends(get_db)):
-    from app.models import RequirementGenerationInput, BackgroundJob
+    from app.models import RequirementGenerationInput, RequirementGenerationItem, BackgroundJob
     from app.services.requirement_generation_worker import authorize_input
     from app.services.task_queue.factory import get_task_queue
     PermissionService(db, principal).require_project_permission(project_id, "project.view")
@@ -487,6 +487,18 @@ def retry_requirement_generation(project_id: int, requirement_id: int, input_id:
     job = db.get(BackgroundJob, payload.job_id)
     if row.created_by != principal.user_id or job is None or job.created_by != principal.user_id or job.project_id != project_id or job.job_type != "requirement_generation" or job.payload_summary_json.get("input_id") != row.id:
         raise HTTPException(404, "生成任务不存在或不可见")
+    # 单个候选项可能因合规闸门（模型引用了范围外规则）或模型波动被阻断，而任务本身正常结束。
+    # 这类残留项允许重试，但任务级状态是 completed，队列的重试语义只接受失败类状态，
+    # 因此先把任务重新标记为 failed，再交给队列完成重投递、重试计数与派发补偿。
+    retryable_items = db.scalars(select(RequirementGenerationItem.id).where(
+        RequirementGenerationItem.input_id == row.id,
+        RequirementGenerationItem.status.in_(("failed", "blocked"))).limit(1)).all()
+    if not retryable_items:
+        raise HTTPException(409, "当前任务没有需要重试的失败或阻断项")
+    if job.status not in {"failed", "partially_completed", "cancelled"}:
+        job.status = "failed"
+        db.commit()
+        db.refresh(job)
     try:
         job = get_task_queue().retry(db, job)
     except ValueError:

@@ -30,9 +30,20 @@ export default function ProjectsPage() {
   const suspendedCount = projects.length - activeCount;
 
   useEffect(() => {
-    apiGet<Array<{ id: number; institution_name: string }>>("/admin/institutions").then(setInstitutions).catch(() => setInstitutions([]));
+    // /admin/institutions is an administrator endpoint: asking for it with a
+    // business or reviewer account produced a guaranteed 403 on every visit.
     apiGet<{ capabilities?: { can_view_admin?: boolean } }>("/auth/me")
-      .then((auth) => setCanManageLifecycle(Boolean(auth.capabilities?.can_view_admin)))
+      .then((auth) => {
+        const canViewAdmin = Boolean(auth.capabilities?.can_view_admin);
+        setCanManageLifecycle(canViewAdmin);
+        if (!canViewAdmin) {
+          setInstitutions([]);
+          return;
+        }
+        return apiGet<Array<{ id: number; institution_name: string }>>("/admin/institutions")
+          .then(setInstitutions)
+          .catch(() => setInstitutions([]));
+      })
       .catch(() => setCanManageLifecycle(false));
   }, []);
 

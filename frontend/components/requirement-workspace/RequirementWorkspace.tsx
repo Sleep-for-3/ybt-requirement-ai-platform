@@ -9,6 +9,7 @@ import { RequirementScopePanel, type RequirementScope } from "@/components/requi
 import { RequirementSnapshotsPanel } from "@/components/requirement-workspace/RequirementSnapshotsPanel";
 import { RequirementScriptPanel, type ScriptBasis } from "@/components/requirement-workspace/RequirementScriptPanel";
 import { RequirementGenerationPanel } from "@/components/requirement-workspace/RequirementGenerationPanel";
+import { RequirementGapResolver } from "@/components/requirement-workspace/RequirementGapResolver";
 import { RequirementDocumentAssistance } from "@/components/requirement-workspace/RequirementDocumentAssistance";
 import { RequirementDeliveryPanel } from "@/components/requirement-workspace/RequirementDeliveryPanel";
 import { RequirementUatPanel } from "@/components/requirement-workspace/RequirementUatPanel";
@@ -357,8 +358,15 @@ export function RequirementWorkspace() {
             <h2 className="text-sm font-semibold">需求缺口</h2>
             {scopedDocument.isError ? <p role="alert">评估加载失败，不能判断是否可交付。<button onClick={()=>void scopedDocument.refetch()}>重试</button></p>
               : !scopedDocument.data ? <p role="status">正在评估需求范围…</p>
-              : <><p className="my-2 text-xs">{scopedDocument.data.assessment === "unassessed" ? "尚未评估" : scopedDocument.data.gaps.length ? `发现 ${scopedDocument.data.gaps.length} 项待确认` : "本次完整性检查未发现缺口；仍需审核确认。"}</p>
-                <ul className="max-h-64 space-y-2 overflow-auto text-xs">{scopedDocument.data.gaps.map(gap=><li key={gap.id} className="rounded bg-amber-50 p-2"><span>{gap.origin === "manual" ? "人工问题" : "分析发现"}：</span><button className="text-left underline" onClick={()=>{if(gap.field_id)changeField(gap.field_id);}}>{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</button></li>)}</ul></>}
+              : <RequirementGapList
+                  projectId={projectId}
+                  requirementId={requirement.id}
+                  contentVersion={scopedDocument.data?.revision?.content_version}
+                  gaps={scopedDocument.data.gaps}
+                  assessment={scopedDocument.data.assessment}
+                  onSelectField={changeField}
+                  onChanged={()=>{setEditorDirty(false);void refreshWorkspace();}}
+                />}
           </section> : null}
           {requirement ? <RequirementDeliveryPanel key={`delivery:${projectId}:${requirement.id}`} projectId={projectId}
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
@@ -511,4 +519,39 @@ function mergeSelectedDetail(records:FieldWorkspaceRecord[], detail:RequirementW
 
 function readError(error: unknown, fallback: string) {
   return describeError(error, fallback);
+}
+
+function isGapClosed(gap: RequirementGap): boolean {
+  return gap.status === "resolved" || gap.status === "closed";
+}
+
+/**
+ * 已关闭的缺口仍然保留在快照里用于追溯，但不再提供“关闭”入口：
+ * 否者用户会反复点同一张已关闭的卡片，服务端只能幂等返回，界面却永远推进不了。
+ */
+function RequirementGapList({ projectId, requirementId, contentVersion, gaps, assessment, onSelectField, onChanged }:{
+  projectId:number|null;
+  requirementId:number;
+  contentVersion?:number;
+  gaps:RequirementGap[];
+  assessment?:string;
+  onSelectField:(fieldId:number)=>void;
+  onChanged:()=>void;
+}) {
+  const openGaps=gaps.filter((gap)=>!isGapClosed(gap));
+  const closedGaps=gaps.filter(isGapClosed);
+  const summary=assessment==="unassessed"?"尚未评估"
+    :openGaps.length?`发现 ${openGaps.length} 项待确认`
+    :closedGaps.length?`当前没有待确认缺口（已关闭 ${closedGaps.length} 项）；仍需审核确认。`
+    :"本次完整性检查未发现缺口；仍需审核确认。";
+  return <>
+    <p className="my-2 text-xs">{summary}</p>
+    <ul className="max-h-64 space-y-2 overflow-auto text-xs">
+      {[...openGaps,...closedGaps].map((gap)=><li key={gap.id} className={isGapClosed(gap)?"rounded bg-slate-50 p-2 opacity-75":"rounded bg-amber-50 p-2"}>
+        <span>{isGapClosed(gap)?"已关闭":gap.origin === "manual" ? "人工问题" : "分析发现"}：</span>
+        <button className="text-left underline" onClick={()=>{if(gap.field_id)onSelectField(gap.field_id);}} type="button">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</button>
+        <RequirementGapResolver projectId={projectId} requirementId={requirementId} contentVersion={contentVersion} gap={gap} onChanged={onChanged} />
+      </li>)}
+    </ul>
+  </>;
 }

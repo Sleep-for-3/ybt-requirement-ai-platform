@@ -134,6 +134,54 @@ def test_scoped_queue_eight_fields_retries_only_failed_and_never_writes_content(
     assert len(calls) == 9
 
 
+def test_blocked_item_of_a_completed_job_can_be_retried(snapshot_api, monkeypatch):
+    from app.services.task_queue.inline import InlineTaskQueue
+    client, db, project, field, req, _ = snapshot_api
+    base = f"/projects/{project.id}/requirements/{req.id}"
+    client.post(base + "/revisions", json={"expected_version": 1})
+    monkeypatch.setattr("app.services.task_queue.factory.get_task_queue", lambda: InlineTaskQueue())
+    calls = []
+
+    def generate(db, row, item, project):
+        calls.append(item.field_id)
+        if len(calls) == 1:
+            raise HTTPException(422, "AI 对照引用了范围外规则或非制度资料")
+        return {"final_content": "合成候选，仅用于阻断项重试语义回归"}
+
+    monkeypatch.setattr("app.services.requirement_generation_worker.generate_candidate", generate)
+    response = client.post(base + "/generation-runs", json={"expected_content_version": 1,
+        "field_ids": [field.id], "sections": ["business"], "idempotency_key": "blocked-retry"})
+    assert response.status_code == 201, response.text
+    job = db.get(BackgroundJob, response.json()["job_id"])
+    item = db.scalar(select(RequirementGenerationItem))
+    # 合规闸门只阻断单个候选项，任务本身正常结束；这种残留阻断项必须仍可由页面重试。
+    assert job.status == "completed" and item.status == "blocked"
+    retry = client.post(base + f"/generation-runs/{response.json()['input_id']}/retry", json={"job_id": job.id})
+    assert retry.status_code == 200, retry.text
+    db.refresh(item)
+    db.refresh(job)
+    assert len(calls) == 2
+    assert item.status == "completed" and job.status == "completed"
+
+
+def test_retry_is_rejected_when_nothing_is_failed_or_blocked(snapshot_api, monkeypatch):
+    from app.services.task_queue.inline import InlineTaskQueue
+    client, db, project, field, req, _ = snapshot_api
+    base = f"/projects/{project.id}/requirements/{req.id}"
+    client.post(base + "/revisions", json={"expected_version": 1})
+    monkeypatch.setattr("app.services.task_queue.factory.get_task_queue", lambda: InlineTaskQueue())
+    monkeypatch.setattr("app.services.requirement_generation_worker.generate_candidate",
+        lambda db, row, item, project: {"final_content": "合成候选，全部成功"})
+    response = client.post(base + "/generation-runs", json={"expected_content_version": 1,
+        "field_ids": [field.id], "sections": ["business"], "idempotency_key": "nothing-to-retry"})
+    assert response.status_code == 201, response.text
+    job = db.get(BackgroundJob, response.json()["job_id"])
+    assert job.status == "completed"
+    retry = client.post(base + f"/generation-runs/{response.json()['input_id']}/retry", json={"job_id": job.id})
+    assert retry.status_code == 409
+    assert "没有需要重试" in retry.json()["detail"]
+
+
 def test_permission_revoked_during_generation_discards_candidate(snapshot_api, monkeypatch):
     from app.services.task_queue.inline import InlineTaskQueue
     client, db, project, field, req, membership = snapshot_api

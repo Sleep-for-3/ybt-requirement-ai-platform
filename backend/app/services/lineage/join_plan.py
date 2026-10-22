@@ -196,6 +196,43 @@ def parse_side(token: str) -> dict[str, Any]:
     return {"raw": cleaned[:MAX_TOKEN_TEXT], "kind": "unknown", "qualifier": None, "column": None}
 
 
+_EMPTY_COVERAGE = {"declared": [], "covered": [], "complete": True, "unique": False}
+
+
+def _key_coverage(key_pairs: list[dict]) -> dict[str, dict]:
+    """Per-side coverage of the declared unique key by the join's equality keys."""
+
+    result: dict[str, dict] = {}
+    for side_key in ("left", "right"):
+        declared: list[str] = []
+        covered: list[str] = []
+        flag_only = False
+        for pair in key_pairs:
+            side = pair.get(side_key) or {}
+            for column in side.get("declared_key_columns") or []:
+                if column not in declared:
+                    declared.append(column)
+            if side.get("is_primary_key"):
+                flag_only = True
+            column = side.get("column")
+            if column and column.upper() not in covered:
+                covered.append(column.upper())
+        if declared:
+            complete = all(column in covered for column in declared)
+            unique = complete
+        else:
+            # No column list: fall back to the single-column metadata flag.
+            complete = True
+            unique = flag_only
+        result[side_key] = {
+            "declared": declared,
+            "covered": covered,
+            "complete": complete,
+            "unique": unique,
+        }
+    return result
+
+
 class JoinPlanStructurer:
     """Resolve join tokens against the project's own governed assets."""
 
@@ -324,6 +361,26 @@ class JoinPlanStructurer:
             return any(str(item).strip().strip('"`[]').upper() == column.upper() for item in declared)
         return None
 
+    def declared_key_columns(self, table_ref: tuple[str, Any] | None, entity: Any) -> list[str]:
+        """Declared unique key of the resolved side, normalized and de-duplicated.
+
+        Only catalog tables expose a column list; source/mart fields carry a single
+        ``is_primary_key`` flag, which cannot describe a composite key and therefore
+        stays empty here (the boolean flag is still honoured by ``is_primary_key``).
+        """
+
+        if table_ref is None or table_ref[0] != "catalog_table":
+            return []
+        declared = getattr(table_ref[1], "primary_key_columns_json", None) or []
+        if not isinstance(declared, (list, tuple, set)):
+            return []
+        columns: list[str] = []
+        for item in declared:
+            text = str(item).strip().strip('"`[]')
+            if text and text.upper() not in columns:
+                columns.append(text.upper())
+        return columns
+
     # ------------------------------------------------------------- describing
     def _table_asset(self, table_ref: tuple[str, Any] | None) -> dict[str, Any] | None:
         if table_ref is None:
@@ -342,6 +399,9 @@ class JoinPlanStructurer:
             "unresolved_reason": None,
             "is_time_condition": bool(side["kind"] == "identifier" and is_temporal_name(side["column"])),
             "is_primary_key": None,
+            # The table's declared unique key (composite keys keep every column).
+            # Cardinality may only claim uniqueness when the join covers all of it.
+            "declared_key_columns": [],
             "entity_type": None,
             "entity_id": None,
             "display": None,
@@ -369,6 +429,7 @@ class JoinPlanStructurer:
             payload["display"] = self.display.describe(entity_type, entity)
             payload["table"] = self._table_asset(resolution["table_ref"])
             payload["is_primary_key"] = self.is_primary_key(resolution["table_ref"], entity, side["column"])
+            payload["declared_key_columns"] = self.declared_key_columns(resolution["table_ref"], entity)
         elif resolution["ambiguous"]:
             payload["ambiguous"] = True
             payload["unresolved_reason"] = "column_ambiguous"
@@ -400,6 +461,8 @@ class JoinPlanStructurer:
             "join_type": "unknown",
             "cardinality": "unknown",
             "cardinality_basis": "none",
+            "key_coverage": {"left": dict(_EMPTY_COVERAGE), "right": dict(_EMPTY_COVERAGE)},
+            "partial_unique_keys": [],
             "null_handling": null_handling or None,
             "left_entity": left_hint,
             "right_entity": right_hint,
@@ -461,11 +524,18 @@ class JoinPlanStructurer:
             plan["parse_status"] = "structured"
         plan["structured"] = plan["parse_status"] == "structured"
 
-        for pair in plan["key_pairs"]:
-            left_pk = pair["left"]["is_primary_key"]
-            right_pk = pair["right"]["is_primary_key"]
-            if not left_pk and not right_pk:
-                continue
+        if plan["key_pairs"]:
+            # A composite unique key (e.g. PRODUCT_ID + TERM_NO) only guarantees
+            # uniqueness when *every* key column is part of the join.  Joining on a
+            # single product id against such a table multiplies rows, so partial
+            # coverage must stay "unknown" instead of claiming 1:1 / N:1.
+            coverage = _key_coverage(plan["key_pairs"])
+            plan["key_coverage"] = coverage
+            plan["partial_unique_keys"] = [
+                item for item in coverage.values() if item["declared"] and not item["complete"]
+            ]
+            left_pk = coverage["left"]["unique"]
+            right_pk = coverage["right"]["unique"]
             if left_pk and right_pk:
                 plan["cardinality"] = "1:1"
                 plan["cardinality_basis"] = "both_sides_declared"
@@ -475,9 +545,6 @@ class JoinPlanStructurer:
             elif right_pk:
                 plan["cardinality"] = "N:1"
                 plan["cardinality_basis"] = "right_primary_key_only"
-            else:
-                continue
-            break
 
         resolved_pairs = [pair for pair in plan["key_pairs"] if pair["resolved"]]
         if resolved_pairs:

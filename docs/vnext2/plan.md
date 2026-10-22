@@ -49,21 +49,31 @@
 - 关键环境事实：公司网关已下线 `deepseek-v4-flash`（`POST /chat/completions` 返回 422 `model not found`，`GET /models` 只剩 `deepseek-v4.1-flash / deepseek-flash / deepseek-v4-pro / cc/* / qwen3.8-flash / glm-5.3-flash`），本轮开发验收改用 `deepseek-v4.1-flash`（`backend/.env` 已改，文件本身被 gitignore，不进提交）。
 - 未覆盖/下一步：`pinned_versions` 目前只有评测脚本传入，产品生成路径（`backend/app/services/rag/grounded_answer_service.py:166`）还没有从需求快照推导固定版本——需在 P0-C 打通“需求冻结时的知识版本 → 引用裁判固定版本”，否则 C10 确定性规则在产品内不会自动生效。
 
-### P0-C 真实监管需求生成与正式交付 E2E　`IN_PROGRESS`（后端链路 DONE，浏览器子项 TODO）
+### P0-C 真实监管需求生成与正式交付 E2E　`DONE`（后端 REAL_COMPONENT+REAL_MODEL，浏览器 REAL_COMPONENT 全链路）
 
 - 痛点：`backend/tests/test_vnext_phase2_closed_loop.py` 的 `_adopt_complete_content` 直接写已确认内容，未证明「真实请求 → 模型生成 → 候选 → 采用 → 修订 → 审批 → 正式交付 → 导出」。
 - 已完成（REAL_COMPONENT + REAL_MODEL）：新增 `backend/tests/test_vnext2_p0c_real_delivery.py`，合成“借据→合同→产品→产品期限方案→客户→来源库→数据集市→一表通”场景，主链路全部走 HTTP API（生成走 inline 队列真实执行 worker，真实网关 `deepseek-v4.1-flash` 生成候选），覆盖：冻结 v1 → generation-inputs/runs → 读候选 hash 与 changes → 批量 adopt → 人工补业务/技术口径 → refresh-lineage → gaps resolve → readiness → 三级审核 → finalize → xlsx/docx 导出（校验正文与 `X-Requirement-Snapshot-Hash`）→ 交付后新增问题阻断新交付且旧文件不变 → 建立新修订历史交付仍不变。失败反例：非法结构 → item failed/blocked 且不产生假正文；派生缺口不可用说明关闭；空白说明 422。
 - 顺带修复的真实缺陷：①`refresh-lineage` 接口 `record_audit` 调用签名错误导致 100% 500；②AI 候选 gaps 无关闭通道造成需求永久不可送审（新增 `resolve_gap` + `POST .../gaps/{gap_id}/resolve`）；③真实推理模型空正文被“格式修复”伪造成英文占位候选（`openai_compatible.py` 空正文明确失败且不进入修复、新增 `LLM_MAX_OUTPUT_TOKENS`、候选正文必须非空且中文、worker 提示词按 section 要求中文与证据引用）。
 - 测试：`pytest tests/test_vnext2_p0c_real_delivery.py -q`（真实模型）→ **4 passed / 159.94s**；相邻回归 10 个文件 → **102 passed**。
-- 未完成：真实浏览器全操作闭环（现只有登录/页面/Tab 的 `scripts/vnext_workspace_browser_smoke.mjs`）；前端“缺口关闭”入口；详见 `docs/vnext2/p0c-real-delivery.md` 第 7 节。
+- 真实浏览器闭环（REAL_COMPONENT，2026-10-23 完成）：`scripts/vnext2_p0c_browser_e2e.mjs` 全流程 **66 步 PASS / 1019 次真实 API 调用 / exit 0**，全部动作由真实页面触发：登录→工作台→业务生成+采用（v1→v2）→技术生成+采用（v3）→页面逐条关闭分析缺口（v4–v8）→血缘快照刷新（v9）→人工补齐来源表/字段技术确认（v10）→再刷新血缘（v11）→readiness「可送审」→项目管理员送审→业务/技术/终审三级页面审批→新增问题后页面显示「1 项阻断」且「固定正式交付」按钮消失（阻断反例）→回答+结案→正式交付→下载 Excel/Word 并与 `formal-deliveries.file_hash` 对账→交付后建立新修订 v12→历史交付哈希不变→重复下载哈希一致。证据 `docs/audit/VNEXT2_P0C_BROWSER-20261022.json` 与截图目录 `docs/audit/vnext2-p0c-browser/`。
+- 浏览器闭环顺带修复的真实缺陷：①前后端契约不一致导致 `adopt` 422（business 候选勾选 evidence/physical_references 越界，`requirement_candidates.py` `SPECIAL_FIELDS` 与前端复选框范围对齐）；②已关闭缺口仍渲染“关闭缺口”按钮且后端静默 201 不产生新版本（前端区分 open/closed + 后端 409「该缺口已关闭」）；③字段派生缺口被误提供“填写说明关闭”入口（前端按 `/^\d+:/` 识别并给出补齐指引）；④阻断项“重试失败项”在单轮内耗尽重试预算后 409（后端在无 failed/blocked 项时 409 明确提示，前端引导“重新点击生成候选创建新一轮”）；⑤`/admin/institutions` 对所有角色无差别请求产生必然 403（projects 页改为按 `can_view_admin` 能力再取）。
+- 仍未接入：前端独立“缺口关闭 + 修订原因”编辑器之外的批量能力、`pinned_versions` 产品化（详见第 1 节剩余缺口）。
 
 ### P1-A Agent 五类业务决策　`TODO`
 
 - 复用 `backend/app/services/agent/{planner,runtime,state_machine,dependencies,gate_policy,tools/}`；信息充分 / 缺输入 / Skill 未绑定 / 需人工确认 / 人工否决；恢复与并发安全复用 AgentRun/AgentStep/ToolCall/BackgroundJob/租约。
 
-### P1-B 复杂 SQL 与监管口径变化　`TODO`
+### P1-B 复杂 SQL 与监管口径变化　`IN_PROGRESS`（top_limit/cte 已归因、复合业务键与需求关联已修，剩余 GBase/Hive 语法矩阵与文档）
 
-- 复用 `backend/app/services/lineage/*`；GBase/Hive 语法矩阵；order_by/top_limit/cte 三类补强或明确 limitation；复合业务键膨胀检测；SQL Change → Requirement → ReviewTask 正反例各 2 个。
+- 已完成的语义补强（不改既有 group_by/distinct/union_mode/having/join_type 逻辑）：
+  - `top_limit`：新增行数上限维度，`ORDER BY ... LIMIT/TOP` 与 `ROW_NUMBER() ... WHERE rn <= n` 都会归因为“影响样本范围”；只改格式/常量不影响。
+  - `cte`：CTE 定义签名（名称+列+内部过滤/聚合）参与比较，CTE 内部过滤变化可归因，别名重命名静默。
+  - `order_by`：**明确 limitation**，保持 `unsupported`，理由记录在比较器与文档：仅影响展示顺序的排序不应自动认定影响监管值，产品不伪造归因。
+  - 覆盖度由 36/39 提升到 38/39（`SQL_SEMANTIC_CLASSES` 统计），不为凑 39/39 输出假归因。
+- 复合业务键（P1-B 4）：`backend/app/services/lineage/join_plan.py` 新增 `declared_key_columns` / `key_coverage` / `partial_unique_keys`，只有关联覆盖**完整**声明唯一键才允许 1:1 / N:1；仅按 `PRODUCT_ID` 关联 `(PRODUCT_ID, TERM_NO)` 维度时基数保持 unknown 并生成 `missing_join_cardinality` 待确认问题（文案含“复合唯一键”“不得视为一对一”“记录数或金额可能重复累计”），且**不自动拼接**缺失键。
+- SQL 变化 → 需求（P1-B 5）：修复真实缺陷 `semantic_impact.py` 把 `target_field_ids` 当 `requirement_ids` 返回（`_impact_scope_dict` 又按 TargetField 反查，导致“关联需求”实际是目标字段）。现在按 `Requirement.project_id + scope_json.field_ids` 求真实需求 id，`_impact_scope_dict` 返回需求摘要（name/content_version/target_table_id/field_ids）；无关需求与其他项目不误关联，格式/注释类变化不产生复核任务，JOIN 类型变化仍生成 impact + ReviewTask。
+- 测试：`tests/test_vnext2_sql_rowlimit_cte.py`（12）、`tests/test_vnext2_composite_business_key.py`（3）、`tests/test_vnext2_sql_impact_requirement_link.py`（4，含 2 正例 2 反例）；SQL/血缘相邻回归 110 passed；`tests/test_sql_lineage.py` 的 requirement 断言已按正确契约更新（原断言把字段 id 当需求 id）。
+- 待办：GBase/Hive 混合语法矩阵（多层 INSERT SELECT/临时表/窗口函数/NULL CONCAT/变量替换等）真实解析与 limitation 清单；`docs/vnext2/p1b-sql-semantics.md`。
 
 ### P1-C 黄金集评测体系　`TODO`
 

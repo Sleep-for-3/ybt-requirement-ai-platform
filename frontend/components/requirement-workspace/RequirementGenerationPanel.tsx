@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { apiGet, apiPost } from "@/lib/api";
+import { ApiError } from "@/lib/http-response.mjs";
 import { createClientId } from "@/lib/client-id.mjs";
 import { classifyQueryState, isRetryable, lastSuccessLabel, withLastSuccess } from "@/lib/query-state.mjs";
 import { ITEM_STATES, canAdoptRound, filterRunItems, itemStateCounts, itemStateLabel, resolveRound, roundLabel, scopeFromRound, selectableRounds } from "@/lib/generation-rounds.mjs";
@@ -128,7 +129,10 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     if(!currentRun?.job_id||busy)return;
     setBusy(true);setError("");
     try{await apiPost(`${base}/generation-runs/${currentRun.id}/retry`,{job_id:currentRun.job_id});await runs.refetch();}
-    catch{setError("当前失败项无法重试，请刷新后核对任务状态。");}
+    catch(error){
+      const detail=error instanceof ApiError&&typeof error.detail==="string"?error.detail:"";
+      setError(`${detail||"当前失败项无法重试"}；若重试次数已用完，可核对上方范围后重新点击“生成候选”，系统会创建新的生成轮次。`);
+    }
     finally{setBusy(false);}
   }
   function queueCandidate(){
@@ -202,7 +206,7 @@ function CandidateBody({data,selected,replace,onSelected,onReplace}:{data:Candid
       ["加工表达式", rule.transformation_expression], ["关联条件", rule.join_condition], ["过滤条件", rule.filter_condition], ["聚合规则", rule.aggregation_rule], ["码值规则", rule.code_mapping_rule]
     ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="mt-2"><strong>{label}</strong><pre className="mt-1 overflow-auto whitespace-pre-wrap break-all">{value}</pre></div>)}</details>)}</section>}
     {data.changes.map(change=><div className="border border-line p-3" key={change.field}><label className="flex items-center gap-2 text-sm font-semibold"><input checked={selected.includes(change.field)} disabled={!change.changed||data.stale} onChange={event=>onSelected(toggle(selected,change.field,event.target.checked))} type="checkbox"/>{labels[change.field]||change.field}{change.manual?<span className="badge-warning">人工内容</span>:null}</label><div className="mt-2 grid gap-3 sm:grid-cols-2"><TextBlock label="当前内容" value={change.current||"空"}/><TextBlock label="候选内容" value={change.proposed}/></div>{change.manual&&selected.includes(change.field)?<label className="mt-2 block text-xs text-amber-800"><input checked={replace.includes(change.field)} onChange={event=>onReplace(toggle(replace,change.field,event.target.checked))} type="checkbox"/> 我确认用候选替换这项人工内容</label>:null}</div>)}
-    {data.physical_references.length?<OptionalChoice field="physical_references" label="物理字段引用" selected={selected} disabled={data.stale} onSelected={onSelected}><ul className="mt-2 text-xs">{data.physical_references.map(item=><li key={`${item.kind}:${item.table_code}:${item.field_code}`}>{item.kind==="source"?"来源":"集市"}：{item.table_code}.{item.field_code} · {item.table_name}.{item.field_name}</li>)}</ul></OptionalChoice>:null}
+    {data.section==="lineage"&&data.physical_references.length?<OptionalChoice field="physical_references" label="物理字段引用" selected={selected} disabled={data.stale} onSelected={onSelected}><ul className="mt-2 text-xs">{data.physical_references.map(item=><li key={`${item.kind}:${item.table_code}:${item.field_code}`}>{item.kind==="source"?"来源":"集市"}：{item.table_code}.{item.field_code} · {item.table_name}.{item.field_name}</li>)}</ul></OptionalChoice>:null}
     {data.evidence.length?<OptionalChoice field="evidence" label="证据引用" selected={selected} disabled={data.stale} onSelected={onSelected}>{data.evidence.map(item=><div className="mt-2 text-xs" key={item.unit_id}><strong>{item.title}</strong><p className="mt-1 whitespace-pre-wrap text-slate-600">{item.content}</p></div>)}</OptionalChoice>:null}
     {data.gaps.length?<div className="border border-amber-200 bg-amber-50 p-3 text-xs"><strong>采用后仍需确认</strong><ul className="mt-1 list-disc pl-4">{data.gaps.map((gap,index)=><li key={index}>{gap}</li>)}</ul></div>:null}
   </div>;

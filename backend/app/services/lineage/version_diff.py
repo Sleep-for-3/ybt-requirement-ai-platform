@@ -17,6 +17,10 @@ class ChangeItemSpec:
     old_value: dict = field(default_factory=dict)
     new_value: dict = field(default_factory=dict)
     severity: str = "low"
+    # ``False`` marks the comparator's whole-AST fallback bucket: the SQL text changed
+    # but no structural dimension explains it.  Consumers must not read that bucket as a
+    # caliber finding, otherwise an equivalent rewrite looks like a business change.
+    attributed: bool = True
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,11 @@ def compare_sql_versions(old_sql: str, new_sql: str, *, dialect: str = "") -> Ve
         items.append(ChangeItemSpec("parse_quality_changed", "script_version", {"status": old.parse_status}, {"status": new.parse_status}, "high"))
     _statement_semantic_changes(items, old, new)
     if not items:
-        items.append(ChangeItemSpec("transformation_changed", "script", {"normalized": old_ast}, {"normalized": new_ast}, "medium"))
+        items.append(ChangeItemSpec(
+            "transformation_changed", "script",
+            {"normalized": old_ast}, {"normalized": new_ast}, "medium",
+            attributed=False,
+        ))
     items = _deduplicate(items)
     severity = max((item.severity for item in items), key=lambda value: _rank(value))
     return VersionDiffResult(True, severity, tuple(items), {
@@ -153,6 +161,48 @@ def _statement_semantic_changes(items: list[ChangeItemSpec], old_result, new_res
             {"distinct": str(old_distinct).lower()}, {"distinct": str(new_distinct).lower()}, "high",
         ))
 
+    # A statement-level WHERE change is a filter change even when it never reaches a
+    # lineage edge (the edge carries no filter condition for a plain SELECT).  Without
+    # this dimension the difference would land in the whole-AST fallback bucket, which is
+    # reserved for changes no structural dimension explains.
+    old_filters = collect(old_states, "filters")
+    new_filters = collect(new_states, "filters")
+    if old_filters != new_filters and not any(
+        item.change_category == "filter_changed" for item in items
+    ):
+        items.append(ChangeItemSpec(
+            "filter_changed", "filter",
+            {"filter": sorted(old_filters)}, {"filter": sorted(new_filters)}, "high",
+        ))
+
+    # Row limits change which records the query produces, so they always need a human
+    # read.  A statement-level ORDER BY only decides presentation *unless* a limit is
+    # present, where the ordering picks which rows survive: that pair is reported as
+    # one row-range change instead of inventing a separate caliber fact.
+    old_limits = collect(old_states, "row_limit")
+    new_limits = collect(new_states, "row_limit")
+    old_order = collect(old_states, "order_by")
+    new_order = collect(new_states, "order_by")
+    limit_changed = old_limits != new_limits
+    order_changed = old_order != new_order
+    if limit_changed or (order_changed and (old_limits or new_limits)):
+        items.append(ChangeItemSpec(
+            "top_limit_changed", "top_limit",
+            {"order_by": sorted(old_order), "row_limit": sorted(old_limits)},
+            {"order_by": sorted(new_order), "row_limit": sorted(new_limits)}, "high",
+        ))
+
+    # A rewrite inside a CTE keeps the outer projection text identical, so the edge
+    # comparator sees nothing.  The CTE signature (name + projection + predicate)
+    # attributes it to the CTE family instead of an unattributed fallback.
+    old_ctes = collect(old_states, "cte_signatures")
+    new_ctes = collect(new_states, "cte_signatures")
+    if old_ctes != new_ctes:
+        items.append(ChangeItemSpec(
+            "cte_changed", "cte",
+            {"cte": sorted(old_ctes)}, {"cte": sorted(new_ctes)}, "high",
+        ))
+
 
 def _semantic_states(result) -> list[dict]:
     """Statement semantics as plain dicts, resilient to older parse results."""
@@ -165,6 +215,10 @@ def _semantic_states(result) -> list[dict]:
             "union_modes": tuple(entry.union_modes or ()),
             "join_types": tuple(entry.join_types or ()),
             "having": tuple(entry.having or ()),
+            "row_limit": tuple(getattr(entry, "row_limit", ()) or ()),
+            "order_by": tuple(getattr(entry, "order_by", ()) or ()),
+            "cte_signatures": tuple(getattr(entry, "cte_signatures", ()) or ()),
+            "filters": tuple(getattr(entry, "filters", ()) or ()),
         })
     return states
 

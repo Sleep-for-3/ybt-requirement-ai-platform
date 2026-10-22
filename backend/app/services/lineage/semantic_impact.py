@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     RegulatoryKnowledgeItem,
+    Requirement,
     SemanticBinding,
     SemanticConcept,
     SemanticConceptVersion,
@@ -25,6 +26,34 @@ class SemanticImpactScope:
     regulatory_rule_ids: list[int]
     regulatory_knowledge_item_ids: list[int]
     requirement_ids: list[int]
+
+
+def _requirements_for_target_fields(db: Session, project_id: int, target_field_ids: list[int]) -> list[int]:
+    """Requirement ids whose frozen scope covers any affected target field.
+
+    Requirements are the unit a business reviewer re-checks, so impact analysis must
+    report real ``Requirement.id`` values.  Field ids belong to
+    ``affected_target_field_ids_json``; conflating the two made downstream review
+    wiring point at the wrong rows.
+    """
+
+    wanted = {int(value) for value in target_field_ids or []}
+    if not wanted:
+        return []
+    rows = db.execute(
+        select(Requirement.id, Requirement.scope_json).where(Requirement.project_id == project_id)
+    ).all()
+    matched: list[int] = []
+    for requirement_id, scope in rows:
+        scope = scope if isinstance(scope, dict) else {}
+        scoped_fields = {
+            int(value)
+            for value in (scope.get("field_ids") or [])
+            if isinstance(value, (int, str)) and str(value).isdigit()
+        }
+        if scoped_fields & wanted:
+            matched.append(int(requirement_id))
+    return sorted(set(matched))
 
 
 def resolve_semantic_impact(
@@ -183,5 +212,5 @@ def resolve_semantic_impact(
         effective_version_ids=version_ids,
         regulatory_rule_ids=regulatory_rule_ids,
         regulatory_knowledge_item_ids=sorted(regulatory_knowledge_ids),
-        requirement_ids=sorted(set(target_field_ids)),
+        requirement_ids=_requirements_for_target_fields(db, project_id, target_field_ids),
     )
