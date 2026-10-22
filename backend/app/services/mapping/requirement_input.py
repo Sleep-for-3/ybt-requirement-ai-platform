@@ -9,9 +9,64 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models import KnowledgeDocument, KnowledgeUnit, SourceTable, SourceField, MartTable, MartField
+from app.services.rag.citation_trust import base_source_title, normalize_version
+from app.services.requirement_pins import pinned_versions_from_content
 
 MAX_INPUT_BYTES = 64000
 MAX_ROWS = 500
+
+
+def _apply_version_pins(evidence, content):
+    """Restrict generation evidence to the regulatory versions frozen in the snapshot.
+
+    A frozen requirement may pin ``{title: version}`` while the knowledge base has
+    already activated a newer version (C10). Feeding the newer clauses into generation
+    would silently rewrite the requirement's regulatory basis, so pinned titles are
+    filtered to the pinned version only; anything dropped is reported as an explicit
+    limitation instead of being replaced.
+    """
+
+    raw_pins = pinned_versions_from_content(content)
+    conflicting = sorted(title.split(":", 1)[1] for title in raw_pins if title.startswith("_conflicting:"))
+    # 同一资料在快照内有多个版本时，钉扎本身不可信：该标题不做版本约束，只报 limitation。
+    pins = {
+        title: version for title, version in raw_pins.items()
+        if not title.startswith("_conflicting:") and title not in conflicting
+    }
+    limitations: list[str] = []
+    if conflicting:
+        limitations.append(
+            "快照内同一资料存在多个版本（" + "、".join(conflicting)
+            + "），未做版本钉扎；请人工确认后重新生成本轮候选。"
+        )
+    if not pins:
+        return evidence, {}, limitations
+
+    pinned_by_title = {base_source_title(title) or title: (title, version) for title, version in pins.items()}
+    kept = []
+    mismatched: dict[str, set[str]] = {}
+    for item in evidence:
+        title = base_source_title(str(item.get("title") or ""))
+        pinned = pinned_by_title.get(title)
+        if pinned is None:
+            kept.append(item)
+            continue
+        if normalize_version(item.get("regulatory_version")) == normalize_version(pinned[1]):
+            kept.append(item)
+        else:
+            mismatched.setdefault(pinned[0], set()).add(str(item.get("regulatory_version") or "未标注"))
+    for title, versions in sorted(mismatched.items()):
+        limitations.append(
+            f"需求固定《{title}》={pins[title]}，已排除 {'/'.join(sorted(versions))} 的 {len(versions)} 类版本证据；"
+            "不得用其他版本替代。"
+        )
+    kept_titles = {base_source_title(str(item.get("title") or "")) for item in kept}
+    for title, version in sorted(pins.items()):
+        if (base_source_title(title) or title) not in kept_titles:
+            limitations.append(
+                f"需求固定《{title}》={version}，但所选资料中没有该版本的可用证据；需补齐该版本或人工确认。"
+            )
+    return kept, pins, limitations
 
 
 def build_requirement_input(db, revision, field_ids, sections):
@@ -56,6 +111,7 @@ def build_requirement_input(db, revision, field_ids, sections):
         evidence = deepcopy(frozen_policy["evidence"])
     else:
         evidence = requirement_evidence(db, project_id, allowed["document_ids"], scope.get("scenario_id"), MAX_ROWS + 1)
+    evidence, pinned_versions, pin_limitations = _apply_version_pins(evidence, content)
     if len(evidence) > MAX_ROWS:
         raise HTTPException(422, "所选资料片段超出单次输入限制，请缩小资料范围")
     fields = []
@@ -74,6 +130,12 @@ def build_requirement_input(db, revision, field_ids, sections):
         "field_ids": sorted(selected), "sections": sorted(set(sections)), "allowed": allowed,
         "fields": fields, "physical_sources": physical, "evidence": evidence,
         "limitations": ["共享规则未自动纳入；仅使用本需求人工内容与明确选定的资料，无法确认的加工关系须列为缺口。"]}
+    if pinned_versions:
+        # 版本钉扎是审计事实：候选生成用了哪个版本的证据必须可追溯，不能只看内容哈希。
+        result["pinned_versions"] = pinned_versions
+    if pin_limitations:
+        result["version_pin_limitations"] = pin_limitations
+    result["limitations"].extend(pin_limitations)
     if content.get("script_basis"):
         confirmation = content["script_basis"]["confirmation"]
         if (confirmation["target_table_id"] != scope["target_table_id"]

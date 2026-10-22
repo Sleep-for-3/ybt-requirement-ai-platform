@@ -68,3 +68,37 @@
 ①提交本批（代码 + 脚本 + 证据 + 文档）；
 ②真实案例独立标注（需业务方）；③容量分档检索测评（需容量基线）；④部署韧性与长任务租约；
 ⑤把钉扎版本接进 generation-run 输入并在候选审计里记录引用版本。
+
+## 当前状态（2026-10-23 Round 6 第二批收尾）
+
+- 当前 HEAD：`1916143`（R6 第二批：钉扎明细回显 + 问答失败提示可执行 + 候选阶段说明 + 真实浏览器钉扎冒烟 6/6）
+- 已提交全量：`08f8e9b`(P0-A) `b5e5ae8`(P0-B) `525190d`(P0-C 后端) `7d37cc7`(P0-C 浏览器 + P1-B 首批)
+  `182d479`(P1-B 次批) `2475d46`(P1-A) `a5249f3`(P1-C) `81ab717`(P2-A/P2-B + 报告) `ff45f9f`(P2 文档收尾)
+  `13f300a`(R6 钉扎问答) `1916143`(R6 浏览器/提示)
+- 当前工作包：**Round 6 第三批 = generation-run 版本钉扎（原阻断项 4 关闭）**
+
+## 本批未提交改动
+
+- `backend/app/services/mapping/requirement_input.py`：新增 `_apply_version_pins`（冻结快照 `{标题: 版本}` 约束送入模型的证据；
+  版本不符一律排除并写 `limitations`；同标题多版本不钉扎只报缺口；`input_json` 记录 `pinned_versions` / `version_pin_limitations`）。
+- `backend/app/services/requirement_generation_worker.py`：把 `version_pin_limitations` 追加进候选 `gaps`（采用后阻断送审/交付）。
+- 新增 `backend/tests/test_vnext2_generation_pins.py`（7 例）。
+- 文档：`docs/vnext2/plan.md`（P0-B 增补生成链路钉扎与证据）、`docs/vnext2/final-report.md` 10.7。
+
+## 测试结果（Round 6 第三批）
+
+| 命令 | 结果 |
+| --- | --- |
+| `pytest tests/test_vnext2_generation_pins.py -q` | **7 passed / 9.28s** |
+| 生成/需求相邻 7 文件回归 | **62 passed / 30.11s** |
+| `pytest tests -k "generation or requirement or knowledge or citation or pinned"` | **333 passed** / 662.31s (0:11:02) |
+
+## 阻断项更新
+
+4. ~~需求生成链路仍用当前知识库内容，未把钉扎版本传入生成输入~~ → **已关闭**（见 10.7）；
+   残余：证据版本字符串写法差异（`2026 年第 1 版` vs `2026-v1`）按 `normalize_version` 归一，等价写法可能被保守排除，需版本字典/别名表。
+
+## 下一步准确动作
+
+①提交本批；②真实案例独立标注（需业务方）；③容量分档检索测评（需容量基线）；④部署韧性与长任务租约；
+⑤待确认问题页内带版本提问入口。

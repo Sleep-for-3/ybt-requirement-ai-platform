@@ -355,6 +355,26 @@ P0-B 阶段已让引用裁判支持 `pinned_versions`（需求冻结时固定的
 
 ### 10.6 仍然缺口
 - 新制度发布后**自动提醒**“该需求引用的 v1 已被 v2 取代、需要复核”：目前只有引用裁判在问答时拒绝越版引用，没有主动推送。
-- 需求生成（generation-run）链路的候选仍在提示层使用当前知识库内容，未把钉扎版本传给生成模型输入；候选审计里也还没有“引用版本”字段。
 - 前端问答入口已在需求工作台、知识问答页可用，尚未在“待确认问题处理”页内直接带版本提问。
 - 未固定版本时目前是**整题拒绝**；若业务希望“部分回答 + 明确标注未固定”，需要新的产品契约，本轮未擅自放宽。
+
+### 10.7 生成链路版本钉扎（2026-10-23 增补，关闭原 10.6 第 2 条）
+
+原缺口：需求生成（generation-run）链路的候选仍使用当前知识库内容，`pinned_versions` 没有进入生成输入，候选审计也没有“引用了哪个版本”的记录。这带来一个真实业务风险：需求快照固定制度 v1、知识库已启用 v2 时，模型会拿 v2 条文生成 v1 需求的正文，审核人看到的却是“有依据”的候选。
+
+改动：
+
+1. `backend/app/services/mapping/requirement_input.py::_apply_version_pins`：以冻结快照里的 `{标题: 版本}` 约束送入模型的证据——标题与版本都匹配才保留，其他版本一律排除；同一资料在快照内出现多个版本时不钉扎、只报缺口（不替业务选版本）；被排除的版本与“该版本当前没有可用证据”都写成显式 `limitations`。
+2. `generation-input` 的 `input_json` 记录 `pinned_versions`（审计事实：本次生成基于哪个版本）与 `version_pin_limitations`（业务缺口）。
+3. `backend/app/services/requirement_generation_worker.py`：把 `version_pin_limitations` 追加进候选 `gaps`，采用后成为待确认缺口——即“用别的版本凑依据”不会静默进入正文，而是阻断送审与正式交付，直到人工补齐该版本证据或明确关闭缺口。
+
+验证：
+
+| 验证项 | 命令 | 结果 |
+| --- | --- | --- |
+| 生成链路钉扎 | `pytest tests/test_vnext2_generation_pins.py -q` | **7 passed**（9.28s） |
+| 生成/需求相邻回归 | `pytest tests/test_requirement_generation_input.py tests/test_requirement_candidate_adoption.py tests/test_requirement_candidate_contract.py tests/test_requirement_scope.py tests/test_requirement_draft_snapshots.py tests/test_vnext2_p0c_real_delivery.py tests/test_vnext2_generation_pins.py -q` | **62 passed**（30.11s） |
+
+用例覆盖：无钉扎时行为不变（仍用现行版本）；钉扎版本与证据一致时保留并记录 `pinned_versions`；现行 v2 的条文（`PIN_SENTINEL_V2`）**不进入**生成输入、且 limitation 写明该版本无可用证据；同一资料多版本时不钉扎只报缺口；真实 generation-run 下候选 `gaps` 带该 limitation 而正文不含 v2 哨兵。
+
+证据级别：`REAL_COMPONENT`（真实服务与真实 API 路径，模型调用被替换为确定性桩以便断言“送进模型的输入”）。仍未覆盖：证据“版本字符串”与知识库 `regulatory_version` 的写法差异（如 `2026 年第 1 版` vs `2026-v1`）目前按 `normalize_version` 归一化后比较，等价写法仍可能被判为不一致而保守排除——下一轮应提供版本字典/别名表，而不是放宽比较。

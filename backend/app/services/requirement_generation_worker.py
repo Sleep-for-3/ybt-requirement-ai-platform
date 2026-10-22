@@ -193,6 +193,10 @@ def requirement_generation_handler(db, job):
             actor = recover_queued_actor(db, job.created_by)
             project = authorize_input(db, row, actor)
             candidate = generate_candidate(db, row, item, project)
+            pin_limits = list((row.input_json or {}).get("version_pin_limitations") or [])
+            if candidate and pin_limits:
+                # 冻结版本的证据缺口必须随候选用户可见，采用后成为待确认缺口阻断送审。
+                candidate["gaps"] = list(dict.fromkeys([*candidate["gaps"], *pin_limits]))
             db.expire_all()
             actor = recover_queued_actor(db, job.created_by)
             authorize_input(db, row, actor)
