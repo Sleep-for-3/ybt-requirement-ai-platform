@@ -326,13 +326,35 @@ P0-B 阶段已让引用裁判支持 `pinned_versions`（需求冻结时固定的
 | 引用信任域 | 同上 + `tests/test_vnext2_citation_trust.py` | 28 passed |
 | 引用/知识/问答域回归 | `pytest tests -k "citation or rag or knowledge or grounded or ask or pin"` | 334 passed（900.65s） |
 | 前端契约 | `node --test tests/knowledge-contract.test.mjs` | 6 passed |
+| 前端全量 | `npm test`（frontend） | 309 passed（95.0s） |
+| 引用/知识/问答域（复核） | `pytest tests/test_vnext2_pinned_versions.py tests/test_knowledge_rag.py tests/test_rag_citation_support.py -q` | 45 passed（188.15s） |
+| 真实浏览器钉扎冒烟 | `node scripts/vnext2_r6_pin_browser.mjs` | **6/6 PASS**，证据 `docs/audit/VNEXT2_R6_PIN_BROWSER-20261023.json` |
 | 类型检查 | `npx tsc --noEmit -p tsconfig.json` | 通过（exit 0） |
 
-证据级别：`REAL_COMPONENT`（真实 PostgreSQL 驱动的服务级测试 + 真实前端契约测试）；
-“业务准确率”仍为 `UNVERIFIED`（无银行专家独立标注）。
+浏览器冒烟（真实 Chromium + 真实前端 + 真实 API + 真实网关 `deepseek-v4.1-flash`）覆盖两个用例：
 
-### 10.4 仍然缺口
+- **已固定版本**：需求 6 的内容 v2 冻结了「产品期限组合键管理办法=2026-v1」，页面顶部出现
+  「本次回答固定使用需求 v2冻结的监管版本：产品期限组合键管理办法=2026-v1」，请求体实际携带
+  `requirement_id` 与 `requirement_content_version`。
+- **未固定版本（失败关闭）**：需求 5 的内容 v12 没有可用钉扎，接口返回 422
+  「该需求版本未固定任何制度版本，无法按冻结版本判定引用；请先固定知识资料版本或取消版本钉扎」，
+  页面原样展示该原因，且**不渲染任何“固定使用某版本”字样**（不假装固定成功）。
 
+### 10.4 本轮顺带修复的第二个真实缺陷（问答失败提示不可执行）
+
+浏览器冒烟发现：请求被 422 保守拒绝时，页面只显示「问题或筛选条件无效，请检查后重新提交。」，
+把服务端已经写清的业务原因（“该需求版本未固定任何制度版本…”）丢掉了，用户不知道下一步该做什么。
+根因在 `frontend/lib/knowledge-contract.mjs::askErrorMessage`：400/422 一律映射为通用文案。
+现改为：当服务端 `detail` 是可读中文短文本时原样展示（业务规则拒绝），仍是数组（请求体结构校验失败）时
+回落通用文案，避免把技术细节抛到页面。同时把 `app/knowledge/ask/page.tsx` 的钉扎说明改为
+“只有真的拿到回答才渲染”，避免请求失败后仍提示“本次回答未回显固定版本”这种指向不存在回答的措辞。
+
+证据级别：后端 `REAL_COMPONENT`（真实 PostgreSQL 驱动的服务级测试）；前端 `REAL_COMPONENT`
+（真实 Chromium + 真实 API，其中一次回答由真实网关生成）；“业务准确率”仍为 `UNVERIFIED`
+（无银行专家独立标注，钉扎只保证“按冻结版本判定”，不保证业务口径正确）。
+
+### 10.6 仍然缺口
 - 新制度发布后**自动提醒**“该需求引用的 v1 已被 v2 取代、需要复核”：目前只有引用裁判在问答时拒绝越版引用，没有主动推送。
 - 需求生成（generation-run）链路的候选仍在提示层使用当前知识库内容，未把钉扎版本传给生成模型输入；候选审计里也还没有“引用版本”字段。
-- 前端问答入口只在需求工作台与知识问答页，尚未在“待确认问题处理”页内直接带版本提问。
+- 前端问答入口已在需求工作台、知识问答页可用，尚未在“待确认问题处理”页内直接带版本提问。
+- 未固定版本时目前是**整题拒绝**；若业务希望“部分回答 + 明确标注未固定”，需要新的产品契约，本轮未擅自放宽。

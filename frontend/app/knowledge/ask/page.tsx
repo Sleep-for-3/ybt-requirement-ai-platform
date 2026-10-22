@@ -31,7 +31,7 @@ function Workbench(){
  const sections=result?.sections;
  // 引用支撑校验的展示口径全部来自 lib 纯函数，页面只负责渲染（与 node --test 同源）。
  const notice=answerStatusNotice(result);
- const pinState=pinNotice(pin,result?.version_pin);
+ const pinState=result?pinNotice(pin,result.version_pin):{tone:"none" as const,text:""};
  function supportPanel(support:NonNullable<KnowledgeAnswer["citation_support"]>){const counts=supportCounts(support);const row=(label:string,value:string)=><div className="contents" key={label}><dt className="text-slate-500">{label}</dt><dd>{value}</dd></div>;return <section className="panel p-5"><h3 className="font-semibold">引用支撑校验</h3><p className="mt-1 text-sm text-slate-600">
    {support.claim_judgement==="citation_level"?"本次按引用逐条核验（裁判未按断言逐句返回结论）。":"本次按断言逐句核验。"}
    {support.degraded?" 校验未完成，无法给出结论可信度。":support.enabled===false?" 当前未启用引用支撑校验。":""}</p><dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">

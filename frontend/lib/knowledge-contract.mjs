@@ -9,7 +9,14 @@ export function askErrorMessage(error) {
   if (error?.status === 401) return "登录状态已失效，请重新登录。";
   if (error?.status === 403 || error?.status === 404) return "当前账号无权在此项目提问，请确认项目选择和访问权限。";
   if (error?.status === 0) return "网络连接失败，请检查连接后重试。";
-  if (error?.status === 400 || error?.status === 422) return "问题或筛选条件无效，请检查后重新提交。";
+  if (error?.status === 400 || error?.status === 422) {
+    // 业务规则拒绝（例如"该需求版本未固定任何制度版本，无法按冻结版本判定"）必须把
+    // 服务端的中文原因原样交给用户，否则用户只看到"条件无效"而不知道下一步做什么。
+    // 请求体结构校验失败时 detail 是数组，仍回落到通用文案，避免把技术细节抛到页面。
+    const detail = typeof error.detail === "string" ? error.detail.trim() : "";
+    if (detail && detail.length <= 300) return detail;
+    return "问题或筛选条件无效，请检查后重新提交。";
+  }
   return "回答服务暂不可用，请稍后重试。";
 }
 

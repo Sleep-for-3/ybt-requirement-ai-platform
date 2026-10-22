@@ -344,6 +344,8 @@ def test_ask_passes_frozen_pins_into_the_answer_service(db, monkeypatch):
         "content_version": 1,
         "source": "frozen_revision",
         "pinned_count": 1,
+        # 明细必须回显，否则前端只能说“已固定”而说不出固定的是哪个版本。
+        "pinned_versions": {PINNED_TITLE: PINNED_VERSION},
     }
 
 

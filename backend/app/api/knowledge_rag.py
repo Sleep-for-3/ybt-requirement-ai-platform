@@ -265,9 +265,12 @@ async def ask(project_id:int,payload:AskRequest,principal:CurrentPrincipal,db:Se
     result["answer_mode"]=payload.answer_mode
     result.setdefault("sections",None)
     if payload.requirement_id is not None:
+        # 回显钉扎明细（制度标题 → 版本），使“按哪个版本判定”可追溯；这些标题本来就取自
+        # 该需求快照的证据条目，不引入新的数据外发面。
         result["version_pin"]={"requirement_id":payload.requirement_id,
                                "content_version":payload.requirement_content_version,
-                               "source":"frozen_revision","pinned_count":len(pinned_versions)}
+                               "source":"frozen_revision","pinned_count":len(pinned_versions),
+                               "pinned_versions":dict(sorted(pinned_versions.items()))}
     citations=result.get("citations") or []
     needs_confirmation=not citations and "待确认" in str(result.get("answer") or "") and bool(result.get("open_questions"))
     result.setdefault("answer_status","needs_confirmation" if needs_confirmation else "grounded")

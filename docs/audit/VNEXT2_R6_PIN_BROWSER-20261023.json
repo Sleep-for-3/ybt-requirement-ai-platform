@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-10-22T20:02:40.925Z",
+  "evidence_level": "REAL_COMPONENT",
+  "truth_level": "UNVERIFIED",
+  "web": "http://127.0.0.1:3010",
+  "api": "http://127.0.0.1:8011/api",
+  "pinned": {
+    "requirementId": 6,
+    "contentVersion": 2,
+    "title": "产品期限组合键管理办法",
+    "version": "2026-v1"
+  },
+  "unpinned": {
+    "requirementId": 5,
+    "contentVersion": 12
+  },
+  "ok": true,
+  "steps": [
+    {
+      "name": "login",
+      "ok": true,
+      "detail": "p0c-biz",
+      "at": "2026-10-22T20:02:35.927Z"
+    },
+    {
+      "name": "ask:pinned-banner",
+      "ok": true,
+      "detail": "本次回答固定使用需求 v2冻结的监管版本：产品期限组合键管理办法=2026-v1",
+      "at": "2026-10-22T20:02:38.477Z"
+    },
+    {
+      "name": "ask:unpinned-fails-closed",
+      "ok": true,
+      "detail": "HTTP 422 · 该需求版本未固定任何制度版本，无法按冻结版本判定引用；请先固定知识资料版本或取消版本钉扎",
+      "at": "2026-10-22T20:02:40.717Z"
+    },
+    {
+      "name": "ask:unpinned-no-fake-pin-claim",
+      "ok": true,
+      "detail": "未渲染任何版本固定声明",
+      "at": "2026-10-22T20:02:40.720Z"
+    },
+    {
+      "name": "ask:request-carries-pin",
+      "ok": true,
+      "detail": "{\"query\":\"产品期限与产品标识是如何构成业务键的？\",\"answer_mode\":\"regulatory\",\"top_k\":8,\"requirement_id\":6,\"requirement_content_version\":2}",
+      "at": "2026-10-22T20:02:40.924Z"
+    },
+    {
+      "name": "console:no-errors",
+      "ok": true,
+      "detail": "",
+      "at": "2026-10-22T20:02:40.925Z"
+    }
+  ],
+  "apiCalls": [
+    {
+      "url": "http://127.0.0.1:8011/api/projects/7/knowledge/ask",
+      "body": "{\"query\":\"产品期限与产品标识是如何构成业务键的？\",\"answer_mode\":\"regulatory\",\"top_k\":8,\"requirement_id\":6,\"requirement_content_version\":2}"
+    },
+    {
+      "url": "http://127.0.0.1:8011/api/projects/7/knowledge/ask",
+      "body": "{\"query\":\"客户证件类型的报送范围是什么？\",\"answer_mode\":\"regulatory\",\"top_k\":8,\"requirement_id\":5,\"requirement_content_version\":12}"
+    }
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"
+  ],
+  "note": "合成演示需求；真实模型网关 deepseek-v4.1-flash；不代表银行专家确认的监管口径。"
+}

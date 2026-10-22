@@ -33,6 +33,11 @@ test("question failures distinguish permissions, network and invalid input witho
   assert.match(askErrorMessage({status:403}),/无权/);
   assert.match(askErrorMessage({status:0}),/网络/);
   assert.match(askErrorMessage({status:422}),/无效/);
+  // 业务规则拒绝必须把服务端中文原因交给用户；结构校验（detail 为数组）仍走通用文案。
+  assert.equal(askErrorMessage({status:422,detail:"该需求版本未固定任何制度版本，无法按冻结版本判定，请先确认监管版本。"}),
+    "该需求版本未固定任何制度版本，无法按冻结版本判定，请先确认监管版本。");
+  assert.match(askErrorMessage({status:422,detail:[{loc:["body","query"],msg:"field required"}]}),/无效/);
+  assert.match(askErrorMessage({status:400,detail:"requirement_id 与 requirement_content_version 必须同时给出"}),/同时给出/);
   assert.match(askErrorMessage({status:500,message:"private diagnostic"}),/服务暂不可用/);
   assert.equal(askErrorMessage(null),askErrorMessage({status:500}));
 });

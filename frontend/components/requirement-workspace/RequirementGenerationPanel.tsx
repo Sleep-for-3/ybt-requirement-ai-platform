@@ -202,6 +202,7 @@ function CandidateBody({data,selected,replace,onSelected,onReplace}:{data:Candid
   const toggle=(values:string[],field:string,checked:boolean)=>checked?Array.from(new Set([...values,field])):values.filter(value=>value!==field);
   return <div className="mt-4 space-y-3">{data.stale?<p className="border border-amber-200 bg-amber-50 p-3 text-xs">这是内容 v{data.input_content_version} 的历史候选，只能查看或拒绝，不能写入当前 v{data.current_content_version}。</p>:null}
     <SkillRunProvenance metadata={data.execution_metadata}/>
+    <p className="text-xs text-slate-500" role="note">阶段：单次模型生成，未经过候选间分批比较（需求正文候选不做重排，也就不存在“进入最终比较”的分数）；采用只代表写入候选内容，仍需人工确认与审核。</p>
     {!!data.script_rules?.length && <section aria-label="候选引用的固定脚本规则" className="rounded border p-3 text-xs"><h3 className="font-semibold">固定脚本规则 · 事实依据</h3><p className="mt-1 text-slate-500">这些规则描述脚本现状，不能替代有效制度条款。</p>{data.script_rules.map(rule => <details key={rule.rule_id} className="mt-2 rounded border p-2"><summary className="cursor-pointer">{rule.rule_id} · 脚本版本 #{rule.script_version_id}{rule.source_line_start ? ` · 第 ${rule.source_line_start} 行` : ""}</summary>{[
       ["加工表达式", rule.transformation_expression], ["关联条件", rule.join_condition], ["过滤条件", rule.filter_condition], ["聚合规则", rule.aggregation_rule], ["码值规则", rule.code_mapping_rule]
     ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="mt-2"><strong>{label}</strong><pre className="mt-1 overflow-auto whitespace-pre-wrap break-all">{value}</pre></div>)}</details>)}</section>}
