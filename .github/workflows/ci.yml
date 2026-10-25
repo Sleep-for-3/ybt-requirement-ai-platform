@@ -108,6 +108,20 @@ jobs:
           python -m alembic downgrade -1
           python -m alembic upgrade head
 
+  delivery-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 交付文档（plan / capability-matrix / checkpoint / evidence-index / final-report）
+      # 的结构校验：章节编号不重复不回退、`### N.M` 父章节存在、`§N` 引用可解析。
+      # 只用标准库，不装 backend 依赖，所以放在独立 job 里做快速失败。
+      - name: Delivery docs structure
+        run: python scripts/requirement_docs_check.py
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 20

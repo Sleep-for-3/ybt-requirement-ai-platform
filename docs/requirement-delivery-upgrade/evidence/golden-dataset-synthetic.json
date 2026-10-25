@@ -1,0 +1,65 @@
+{
+  "dataset_version": "golden-synthetic-2026-10-23",
+  "note": "合成金标示例：用于验证指标工具可用，不代表任何真实银行业务准确率。",
+  "cases": [
+    {
+      "case_id": "SYN-001",
+      "field_code": "CUST_BAL_NORMAL",
+      "quality": "synthetic",
+      "case_family": "filter_semantics",
+      "expected_definition": "统计口径为五级分类正常的贷款本金余额合计。",
+      "expected_processing_logic": "按客户号汇总借据本金，过滤 LOAN_STATUS = 'NORMAL'，统计时点为业务日期日终。",
+      "required_tokens": ["LOAN_STATUS = 'NORMAL'", "业务日期日终"]
+    },
+    {
+      "case_id": "SYN-002",
+      "field_code": "CUST_NO",
+      "quality": "synthetic",
+      "case_family": "join_semantics",
+      "expected_definition": "客户唯一编号，取自核心系统客户主档。",
+      "expected_processing_logic": "以 CUST_NO 与核心客户表关联，复合键 (CUST_NO, BRANCH_NO) 去重。",
+      "required_tokens": ["(CUST_NO, BRANCH_NO)"]
+    },
+    {
+      "case_id": "SYN-003",
+      "field_code": "LOAN_DUE_DAYS",
+      "quality": "synthetic",
+      "case_family": "as_of_date",
+      "expected_definition": "截至业务日期的逾期天数。",
+      "expected_processing_logic": "以业务日期减去应还日期计算逾期天数，空值按 0 处理。",
+      "required_tokens": ["业务日期"]
+    }
+  ],
+  "results": [
+    {
+      "case_id": "SYN-001",
+      "field_code": "CUST_BAL_NORMAL",
+      "definition": "统计口径为五级分类正常的贷款本金余额合计。",
+      "processing_logic": "按客户号汇总借据本金，过滤 LOAN_STATUS = 'NORMAL'，统计时点为业务日期日终。",
+      "supported_claim_count": 3,
+      "claim_count": 3
+    },
+    {
+      "case_id": "SYN-002",
+      "field_code": "CUST_NO",
+      "definition": "客户唯一编号，取自核心系统客户主档。",
+      "processing_logic": "以 CUST_NO 与核心客户表关联，按 CUST_NO 去重。",
+      "supported_claim_count": 1,
+      "claim_count": 2
+    },
+    {
+      "case_id": "SYN-003",
+      "field_code": "LOAN_DUE_DAYS",
+      "definition": "截至业务日期的逾期天数。",
+      "processing_logic": "以业务日期减去应还日期计算逾期天数，空值按 0 处理。",
+      "supported_claim_count": 2,
+      "claim_count": 2
+    }
+  ],
+  "timings": [
+    {"case_id": "SYN-001", "phases_ms": {"reading": 90000, "editing": 120000, "verifying": 60000, "approval_wait": 900000, "system_wait": 150000}},
+    {"case_id": "SYN-002", "phases_ms": {"reading": 60000, "editing": 300000, "verifying": 45000, "approval_wait": 600000, "system_wait": 90000}},
+    {"case_id": "SYN-003", "phases_ms": {"reading": 45000, "editing": 60000, "verifying": 30000, "approval_wait": 300000, "system_wait": 60000}}
+  ],
+  "executed_families": ["filter_semantics", "join_semantics", "as_of_date"]
+}

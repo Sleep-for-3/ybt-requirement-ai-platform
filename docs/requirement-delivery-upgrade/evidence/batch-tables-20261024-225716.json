@@ -1,0 +1,43 @@
+{
+  "project_id": 9,
+  "tables": [
+    "T_1_2"
+  ],
+  "results": [
+    {
+      "table_code": "T_1_2",
+      "steps": {
+        "resume": {
+          "input_id": 31,
+          "total": 8,
+          "counts": {
+            "pending": 0,
+            "running": 0,
+            "completed": 8,
+            "failed": 0,
+            "blocked": 0
+          }
+        },
+        "generation": {
+          "counts": {
+            "completed": 8
+          },
+          "seconds": 0.0
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null
+        },
+        "freeze": {
+          "error": "requirement 405: {'detail': 'Method Not Allowed', 'error_code': 'internal_error', 'user_message': '服务器处理失败', 'technical_message': None, 'trace_id': '483ad6b7cc9f4ee5a768dbf0b66380ad', 'retryable': False, 'suggested_ac"
+        }
+      },
+      "field_count": 5,
+      "script_version_id": 8,
+      "requirement_id": 13,
+      "input_id": 31,
+      "failures": [],
+      "seconds": 0.0
+    }
+  ]
+}

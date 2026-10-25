@@ -106,7 +106,8 @@ function ReverseRequirements() {
       {preview&&<fieldset disabled={busy||!!created} className="space-y-4">
         <legend className="mb-3 font-semibold">确认监管目标与字段</legend>
         <label className="block text-sm">业务场景<select className="control mt-1" value={scenario} onChange={e=>{setScenario(e.target.value);setConfirmed(false);}}><option value="">请选择</option>{scenarios.data?.map(s=><option key={s.id} value={s.id}>{s.scenario_name}</option>)}</select></label>
-        {preview.gaps.length>0&&<details className="text-sm text-amber-800"><summary>解析待核验事项（{preview.gaps.length}）</summary><ul>{preview.gaps.map((g,i)=><li key={i}>{g}</li>)}</ul></details>}
+        {preview.gaps.length>0&&<details open={preview.targets.length===0} className="text-sm text-amber-800"><summary>解析待核验事项（{preview.gaps.length}）</summary><ul>{preview.gaps.map((g,i)=><li key={i}>{g}</li>)}</ul></details>}
+        {preview.targets.length===0&&<p role="alert" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm leading-6 text-amber-900">这个脚本版本没有解析出写入目标，因此无法建立需求草稿。常见原因：脚本被整段注释屏蔽、不是 INSERT/建表脚本、或该版本由旧版解析器导入（可运行 <code>scripts/reparse_drift_report.py</code> 检查版本是否落后于当前解析器）。平台不会为没有写入目标的脚本编造需求；确认脚本有效后请重新导入该文件。</p>}
         {preview.targets.map(target=>{
           const choice=choices[target.key];const option=preview.regulatory_targets.options.find(o=>optionKey(o)===choice?.option);
           const suggestions=preview.regulatory_targets.suggestions.find(s=>s.target_key===target.key)?.matches??[];

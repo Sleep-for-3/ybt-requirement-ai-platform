@@ -5,6 +5,8 @@ export type GenerationRunItem = {
   status: string;
   decision: string;
   reason_code?: string | null;
+  /** 阻断/失败的具体原因（服务端从 usage_json.detail 返回），供界面直接告知用户要补什么。 */
+  failure_detail?: string | null;
   adopted_content_version?: number | null;
 };
 

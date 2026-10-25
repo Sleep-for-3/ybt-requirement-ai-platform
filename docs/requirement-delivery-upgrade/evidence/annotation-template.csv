@@ -1,0 +1,3 @@
+﻿case_id,field_code,expected_definition,expected_processing_logic,required_tokens,quality,case_family,annotator,reviewer,annotated_at,evidence_positions
+SYN-001,CUST_NO,客户号,取 CUST_NO 并去空格,CUST_NO|去空格,synthetic,mapping,,,,制度A|3|第2条
+BIZ-001,LOAN_BAL,正常类贷款余额,按 LOAN_STATUS='NORMAL' 过滤后汇总,LOAN_BAL|LOAN_STATUS|NORMAL,business,filter,标注员姓名,复核员姓名,2026-10-23,制度A|3|第2条;制度B|7|表1

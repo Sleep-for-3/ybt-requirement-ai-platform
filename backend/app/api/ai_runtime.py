@@ -50,11 +50,12 @@ class ConnectionTestState(BaseModel):
 class ModelCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     json_mode: bool = True
-    max_output_tokens: int = Field(2048, ge=1, le=8192)
+    # 真实观测：推理型网关会把 8192 预算全用在 reasoning_content 上，正文为空
+    max_output_tokens: int = Field(4096, ge=1, le=32768)
     temperature: float = Field(0.2, ge=0, le=2)
     timeout_seconds: int = Field(60, ge=1, le=180)
     retry_count: int = Field(2, ge=0, le=2)
-    requirement_max_input_bytes: int = Field(64000, ge=1, le=64000)
+    requirement_max_input_bytes: int = Field(128000, ge=1, le=128000)
     last_connection_test: ConnectionTestState | None = None
 
 

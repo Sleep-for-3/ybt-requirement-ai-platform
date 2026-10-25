@@ -1,0 +1,129 @@
+{
+  "project_id": 9,
+  "tables": [
+    "T_9_4",
+    "T_3_6"
+  ],
+  "results": [
+    {
+      "table_code": "T_9_4",
+      "steps": {
+        "preview": {
+          "targets": 1,
+          "rules": 42,
+          "gaps": 29,
+          "preview_hash": "7fcb832918f5faedf222fe87d30f3b7e8e123ba5ccde817b72d76ba4fd7b2670"
+        },
+        "create": {
+          "content_version": 2
+        },
+        "scope_text": "ok",
+        "generation": {
+          "counts": {
+            "completed": 19,
+            "blocked": 1
+          },
+          "seconds": 1102.5
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null,
+          "keys": [
+            "document",
+            "idempotent"
+          ]
+        },
+        "freeze": {
+          "id": 7,
+          "requirement_id": 16,
+          "requirement_version": 2,
+          "content_hash": "4cf5fd53688098f148e516c4bb426019ae9b6b5023f5a886ef6b41789b8148af",
+          "created_at": "2026-10-24T16:03:36.022166+00:00",
+          "status": "frozen_draft",
+          "deduplicated": false
+        },
+        "export": {
+          "bytes": 12137,
+          "path": "T_9_4-survey.xlsx",
+          "renderer": "survey-requirement-doc-v4",
+          "artifact_id": "27"
+        }
+      },
+      "field_count": 10,
+      "script_version_id": 88,
+      "bound_fields": 10,
+      "scoped_fields": 10,
+      "generated_fields": 10,
+      "requirement_id": 16,
+      "input_id": 36,
+      "failures": [
+        {
+          "id": 159,
+          "status": "blocked",
+          "reason": "generation_validation_blocked"
+        }
+      ],
+      "seconds": 1107.5
+    },
+    {
+      "table_code": "T_3_6",
+      "steps": {
+        "preview": {
+          "targets": 1,
+          "rules": 28,
+          "gaps": 22,
+          "preview_hash": "e04d0bbee0796443167254e1f5c96d225796d3062d020ebea7efdffa9bfb01de"
+        },
+        "create": {
+          "content_version": 2
+        },
+        "scope_text": "ok",
+        "generation": {
+          "counts": {
+            "completed": 19,
+            "blocked": 1
+          },
+          "seconds": 1142.9
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null,
+          "keys": [
+            "document",
+            "idempotent"
+          ]
+        },
+        "freeze": {
+          "id": 8,
+          "requirement_id": 17,
+          "requirement_version": 2,
+          "content_hash": "8ca2651985b60060e1df731f524301ed3f174d85be0034aada67048d5a9a7de3",
+          "created_at": "2026-10-24T16:22:43.169410+00:00",
+          "status": "frozen_draft",
+          "deduplicated": false
+        },
+        "export": {
+          "bytes": 10408,
+          "path": "T_3_6-survey.xlsx",
+          "renderer": "survey-requirement-doc-v4",
+          "artifact_id": "28"
+        }
+      },
+      "field_count": 10,
+      "script_version_id": 25,
+      "bound_fields": 10,
+      "scoped_fields": 10,
+      "generated_fields": 10,
+      "requirement_id": 17,
+      "input_id": 37,
+      "failures": [
+        {
+          "id": 192,
+          "status": "blocked",
+          "reason": "generation_validation_blocked"
+        }
+      ],
+      "seconds": 1147.2
+    }
+  ]
+}

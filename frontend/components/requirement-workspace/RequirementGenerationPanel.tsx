@@ -12,7 +12,7 @@ import { ITEM_STATES, canAdoptRound, filterRunItems, itemStateCounts, itemStateL
 import { SkillRunProvenance, type CandidateExecution } from "@/components/SkillRunProvenance";
 
 type Section = "business" | "lineage";
-type RunItem = {id:number;field_id:number;section:Section;status:string;reason_code?:string|null;decision:string;adopted_content_version?:number|null};
+type RunItem = {id:number;field_id:number;section:Section;status:string;reason_code?:string|null;failure_detail?:string|null;decision:string;adopted_content_version?:number|null};
 type Run = {id:number;job_id?:number|null;content_version:number;status:string;stale:boolean;total:number;
   counts:Record<"pending"|"running"|"completed"|"failed"|"blocked",number>;items:RunItem[]};
 type Difference = {field:string;current:string;proposed:string;changed:boolean;manual:boolean};
@@ -28,9 +28,9 @@ const labels:Record<string,string>={business_definition:"业务定义",processin
   physical_references:"物理字段引用",evidence:"证据引用"};
 const ITEM_STATE_LABELS:Record<string,string>={pending:"待采用",adopted:"已采用",rejected:"已拒绝",failed:"失败",blocked:"阻断",running:"生成中"};
 
-export function RequirementGenerationPanel({projectId,requirementId,contentVersion,currentFieldId,fields,dirty,onChanged,onSelectField}: {
+export function RequirementGenerationPanel({projectId,requirementId,contentVersion,currentFieldId,fields,dirty,onChanged,onSelectField,autoOpenPending}: {
   projectId:number;requirementId:number;contentVersion:number;currentFieldId:number|null;
-  fields:{id:number;field_name:string;field_code:string}[];dirty:boolean;onChanged:()=>void;onSelectField:(id:number)=>void;
+  fields:{id:number;field_name:string;field_code:string}[];dirty:boolean;onChanged:()=>void;onSelectField:(id:number)=>void;autoOpenPending?:boolean;
 }) {
   const base=`/projects/${projectId}/requirements/${requirementId}`;
   const [mode,setMode]=useState<"scope"|"field">("scope");
@@ -45,6 +45,8 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
   const [basket,setBasket]=useState<Record<number,BasketSelection>>({});
   const [rejectReason,setRejectReason]=useState("");
   const [itemFilter,setItemFilter]=useState("all");
+  // 从看板「待采纳」深链进来时只自动打开一次；之后用户自己关掉不该被再次弹出。
+  const autoOpenApplied=useRef(false);
   // W07: explicitly regenerating a historical round's scope; null means "use the current selection".
   const [scopeOverride,setScopeOverride]=useState<number[]|null>(null);
   // W07: keep the last successful generation state so a later failure can still show fresh-enough data.
@@ -86,11 +88,36 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
     setReplace(saved?.replace_manual_fields||[]);setRejectReason("");
   },[candidate.data,basket]);
   const pendingCandidates=currentRun?.items.filter(item=>item.status==="completed"&&item.decision==="pending")||[];
+
+  useEffect(()=>{
+    if(!autoOpenPending||autoOpenApplied.current)return;
+    if(!currentRun||!pendingCandidates.length)return;
+    autoOpenApplied.current=true;
+    // 先切到「待采用」，避免用户打开抽屉后又看到一堆已采用条目。
+    setItemFilter("pending");
+    const first=pendingCandidates[0];
+    onSelectField(first.field_id);
+    setCandidateId(first.id);
+  },[autoOpenPending,currentRun,pendingCandidates,onSelectField]);
   // W07: every candidate state (failed / rejected / adopted / running / pending) is queryable, not
   // just the pending ones; the counts are shown so the operator sees what is filterable.
   const roundItems=currentRun?.items||[];
   const stateCounts=itemStateCounts(roundItems);
   const visibleItems=filterRunItems(roundItems,itemFilter);
+  // 同一原因往往重复出现（例如多个字段都漏了同一个过滤列），按原因归并后给出条数，
+  // 用户才知道要改的是"同一处脚本依据"而不是二十个独立问题。
+  const blockedReasons=(()=>{
+    const counts=new Map<string,number>();
+    for(const item of roundItems){
+      if(item.status!=="blocked"&&item.status!=="failed")continue;
+      const text=(item.failure_detail||"").trim()||item.reason_code||"未记录原因（服务端未写入 failure_detail）";
+      counts.set(text,(counts.get(text)||0)+1);
+    }
+    // 原因文本常含整段过滤条件（真实脚本可达数百字），清单里截断到 300 字，完整内容仍在条目上。
+    return Array.from(counts.entries())
+      .map(([text,count])=>({text:text.length>300?`${text.slice(0,300)}…`:text,count}))
+      .sort((left,right)=>right.count-left.count);
+  })();
   // W07: a failed or forbidden runs query must not look like "no generation runs".
   const runsState=classifyQueryState({isPending:runs.isPending,isError:runs.isError,error:runs.error,hasData:Boolean(runs.data),itemCount:runs.data?.length||0});
   // W07: a 403 on the candidate must not read as "failed or unavailable", and a failure offers retry.
@@ -181,7 +208,8 @@ export function RequirementGenerationPanel({projectId,requirementId,contentVersi
       {!roundAdoptable?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy||dirty} onClick={()=>applyRoundScope(currentRun)} type="button"><RefreshCw size={13}/>按此轮范围重新生成</button>:null}
       {(currentRun.counts.failed||currentRun.counts.blocked)&&currentRun.job_id&&roundAdoptable?<button className="button-secondary mt-2 h-8 text-xs" disabled={busy} onClick={()=>void retry()} type="button"><RefreshCw size={13}/>重试失败项</button>:null}
       <label className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500"><span>候选状态</span><select aria-label="候选状态筛选" className="control h-7 w-auto text-[11px]" onChange={event=>setItemFilter(event.target.value)} value={itemFilter}><option value="all">全部 {roundItems.length}</option>{ITEM_STATES.filter(state=>state!=="all").map(state=><option key={state} value={state}>{ITEM_STATE_LABELS[state]||state} {stateCounts[state]||0}</option>)}</select></label>
-      <div className="mt-2 max-h-48 space-y-1 overflow-auto">{visibleItems.map(item=><button className="flex w-full items-center justify-between border border-line bg-white px-2 py-2 text-left" key={item.id} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><span className="shrink-0 text-[10px] text-slate-500">{itemStateLabel(item)}</span><Eye className="shrink-0" size={13}/></button>)}</div>
+      {blockedReasons.length?<details className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900"><summary className="cursor-pointer">查看 {blockedReasons.length} 条阻断/失败原因（按原因归并，去问业务或补脚本依据时用）</summary><ul className="mt-1 space-y-1">{blockedReasons.map(reason=><li key={reason.text}><span className="font-medium">{reason.count} 项：</span>{reason.text}</li>)}</ul></details>:null}
+<div className="mt-2 max-h-48 space-y-1 overflow-auto">{visibleItems.map(item=><button className="flex w-full flex-col border border-line bg-white px-2 py-2 text-left" key={item.id} title={item.failure_detail||undefined} onClick={()=>{onSelectField(item.field_id);setCandidateId(item.id);}} type="button"><span className="flex w-full items-center justify-between"><span className="min-w-0 truncate">{fieldMap.get(item.field_id)?.field_name||`字段 ${item.field_id}`} · {item.section==="business"?"业务":"技术"}</span><span className="flex shrink-0 items-center gap-1 text-[10px] text-slate-500">{itemStateLabel(item)}<Eye size={13}/></span></span>{(item.status==="blocked"||item.status==="failed")&&item.failure_detail?<span className="mt-1 line-clamp-2 text-[10px] text-amber-800">{item.failure_detail}</span>:null}</button>)}</div>
       {!visibleItems.length?<p className="mt-2 text-xs text-slate-500">当前状态下没有候选。</p>:null}
       {Object.keys(basket).length?<><button className="button-primary mt-2 w-full" disabled={busy||dirty||!roundAdoptable} onClick={()=>void adoptBasket()} type="button"><Check size={14}/>应用采用清单（{Object.keys(basket).length}）</button>{dirty?<p className="mt-2 text-xs text-amber-700">请先保存当前人工编辑，再采用候选。</p>:null}{!roundAdoptable?<p className="mt-2 text-xs text-amber-700">当前查看的是历史轮次，只能查看或拒绝，不能写入当前版本。</p>:null}</>:null}
     </div>:runsState.kind==="loading"||runsState.kind==="empty"?<p className="mt-2 text-xs text-slate-500">{runsState.kind==="loading"?"正在读取生成状态…":"尚无生成轮次，可先按范围生成候选。"}</p>:runsState.kind==="ready"?null:<p className={`mt-2 text-xs ${runsState.kind==="forbidden"?"text-amber-700":"text-red-700"}`} role={runsState.kind==="forbidden"?"status":"alert"}>{runsState.kind==="forbidden"?"没有查看生成状态的权限，请联系项目管理员。":`生成状态读取失败：${runsState.message}`}{isRetryable(runsState.kind)?<button className="ml-2 underline" onClick={()=>void runs.refetch()} type="button">重试</button>:null}</p>}

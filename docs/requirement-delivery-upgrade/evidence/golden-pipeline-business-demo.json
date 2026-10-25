@@ -1,0 +1,64 @@
+{
+  "example_only": true,
+  "acceptance_note": "示例标注（非真实银行专家标注）。本文件只证明指标口径能把业务用例计入分母/分子，不构成业务准确率验收；对外汇报不得引用本文件的数字作为业务正确率。",
+  "metric_version": "requirement-golden-v1",
+  "dataset_version": "demo-pipeline-v1",
+  "dataset_sha256": "47dc9c74928ea335f8fc4b36f0f70d84ad8e533c6c2f02b89b7d36677a158431",
+  "business_accuracy": {
+    "cases": 1,
+    "scored_cases": 1,
+    "definition_exact_rate": 1.0,
+    "logic_exact_rate": 0.0,
+    "key_rule_recall": 0.0,
+    "evidence_support_rate": 1.0,
+    "manual_edit_rate": 1.0,
+    "status": "BUSINESS_MEASURED"
+  },
+  "case_families": {
+    "filter": {
+      "cases": 1,
+      "scored_cases": 1,
+      "definition_exact_rate": 1.0,
+      "logic_exact_rate": 0.0,
+      "key_rule_recall": 0.0,
+      "evidence_support_rate": 1.0,
+      "manual_edit_rate": 1.0
+    },
+    "mapping": {
+      "cases": 1,
+      "scored_cases": 1,
+      "definition_exact_rate": 1.0,
+      "logic_exact_rate": 0.0,
+      "key_rule_recall": 0.0,
+      "evidence_support_rate": 1.0,
+      "manual_edit_rate": 1.0
+    }
+  },
+  "cases": [
+    {
+      "case_id": "BIZ-DEMO-001",
+      "field_code": "LOAN_BAL",
+      "quality": "business",
+      "definition_exact": true,
+      "logic_exact": false,
+      "key_rule_recall": 0.5,
+      "evidence_support": 1.0,
+      "manual_edit_ratio": 1.0,
+      "scored": true,
+      "reason": ""
+    },
+    {
+      "case_id": "SYN-DEMO-001",
+      "field_code": "CUST_NO",
+      "quality": "synthetic",
+      "definition_exact": true,
+      "logic_exact": false,
+      "key_rule_recall": 0.5,
+      "evidence_support": 1.0,
+      "manual_edit_ratio": 1.0,
+      "scored": true,
+      "reason": ""
+    }
+  ],
+  "metadata_issues": []
+}

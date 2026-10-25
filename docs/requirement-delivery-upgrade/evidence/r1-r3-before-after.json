@@ -1,0 +1,88 @@
+{
+  "generated_at": "2026-10-23T18:49:02+0800",
+  "python": "3.12.4",
+  "cases": [
+    {
+      "case": "R1",
+      "title": "无缓存公式静默丢值",
+      "file_bytes": 5004,
+      "formula_cell_data_only_false": "=IF(1=1,\"只报送正常贷款余额\",\"\")",
+      "formula_cell_data_only_true": null,
+      "unit_count": 1,
+      "unit_texts": [
+        "字段代码：CUST_NO；字段名称：客户号"
+      ],
+      "unit_type": [
+        "qa"
+      ],
+      "warnings": [
+        "[阻断]字段口径 第 2 行有 1 列是无缓存公式（口径），这些值未被解析（定位：sheet=字段口径，row=2，cells=C2）建议：该单元格是公式但没有缓存计算结果（文件由程序生成后从未被 Excel/LibreOffice 重算）。请用 Excel 打开并保存一次，或改为填写文本口径后再上传。系统不会自行执行公式或猜测结果。"
+      ],
+      "observed_loss": true,
+      "warnings_mention_formula": true
+    },
+    {
+      "case": "R2",
+      "title": "合法引用配错误正文",
+      "evidence_text": "只报送正常贷款余额。",
+      "candidate_body": "报送所有逾期贷款余额，无需筛选正常状态。",
+      "violations": [],
+      "contradiction_undetected": true
+    },
+    {
+      "case": "R3",
+      "title": "同快照 Word 重复导出字节不一致",
+      "first_sha256": "c5003a1520ea62de72b62a4458f24733e8e95d329a095209457e38e0f03ed96b",
+      "second_sha256": "36b55b564e5a8c796052fa6cf62371093d3bf8bbce10194067fcf080b629a214",
+      "byte_identical": false,
+      "first_size": 37598,
+      "second_size": 37598
+    }
+  ],
+  "after": [
+    {
+      "case": "R1-after",
+      "title": "无缓存公式→阻断项可见",
+      "unit_texts": [
+        "字段代码：CUST_NO；字段名称：客户号"
+      ],
+      "warnings": [
+        "[阻断]字段口径 第 2 行有 1 列是无缓存公式（口径），这些值未被解析（定位：sheet=字段口径，row=2，cells=C2）建议：该单元格是公式但没有缓存计算结果（文件由程序生成后从未被 Excel/LibreOffice 重算）。请用 Excel 打开并保存一次，或改为填写文本口径后再上传。系统不会自行执行公式或猜测结果。"
+      ],
+      "formula_cells": [
+        {
+          "sheet": "字段口径",
+          "cell": "C2",
+          "formula": "=IF(1=1,\"只报送正常贷款余额\",\"\")"
+        }
+      ],
+      "formula_uncached": 1,
+      "blocking_count": 1,
+      "has_blocking": true,
+      "warnings_mention_formula": true
+    },
+    {
+      "case": "R2-after",
+      "title": "合法引用配错误正文→判定冲突",
+      "status": "conflict",
+      "conflict_count": 1,
+      "unknown_count": 0,
+      "codes": [
+        "filter_column_missing"
+      ],
+      "violations": [
+        "候选正文主张与固定事实冲突（claim-1/filter_column_missing）：主张未提及固定过滤列 LOAN_STATUS（漏过滤），固定条件为：LOAN_STATUS = 'NORMAL'"
+      ],
+      "contradiction_detected": true
+    },
+    {
+      "case": "R3-after",
+      "title": "同快照重复渲染→字节一致",
+      "first_sha256": "6eff169e87fddc01983b15b6f6eb79c96844aa08c39105c97b8b31b4c603fbe8",
+      "second_sha256": "6eff169e87fddc01983b15b6f6eb79c96844aa08c39105c97b8b31b4c603fbe8",
+      "byte_identical": true,
+      "first_size": 37909,
+      "second_size": 37909
+    }
+  ]
+}

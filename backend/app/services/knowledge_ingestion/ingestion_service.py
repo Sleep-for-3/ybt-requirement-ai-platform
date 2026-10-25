@@ -36,7 +36,24 @@ from app.services.vector import get_vector_store
 from app.services.vector.knowledge_record import build_knowledge_vector_record
 
 from .normalizer import normalize_content
-from .parsers import parse_document
+from .parsers import parse_document, parse_document_with_report
+
+# ``parse_document`` 仍是本模块的解析接缝：既有测试与扩展点通过
+# ``monkeypatch.setattr(ingestion_service, "parse_document", ...)`` 替换解析器。
+# 记录导入时的原始对象，用于区分“被替换过”的情况（见 ``_parse_upload``）。
+_ORIGINAL_PARSE_DOCUMENT = parse_document
+
+
+def _parse_upload(file_name: str, content: bytes, knowledge_type: str):
+    """调用解析器，返回 ``(units, warnings, parse_report|None)``。
+
+    被替换过的 ``parse_document`` 按旧的两元组契约处理，解析报告视为不可用
+    （``None``），从而不改变既有扩展点的行为。
+    """
+    if parse_document is not _ORIGINAL_PARSE_DOCUMENT:
+        units, warnings = parse_document(file_name, content, knowledge_type)
+        return units, warnings, None
+    return parse_document_with_report(file_name, content, knowledge_type)
 
 
 ProgressCallback = Callable[[int, int], None]
@@ -279,7 +296,7 @@ async def ingest_knowledge_document(
     vector_store = None if formal_versioned_index else get_vector_store()
     new_vector_ids: list[str] = []
     try:
-        drafts, warnings = parse_document(file_name, content, knowledge_type)
+        drafts, warnings, parse_report = _parse_upload(file_name, content, knowledge_type)
         total = len(drafts)
         resolver = _EntityResolver(db, project_id)
         created_count = 0
@@ -401,6 +418,10 @@ async def ingest_knowledge_document(
             db.execute(update(KnowledgeUnit).where(
                 KnowledgeUnit.document_version_id == version.id).values(enabled=True))
 
+        report_payload = parse_report.to_dict() if parse_report is not None else None
+        parse_blocked = bool(parse_report is not None and parse_report.has_blocking)
+        # Blocking findings are already in ``warnings`` (only ``info`` is filtered),
+        # so a run that dropped key data can never read as a complete parse.
         final_status = (
             ("parsed" if not warnings else "parsed_with_warnings")
             if formal_versioned_index
@@ -411,6 +432,7 @@ async def ingest_knowledge_document(
             "unit_count": created_count,
             "version_no": version.version_no,
             "semantic_index_status": "pending_reindex" if formal_versioned_index else "indexed",
+            **({"parse_report": report_payload, "parse_blocked": parse_blocked} if report_payload else {}),
         }
         version.warnings_json = warnings
         if governed:

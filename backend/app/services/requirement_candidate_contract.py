@@ -15,6 +15,42 @@ _CHINESE_TEXT = re.compile(r"[\u4e00-\u9fff]")
 
 ReferenceId = Annotated[int, Field(strict=True, gt=0)]
 
+# 主张/支持记录的语义版本。校验器（requirement_claim_support）按该版本演进，
+# 候选自行声明的版本与校验器不一致时不会被认证为“已支持”。
+CLAIM_SUPPORT_VERSION = "claim-support-v1"
+
+ClaimAssertionKind = Literal[
+    "filter", "aggregation", "join_key", "as_of_date", "null_handling", "code_mapping",
+    "runtime_fact", "other",
+]
+ClaimSupportSource = Literal["script_rule", "evidence", "physical_field", "runtime_fact"]
+ClaimSupportStatus = Literal["supported", "conflict", "unknown"]
+
+
+class ClaimSupport(BaseModel):
+    """主张与某条固定事实（脚本规则/证据/物理字段）的关系记录。"""
+
+    model_config = ConfigDict(extra="forbid")
+    source: ClaimSupportSource
+    ref_id: str = Field(min_length=1, max_length=200)
+    status: ClaimSupportStatus = "unknown"
+    method: str = Field(default="", max_length=200)
+    method_version: str = Field(default="", max_length=100)
+    detail: str = Field(default="", max_length=2000)
+    # 主张声明的证据版本；为空表示未声明版本。
+    ref_version: str = Field(default="", max_length=100)
+
+
+class CandidateClaim(BaseModel):
+    """候选正文中的一条可核验主张（供生成期校验与事后审计）。"""
+
+    model_config = ConfigDict(extra="forbid")
+    claim_id: str = Field(min_length=1, max_length=100)
+    section: Literal["business", "lineage"]
+    text: str = Field(min_length=1, max_length=5000)
+    assertion_kind: ClaimAssertionKind
+    support: list[ClaimSupport] = Field(default_factory=list, max_length=50)
+
 
 class PhysicalReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -42,6 +78,9 @@ class RequirementCandidate(BaseModel):
     script_rule_ids: list[str] = Field(default_factory=list, max_length=100)
     policy_comparisons: list[PolicyComparisonCandidate] = Field(default_factory=list, max_length=100)
     gaps: list[str] = Field(default_factory=list, max_length=100)
+    # 可选：旧候选没有 claims，仍必须通过本 schema（审计上记为“未执行主张校验”）。
+    claims: list[CandidateClaim] = Field(default_factory=list, max_length=100)
+    claim_support_version: str = Field(default=CLAIM_SUPPORT_VERSION, max_length=100)
 
 
 def project_candidate_context(frozen: dict, field_id: int, section: str) -> dict:
@@ -67,6 +106,11 @@ def check_candidate_compliance(context: dict, candidate: dict) -> list[str]:
     """Validate candidate against context boundaries and return actionable violation messages."""
     violations = []
     allowed_physical = {(item["kind"], item["table_id"], item["field_id"]) for item in context.get("physical_sources", [])}
+    # 需求字段已固定的监管集市映射属于该字段自己的溯源证据（mapping_sources），
+    # 不是"用户选定的资料范围"，但引用它对得上冻结内容，故允许；未映射的集市字段仍不可引用。
+    allowed_physical.update(
+        (item["kind"], item["table_id"], item["field_id"]) for item in context.get("mapping_sources", [])
+    )
     for ref in candidate.get("physical_references", []):
         ref_tuple = (ref.get("kind"), ref.get("table_id"), ref.get("field_id"))
         if ref_tuple not in allowed_physical:
@@ -98,6 +142,15 @@ def check_candidate_compliance(context: dict, candidate: dict) -> list[str]:
         if comparison.get("status") == "conflict" and not (comparison.get("difference") or "").strip():
             violations.append("AI 冲突对照缺少差异说明")
             break
+
+    # 语义支持校验：引用合法不等于正文被固定事实支持。无 claims 的历史候选
+    # 返回 not_evaluated 且不产生新违规，保证向后兼容、不追改历史内容。
+    # 只有"确定性冲突"（正文与固定事实矛盾）算生成期阻断；"无法判定"不阻断生成，
+    # 由 seal_candidate 写成缺口，交给送审前的人工确认——否则模型如实说"无证据"
+    # 反而被整条阻断，等于逼它虚构证据。
+    from app.services.requirement_claim_support import evaluate_claim_support
+
+    violations.extend(evaluate_claim_support(context, candidate).blocking_violations)
     return violations
 
 

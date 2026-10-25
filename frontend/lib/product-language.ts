@@ -273,6 +273,9 @@ export function relationTypeLabel(value?: string | null): string {
 
 const PARSE_STATUS_LABELS: Record<string, string> = {
   pending: "待解析",
+  // 模板入库接口写的是 success（实测真实模板版本 parse_status="success"），
+  // 少了这一项界面会把“解析成功”显示成“其他解析状态”，用户以为解析没做完。
+  success: "解析成功",
   queued: "排队待解析",
   running: "解析中",
   parsed: "已解析",

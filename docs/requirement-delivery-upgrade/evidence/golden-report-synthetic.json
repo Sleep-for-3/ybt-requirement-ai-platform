@@ -1,0 +1,102 @@
+{
+  "metric_version": "requirement-golden-v1",
+  "dataset_version": "golden-synthetic-2026-10-23",
+  "dataset_sha256": "711d15a1c571dcace09b1735680a63de8338be40258d19a89c888dbe5d902c6d",
+  "case_count": 3,
+  "metadata_issues": [],
+  "cases": [
+    {
+      "case_id": "SYN-001",
+      "field_code": "CUST_BAL_NORMAL",
+      "quality": "synthetic",
+      "definition_exact": true,
+      "logic_exact": true,
+      "key_rule_recall": 1.0,
+      "evidence_support": 1.0,
+      "manual_edit_ratio": 0.0,
+      "scored": true,
+      "reason": ""
+    },
+    {
+      "case_id": "SYN-002",
+      "field_code": "CUST_NO",
+      "quality": "synthetic",
+      "definition_exact": true,
+      "logic_exact": false,
+      "key_rule_recall": 0.0,
+      "evidence_support": 0.5,
+      "manual_edit_ratio": 1.0,
+      "scored": true,
+      "reason": ""
+    },
+    {
+      "case_id": "SYN-003",
+      "field_code": "LOAN_DUE_DAYS",
+      "quality": "synthetic",
+      "definition_exact": true,
+      "logic_exact": true,
+      "key_rule_recall": 1.0,
+      "evidence_support": 1.0,
+      "manual_edit_ratio": 0.0,
+      "scored": true,
+      "reason": ""
+    }
+  ],
+  "synthetic_consistency": {
+    "cases": 3,
+    "scored_cases": 3,
+    "definition_exact_rate": 1.0,
+    "logic_exact_rate": 0.6667,
+    "key_rule_recall": 0.6667,
+    "evidence_support_rate": 0.6667,
+    "manual_edit_rate": 0.3333,
+    "status": "SYNTHETIC_ONLY"
+  },
+  "business_accuracy": {
+    "status": "N/A",
+    "reason": "缺少独立业务标注（标注人/时间/证据位置），业务正确率不可计算，不得对外宣称"
+  },
+  "case_families": {
+    "as_of_date": {
+      "cases": 1,
+      "scored_cases": 1,
+      "definition_exact_rate": 1.0,
+      "logic_exact_rate": 1.0,
+      "key_rule_recall": 1.0,
+      "evidence_support_rate": 1.0,
+      "manual_edit_rate": 0.0
+    },
+    "filter_semantics": {
+      "cases": 1,
+      "scored_cases": 1,
+      "definition_exact_rate": 1.0,
+      "logic_exact_rate": 1.0,
+      "key_rule_recall": 1.0,
+      "evidence_support_rate": 1.0,
+      "manual_edit_rate": 0.0
+    },
+    "join_semantics": {
+      "cases": 1,
+      "scored_cases": 1,
+      "definition_exact_rate": 1.0,
+      "logic_exact_rate": 0.0,
+      "key_rule_recall": 0.0,
+      "evidence_support_rate": 0.0,
+      "manual_edit_rate": 1.0
+    }
+  },
+  "manual_effort": {
+    "case_count": 3,
+    "effective_ms_per_field": 270000.0,
+    "wait_ms_per_field": 700000.0,
+    "total_effective_ms": 810000,
+    "phase_totals_ms": {
+      "approval_wait": 1800000,
+      "editing": 480000,
+      "reading": 195000,
+      "system_wait": 300000,
+      "verifying": 135000
+    }
+  },
+  "verdict": "UNVERIFIED"
+}

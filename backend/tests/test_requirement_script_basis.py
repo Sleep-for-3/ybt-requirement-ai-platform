@@ -55,7 +55,15 @@ def test_selected_versions_freeze_rules_and_do_not_follow_live_scripts(snapshot_
     assert "forbidden" not in str(generation) and "hidden" not in str(generation)
     rules = generation["script_basis"]["rules"]
     assert {r["script_version_id"] for r in rules} == {script.version.id}
-    assert any(r["transformation_expression"] == "a.amount * 2" and r["filter_condition"] for r in rules)
+    # 生成输入里的长表达式按 sha 去重进 condition_texts（见 _project_script_basis），
+    # 规则本身只留 *_ref；断言通过摘要还原原文，证明脚本事实既省预算又未被改写。
+    pool = generation["script_basis"]["condition_texts"]
+    resolved = [{key[:-4]: pool[value] for key, value in rule.items()
+                 if key.endswith("_ref") and key[:-4] not in rule}
+                | {key: value for key, value in rule.items() if not key.endswith("_ref")}
+                for rule in rules]
+    # 用 .get：投影后不是每条边都有表达式，直接下标会在 any() 找到目标前就 KeyError。
+    assert any(r.get("transformation_expression") == "a.amount * 2" and r.get("filter_condition") for r in resolved)
     assert all(r["statement_id"] and r["source_line_start"] for r in rules)
     service.ingest(project=project, data=b"INSERT INTO bank.reg.report (amount) SELECT 999;",
         file_name="batch.sql", relative_path="batch.sql", dialect=None, actor_user_id=None, build_revision=False)

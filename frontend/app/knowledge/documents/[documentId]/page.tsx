@@ -17,7 +17,9 @@ import { useJobPolling } from "@/hooks/useJobPolling";
 import { BackgroundJobSummary, KnowledgeRagDocument, KnowledgeUnit, apiDelete, apiGet, apiPost } from "@/lib/api";
 
 const DOCUMENT_TABS = ["原文预览", "解析内容", "版本记录", "索引状态"];
-type DocumentVersion={id:number;version_no:number;file_name:string;parse_status:string;lifecycle_status?:string;regulatory_version?:string|null;internal_revision?:string|null;publisher?:string|null;published_at?:string|null;effective_at?:string|null;expires_at?:string|null;replaces_version_id?:number|null;change_note?:string|null;reviewed_by?:string|null;reviewed_at?:string|null;activated_at?:string|null;warnings_json?:string[];parse_summary_json?:{unit_count?:number;semantic_index_status?:string}};
+type ParseFinding={code:string;severity:"info"|"warning"|"blocking";message:string;locator?:Record<string,unknown>;suggestion?:string};
+type ParseReport={strategy_version?:string;config_version?:string;reader?:string;sheet_total?:number;sheet_parsed?:number;row_total?:number;row_emitted?:number;blocking_count?:number;complete?:boolean;findings?:ParseFinding[]};
+type DocumentVersion={id:number;version_no:number;file_name:string;parse_status:string;lifecycle_status?:string;regulatory_version?:string|null;internal_revision?:string|null;publisher?:string|null;published_at?:string|null;effective_at?:string|null;expires_at?:string|null;replaces_version_id?:number|null;change_note?:string|null;reviewed_by?:string|null;reviewed_at?:string|null;activated_at?:string|null;warnings_json?:string[];parse_summary_json?:{unit_count?:number;semantic_index_status?:string;parse_blocked?:boolean;parse_report?:ParseReport|null}};
 const LIFE:Record<string,string>={draft:"草稿",pending_review:"待审核",approved:"已审核",active:"已生效",superseded:"已替代",withdrawn:"已撤回"};
 
 export default function Page() {
@@ -81,9 +83,21 @@ export default function Page() {
   }
   const parsedUnitCount=Number(doc?.parse_summary_json?.unit_count);
   const unitCount=Number.isFinite(parsedUnitCount)&&parsedUnitCount>0?parsedUnitCount:units.length;
+  function parseFindings(version:DocumentVersion, severity?:ParseFinding["severity"]){
+    const findings=version.parse_summary_json?.parse_report?.findings||[];
+    return severity?findings.filter(finding=>finding.severity===severity):findings;
+  }
+  function hasBlockingLoss(version:DocumentVersion){
+    return Boolean(version.parse_summary_json?.parse_blocked)||parseFindings(version,"blocking").length>0;
+  }
+  function findingText(finding:ParseFinding){
+    const locator=Object.entries(finding.locator||{}).map(([key,value])=>`${key}=${String(value)}`).join("，");
+    return `${finding.message}${locator?`（定位：${locator}）`:""}${finding.suggestion?` 建议：${finding.suggestion}`:""}`;
+  }
   function versionWarnings(version:DocumentVersion){
-    if(version.warnings_json?.length)return version.warnings_json;
-    return doc?.current_version_no===version.version_no?doc.warnings_json:[];
+    const raw=version.warnings_json?.length?version.warnings_json:(doc?.current_version_no===version.version_no?doc.warnings_json:[]);
+    // 阻断项已单独以定位清单展示，避免同一问题在折叠区里重复出现两次。
+    return hasBlockingLoss(version)?raw.filter(item=>!item.startsWith("[阻断]")):raw;
   }
   function versionUnitCount(version:DocumentVersion){
     if(typeof version.parse_summary_json?.unit_count==="number")return version.parse_summary_json.unit_count;
@@ -144,12 +158,14 @@ export default function Page() {
           <h2 className="mb-2 font-semibold">版本记录</h2>
           <p className="mb-4 text-sm text-slate-500">监管版本与内部修订版本分别展示；解析失败或未激活版本不会替换当前问答语料。</p>
           {versions.some(v=>v.parse_status==="failed")&&doc?.current_version_id?<p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">存在解析失败的新版本；问答仍在使用内部版本 {doc.current_version_no}。</p>:null}
+          {versions.some(hasBlockingLoss)?<div className="mb-4 rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900"><p className="font-medium">存在阻断级解析缺失的版本</p><p className="mt-1">这些版本的部分单元格没有被解析出来（例如公式没有缓存结果、整张 sheet 未识别表头）。缺失内容不会进入证据，用这些资料生成需求会被系统拒绝。请按定位用 Excel 重新计算并保存后重新上传。</p></div>:null}
           {versions.length?<ul className="divide-y">{versions.map(v=><li className="grid gap-3 py-4 md:grid-cols-[1fr_1fr_auto] md:items-start" key={v.id}>
             <div>
               <strong>内部版本 {v.version_no}</strong>
               <p className="mt-1 text-sm text-slate-500">监管版本：{v.regulatory_version||"未提供"} · 内部修订：{v.internal_revision||`R${v.version_no}`}</p>
               <p className="mt-1 text-sm">{v.file_name} · {knowledgeLabel(v.parse_status)} · <span className={v.lifecycle_status==="active"?"badge-success":v.lifecycle_status==="pending_review"?"badge-warning":"badge-neutral"}>{LIFE[v.lifecycle_status||""]||"历史导入"}</span></p>
               {versionUnitCount(v)!==undefined?<p className="mt-1 text-sm text-slate-500">解析知识单元：{versionUnitCount(v)}</p>:null}
+              {hasBlockingLoss(v)?<div className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-sm text-rose-900"><p className="font-medium">阻断级解析缺失（{parseFindings(v,"blocking").length}）：缺少的内容不会进入证据，该版本不能用于生成需求</p><ul className="mt-1 list-disc space-y-1 pl-5">{parseFindings(v,"blocking").map((finding,index)=><li key={`${v.id}-blocking-${index}`}>{findingText(finding)}</li>)}</ul></div>:null}
               {versionWarnings(v).length?<details className="mt-2 text-sm text-amber-800"><summary className="cursor-pointer font-medium">查看解析警告（{versionWarnings(v).length}）</summary><ul className="mt-1 list-disc space-y-1 pl-5">{versionWarnings(v).map((warning,index)=><li key={`${v.id}-${index}`}>{warning}</li>)}</ul></details>:null}
             </div>
             <div className="text-sm text-slate-600">

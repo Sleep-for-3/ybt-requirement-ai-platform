@@ -92,7 +92,10 @@ def candidate_detail(db, project_id, requirement_id, item_id, principal):
         "execution_metadata": safe_execution_metadata(candidate.get("execution_metadata"), candidate.get("runtime")),
         "script_rules": [deepcopy(rule) for rule in generation_input.input_json.get("script_basis", {}).get("rules", [])
             if rule["rule_id"] in candidate.get("script_rule_ids", [])],
-        "gaps": [str(value) for value in candidate.get("gaps", []) if str(value).strip()]}
+        "gaps": [str(value) for value in candidate.get("gaps", []) if str(value).strip()],
+        # P0-B 审计：候选自行登记的主张及其确定性支持报告（旧候选为空/None，表示未执行主张校验）。
+        "claims": [deepcopy(claim) for claim in candidate.get("claims", []) if isinstance(claim, dict)],
+        "claim_support": deepcopy(candidate.get("claim_support"))}
 
 
 def adopt_candidate(db, project_id, requirement_id, item_id, expected_version, candidate_hash,

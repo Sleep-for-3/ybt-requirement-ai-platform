@@ -1,0 +1,59 @@
+{
+  "project_id": 9,
+  "tables": [
+    "T_1_2"
+  ],
+  "results": [
+    {
+      "table_code": "T_1_2",
+      "steps": {
+        "resume": {
+          "input_id": 31,
+          "total": 8,
+          "counts": {
+            "pending": 0,
+            "running": 0,
+            "completed": 8,
+            "failed": 0,
+            "blocked": 0
+          }
+        },
+        "generation": {
+          "counts": {
+            "completed": 8
+          },
+          "seconds": 0.0
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null,
+          "keys": [
+            "document",
+            "idempotent"
+          ]
+        },
+        "freeze": {
+          "id": 2,
+          "requirement_id": 13,
+          "requirement_version": 2,
+          "content_hash": "a29884db099d96cf530d6a8d8d5e448a4dcb2297abf42a233c408849f8184d0b",
+          "created_at": "2026-10-24T14:57:42.482909+00:00",
+          "status": "frozen_draft",
+          "deduplicated": false
+        },
+        "export": {
+          "bytes": 8092,
+          "path": "T_1_2-survey.xlsx",
+          "renderer": "survey-requirement-doc-v3",
+          "artifact_id": "21"
+        }
+      },
+      "field_count": 5,
+      "script_version_id": 8,
+      "requirement_id": 13,
+      "input_id": 31,
+      "failures": [],
+      "seconds": 0.0
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import hashlib
 import re
+from typing import Any
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
@@ -10,12 +11,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    ScenarioBusinessMapping, ScenarioTechnicalLineage, TargetField, TargetTable,
-    TemplateApplication, TemplateDocument, TemplateParseResult, TemplateVersion,
+    MartField, MartTable, MartToYbtMapping, ScenarioBusinessMapping, ScenarioTechnicalLineage,
+    TargetField, TargetTable, TemplateApplication, TemplateDocument, TemplateParseResult, TemplateVersion,
 )
 from app.schemas import TemplatePreviewItem, TemplateUploadResponse
 from app.services.storage import get_storage_service
-from app.services.template_parser import ExcelTemplateParser
+from app.services.template_parser import ExcelTemplateParser, SurveyTemplateParser, is_survey_workbook
 
 
 @dataclass
@@ -25,6 +26,9 @@ class TemplateApplySummary:
     updated_tables: int = 0
     created_fields: int = 0
     updated_fields: int = 0
+    created_mart_tables: int = 0
+    created_mart_fields: int = 0
+    created_mart_mappings: int = 0
     skipped_rows: int = 0
     warnings: list[str] | None = None
     template_version_id: int | None = None
@@ -76,7 +80,10 @@ async def ingest_template(
         uploaded_by=uploaded_by)
     db.add(version); db.flush()
     try:
-        output = ExcelTemplateParser().parse(BytesIO(content))
+        # 真实客户模板（一表通调研表）版式与早期单行表头模板不同，按版式分派解析器；
+        # 两者产出同一 ExcelTemplateParseOutput 结构，落库与审核流程保持一致。
+        survey = is_survey_workbook(BytesIO(content))
+        output = (SurveyTemplateParser() if survey else ExcelTemplateParser()).parse(BytesIO(content))
         version.sheet_names_json, version.parse_status, version.status = output.sheet_names, "success", "pending_review"
         snapshot = []
         for result in output.results:
@@ -88,6 +95,9 @@ async def ingest_template(
                 raw_header_json=result.raw_header, parsed_rows_json=result.parsed_rows,
                 warnings_json=result.warnings))
         version.parsed_snapshot_json = snapshot
+        # 表级口径（主题/填报说明/报送数据域）：调研表里已有的事实，落库供导出文档引用。
+        version.table_meta_json = getattr(output, "table_meta", {}) or {}
+        version.parse_report_json = output.parse_report or {}
         # Keep legacy summary columns without changing the active version pointer.
         document.file_name, document.file_type, document.storage_path = file_name, "xlsx", storage_path
         document.sheet_names_json, document.parse_status, document.error_message = output.sheet_names, "success", None
@@ -97,6 +107,7 @@ async def ingest_template(
             version_no=version.version_no, file_name=file_name, parse_status=version.parse_status,
             sheet_count=output.sheet_count, table_count=output.table_count,
             field_count=output.field_count, warnings=output.warnings,
+            parse_report=output.parse_report,
             preview=[TemplatePreviewItem(sheet_name=item.sheet_name, table_code=item.table_code,
                 table_name=item.table_name, field_count=item.field_count) for item in output.results])
     except Exception as exc:
@@ -190,22 +201,42 @@ def apply_template(db: Session, template_id: int, *, applied_by: str | None = No
             db.add(table); db.flush(); summary.created_tables += 1
             change_set.append({"entity": "table", "key": table_code, "operation": "create", "before": None,
                 "after": {"table_code": table_code, "table_name": table_name}})
+        # 表级口径来自“表级口径”sheet：只补空值，绝不覆盖已人工维护的内容。
+        meta = (version.table_meta_json or {}).get((table_code or "").upper()) if version else None
+        if meta:
+            for column in ("theme", "filing_note", "reporting_domain_code", "reporting_domain_name"):
+                value = meta.get(column)
+                if value and not getattr(table, column):
+                    setattr(table, column, value)
+
         for row in result.parsed_rows_json or []:
             field_code, field_name = (row.get("field_code") or "").strip(), (row.get("field_name") or "").strip()
             if not field_code or not field_name:
                 summary.skipped_rows += 1; summary.warnings.append(f"{result.sheet_name} 第 {row.get('row_number', '?')} 行缺少字段代码或字段名称，已跳过"); continue
+            if not _FIELD_CODE_PATTERN.match(field_code):
+                summary.skipped_rows += 1
+                summary.warnings.append(
+                    f"{result.sheet_name} 第 {row.get('row_number', '?')} 行的字段代码「{field_code}」不是标识符，按分段标记行跳过"
+                )
+                continue
             field = db.scalar(select(TargetField).where(TargetField.target_table_id == table.id,
                 TargetField.field_code == field_code))
             payload = {"project_id": document.project_id, "target_table_id": table.id, "field_code": field_code,
                 "field_name": field_name, "field_type": row.get("field_type") or None,
-                "required_flag": bool(row.get("required_flag")), "field_definition": row.get("field_definition") or None,
+                "required_flag": _as_required(row.get("required_flag")), "field_definition": row.get("field_definition") or None,
                 "regulatory_description": row.get("regulatory_description") or None}
+            # 一表通调研表带回的扩展口径（示例需求文档 A–K 列）：只写非空值，避免覆盖已人工确认的内容。
+            for column, source_key in _EXTENDED_FIELD_COLUMNS.items():
+                value = row.get(source_key)
+                if value not in (None, ""):
+                    payload[column] = value
             before = _field_snapshot(field) if field else None
             if field:
                 for key, value in payload.items(): setattr(field, key, value)
                 summary.updated_fields += 1
             else:
                 field = TargetField(**payload); db.add(field); db.flush(); summary.created_fields += 1
+            _apply_mart_mapping(db, document, field, row, summary)
             after = _field_snapshot(field)
             if before: before_snapshot.append(before)
             after_snapshot.append(after)
@@ -239,3 +270,124 @@ def _field_snapshot(field):
     if not field: return None
     return {name: getattr(field, name) for name in ("id", "project_id", "target_table_id", "field_code",
         "field_name", "field_type", "required_flag", "field_definition", "regulatory_description")}
+
+
+#: 调研表列 -> ``TargetField`` 扩展列。语义映射在 :mod:`survey_excel_parser` 里已写死。
+_EXTENDED_FIELD_COLUMNS = {
+    "data_category": "data_category",
+    "data_format": "data_format",
+    "regulatory_original_definition": "regulatory_original_definition",
+    "regulatory_refined_definition": "regulatory_refined_definition",
+    "report_name": "report_name",
+    "report_field_name": "report_field_name",
+    "east_definition": "east_definition",
+    "internal_definition": "internal_definition",
+    "remarks": "remarks",
+}
+
+
+#: 集市表/字段只在确实是标识符时才落库：真实调研表里有个别单元格填的是
+#: ``CASE WHEN ... END`` 之类的取数表达式，直接塞进 ``field_code`` 会超长并被数据库拒绝。
+_MART_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]{0,63}$")
+#: 监管字段代码必须是标识符。真实调研表的数据区中间夹着"辅助字段""数据项编码""补充字段"
+#: 这类分段标记行（表编号/表名称列为空），早期解析会把它们当成字段导入，形成
+#: field_code 为中文的假字段——它们没有脚本血缘、没有集市映射，只会让"字段总数/脚本覆盖"
+#: 这类统计失真。解析器已跳过这些行，这里再守一道：非标识符代码一律跳过并计入 skipped_rows。
+_FIELD_CODE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+
+
+def _apply_mart_mapping(db: Session, document: TemplateDocument, field: TargetField, row: dict,
+                        summary: "TemplateApplySummary") -> None:
+    """把调研表里的“监管集市表/集市字段/取数逻辑”落成集市映射草稿。
+
+    真实调研表一个字段可以对应**多个**集市表（同一 sheet 里重复多组集市列），因此优先按
+    ``row["mart_mappings"]`` 逐组落库；老格式（只有单个 ``mart_*`` 键）仍按单条处理。
+
+    只按模板原值建立映射，不推断关联键或过滤条件：``business_rule`` 只放模板给出的取数逻辑，
+    缺失即留空并在 ``mapping_name`` 里标注待补，避免把空值伪装成已确认口径。
+    """
+
+    groups = row.get("mart_mappings")
+    if isinstance(groups, list) and groups:
+        for group in groups:
+            if isinstance(group, dict):
+                _apply_single_mart_mapping(db, document, field, group, summary)
+        return
+    _apply_single_mart_mapping(db, document, field, row, summary)
+
+
+def _apply_single_mart_mapping(db: Session, document: TemplateDocument, field: TargetField, row: dict,
+                               summary: "TemplateApplySummary") -> None:
+    """落一条集市映射草稿（供 ``_apply_mart_mapping`` 逐组调用）。"""
+
+    table_code = (row.get("mart_table_code") or "").strip()
+    field_code = (row.get("mart_field_code") or "").strip()
+    table_name = (row.get("mart_table_name") or "").strip()
+    field_name = (row.get("mart_field_name") or "").strip()
+    logic = (row.get("mart_logic") or "").strip()
+    if not table_code and not field_code:
+        return
+    if table_code and not _MART_IDENTIFIER.match(table_code):
+        # 不是表名：保留原文作为映射说明，避免把表达式当表名写库。
+        logic = "；".join(filter(None, [logic, f"模板集市表原文：{table_code[:500]}"]))
+        table_code, table_name = "", ""
+    if field_code and not _MART_IDENTIFIER.match(field_code):
+        logic = "；".join(filter(None, [logic, f"模板集市字段原文：{field_code[:1500]}"]))
+        field_code, field_name = "", ""
+    mart_table = None
+    if table_code:
+        mart_table = db.scalar(select(MartTable).where(
+            MartTable.project_id == document.project_id, MartTable.table_code == table_code))
+        if mart_table is None:
+            mart_table = MartTable(project_id=document.project_id, table_code=table_code,
+                                   table_name=table_name or table_code, physical_table_name=table_code,
+                                   description=f"由监管报送模板 {document.file_name} 识别")
+            db.add(mart_table); db.flush(); summary.created_mart_tables += 1
+        elif table_name and mart_table.table_name != table_name:
+            mart_table.table_name = table_name
+    mart_field = None
+    if mart_table is not None and field_code:
+        mart_field = db.scalar(select(MartField).where(
+            MartField.mart_table_id == mart_table.id, MartField.field_code == field_code))
+        if mart_field is None:
+            mart_field = MartField(project_id=document.project_id, mart_table_id=mart_table.id,
+                                   field_code=field_code, field_name=field_name or field_code,
+                                   physical_column_name=field_code)
+            db.add(mart_field); db.flush(); summary.created_mart_fields += 1
+        elif field_name and mart_field.field_name != field_name:
+            mart_field.field_name = field_name
+    mapping = db.scalar(select(MartToYbtMapping).where(
+        MartToYbtMapping.project_id == document.project_id,
+        MartToYbtMapping.target_field_id == field.id,
+        MartToYbtMapping.mart_field_id == (mart_field.id if mart_field else None)))
+    if mapping is None:
+        mapping = MartToYbtMapping(
+            project_id=document.project_id,
+            target_field_id=field.id,
+            mart_field_id=mart_field.id if mart_field else None,
+            mapping_name=f"{field.field_code} → {field_code or table_code or '待补集市字段'}",
+            mapping_status="draft",
+            mart_table_summary=f"{table_name}({table_code})" if table_code else None,
+            mart_field_summary=f"{field_name}({field_code})" if field_code else None,
+            business_rule=logic or None,
+            open_questions=None if logic else "模板未给出取数逻辑，需补充映射规则后再确认",
+        )
+        db.add(mapping); db.flush(); summary.created_mart_mappings += 1
+    elif logic and mapping.business_rule != logic:
+        mapping.business_rule = logic
+
+_REQUIRED_TRUE = {"是", "y", "yes", "true", "1", "必填", "必输", "not null", "非空"}
+
+
+def _as_required(value: Any) -> bool:
+    """把模板原值转成必填标记。
+
+    早期解析器产 bool，一表通调研表产“是/否”字符串；``bool("否")`` 为 True，
+    直接转换会把所有字段都标成必填，因此这里显式判定字符串。
+    """
+
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in _REQUIRED_TRUE

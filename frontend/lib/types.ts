@@ -348,7 +348,8 @@ export type ColumnProfileTask = { id:number; status:string; catalog_column_id:nu
 export type ColumnProfileSnapshot = { id:number; profile_task_id:number; catalog_column_id:number; profile_date:string; total_count?:number|null; null_rate?:number|null; distinct_count?:number|null; min_value_text?:string|null; max_value_text?:string|null; min_length?:number|null; max_length?:number|null; average_length?:number|null; top_values_json:unknown[]; warnings_json:unknown[] };
 export type KnowledgeRagDocument = { id:number; project_id:number; file_name:string; knowledge_type:string; knowledge_scope:string; institution_name?:string|null; document_status:string; confidentiality_level:string; current_version_no:number; current_version_id?:number|null;logical_code?:string|null;source_category?:string;regulatory_document_no?:string|null;publisher?:string|null;parse_summary_json:Record<string,unknown>; warnings_json:string[] };
 export type KnowledgeUnit = { id:number; document_id:number; knowledge_type:string; unit_type:string; title?:string|null; content:string; source_file_name:string; source_sheet_name?:string|null; source_page_no?:number|null; source_heading?:string|null; source_cell_range?:string|null; target_field_code?:string|null; enabled:boolean };
-export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[] };
+export type KnowledgeFragmentLocator = { parent_unit_id:number|null; fragment_index:number; char_start:number|null; char_end:number|null; strategy_version:string|null; estimated_tokens:number|null };
+export type HybridKnowledgeItem = { knowledge_unit_id:number; title?:string|null; content:string; knowledge_type:string; source_file_name:string; source_sheet_name?:string|null; source_cell_range?:string|null; source_page_no?:number|null; keyword_score:number; vector_score:number; rerank_score:number; match_reasons:string[]; fragment?:KnowledgeFragmentLocator|null };
 export type RenderIssue = { severity:"error"|"warning"|"info";code:string;message:string;sheet_name?:string|null;cell?:string|null;business_section?:string|null;business_field?:string|null;target_field_id?:number|null };
 export type ValidationResult = { valid?:boolean;error_count:number;warning_count:number;info_count?:number;issues:RenderIssue[] };
 export type BackgroundJobSummary = {
@@ -412,7 +413,7 @@ export type TraceabilityTemplateDocument = {
   parse_status: string;
   sheet_names_json: string[];
   detected_scenarios_json: Array<{ scenario_code: string; scenario_name: string }>;
-  parse_summary_json: Record<string, number>;
+  parse_summary_json: { sheet_count?: number; row_count?: number; parse_report?: ParseReportPayload | null };
   warnings_json: string[];
   error_message?: string | null;
 };
@@ -530,13 +531,30 @@ export type DataSource = {
   last_discovered_schemas_json: string[];
 };
 
+/** 解析诊断（与 backend/app/services/parse_diagnostics.py 的 to_dict 对齐）。 */
+export type ParseFindingPayload = {
+  code: string; severity: "info" | "warning" | "blocking"; message: string;
+  category?: string; locator?: Record<string, unknown>; suggestion?: string | null;
+};
+export type ParseReportPayload = {
+  strategy_version?: string; config_version?: string; reader?: string; file_suffix?: string;
+  sheet_total?: number; sheet_parsed?: number; sheets_skipped?: Array<Record<string, unknown>>;
+  row_total?: number; row_emitted?: number; row_skipped_blank?: number; row_skipped_duplicate?: number;
+  columns_unrecognized?: string[]; columns_critical_missing?: string[];
+  duplicate_headers?: Array<{ sheet: string; row: number; name: string; columns: number[] }>;
+  formula_total?: number; formula_cached?: number; formula_uncached?: number;
+  formula_cells?: Array<Record<string, unknown>>; formula_cells_truncated?: boolean;
+  header_rows?: unknown[]; merged_header_cells?: number;
+  findings?: ParseFindingPayload[]; blocking_count?: number; complete?: boolean;
+};
+
 export type TemplateVersion = {
   id:number;template_document_id:number;project_id:number;version_no:number;
   regulatory_version?:string|null;release_batch?:string|null;template_code:string;
   publisher?:string|null;published_at?:string|null;effective_at?:string|null;expires_at?:string|null;
   status:string;replaces_version_id?:number|null;change_note?:string|null;file_name:string;file_type:string;
   file_hash:string;sheet_names_json:string[];parsed_snapshot_json:Array<Record<string,unknown>>;
-  parse_status:string;uploaded_by?:string|null;reviewed_by?:string|null;reviewed_at?:string|null;
+  parse_status:string;parse_report_json?:ParseReportPayload|null;uploaded_by?:string|null;reviewed_by?:string|null;reviewed_at?:string|null;
   activated_at?:string|null;created_at:string;updated_at:string;
 };
 

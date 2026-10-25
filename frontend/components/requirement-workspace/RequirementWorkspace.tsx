@@ -12,9 +12,12 @@ import { RequirementGenerationPanel } from "@/components/requirement-workspace/R
 import { RequirementGapResolver } from "@/components/requirement-workspace/RequirementGapResolver";
 import { RequirementDocumentAssistance } from "@/components/requirement-workspace/RequirementDocumentAssistance";
 import { RequirementDeliveryPanel } from "@/components/requirement-workspace/RequirementDeliveryPanel";
+import { RequirementRuntimeFactsPanel } from "@/components/requirement-workspace/RequirementRuntimeFactsPanel";
+import { RequirementTemplateExportPanel } from "@/components/requirement-workspace/RequirementTemplateExportPanel";
 import { RequirementUatPanel } from "@/components/requirement-workspace/RequirementUatPanel";
 import { RequirementRecheckPanel } from "@/components/requirement-workspace/RequirementRecheckPanel";
-import { DocumentPreview, type RequirementGap, type RequirementResourceSummary } from "@/components/requirement-workspace/DocumentPreview";
+import { diffRequirementContent, type SnapshotDiff } from "@/lib/snapshot-diff";
+import { DocumentPreview, type ExportOutcome, type RequirementGap, type RequirementResourceSummary } from "@/components/requirement-workspace/DocumentPreview";
 import { EvidenceDrawer } from "@/components/requirement-workspace/EvidenceDrawer";
 import { RequirementInputPanel } from "@/components/requirement-workspace/RequirementInputPanel";
 import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requirement-workspace/types";
@@ -36,7 +39,8 @@ import {
   SourceToMartMapping,
   apiDownload,
   apiGet,
-  apiPost
+  apiPost,
+  uploadFormDownload
 } from "@/lib/api";
 import { workspaceEvidenceOptions, workspaceFieldOptions, workspaceProjectionOptions, workspaceQueryKeys } from "@/lib/workspace-queries";
 import { describeError, describeUserMessage } from "@/lib/user-message.mjs";
@@ -46,6 +50,10 @@ export function RequirementWorkspace() {
   const queryClient = useQueryClient();
   const [requirement, setRequirement] = useState<RequirementScope | null>(null);
   const pendingReturnField = useRef<number | null>(null);
+  // 深链里的 fieldId 也要让右侧文档预览知道（否则只会选中左侧字段，不定位、不切页签）。
+  const [initialFocusFieldId, setInitialFocusFieldId] = useState<number | null>(null);
+  // 从看板「待采纳」进来时，直接把第一条待采纳候选的抽屉打开：否则用户还要自己找轮次、找条目。
+  const [autoOpenPendingCandidate, setAutoOpenPendingCandidate] = useState(false);
   const [scopeDirty, setScopeDirty] = useState(false);
   const [tableId, setTableId] = useState<number | null>(null);
   const [fieldId, setFieldId] = useState<number | null>(null);
@@ -154,6 +162,8 @@ export function RequirementWorkspace() {
     const sameProject = Number(params.get("projectId")) === projectId;
     const positiveId = (key: string) => {const id = Number(params.get(key)); return sameProject && Number.isSafeInteger(id) && id > 0 ? id : null;};
     pendingReturnField.current = positiveId("fieldId");
+    setInitialFocusFieldId(positiveId("fieldId"));
+    setAutoOpenPendingCandidate(params.get("pendingCandidate") === "1");
     setTableId(positiveId("tableId")); setFieldId(null); setScenarioId(positiveId("scenarioId")); setEvidenceOpen(false); setError(""); setNotice("");
     setActiveTab("structured");
   }, [projectId]);
@@ -290,16 +300,67 @@ export function RequirementWorkspace() {
     } catch (cause) { setError(readError(cause, "采用 AI 草稿失败")); }
   }
 
+  function saveBlob(blob: Blob, fileName: string) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = fileName; anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function exportWorkbook() {
     if (!projectId || !tableId) return;
     if (scopeDirty) { setError("请先保存需求说明后导出。"); return; }
     setExporting(true); setError("");
     try {
-      const file = await apiDownload(requirement ? `/projects/${projectId}/requirements/${requirement.id}/export` : `/target-tables/${tableId}/export/traceability-workbook`);
-      const url = URL.createObjectURL(file.blob);
-      const anchor = document.createElement("a"); anchor.href = url; anchor.download = file.fileName; anchor.click();
-      URL.revokeObjectURL(url); setNotice(`已生成 ${file.fileName}`);
+      const file = await apiDownload(`/target-tables/${tableId}/export/traceability-workbook`);
+      saveBlob(file.blob, file.fileName); setNotice(`已生成 ${file.fileName}`);
     } catch (cause) { setError(readError(cause, "需求文档导出失败")); }
+    finally { setExporting(false); }
+  }
+
+  // 与最近一次冻结的快照逐字段比口径，回答"这版和上版差在哪"。
+  // 读取失败时返回 null 而不是抛错：预检是"看一眼再决定"，不该因为它拿不到数据就挡住导出。
+  async function loadSnapshotDiff(): Promise<SnapshotDiff | null> {
+    if (!projectId || !requirement) return null;
+    const current = scopedDocument.data;
+    if (!current) return null;
+    const snapshots = await apiGet<{ id: number; requirement_id: number }[]>(`/projects/${projectId}/requirements/${requirement.id}/snapshots`);
+    const latest = snapshots?.[0];
+    if (!latest) return null;
+    const frozen = await apiGet<{ id: number; content: unknown; content_hash: string }>(`/projects/${projectId}/requirements/${requirement.id}/snapshots/${latest.id}/content`);
+    return diffRequirementContent(
+      frozen.content as Parameters<typeof diffRequirementContent>[0],
+      current as unknown as Parameters<typeof diffRequirementContent>[1],
+      latest.id,
+      Boolean(frozen.content_hash) && frozen.content_hash === current.content_hash,
+    );
+  }
+
+  // 需求模式的导出必须先冻结：编辑态内容每次都可能不同，评审拿到文件后无法复现。
+  async function freezeAndExport(options: { format: "xlsx" | "docx"; layout: "survey" | "standard" }): Promise<ExportOutcome | null> {
+    if (!projectId || !requirement) return null;
+    if (scopeDirty) { setError("请先保存需求说明后再导出。"); return null; }
+    const contentHash = scopedDocument.data?.content_hash;
+    if (!contentHash) { setError("当前内容尚未加载完成，无法冻结导出。"); return null; }
+    setExporting(true); setError("");
+    try {
+      const form = new FormData();
+      form.append("format", options.format);
+      form.append("layout", options.layout);
+      form.append("expected_version", String(requirement.version));
+      form.append("expected_hash", contentHash);
+      const file = await uploadFormDownload(`/projects/${projectId}/requirements/${requirement.id}/freeze-and-export`, form);
+      saveBlob(file.blob, file.fileName);
+      const outcome: ExportOutcome = {
+        fileName: file.fileName,
+        snapshotId: file.headers["x-requirement-snapshot-id"] || "未返回",
+        snapshotCreated: file.headers["x-requirement-snapshot-created"] === "true",
+        artifactId: file.headers["x-requirement-render-artifact-id"] || "未返回",
+        fileSha256: file.headers["x-requirement-rendered-file-sha256"] || "未返回",
+      };
+      setNotice(`已冻结并导出 ${file.fileName}（快照 #${outcome.snapshotId}）`);
+      await refreshWorkspace();
+      return outcome;
+    } catch (cause) { setError(readError(cause, "冻结并导出失败")); return null; }
     finally { setExporting(false); }
   }
 
@@ -348,7 +409,7 @@ export function RequirementWorkspace() {
             fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
             locked={Boolean(scopedDocument.data?.revision&&scopedDocument.data.revision.status!=="draft")}
             basis={scopedDocument.data?.script_basis} onChanged={()=>{void refreshWorkspace();}}/> : null}
-          {requirement ? <RequirementGenerationPanel key={`generation:${projectId}:${requirement.id}`} projectId={projectId}
+          {requirement ? <RequirementGenerationPanel key={`generation:${projectId}:${requirement.id}`} projectId={projectId} autoOpenPending={autoOpenPendingCandidate}
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
             currentFieldId={fieldId} fields={records.map(record=>record.field)} dirty={scopeDirty||editorDirty}
             onSelectField={changeField} onChanged={()=>{setEditorDirty(false);void refreshWorkspace();}}/> : null}
@@ -368,6 +429,8 @@ export function RequirementWorkspace() {
                   onChanged={()=>{setEditorDirty(false);void refreshWorkspace();}}
                 />}
           </section> : null}
+          {requirement ? <RequirementRuntimeFactsPanel key={`runtime-facts:${projectId}:${requirement.id}`} projectId={projectId} requirementId={requirement.id} /> : null}
+          {requirement ? <RequirementTemplateExportPanel key={`template-export:${projectId}:${requirement.id}`} projectId={projectId} requirementId={requirement.id} /> : null}
           {requirement ? <RequirementDeliveryPanel key={`delivery:${projectId}:${requirement.id}`} projectId={projectId}
             requirementId={requirement.id} contentVersion={scopedDocument.data?.revision?.content_version||0}
             contentHash={scopedDocument.data?.revision?.content_hash} dirty={scopeDirty||editorDirty}
@@ -403,6 +466,7 @@ export function RequirementWorkspace() {
           <div className="relative min-w-0">
             {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在读取字段口径与来源映射…</div> : null}
             <DocumentPreview
+              initialFocusFieldId={initialFocusFieldId}
               requirementId={requirement?.id}
               requirementBackground={requirement?.background}
               requirementScope={requirement || undefined}
@@ -425,6 +489,8 @@ export function RequirementWorkspace() {
               onEditorNotice={setNotice}
               onEditorSaved={() => { setEditorDirty(false); setNotice(requirement ? "本需求内容版本已保存，尚未审核确认。" : "人工内容已保存。"); void refreshWorkspace(); }}
               onExport={() => void exportWorkbook()}
+              onFreezeAndExport={requirement ? freezeAndExport : undefined}
+              snapshotDiffLoader={requirement ? loadSnapshotDiff : undefined}
               onSelectField={changeField}
               onShowEvidence={() => setEvidenceOpen(true)}
               onTabChange={setActiveTab}

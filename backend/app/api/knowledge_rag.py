@@ -6,7 +6,7 @@ from pydantic import BaseModel,Field
 from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models import (AIUserFeedback,EmbeddingIndexVersion,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelCallLog,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
+from app.models import (AIUserFeedback,BackgroundJob,EmbeddingIndexVersion,EmbeddingRecord,KnowledgeDocument,KnowledgeDocumentVersion,KnowledgeUnit,ModelCallLog,Project,PromptTemplateVersion,RagEvaluationCase,RagEvaluationResult,RagEvaluationRun)
 from app.core.settings import get_settings
 from app.services.auth.dependencies import CurrentPrincipal, RealPrincipal
 from app.services.retrieval.planned_search import PlannedSearchRequest, planned_search
@@ -29,8 +29,11 @@ from app.services.vector.knowledge_record import build_knowledge_vector_record
 from app.services.llm.providers import normalize_provider_type
 from app.services.semantic_index.reindex import (
     CHUNK_STRATEGY_VERSION,
+    FRAGMENT_STRATEGY_VERSION,
     INDEX_CONFIG_VERSION,
     build_corpus_snapshot,
+    resolve_chunk_strategy,
+    resolve_fragment_budget,
 )
 from app.services.semantic_index.versioning import (
     build_model_fingerprint,
@@ -47,6 +50,27 @@ KNOWLEDGE_TYPES={"regulatory_qa","regulatory_policy","field_explanation","histor
 KNOWLEDGE_SCOPES={"global","project","institution"}
 CONFIDENTIALITY_LEVELS={"public","internal","confidential","restricted"}
 SOURCE_CATEGORIES={"regulatory_formal","regulatory_qa","internal_policy","internal_interpretation","business_material","technical_evidence"}
+def pending_ingestion_job_ids(db: Session, project_id: int) -> list[int]:
+    """导入任务未完成时提交索引必定失败：语料在提交后变化，任务以语料哈希不符告终。
+
+    真实事故：上传 3 条知识单元后立刻提交重新索引，任务直接失败并只留下
+    "Knowledge corpus changed after submission; submit a fresh reindex task"。
+    """
+    return list(db.scalars(select(BackgroundJob.id).where(
+        BackgroundJob.project_id == project_id,
+        BackgroundJob.job_type == "knowledge_ingestion",
+        BackgroundJob.status.in_(("queued", "running")),
+    ).order_by(BackgroundJob.id.desc())).all())
+
+
+def ingestion_in_progress_message(job_ids: list[int]) -> str:
+    listed = "、".join(f"#{item}" for item in job_ids[:5])
+    return (
+        f"知识资料仍在导入中（任务 {listed}）：导入会改变语料，此时提交索引必定因语料变化失败。"
+        "请等待导入完成后再提交重新索引。"
+    )
+
+
 class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_id:int|None=None;knowledge_types:list[str]=Field(default_factory=list);top_k:int=Field(20,ge=1,le=50);retrieval_mode:str="hybrid";include_history:bool=False;historical_as_of:datetime|None=None
 class AskRequest(SearchRequest):
     answer_mode: Literal["regulatory", "data_field"] | None = None
@@ -57,7 +81,11 @@ class AskRequest(SearchRequest):
 class BindFeedback(BaseModel):feedback_type:str;target_type:str;target_id:int;rating:str;correct_source_system:str|None=None;correct_table_name:str|None=None;correct_field_name:str|None=None;comment:str|None=None;model_call_log_id:int|None=None;output_hash:str|None=None;execution_kind:Literal["real_model","mock_model","deterministic","degraded"]|None=None;execution_metadata_json:dict|None=None
 class EvaluationCaseCreate(BaseModel):case_name:str;case_type:str="retrieval";query_text:str;target_field_id:int|None=None;scenario_id:int|None=None;expected_knowledge_unit_ids_json:list[int]=Field(default_factory=list);expected_source_system:str|None=None;expected_table_name:str|None=None;expected_field_name:str|None=None;expected_answer_keywords_json:list[str]=Field(default_factory=list);enabled:bool=True
 class EvaluationRunCreate(BaseModel):run_name:str;model_profile_id:int|None=None;retrieval_config_json:dict=Field(default_factory=dict)
-class FormalReindexRequest(BaseModel):force:bool=False
+class FormalReindexRequest(BaseModel):
+    force: bool = False
+    # 分片策略必须显式选择；默认保持"一个知识单元一个向量"的历史行为。
+    chunk_strategy: str = CHUNK_STRATEGY_VERSION
+    fragment_max_tokens: int | None = None
 
 @router.post("/projects/{project_id}/knowledge/documents/upload")
 async def upload(project_id:int,response:Response,principal:CurrentPrincipal,file:UploadFile=File(...),knowledge_type:str=Form(...),knowledge_scope:str=Form("project"),institution_name:str|None=Form(None),confidentiality_level:str=Form("internal"),change_note:str|None=Form(None),document_id:int|None=Form(None),logical_code:str|None=Form(None),source_category:str|None=Form(None),regulatory_document_no:str|None=Form(None),regulatory_version:str|None=Form(None),internal_revision:str|None=Form(None),publisher:str|None=Form(None),published_at:str|None=Form(None),effective_at:str|None=Form(None),expires_at:str|None=Form(None),applicable_institutions:str|None=Form(None),applicable_fields:str|None=Form(None),applicable_scenarios:str|None=Form(None),db:Session=Depends(get_db)):
@@ -163,9 +191,18 @@ def formal_reindex(project_id:int,payload:FormalReindexRequest,principal:Current
     if not settings.embedding_model.strip() or not settings.embedding_base_url.strip() or settings.embedding_dimension<=0:
         raise HTTPException(409,"Embedding 配置不完整，请设置独立模型、服务地址和 EMBEDDING_DIMENSION")
     snapshot=build_corpus_snapshot(db,project_id)
+    pending_ingestions=pending_ingestion_job_ids(db,project_id)
+    if pending_ingestions:
+        raise HTTPException(409,ingestion_in_progress_message(pending_ingestions))
+    try:
+        strategy=resolve_chunk_strategy(payload.chunk_strategy)
+        fragment_budget=resolve_fragment_budget(payload.fragment_max_tokens)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
     fingerprint=build_model_fingerprint(provider=provider,base_url=settings.embedding_base_url,model_name=settings.embedding_model,dimension=settings.embedding_dimension)
     active=get_active_index_version(db,project_id)
-    if not payload.force and active and active.model_fingerprint==fingerprint and active.corpus_hash==snapshot.corpus_hash:
+    active_strategy=(active.config_json or {}).get("chunk_strategy_version",CHUNK_STRATEGY_VERSION) if active else None
+    if not payload.force and active and active_strategy==strategy and active.model_fingerprint==fingerprint and active.corpus_hash==snapshot.corpus_hash:
         return {
             "already_active":True,
             "deduplicated":True,
@@ -183,18 +220,21 @@ def formal_reindex(project_id:int,payload:FormalReindexRequest,principal:Current
         "document_count":snapshot.document_count,
         "chunk_count":snapshot.chunk_count,
         "batch_size":settings.embedding_batch_size,
-        "chunk_strategy_version":CHUNK_STRATEGY_VERSION,
+        "chunk_strategy_version":strategy,
         "index_config_version":INDEX_CONFIG_VERSION,
         "force":payload.force,
         "generation":latest_id,
     }
+    if strategy==FRAGMENT_STRATEGY_VERSION and payload.fragment_max_tokens is not None:
+        job_payload["fragment_max_tokens"]=fragment_budget
     idempotency_key=semantic_idempotency_key(job_type="knowledge_embedding_reindex",payload={
         "institution_id":project.institution_id,
         "project_id":project.id,
         "operation_type":"knowledge_embedding_reindex",
         "embedding_model_fingerprint":fingerprint,
         "corpus_hash":snapshot.corpus_hash,
-        "chunk_strategy_version":CHUNK_STRATEGY_VERSION,
+        "chunk_strategy_version":strategy,
+        "fragment_max_tokens":payload.fragment_max_tokens if strategy==FRAGMENT_STRATEGY_VERSION else None,
         "index_config_version":INDEX_CONFIG_VERSION,
         "generation":latest_id if payload.force else 0,
     })

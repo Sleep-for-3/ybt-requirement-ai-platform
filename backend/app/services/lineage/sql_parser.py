@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from bisect import bisect_left
 from dataclasses import dataclass, field, replace
 
 import sqlglot
@@ -115,7 +116,7 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
     edges: list[LineageEdgeSpec] = []
     try:
         chunks = _split_sql_statements(prepared.parse_sql, dialect)
-    except (sqlglot.errors.ParseError, ValueError) as exc:
+    except (sqlglot.errors.SqlglotError, ValueError) as exc:
         warning = f"SQL parse failed: {exc}"
         return SqlLineageParseResult(
             parse_status="failed",
@@ -124,9 +125,35 @@ def parse_sql_lineage(sql: str, *, dialect: str = "", variables: dict[str, str] 
         )
 
     for index, (statement_sql, source_line_start, source_line_end) in enumerate(chunks):
+        write_only = _write_only_statement_type(statement_sql)
+        if write_only is not None:
+            # Pure data statements (INSERT ... VALUES / DELETE / TRUNCATE) cannot
+            # produce field lineage and parsing tens of thousands of them is what
+            # made large customer data scripts time out.  Record the statement
+            # verbatim; never claim lineage for it.
+            statements.append(ParsedStatementSpec(
+                index, write_only, _hash(statement_sql), statement_sql.strip(), "parsed",
+                source_line_start, source_line_end,
+            ))
+            continue
+        oversized = _decompose_oversized_statement(statement_sql, index, prepared.original_sql, dialect)
+        if oversized is not None:
+            statement, statement_edges, extra_warnings = oversized
+            statements.append(replace(statement, source_line_start=source_line_start, source_line_end=source_line_end))
+            edges.extend(statement_edges)
+            warnings.extend(extra_warnings)
+            continue
         try:
             expression = sqlglot.parse_one(statement_sql, read=dialect or None)
-        except (sqlglot.errors.ParseError, ValueError) as exc:
+        except (sqlglot.errors.SqlglotError, ValueError) as exc:
+            recovered = _decompose_oversized_statement(statement_sql, index, prepared.original_sql, dialect, force=True)
+            if recovered is not None:
+                recovered_statement, recovered_edges, recovered_warnings = recovered
+                statements.append(replace(recovered_statement, source_line_start=source_line_start,
+                                          source_line_end=source_line_end))
+                edges.extend(recovered_edges)
+                warnings.extend(recovered_warnings)
+                continue
             warning = f"Statement {index + 1} parse failed: {exc}"
             warnings.append(warning)
             statements.append(ParsedStatementSpec(
@@ -318,26 +345,299 @@ def _join_kind(join: exp.Join) -> str:
     return "inner" if side else "inner"
 
 
-def _split_sql_statements(sql: str, dialect: str) -> list[tuple[str, int, int]]:
-    """Split on tokenizer-confirmed semicolons so one bad statement stays isolated."""
+MAX_STATEMENT_CHARS = 120_000
+"""Largest statement handed to sqlglot in one call.
 
-    tokenizer = sqlglot.Dialect.get_or_raise(dialect).tokenizer() if dialect else sqlglot.Tokenizer()
-    tokens = tokenizer.tokenize(sql)
-    boundaries = [token.end + 1 for token in tokens if token.token_type == TokenType.SEMICOLON]
-    chunks: list[tuple[str, int, int]] = []
+Real GBase batch scripts contain single ``INSERT ... SELECT`` statements built
+from hundreds of ``UNION ALL`` branches (one customer script is 2.28 MB).  A
+full parse of such a statement does not finish in usable time, so oversized
+statements are decomposed instead of timing out.  The limit is a parsing budget,
+never a truncation: nothing is dropped silently.
+"""
+
+MAX_UNION_BRANCHES = 400
+"""Upper bound on decomposed branches; above this the statement is reported as
+unparsed instead of spending unbounded time."""
+
+_WRITE_ONLY_KINDS = (
+    ("insert", "insert_values"),
+    ("delete", "delete"),
+    ("truncate", "truncate"),
+    ("drop", "drop"),
+    ("commit", "commit"),
+)
+"""Statement kinds that carry data, not field lineage, and are cheap to classify."""
+
+_SELECT_TOKEN = re.compile(r"(?i)\bSELECT\b")
+_USING_OR_FROM_TAIL = re.compile(r"(?i)\b(?:USING|FROM)\b")
+
+
+def _strip_leading_comments(sql: str) -> str:
+    """Drop leading whitespace and comments so statement heads can be matched."""
+
+    index = 0
+    length = len(sql)
+    while index < length:
+        if sql[index].isspace():
+            index += 1
+            continue
+        if sql.startswith("--", index):
+            newline = sql.find("\n", index)
+            index = length if newline < 0 else newline + 1
+            continue
+        if sql.startswith("/*", index):
+            end = sql.find("*/", index + 2)
+            index = length if end < 0 else end + 2
+            continue
+        break
+    return sql[index:]
+
+
+def _write_only_statement_type(statement_sql: str) -> str | None:
+    """Classify a data statement that cannot yield field lineage.
+
+    Returns ``None`` when the statement must go through the real parser (it
+    contains ``SELECT`` or is not a recognised write statement), so nothing is
+    silently skipped.
+    """
+
+    head = statement_sql.lstrip()[:64].lower()
+    if _SELECT_TOKEN.search(statement_sql):
+        return None
+    if _USING_OR_FROM_TAIL.search(statement_sql):
+        # ``DELETE ... USING`` and ``UPDATE ... FROM`` do carry lineage.
+        return None
+    for prefix, kind in _WRITE_ONLY_KINDS:
+        if head.startswith(prefix):
+            return kind
+    return None
+
+_INSERT_HEADER = re.compile(
+    r"(?is)\A\s*(?P<header>INSERT\s+(?:OVERWRITE\s+)?(?:INTO\s+)?(?:TABLE\s+)?(?P<target>[^\s(;]+)\s*(?:\([^)]*\)\s*)?)(?P<select>SELECT\b.*)\Z"
+)
+_UNION_KEYWORD = re.compile(r"(?is)\bUNION\b(?:\s+ALL\b)?")
+
+
+def _top_level_union_branches(select_sql: str) -> list[str] | None:
+    """Split a SELECT chain on top-level ``UNION [ALL]`` markers.
+
+    Quoting, parentheses and ``--`` comments are honoured so a UNION inside a
+    sub-query or a string literal never splits the statement.  Returns ``None``
+    when there is nothing to split.
+    """
+
+    cuts: list[tuple[int, int]] = []
+    depth = 0
+    index = 0
+    length = len(select_sql)
+    while index < length:
+        char = select_sql[index]
+        if char in ("'", '"', "`"):
+            quote = char
+            index += 1
+            while index < length:
+                if select_sql[index] == "\\":
+                    index += 2
+                    continue
+                if select_sql[index] == quote:
+                    if index + 1 < length and select_sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    break
+                index += 1
+            index += 1
+            continue
+        if char == "-" and select_sql.startswith("--", index):
+            newline = select_sql.find("\n", index)
+            index = length if newline < 0 else newline + 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(depth - 1, 0)
+        elif depth == 0 and select_sql[index : index + 5].upper() == "UNION":
+            match = _UNION_KEYWORD.match(select_sql, index)
+            if match:
+                cuts.append((index, match.end()))
+                index = match.end()
+                continue
+        index += 1
+    if not cuts:
+        return None
+    branches: list[str] = []
     start = 0
-    for end in [*boundaries, len(sql)]:
-        raw = sql[start:end]
-        if raw.strip().strip(";").strip():
-            first_non_space = start + len(raw) - len(raw.lstrip())
-            last_non_space = start + len(raw.rstrip()) - 1
-            chunks.append((
-                raw,
-                sql.count("\n", 0, first_non_space) + 1,
-                sql.count("\n", 0, max(last_non_space, first_non_space)) + 1,
-            ))
+    for begin, end in cuts:
+        branches.append(select_sql[start:begin])
         start = end
+    branches.append(select_sql[start:])
+    cleaned = [branch.strip() for branch in branches if branch.strip()]
+    return cleaned if len(cleaned) > 1 else None
+
+
+def _decompose_oversized_statement(statement_sql: str, statement_index: int, original_sql: str, dialect: str,
+                                   *, force: bool = False):
+    """Parse an oversized ``INSERT ... SELECT ... UNION ALL ...`` by branch.
+
+    Returns ``None`` when the statement is within budget or cannot be
+    decomposed, so the caller keeps its normal behaviour.  Each branch is parsed
+    as its own ``INSERT`` so field-level mapping survives the budget; when a
+    branch fails the statement is reported as ``partially_parsed`` and the
+    failure is named — no lineage is invented for the failed branch.
+    """
+
+    if len(statement_sql) <= MAX_STATEMENT_CHARS and not force:
+        return None
+    core = _strip_leading_comments(statement_sql)
+    header = _INSERT_HEADER.match(core)
+    if header is None:
+        if force:
+            # Recovering from a failed parse: only a real decomposition helps,
+            # otherwise let the caller report its original error verbatim.
+            return None
+        warning = (f"Statement {statement_index + 1} skipped: {len(statement_sql)} characters exceed the "
+                   f"{MAX_STATEMENT_CHARS}-character parse budget and it is not a decomposable INSERT ... SELECT；"
+                   "未做字段级解析，需人工核验")
+        return (ParsedStatementSpec(statement_index, "unknown", _hash(statement_sql), statement_sql.strip()[:2000],
+                                    "failed", 1, 1, (warning,)), [], [warning])
+    branches = _top_level_union_branches(header.group("select"))
+    if branches is None or len(branches) > MAX_UNION_BRANCHES:
+        if force:
+            return None
+        warning = (f"Statement {statement_index + 1} skipped: {len(statement_sql)} characters exceed the "
+                   f"{MAX_STATEMENT_CHARS}-character parse budget and its UNION branches cannot be split safely；"
+                   "未做字段级解析，需人工核验")
+        return (ParsedStatementSpec(statement_index, "unknown", _hash(statement_sql), statement_sql.strip()[:2000],
+                                    "failed", 1, 1, (warning,)), [], [warning])
+    prefix = header.group("header")
+    merged: list[LineageEdgeSpec] = []
+    failures: list[str] = []
+    for branch_index, branch in enumerate(branches):
+        branch_sql = f"{prefix}{branch}"
+        if not branch_sql.endswith("\n"):
+            # sqlglot raises TokenError when a trailing ``--`` comment reaches EOF.
+            branch_sql += "\n"
+        try:
+            expression = sqlglot.parse_one(branch_sql, read=dialect or None)
+        except (sqlglot.errors.SqlglotError, ValueError) as exc:
+            failures.append(f"branch {branch_index + 1}: {exc}")
+            continue
+        try:
+            merged.extend(_statement_edges(expression, statement_index, original_sql, dialect))
+        except Exception as exc:  # isolate a single branch
+            failures.append(f"branch {branch_index + 1} lineage: {exc}")
+    reason = ("its single-call parse failed, lineage recovered per UNION branch" if force else
+              f"{len(statement_sql)} characters exceed the {MAX_STATEMENT_CHARS}-character budget")
+    warnings = [f"Statement {statement_index + 1} decomposed into {len(branches)} UNION branches ({reason})"]
+    status = "partially_parsed" if failures else "parsed"
+    if failures:
+        warnings.append(f"Statement {statement_index + 1} branch parse failed: " + "; ".join(failures[:5]))
+    statement = ParsedStatementSpec(statement_index, "insert_select", _hash(statement_sql),
+                                    f"{prefix}<{len(branches)} UNION branches>", status, 1, 1,
+                                    tuple(warnings))
+    return statement, merged, warnings
+
+
+def _split_sql_statements(sql: str, dialect: str) -> list[tuple[str, int, int]]:
+    """Split on semicolons outside strings and comments.
+
+    The previous implementation tokenized the whole file with sqlglot to confirm
+    every semicolon.  A 2.28 MB customer script (19 400 ``INSERT ... VALUES``
+    data rows) spent ~30 s just tokenizing, before parsing anything.  A single
+    quote/comment-aware scan gives the same boundaries in linear time; syntax is
+    still validated per statement afterwards, so a bad statement stays isolated.
+    """
+
+    chunks: list[tuple[str, int, int]] = []
+    length = len(sql)
+    start = 0
+    index = 0
+    newlines = [position for position, character in enumerate(sql) if character == "\n"]
+
+    def line_of(offset: int) -> int:
+        return bisect_left(newlines, offset) + 1
+
+    def emit(begin: int, end: int) -> None:
+        raw = sql[begin:end]
+        # A chunk that holds only comments/semicolons is not a statement; keeping
+        # it produced "No expression was parsed from '\n--…'" noise for every
+        # script banner (and for scripts truncated at a disabled block comment).
+        if raw.strip().strip(";").strip() and _has_sql_content(raw):
+            first_non_space = begin + len(raw) - len(raw.lstrip())
+            last_non_space = begin + len(raw.rstrip()) - 1
+            # Precomputed newline offsets: per-chunk ``str.count`` over a 2 MB
+            # script made splitting quadratic (19 400 statements × full scan).
+            chunks.append((raw, line_of(first_non_space), line_of(max(last_non_space, first_non_space))))
+
+    while index < length:
+        char = sql[index]
+        if char in ("'", '"', "`"):
+            quote = char
+            index += 1
+            while index < length:
+                if sql[index] == "\\":
+                    index += 2
+                    continue
+                if sql[index] == quote:
+                    if index + 1 < length and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    break
+                index += 1
+            index += 1
+            continue
+        if char == "-" and sql.startswith("--", index):
+            newline = sql.find("\n", index)
+            index = length if newline < 0 else newline + 1
+            continue
+        if char == "/" and sql.startswith("/*", index):
+            end_comment = sql.find("*/", index + 2)
+            index = length if end_comment < 0 else end_comment + 2
+            continue
+        if char == ";":
+            emit(start, index + 1)
+            start = index + 1
+        index += 1
+    emit(start, length)
     return chunks
+
+
+def _has_sql_content(chunk: str) -> bool:
+    """True when the chunk contains something other than comments and blanks."""
+
+    return bool(_strip_sql_comments(chunk).strip().strip(";").strip())
+
+
+def _strip_sql_comments(sql: str) -> str:
+    out: list[str] = []
+    index, length = 0, len(sql)
+    while index < length:
+        char = sql[index]
+        if char in ("'", '"', "`"):
+            quote = char
+            out.append(char)
+            index += 1
+            while index < length:
+                if sql[index] == "\\" and index + 1 < length:
+                    out.append(sql[index:index + 2])
+                    index += 2
+                    continue
+                out.append(sql[index])
+                if sql[index] == quote:
+                    index += 1
+                    break
+                index += 1
+            continue
+        if char == "-" and sql.startswith("--", index):
+            newline = sql.find("\n", index)
+            index = length if newline < 0 else newline
+            continue
+        if char == "/" and sql.startswith("/*", index):
+            end_comment = sql.find("*/", index + 2)
+            index = length if end_comment < 0 else end_comment + 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def _statement_edges(statement: exp.Expression, statement_index: int, original_sql: str, dialect: str) -> list[LineageEdgeSpec]:

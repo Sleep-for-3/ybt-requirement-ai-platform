@@ -100,6 +100,11 @@ export default function TraceabilityTemplatesPage() {
                   </div>
                   <div>
                     <span className={PARSE_BADGE[document.parse_status] || "badge-neutral"}>{parseStatusLabel(document.parse_status)}</span>
+                    {Number(document.parse_summary_json?.parse_report?.blocking_count || 0) > 0 ? (
+                      <p className="mt-1 text-xs text-rose-700">
+                        阻断级解析缺失 {Number(document.parse_summary_json?.parse_report?.blocking_count)} 项，缺的单元格不会参与口径溯源
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex justify-end gap-2">
                     <button

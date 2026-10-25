@@ -1,0 +1,79 @@
+{
+  "probe_version": "capacity-probe-v1",
+  "generated_at": "2026-10-23T11:36:25+00:00",
+  "tier": "small",
+  "tier_definition": {
+    "description": "单项目单机构，单次生成 ≤ 30 个监管目标",
+    "targets": {
+      "generation_p95_seconds": 120,
+      "worker_restart_recovery_seconds": 300,
+      "max_concurrent_jobs": 2
+    }
+  },
+  "components": [
+    {
+      "component": "postgres",
+      "status": "not_run",
+      "reason": "未配置真实 PostgreSQL DATABASE_URL",
+      "dsn_kind": ""
+    },
+    {
+      "component": "redis",
+      "status": "not_run",
+      "reason": "未配置 REDIS_URL"
+    },
+    {
+      "component": "milvus",
+      "status": "not_run",
+      "reason": "未配置 MILVUS_HOST"
+    }
+  ],
+  "recovery_scenarios": [
+    {
+      "id": "worker_restart",
+      "requirement": "worker 重启后未完成 item 可被重新租约并继续",
+      "entrypoint": "celery worker 重启 + generation-items 租约",
+      "status": "not_run",
+      "reason": "需在真实组件与真实队列上人工编排，本探针不代替验收"
+    },
+    {
+      "id": "lease_expiry",
+      "requirement": "租约到期不重复采纳、不重复计费",
+      "entrypoint": "generation-items lease_until 过期",
+      "status": "not_run",
+      "reason": "需在真实组件与真实队列上人工编排，本探针不代替验收"
+    },
+    {
+      "id": "duplicate_delivery",
+      "requirement": "重复投递同一 job 不产生重复候选",
+      "entrypoint": "background_jobs 重复 enqueue",
+      "status": "not_run",
+      "reason": "需在真实组件与真实队列上人工编排，本探针不代替验收"
+    },
+    {
+      "id": "provider_timeout_429",
+      "requirement": "provider 超时/429 有明确阻断与可重试状态",
+      "entrypoint": "LLM_BASE_URL 指向慢速代理",
+      "status": "not_run",
+      "reason": "需在真实组件与真实队列上人工编排，本探针不代替验收"
+    },
+    {
+      "id": "index_switch_rollback",
+      "requirement": "索引版本切换失败可回滚到上一版",
+      "entrypoint": "embedding_index_versions 切换",
+      "status": "not_run",
+      "reason": "需在真实组件与真实队列上人工编排，本探针不代替验收"
+    },
+    {
+      "id": "long_job_cancel",
+      "requirement": "长任务取消后不留半成品、可恢复",
+      "entrypoint": "reindex 任务取消",
+      "status": "not_run",
+      "reason": "需在真实组件与真实队列上人工编排，本探针不代替验收"
+    }
+  ],
+  "verdict": "NOT_RUN（无可用真实组件，容量与恢复全部未验证）",
+  "reachable_components": [],
+  "business_verified": false,
+  "statement": "容量档位与 SLO 是待验证目标；恢复场景必须逐个在真实 PostgreSQL/Redis-Celery/Milvus 上编排。本报告不构成任何性能或稳定性结论。"
+}

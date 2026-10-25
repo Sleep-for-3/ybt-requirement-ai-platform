@@ -1,4 +1,5 @@
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, func
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -105,6 +106,8 @@ class RequirementGenerationItem(Base, TimestampMixin):
     lease_until: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     candidate_json: Mapped[dict | None] = mapped_column(JSON)
     candidate_hash: Mapped[str | None] = mapped_column(String(64))
+    # 每次尝试的 provider 用量、时延、重试与模型/提示词版本；失败与阻断的尝试也要留账。
+    usage_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     reason_code: Mapped[str | None] = mapped_column(String(80))
     decision: Mapped[str] = mapped_column(String(30), default="pending", server_default="pending")
     decision_reason: Mapped[str | None] = mapped_column(String(2000))

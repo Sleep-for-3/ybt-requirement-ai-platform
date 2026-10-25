@@ -1,5 +1,6 @@
 "use client";
 
+import { FieldTraceSummary } from "@/components/requirement-workspace/FieldTraceSummary";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Save } from "lucide-react";
@@ -71,5 +72,6 @@ export function RequirementContentEditor({requirementId,scopeVersion,contentVers
     {!history?<button className="button-primary mt-3" disabled={busy||!dirty||!editable} onClick={()=>void run()}><Save size={14}/>保存本需求口径</button>:<p className="mt-2 text-xs">历史内容只读，不参与当前编辑。</p>}
     {dirty?<p className="text-xs text-amber-700">有未保存修改，请先保存再切换章节或版本。</p>:null}
     {error?<p role="alert" className="text-xs">{error}</p>:null}
+    <FieldTraceSummary record={record} />
   </section>;
 }

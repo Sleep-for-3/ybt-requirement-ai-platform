@@ -11,6 +11,7 @@ from app.models.decision_case import DecisionCase
 from app.models.sql_change_event import SqlChangeEvent
 from app.models.data_architecture import DataArchitecture, DataArchitectureRevision, CatalogClassification
 from app.models.batch_import import ResourceImportBatch, ResourceImportItem
+from app.models.script_basis_decision import RequirementScriptBasisDecision
 from app.models.requirement import (
     Requirement,
     RequirementDelivery,
@@ -20,6 +21,14 @@ from app.models.requirement import (
     RequirementReviewSubmission,
     RequirementRevision,
 )
+from app.models.requirement_render import RequirementRenderArtifact
+from app.models.artifact_attestation import RequirementArtifactAttestation
+from app.models.delivery_check import RequirementDeliveryCheck
+from app.models.dispatch import RequirementFieldDispatch
+from app.models.dispatch_event import RequirementFieldDispatchEvent
+from app.models.external_sync import ExternalSyncCursor, ExternalSyncEvent
+from app.models.customer_template import CustomerTemplate
+from app.models.requirement_runtime import RequirementRuntimeFactPack
 from app.models.entities import (
     BusinessSystem,
     CandidateSourceRecommendation,
@@ -254,7 +263,17 @@ __all__ = [
     "RequirementGenerationInput",
     "RequirementGenerationItem",
     "RequirementReviewSubmission",
+    "CustomerTemplate",
     "RequirementRevision",
+    "RequirementScriptBasisDecision",
+    "RequirementRenderArtifact",
+    "RequirementDeliveryCheck",
+    "RequirementArtifactAttestation",
+    "RequirementFieldDispatch",
+    "RequirementFieldDispatchEvent",
+    "RequirementRuntimeFactPack",
+    "ExternalSyncCursor",
+    "ExternalSyncEvent",
     "AISkillDefinition",
     "AISkillVersion",
     "AISkillScopeBinding",

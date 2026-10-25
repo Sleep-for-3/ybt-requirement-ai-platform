@@ -2,7 +2,7 @@
 
 import { Download, FileCheck2 } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 
 import { SelectedFieldEditor } from "@/components/requirement-workspace/SelectedFieldEditor";
 import { AiExplanationPanel } from "@/components/requirement-workspace/AiExplanationPanel";
@@ -20,6 +20,16 @@ import type { FieldWorkspaceRecord, SourceMappingIndex } from "@/components/requ
 import type { RequirementScope } from "./RequirementScopePanel";
 import { RequirementContentEditor } from "./RequirementContentEditor";
 import { describeUserMessage } from "@/lib/user-message.mjs";
+import { TRACE_FILTERS, fieldTraceStats, filterFieldTrace, traceFilterCount, type TraceFilterKey } from "@/lib/field-trace";
+import type { SnapshotDiff } from "@/lib/snapshot-diff";
+
+export type ExportOutcome = {
+  fileName: string;
+  snapshotId: string;
+  snapshotCreated: boolean;
+  artifactId: string;
+  fileSha256: string;
+};
 
 export type RequirementGap = {id:string; field_id:number|null; origin:string; message:string; status:string};
 export type RequirementResourceSummary = {kind:string; name:string; code:string; status:string};
@@ -66,7 +76,10 @@ export function DocumentPreview({
   onEditorSaved,
   onShowEvidence,
   onExport,
-  exporting
+  onFreezeAndExport,
+  snapshotDiffLoader,
+  exporting,
+  initialFocusFieldId
 }: {
   requirementId?: number;
   requirementBackground?: string;
@@ -99,8 +112,75 @@ export function DocumentPreview({
   onEditorSaved: () => void;
   onShowEvidence: () => void;
   onExport: () => void;
+  // 需求模式下导出必须先冻结：调用方负责"冻结 + 导出"，并回报身份信息。
+  onFreezeAndExport?: (options: { format: "xlsx" | "docx"; layout: "survey" | "standard" }) => Promise<ExportOutcome | null>;
+  // 与"最近一次冻结"的字段级差异；打开预检时现算，避免把过期差异当成事实。
+  snapshotDiffLoader?: () => Promise<SnapshotDiff | null>;
+  /** 从看板深链进来时带的字段：进入后要定位到它（切到文档预览并高亮）。 */
+  initialFocusFieldId?: number | null;
   exporting: boolean;
 }) {
+  const [traceFilter, setTraceFilter] = useState<TraceFilterKey>("all");
+  const [focusedFieldId, setFocusedFieldId] = useState<number | null>(null);
+  const [showPreflight, setShowPreflight] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"xlsx" | "docx">("xlsx");
+  const [exportLayout, setExportLayout] = useState<"survey" | "standard">("survey");
+  const [exportOutcome, setExportOutcome] = useState<ExportOutcome | null>(null);
+  const [freezing, setFreezing] = useState(false);
+  const [snapshotDiff, setSnapshotDiff] = useState<SnapshotDiff | null>(null);
+  const [snapshotDiffLoading, setSnapshotDiffLoading] = useState(false);
+  const [snapshotDiffError, setSnapshotDiffError] = useState("");
+  const openPreflight = async () => {
+    setShowPreflight(true);
+    if (!snapshotDiffLoader) return;
+    setSnapshotDiffLoading(true);
+    setSnapshotDiffError("");
+    try {
+      setSnapshotDiff(await snapshotDiffLoader());
+    } catch {
+      // 读不到快照内容与"从没冻结过"是两件事：不能把读取失败说成"没有快照"。
+      setSnapshotDiff(null);
+      setSnapshotDiffError("读取最近一次冻结的快照失败，本次差异暂不可用（不影响导出）。");
+    } finally {
+      setSnapshotDiffLoading(false);
+    }
+  };
+  const surveyBlocked = exportLayout === "survey" && exportFormat !== "xlsx";
+  const runFreezeAndExport = async () => {
+    if (!onFreezeAndExport || surveyBlocked) return;
+    setFreezing(true);
+    try {
+      const outcome = await onFreezeAndExport({ format: exportFormat, layout: exportLayout });
+      if (outcome) setExportOutcome(outcome);
+    } finally {
+      setFreezing(false);
+    }
+  };
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
+  const traceStats = useMemo(() => fieldTraceStats(records, requirementGaps || []), [records, requirementGaps]);
+  const visibleRecords = useMemo(() => filterFieldTrace(records, traceFilter, requirementGaps || []), [records, traceFilter, requirementGaps]);
+  // 定位必须"落在看得见的行上"：如果当前覆盖度筛选把这个字段过滤掉了，先切回全部字段，
+  // 否则用户点了"定位字段"却看不到它，会以为按钮没生效。
+  const focusField = (fieldId: number) => {
+    setFocusedFieldId(fieldId);
+    onSelectField(fieldId);
+    // 从"待确认"页签点定位时，字段表在"文档预览"里；不切页签用户会觉得按钮没反应。
+    onTabChange("document");
+    if (!visibleRecords.some((record) => record.field.id === fieldId)) setTraceFilter("all");
+  };
+  // 深链进来时只应用一次：否则用户之后手动切字段/切筛选会被反复拉回去。
+  const initialFocusApplied = useRef(false);
+  useEffect(() => {
+    if (initialFocusApplied.current || !initialFocusFieldId) return;
+    if (!records.some((record) => record.field.id === initialFocusFieldId)) return;
+    initialFocusApplied.current = true;
+    focusField(initialFocusFieldId);
+  }, [initialFocusFieldId, records]);
+  useEffect(() => {
+    if (focusedFieldId === null) return;
+    const row = rowRefs.current[focusedFieldId];
+    if (row && typeof row.scrollIntoView === "function") row.scrollIntoView({ block: "center" });
+  }, [focusedFieldId, visibleRecords]);
   const recordsByFieldId = useMemo(() => new Map(records.map((record) => [record.field.id, record])), [records]);
   const martFieldsById = useMemo(() => new Map(martFields.map((field) => [field.id, field])), [martFields]);
   const martTablesById = useMemo(() => new Map(martTables.map((table) => [table.id, table])), [martTables]);
@@ -123,9 +203,106 @@ export function DocumentPreview({
           <button className="badge-info cursor-pointer" onClick={onShowEvidence} type="button">证据 {evidenceForSelected} 条</button>
           {requirementId ? <button className="badge-warning" onClick={()=>onTabChange("questions")}>{requirementGaps ? `待确认 ${requirementGaps.length} 项` : "完整性待评估"}</button> : <Link className="badge-warning" href="/questions">人工问题 {openQuestions.length} 项 · 完整性待评估</Link>}
           <span className="badge-neutral">{versionLabel}</span>
-          <button className="button-primary" disabled={!table || exporting} onClick={onExport} type="button"><Download size={15} />{exporting ? "导出中…" : "导出需求文档"}</button>
+          <button className="button-primary" disabled={!table || exporting} onClick={() => void openPreflight()} type="button"><Download size={15} />{exporting ? "导出中…" : "导出需求文档"}</button>
         </div>
       </div>
+
+      {showPreflight ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4" role="presentation">
+          <div aria-label="导出前预检" aria-modal="true" className="w-full max-w-lg rounded-lg border border-line bg-white p-5 shadow-xl" role="dialog">
+            <h3 className="text-sm font-semibold text-ink">导出前预检</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {onFreezeAndExport
+                ? "只做统计；继续导出会先把当前内容冻结为快照，再按该快照导出——同一内容重复导出得到同一份文件。"
+                : "只做统计，不冻结版本、不修改任何内容。"}
+            </p>
+            {onFreezeAndExport ? (
+              <div className="mt-3 rounded border border-line bg-slate-50/70 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-slate-500">导出格式</span>
+                  <select aria-label="导出格式" className="rounded border border-line px-2 py-1" onChange={(event) => setExportFormat(event.target.value as "xlsx" | "docx")} value={exportFormat}>
+                    <option value="xlsx">Excel（xlsx）</option>
+                    <option value="docx">Word（docx）</option>
+                  </select>
+                  <span className="text-slate-500">版式</span>
+                  <select aria-label="导出版式" className="rounded border border-line px-2 py-1" onChange={(event) => setExportLayout(event.target.value as "survey" | "standard")} value={exportLayout}>
+                    <option value="survey">一表通调研表式（仅 xlsx）</option>
+                    <option value="standard">平台内置版式</option>
+                  </select>
+                  <span className="text-slate-500">冻结后导出，快照号可在"生成轮次/快照"里复查</span>
+                </div>
+                {surveyBlocked ? <p className="mt-1 text-amber-700">一表通调研表式只支持 xlsx；要导出 Word 请选平台内置版式。</p> : null}
+              </div>
+            ) : null}
+            {onFreezeAndExport && snapshotDiffLoader ? (
+              <section aria-label="与上次冻结相比" className="mt-3 rounded border border-line bg-white px-3 py-2 text-xs">
+                <p className="font-medium text-slate-700">与上次冻结相比</p>
+                {snapshotDiffLoading ? (
+                  <p className="mt-1 text-slate-500">正在读取最近一次冻结的快照…</p>
+                ) : snapshotDiffError ? (
+                  <p className="mt-1 text-amber-700">{snapshotDiffError}</p>
+                ) : !snapshotDiff ? (
+                  <p className="mt-1 text-slate-500">这个需求还没有冻结过快照；本次冻结会是第 1 份。</p>
+                ) : snapshotDiff.sameContentHash ? (
+                  <p className="mt-1 text-slate-600">
+                    与快照 #{snapshotDiff.previousSnapshotId ?? "-"} 内容完全一致（{snapshotDiff.currentFieldCount} 个字段，内容 hash 相同）——本次导出会复用这份快照，不会新建。
+                  </p>
+                ) : snapshotDiff.identical ? (
+                  <p className="mt-1 text-slate-600">
+                    字段口径与快照 #{snapshotDiff.previousSnapshotId ?? "-"} 相同（{snapshotDiff.currentFieldCount} 个字段），但快照之后还有其他内容改动（缺口、资料范围或脚本依据），本次导出会新建快照。
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-1 text-slate-600">
+                      与快照 #{snapshotDiff.previousSnapshotId ?? "-"} 相比：
+                      字段口径变化 {snapshotDiff.changed.length} 个 · 新增字段 {snapshotDiff.added.length} 个 · 删除字段 {snapshotDiff.removed.length} 个（快照 {snapshotDiff.previousFieldCount} → 当前 {snapshotDiff.currentFieldCount}）；本次导出会新建快照。
+                    </p>
+                    {snapshotDiff.changed.length > 0 ? (
+                      <ul className="mt-1 space-y-0.5 text-slate-600">
+                        {snapshotDiff.changed.slice(0, 5).map((item) => (
+                          <li key={item.fieldCode}>· {item.fieldCode} {item.fieldName}：{item.sections.join("、")}发生变化</li>
+                        ))}
+                        {snapshotDiff.changed.length > 5 ? <li>· …另有 {snapshotDiff.changed.length - 5} 个字段有变化</li> : null}
+                      </ul>
+                    ) : null}
+                    <p className="mt-1 text-slate-500">差异按字段口径逐项比较（业务定义/业务正文/技术加工/技术正文），不比较格式与空白。</p>
+                  </>
+                )}
+              </section>
+            ) : null}
+            {exportOutcome ? (
+              <div aria-label="导出身份" className="mt-3 rounded border border-pine-200 bg-pine-50 px-3 py-2 text-xs text-pine-900">
+                <p className="font-medium">已导出 {exportOutcome.fileName}</p>
+                <p>快照 #{exportOutcome.snapshotId}（{exportOutcome.snapshotCreated ? "本次新建" : "内容未变，复用已有快照"}） · 产物 #{exportOutcome.artifactId}</p>
+                <p className="break-all">文件 hash {exportOutcome.fileSha256}</p>
+                <p className="text-pine-800">凭快照号可重新导出同一份文件；改动内容需要新的快照。</p>
+              </div>
+            ) : null}
+            <dl className="mt-4 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">字段总数</dt><dd className="text-base font-semibold text-ink">{traceStats.total}</dd></div>
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">会带"待业务补充"占位</dt><dd className={`text-base font-semibold ${traceStats.pendingBusiness ? "text-amber-700" : "text-ink"}`}>{traceStats.pendingBusiness}</dd></div>
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">无集市映射（溯源列组留空）</dt><dd className="text-base font-semibold text-ink">{traceStats.unmapped}</dd></div>
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">多来源字段（需业务确认口径）</dt><dd className="text-base font-semibold text-ink">{traceStats.multiMapping}</dd></div>
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">仍打开的字段级缺口</dt><dd className={`text-base font-semibold ${traceStats.withGaps ? "text-amber-700" : "text-ink"}`}>{traceStats.withGaps} 个字段</dd></div>
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">缺口条数（含范围级）</dt><dd className="text-base font-semibold text-ink">{requirementGaps ? requirementGaps.length : 0}</dd></div>
+            </dl>
+            <ul className="mt-4 space-y-1 text-xs text-slate-600">
+              {traceStats.pendingBusiness ? <li>· 有 {traceStats.pendingBusiness} 个字段没有业务口径正文，导出文档会写"待业务补充"——审阅者会看到你没有给出口径，而不是看到空白。</li> : null}
+              {traceStats.unmapped ? <li>· 有 {traceStats.unmapped} 个字段没有固定的集市映射，导出的溯源列组会留空。</li> : null}
+              {traceStats.multiMapping ? <li>· 有 {traceStats.multiMapping} 个字段来自多个集市字段，导出后需业务确认取数口径，不能默认取第一条。</li> : null}
+              {traceStats.withGaps ? <li>· 有 {traceStats.withGaps} 个字段仍带打开状态的缺口，导出不等于关闭缺口，送审仍会被阻断。</li> : null}
+            </ul>
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="button-secondary" onClick={() => setShowPreflight(false)} type="button">返回修改</button>
+              {onFreezeAndExport ? (
+                <button className="button-primary" disabled={exporting || freezing || surveyBlocked} onClick={() => void runFreezeAndExport()} type="button">{freezing ? "冻结并导出…" : "冻结并导出"}</button>
+              ) : (
+                <button className="button-primary" disabled={exporting} onClick={() => { setShowPreflight(false); onExport(); }} type="button">{exporting ? "导出中…" : "继续导出"}</button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {!table ? (
         <div className="m-5 empty-state min-h-[620px]"><FileCheck2 className="text-slate-300" size={38} /><p>请先选择一表通目标表</p></div>
@@ -175,12 +352,32 @@ export function DocumentPreview({
             </dl> : null}
 
             <SectionTitle number="2" title="字段级业务口径与技术溯源" />
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px]">
+              <span className="text-slate-500">覆盖度</span>
+              {TRACE_FILTERS.map((filter) => {
+                const count = traceFilterCount(traceStats, filter.key);
+                const active = traceFilter === filter.key;
+                return (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    aria-pressed={active}
+                    className={`rounded-full border px-2 py-0.5 ${active ? "border-pine-400 bg-pine-50 text-pine-700" : "border-line text-slate-600 hover:bg-slate-50"}`}
+                    onClick={() => setTraceFilter(filter.key)}
+                  >
+                    {filter.label} {count}
+                  </button>
+                );
+              })}
+              <span className="text-slate-400">当前显示 {visibleRecords.length} / {traceStats.total} 个字段（与导出文档的完整度统计同口径）</span>
+              {traceFilter !== "all" && traceStats.total ? <span className="text-slate-400">· 该条件下各字段都处理掉后这一项才归零（当前还剩 {traceFilterCount(traceStats, traceFilter)} 个）</span> : null}
+            </div>
             <div className="overflow-x-auto border border-line">
               <table className="w-full min-w-[900px] table-fixed border-collapse text-[10px]">
                 <colgroup><col className="w-[12%]" /><col className="w-[20%]" /><col className="w-[11%]" /><col className="w-[15%]" /><col className="w-[14%]" /><col className="w-[19%]" /><col className="w-[9%]" /></colgroup>
                 <thead><tr className="bg-slate-50 text-left text-slate-600"><Th>目标字段</Th><Th>业务口径</Th><Th>源系统</Th><Th>源表 / 字段</Th><Th>加工路径 / 集市字段</Th><Th>加工与取数规则</Th><Th>状态</Th></tr></thead>
                 <tbody>
-                  {records.map((record) => {
+                  {visibleRecords.map((record) => {
                     const martMapping = record.martMappings[0] || null;
                     const martField = martMapping?.mart_field_id ? martFieldsById.get(martMapping.mart_field_id) || null : null;
                     const martTable = martField ? martTablesById.get(martField.mart_table_id) || null : null;
@@ -201,7 +398,7 @@ export function DocumentPreview({
                     const status = mappingStatusLabel(combinedStatus);
                     const selectedRow = record.field.id === selectedFieldId;
                     return (
-                      <tr className={`cursor-pointer align-top transition ${selectedRow ? "bg-pine-50/70" : "hover:bg-slate-50/70"}`} key={record.field.id} onClick={() => onSelectField(record.field.id)}>
+                      <tr ref={(element) => { rowRefs.current[record.field.id] = element; }} className={`cursor-pointer align-top transition ${selectedRow ? "bg-pine-50/70" : "hover:bg-slate-50/70"} ${focusedFieldId === record.field.id ? "ring-2 ring-pine-400 ring-inset" : ""}`} data-focused={focusedFieldId === record.field.id ? "true" : undefined} key={record.field.id} onClick={() => { setFocusedFieldId(record.field.id); onSelectField(record.field.id); }}>
                         <Td><strong className="block text-ink">{record.field.field_name}</strong><span className="mt-1 block font-mono text-[9px] text-slate-400">{record.field.field_code}</span></Td>
                         <Td>{preferredMappingContent(record.business, record.field.regulatory_refined_definition || record.field.regulatory_description || "待维护")}</Td>
                         <Td>{record.lineage?.source_system_name || sourceMapping?.source_system_summary || "待确认"}</Td>
@@ -212,7 +409,7 @@ export function DocumentPreview({
                       </tr>
                     );
                   })}
-                  {!records.length ? <tr><td className="px-4 py-10 text-center text-xs text-slate-500" colSpan={7}>当前目标表没有可展示字段</td></tr> : null}
+                  {!visibleRecords.length ? <tr><td className="px-4 py-10 text-center text-xs text-slate-500" colSpan={7}>{records.length ? `当前筛选没有字段（共 ${records.length} 个）。换一个覆盖度条件，或选择“全部字段”。` : "当前目标表没有可展示字段"}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -226,7 +423,7 @@ export function DocumentPreview({
             ) : null}
 
             <SectionTitle number={selected ? "4" : "3"} title="待业务 / 技术确认问题" />
-            {requirementId ? <RequirementGapList gaps={requirementGaps} records={records} onSelectField={onSelectField} /> : selectedQuestions.length ? (
+            {requirementId ? <RequirementGapList gaps={requirementGaps} records={records} onFocusField={focusField} /> : selectedQuestions.length ? (
               <ul className="space-y-2">
                 {selectedQuestions.map((question) => (
                   <li className="border-l-2 border-gold-300 bg-gold-50 px-3 py-2 text-[10px] leading-5 text-slate-700" key={question.id}>
@@ -246,7 +443,7 @@ export function DocumentPreview({
             {activeTab === "structured" && selected ? <AiExplanationPanel evidenceCount={evidenceForSelected} martFieldsById={martFieldsById} martTablesById={martTablesById} record={selected} sourceMappings={sourceMappings} /> : null}
             {activeTab === "lineage" ? <RequirementLineagePanel tableId={table.id} fieldId={selectedFieldId} requirementId={requirementId} scenarioId={scenario?.id} onSelectField={onSelectField} contentVersion={contentVersion} /> : null}
             {activeTab === "evidence" ? <EvidencePanel evidenceCountByField={evidenceCountByField} onSelectField={onSelectField} onShowEvidence={onShowEvidence} records={records} selectedFieldId={selectedFieldId} /> : null}
-            {activeTab === "questions" ? requirementId ? <RequirementGapList gaps={requirementGaps} records={records} onSelectField={onSelectField} /> : <QuestionsPanel questions={selectedQuestions} /> : null}
+            {activeTab === "questions" ? requirementId ? <RequirementGapList gaps={requirementGaps} records={records} onFocusField={focusField} /> : <QuestionsPanel questions={selectedQuestions} /> : null}
           </article>
         </div>
       )}
@@ -254,13 +451,56 @@ export function DocumentPreview({
   );
 }
 
-function RequirementGapList({gaps, records, onSelectField}: {gaps?:RequirementGap[]; records:FieldWorkspaceRecord[]; onSelectField:(id:number)=>void}) {
+function RequirementGapList({gaps, records, onFocusField}: {gaps?:RequirementGap[]; records:FieldWorkspaceRecord[]; onFocusField:(id:number)=>void}) {
   if(!gaps)return <p role="status" className="my-3 text-xs">缺口尚未完成评估或读取，请刷新后核验。</p>;
   if(!gaps.length)return <p className="my-3 text-xs">本次完整性检查未发现缺口，仍需完成审核确认。</p>;
-  return <ul aria-label="当前需求全部缺口" className="my-3 space-y-2">{gaps.map(gap=>{
-    const field=records.find(item=>item.field.id===gap.field_id)?.field;
-    return <li key={gap.id} className="rounded border border-gold-200 bg-gold-50 p-3 text-xs"><strong>{gap.origin==="manual"?"人工问题":"分析发现"} · {field?.field_name||"需求范围"}</strong><p className="my-1 whitespace-pre-wrap">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</p>{field?<button className="underline" onClick={()=>onSelectField(field.id)}>定位字段</button>:null}<span className="ml-2">待核验闭环</span></li>;
-  })}</ul>;
+  const fieldById = new Map(records.map((record) => [record.field.id, record]));
+  const groups = new Map<number | null, RequirementGap[]>();
+  for (const gap of gaps) {
+    const key = gap.field_id ?? null;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(gap); else groups.set(key, [gap]);
+  }
+  const ordered = Array.from(groups.entries()).sort((a, b) => (b[1].length - a[1].length));
+  return (
+    <div aria-label="当前需求全部缺口" className="my-3 space-y-2">
+      <p className="text-xs text-slate-500">
+        共 {gaps.length} 项缺口，按字段归并为 {ordered.length} 组（{ordered.filter(([id]) => id !== null).length} 个字段 + {ordered.filter(([id]) => id === null).length} 组范围级）。
+        条数会远多于字段数：同一字段的重复问题不重复定位。
+      </p>
+      {ordered.map(([fieldId, bucket]) => {
+        const field = fieldId !== null ? fieldById.get(fieldId) : undefined;
+        return (
+          <details className="rounded border border-gold-200 bg-gold-50 p-3 text-xs" key={String(fieldId)} open={bucket.length <= 2}>
+            <summary className="flex cursor-pointer items-center gap-2 font-semibold">
+              <span>
+                {field ? `${field.field.field_name || field.field.field_code}` : "需求范围"} · {bucket.length} 项
+                {field && bucket.some((gap: RequirementGap) => gap.origin === "manual") ? " · 含人工问题" : ""}
+              </span>
+              {fieldId !== null ? (
+                <button
+                  className="ml-auto rounded border border-gold-300 bg-white px-2 py-0.5 text-[11px] hover:bg-gold-100"
+                  onClick={(event) => { event.preventDefault(); event.stopPropagation(); onFocusField(fieldId); }}
+                  type="button"
+                >
+                  定位该字段
+                </button>
+              ) : (
+                <span className="ml-auto text-[11px] font-normal text-slate-500">范围级，不对应单个字段</span>
+              )}
+            </summary>
+            <ul className="mt-2 space-y-1.5">
+              {bucket.slice(0, 5).map((gap: RequirementGap) => (
+                <li key={gap.id} className="whitespace-pre-wrap">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</li>
+              ))}
+              {bucket.length > 5 ? <li className="text-slate-500">…另有 {bucket.length - 5} 项同类缺口（同一字段）。</li> : null}
+            </ul>
+            {fieldId === null ? <p className="mt-2 text-slate-500">范围级缺口请在需求范围里处理，不对应单个字段。</p> : null}
+          </details>
+        );
+      })}
+    </div>
+  );
 }
 
 function WorkspaceTabs({ activeTab, onChange }: { activeTab: WorkspaceTab; onChange: (tab: WorkspaceTab) => void }) {

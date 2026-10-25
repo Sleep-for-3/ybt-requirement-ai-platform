@@ -1,0 +1,94 @@
+{
+  "report_version": "reparse-drift-report-v1",
+  "project_id": 9,
+  "sql_versions": 89,
+  "drifted_versions": 4,
+  "items": [
+    {
+      "script_version_id": 1,
+      "script_file_id": 1,
+      "path": "YBT_DKYWCJ_TMP.sql",
+      "version_no": 1,
+      "stored": {
+        "statements": 5,
+        "edges": 57,
+        "parse_status": "partially_parsed"
+      },
+      "current_parser": {
+        "statements": 4,
+        "edges": 57,
+        "parse_status": "parsed",
+        "warnings": [
+          "Unknown template variable preserved: #{INSTANCE_GB}",
+          "Unknown template variable preserved: #{DATA_DATE}"
+        ]
+      },
+      "reason": "parser_facts_predate_current_parser"
+    },
+    {
+      "script_version_id": 3,
+      "script_file_id": 3,
+      "path": "YBT_KHC_TMP.sql",
+      "version_no": 1,
+      "stored": {
+        "statements": 4,
+        "edges": 17,
+        "parse_status": "partially_parsed"
+      },
+      "current_parser": {
+        "statements": 3,
+        "edges": 17,
+        "parse_status": "partially_parsed",
+        "warnings": [
+          "未闭合的块注释：第 532 行起的 SQL 被视为注释（脚本可能被人工屏蔽），其后的语句不参与解析",
+          "Unknown template variable preserved: #{INSTANCE_GB}",
+          "Unknown template variable preserved: #{DATA_DATE}"
+        ]
+      },
+      "reason": "parser_facts_predate_current_parser"
+    },
+    {
+      "script_version_id": 24,
+      "script_file_id": 24,
+      "path": "YBT_T_3_5.sql",
+      "version_no": 1,
+      "stored": {
+        "statements": 2,
+        "edges": 0,
+        "parse_status": "partially_parsed"
+      },
+      "current_parser": {
+        "statements": 1,
+        "edges": 0,
+        "parse_status": "parsed",
+        "warnings": [
+          "未闭合的块注释：第 17 行起的 SQL 被视为注释（脚本可能被人工屏蔽），其后的语句不参与解析",
+          "Unknown template variable preserved: #{INSTANCE_GB}"
+        ]
+      },
+      "reason": "parser_facts_predate_current_parser"
+    },
+    {
+      "script_version_id": 30,
+      "script_file_id": 30,
+      "path": "YBT_T_4_3.sql",
+      "version_no": 1,
+      "stored": {
+        "statements": 80,
+        "edges": 531,
+        "parse_status": "partially_parsed"
+      },
+      "current_parser": {
+        "statements": 79,
+        "edges": 531,
+        "parse_status": "parsed",
+        "warnings": [
+          "Unknown template variable preserved: #{INSTANCE_GB}",
+          "Unknown template variable preserved: #{DATA_DATE}"
+        ]
+      },
+      "reason": "parser_facts_predate_current_parser"
+    }
+  ],
+  "note": "这些脚本版本的解析事实由旧解析器写入。重新上传相同内容会被内容哈希幂等判为重复而不会重写历史事实；请导入新的脚本版本（内容发生变化）或在受控流程中重新导入。"
+}

@@ -132,6 +132,7 @@ class HybridRetriever:
                 candidates = [unit for unit in candidates if unit.id in keyword]
 
         vector: dict[int, float] = {}
+        fragments: dict[int, dict] = {}
         active_index = None
         effective_retrieval_mode = retrieval_mode
         if retrieval_mode in {"vector_only", "hybrid"}:
@@ -178,7 +179,14 @@ class HybridRetriever:
                     for item in vector_results:
                         if item.metadata.get("knowledge_unit_id"):
                             unit_id = int(item.metadata["knowledge_unit_id"])
-                            vector[unit_id] = max(vector.get(unit_id, -1.0), float(item.score))
+                            score = float(item.score)
+                            if score > vector.get(unit_id, -1.0):
+                                # 同一长单元可能命中多个分片：保留得分最高的那一片的
+                                # 原始坐标，命中位置不再是"整条单元"这种笼统信息。
+                                fragment_meta = _fragment_metadata(item.metadata)
+                                if fragment_meta:
+                                    fragments[unit_id] = fragment_meta
+                            vector[unit_id] = max(vector.get(unit_id, -1.0), score)
             else:
                 # The in-memory store remains a deterministic test adapter only.
                 embedding = get_embedding_service()
@@ -211,7 +219,12 @@ class HybridRetriever:
                 for item in vector_results:
                     if item.metadata.get("knowledge_unit_id"):
                         unit_id = int(item.metadata["knowledge_unit_id"])
-                        vector[unit_id] = max(vector.get(unit_id, -1.0), float(item.score))
+                        score = float(item.score)
+                        if score > vector.get(unit_id, -1.0):
+                            fragment_meta = _fragment_metadata(item.metadata)
+                            if fragment_meta:
+                                fragments[unit_id] = fragment_meta
+                        vector[unit_id] = max(vector.get(unit_id, -1.0), score)
 
         normalized_keyword = _normalize_scores(keyword)
         normalized_vector = _normalize_scores(vector)
@@ -344,6 +357,7 @@ class HybridRetriever:
                 "internal_revision": version.internal_revision,
                 "effective_at": version.effective_at,
                 "lifecycle_status": version.lifecycle_status,
+                "fragment": fragments.get(unit.id),
                 "metadata_json": unit.metadata_json,
                 "historical": historical and version.lifecycle_status != "active",
             })
@@ -393,6 +407,28 @@ class HybridRetriever:
             self.db.flush()
         self.db.refresh(log)
         return log, items
+
+
+def _fragment_metadata(metadata: dict) -> dict | None:
+    """Extract the fragment locator from a vector hit, if the hit is a fragment.
+
+    分片检索的向量记录只存片段文本与坐标，正文由 ``KnowledgeUnit.content`` 回填；
+    命中位置对审核者有意义（哪一段被匹配上），所以在检索结果里带上坐标，但绝不
+    用片段文本替代完整证据。
+    """
+    if not metadata:
+        return None
+    index = metadata.get("fragment_index")
+    if index is None:
+        return None
+    return {
+        "parent_unit_id": metadata.get("parent_unit_id"),
+        "fragment_index": int(index),
+        "char_start": metadata.get("fragment_char_start"),
+        "char_end": metadata.get("fragment_char_end"),
+        "strategy_version": metadata.get("fragment_strategy_version"),
+        "estimated_tokens": metadata.get("estimated_tokens"),
+    }
 
 
 def _normalize_scores(scores: dict[int, float]) -> dict[int, float]:

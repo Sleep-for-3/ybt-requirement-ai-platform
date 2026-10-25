@@ -32,6 +32,8 @@ from app.api import (
     datasources,
     db_profile,
     documents,
+    customer_templates,
+    external_sync,
     mapping_evidence,
     mapping_export,
     mapping_rules,
@@ -114,6 +116,33 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 前端（3010）与 API（8011）不同源：不显式 expose，浏览器 JS 读不到这些响应头。
+    # 真实表现是导出文件名退化成默认值（"需求文档.docx"）、产物身份头全部拿不到，
+    # 用户以为导出的是 Word，实际是 xlsx —— 属于"看起来成功但结果错"的静默缺陷。
+    expose_headers=[
+        "Content-Disposition",
+        "Deprecation",
+        "X-Requirement-Deprecated",
+        "X-Requirement-Render-Artifact-Id",
+        "X-Requirement-Rendered-File-Sha256",
+        "X-Requirement-Template-Sha256",
+        "X-Requirement-Renderer-Version",
+        "X-Requirement-Render-Config-Version",
+        "X-Requirement-Snapshot-Hash",
+        # 冻结并导出的身份头：新增响应头必须同时加进 expose_headers，
+        # 否则浏览器读不到（真实事故：界面显示"快照 #未返回"）。
+        "X-Requirement-Snapshot-Id",
+        "X-Requirement-Snapshot-Created",
+        # 批量导出的身份头：同样必须显式 expose，否则前端拿不到条目数与压缩包哈希。
+        "X-Requirement-Batch-Items",
+        "X-Requirement-Batch-Snapshots-Created",
+        "X-Requirement-Batch-File-Sha256",
+        # 派工清单按表分装的入口头：同样必须显式 expose（漏加的代价详见上面两次事故）。
+        "X-Requirement-Worklist-Tables",
+        "X-Requirement-Worklist-Items",
+        "X-Requirement-Worklist-File-Sha256",
+        "X-Request-Id",
+    ],
 )
 
 
@@ -250,6 +279,8 @@ app.include_router(traceability_templates.router, prefix=settings.api_prefix, de
 app.include_router(traceability_export.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(source_recommendations.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(metadata_sync.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(external_sync.router, prefix=settings.api_prefix, dependencies=secured)
+app.include_router(customer_templates.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(catalog.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(metadata_imports.router, prefix=settings.api_prefix, dependencies=secured)
 app.include_router(profiling.router, prefix=settings.api_prefix, dependencies=secured)

@@ -923,7 +923,12 @@ def _deterministic_requirement_content(
         "evidence_unit_ids": [],
         "script_rule_ids": [],
         "policy_comparisons": [],
-        "gaps": list(dict.fromkeys(gap_codes))[:100],
+        # 该路径没有需求冻结输入（无 script_basis/证据锚定），因此无法执行
+        # P0-B 的主张支持校验；这里显式登记为待人工核对，而不是静默当作已校验。
+        "gaps": list(dict.fromkeys([
+            *gap_codes,
+            "该确定性草稿未经主张支持校验（缺少固定脚本依据输入），正文需人工核对后采用",
+        ]))[:100],
     }
     return RequirementCandidate(**candidate).model_dump(mode="json")
 

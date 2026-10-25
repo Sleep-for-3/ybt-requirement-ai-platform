@@ -18,6 +18,12 @@ from app.services.embeddings.observability import (
     embed_with_observability,
     ensure_embedding_external_allowed,
 )
+from app.services.semantic_index.chunking import (
+    DEFAULT_MAX_TOKENS,
+    FRAGMENT_STRATEGY_VERSION,
+    build_fragment_vector_records,
+    plan_fragments,
+)
 from app.services.semantic_index.versioning import (
     activate_index_version,
     build_collection_name,
@@ -28,6 +34,33 @@ from app.services.vector.knowledge_record import build_knowledge_vector_record
 
 CHUNK_STRATEGY_VERSION = "existing-knowledge-unit-v1"
 INDEX_CONFIG_VERSION = "formal-semantic-index-v1"
+# 允许的索引分片策略。默认仍是"一个知识单元一个向量"，分片策略必须由建索引请求显式选择，
+# 不做按长度自动切换——否则同一个语料在不同批次里会得到不同规模的索引，无法对账。
+SUPPORTED_CHUNK_STRATEGIES = (CHUNK_STRATEGY_VERSION, FRAGMENT_STRATEGY_VERSION)
+
+
+def resolve_chunk_strategy(value: object) -> str:
+    """Validate an explicitly requested chunk strategy; never guess or fall back silently."""
+    strategy = str(value or CHUNK_STRATEGY_VERSION)
+    if strategy not in SUPPORTED_CHUNK_STRATEGIES:
+        raise ValueError(
+            f"Unsupported chunk strategy: {strategy}. "
+            f"Supported values are {list(SUPPORTED_CHUNK_STRATEGIES)}."
+        )
+    return strategy
+
+
+def resolve_fragment_budget(value: object) -> int:
+    """Validate the fragment token budget used by the fragment chunk strategy."""
+    if value is None or value == "":
+        return DEFAULT_MAX_TOKENS
+    try:
+        budget = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("fragment_max_tokens must be an integer token budget") from exc
+    if budget <= 0:
+        raise ValueError("fragment_max_tokens must be a positive integer token budget")
+    return budget
 
 
 @dataclass(frozen=True)
@@ -90,6 +123,15 @@ def reindex_project_knowledge(
         persist_denial=True,
     )
 
+    # 提交接口写入的是 `chunk_strategy_version`（见 api/knowledge_rag.py 的 job_payload），
+    # 而历史调用方与单元测试用的是 `chunk_strategy`；只读其中一个键会让用户选的分片
+    # 策略被静默降级成默认策略（真实事故：选了 knowledge-fragment-v1，任务结果里却是
+    # existing-knowledge-unit-v1，且没有任何提示）。
+    requested_value = payload.get("chunk_strategy") or payload.get("chunk_strategy_version")
+    requested_strategy = resolve_chunk_strategy(requested_value)
+    fragment_mode = requested_strategy == FRAGMENT_STRATEGY_VERSION
+    fragment_max_tokens = resolve_fragment_budget(payload.get("fragment_max_tokens"))
+
     version = db.scalar(
         select(EmbeddingIndexVersion).where(
             EmbeddingIndexVersion.background_job_id == job.id
@@ -116,8 +158,16 @@ def reindex_project_knowledge(
             failed_count=0,
             config_json={
                 "batch_size": batch_size,
-                "chunk_strategy_version": CHUNK_STRATEGY_VERSION,
+                "chunk_strategy_version": requested_strategy,
                 "index_config_version": INDEX_CONFIG_VERSION,
+                **(
+                    {
+                        "fragment_max_tokens": fragment_max_tokens,
+                        "fragment_counter": "estimate-tokens-v1",
+                    }
+                    if fragment_mode
+                    else {}
+                ),
             },
             validation_json={},
             created_by=str(job.created_by),
@@ -148,6 +198,13 @@ def reindex_project_knowledge(
         _progress(db, job, 5, "preparing_corpus")
         store.ensure_collection(expected_dimension)
         total = snapshot.chunk_count
+        planned: dict[int, list] = {}
+        if fragment_mode:
+            for unit in snapshot.units:
+                planned[unit.id] = plan_fragments(unit, max_tokens=fragment_max_tokens)
+            expected_record_count = sum(len(items) for items in planned.values())
+        else:
+            expected_record_count = total
         batch_total = max(1, (total + batch_size - 1) // batch_size)
         for batch_number, offset in enumerate(range(0, total, batch_size), start=1):
             db.refresh(job)
@@ -183,8 +240,16 @@ def reindex_project_knowledge(
             current_item_id = item.id
 
             batch = snapshot.units[offset : offset + batch_size]
-            texts = [unit.content for unit in batch]
-            levels = [unit.confidentiality_level for unit in batch]
+            if fragment_mode:
+                texts: list[str] = []
+                levels: list[str] = []
+                for unit in batch:
+                    for fragment in planned.get(unit.id, []):
+                        texts.append(fragment.text)
+                        levels.append(unit.confidentiality_level)
+            else:
+                texts = [unit.content for unit in batch]
+                levels = [unit.confidentiality_level for unit in batch]
             progress = 8 + int((offset / max(total, 1)) * 75)
             _progress(
                 db,
@@ -199,25 +264,53 @@ def reindex_project_knowledge(
                 texts,
                 levels,
             )
-            if len(vectors) != len(batch):
+            if len(vectors) != len(texts):
                 raise ValueError("Embedding result count does not match the corpus batch")
             if any(len(vector) != expected_dimension for vector in vectors):
                 raise ValueError("Embedding dimension does not match the configured index dimension")
-            records = [
-                build_knowledge_vector_record(
-                    unit,
-                    vector,
-                    index_version_id=version.id,
-                    model_fingerprint=version.model_fingerprint,
-                    institution_id=version.institution_id,
-                )
-                for unit, vector in zip(batch, vectors, strict=True)
-            ]
+            unit_records: dict[int, list] = {}
+            if fragment_mode:
+                records: list = []
+                cursor = 0
+                for unit in batch:
+                    fragments = planned.get(unit.id, [])
+                    if not fragments:
+                        continue
+                    unit_vectors = vectors[cursor : cursor + len(fragments)]
+                    cursor += len(fragments)
+                    built = build_fragment_vector_records(
+                        unit,
+                        unit_vectors,
+                        fragments,
+                        index_version_id=version.id,
+                        model_fingerprint=version.model_fingerprint,
+                        institution_id=version.institution_id,
+                    )
+                    if len(built) != len(fragments):
+                        raise ValueError("Fragment record count does not match planned fragments")
+                    records.extend(built)
+                    unit_records[unit.id] = built
+            else:
+                records = [
+                    build_knowledge_vector_record(
+                        unit,
+                        vector,
+                        index_version_id=version.id,
+                        model_fingerprint=version.model_fingerprint,
+                        institution_id=version.institution_id,
+                    )
+                    for unit, vector in zip(batch, vectors, strict=True)
+                ]
+                unit_records = {unit.id: [record] for unit, record in zip(batch, records, strict=True)}
             _progress(db, job, min(88, progress + 3), f"writing_milvus batch {batch_number}/{batch_total}")
             store.upsert_embeddings(records)
             if records and sample_vector is None:
                 sample_vector = records[0].embedding
-            for unit, record in zip(batch, records, strict=True):
+            for unit in batch:
+                flat_records = unit_records.get(unit.id) or []
+                if not flat_records:
+                    continue
+                record_ids = [item.id for item in flat_records]
                 embedding_record = db.scalar(select(EmbeddingRecord).where(
                     EmbeddingRecord.embedding_index_version_id == version.id,
                     EmbeddingRecord.knowledge_unit_id == unit.id,
@@ -231,11 +324,16 @@ def reindex_project_knowledge(
                         embedding_provider=provider,
                         embedding_model=model_name,
                         vector_store_provider="milvus",
-                        vector_record_id=record.id,
+                        vector_record_id=record_ids[0],
+                        vector_record_ids_json=record_ids,
                         embedding_dimension=expected_dimension,
                         content_hash=unit.content_hash,
                         status="active",
                     ))
+                else:
+                    # 重跑同一单元时，向量 id 会随策略/批次变化；记录最新一组，避免"账上只有一条"。
+                    embedding_record.vector_record_id = record_ids[0]
+                    embedding_record.vector_record_ids_json = record_ids
             item.status = "completed"
             item.result_summary_json = {
                 "batch_number": batch_number,
@@ -251,7 +349,7 @@ def reindex_project_knowledge(
         version.status = "validating"
         db.commit()
         validation = store.validate_index(
-            expected_count=snapshot.chunk_count,
+            expected_count=expected_record_count,
             expected_dimension=expected_dimension,
         )
         if sample_vector is None and snapshot.units:
@@ -290,6 +388,8 @@ def reindex_project_knowledge(
             "vector_dimension": expected_dimension,
             "document_count": snapshot.document_count,
             "chunk_count": snapshot.chunk_count,
+            "record_count": expected_record_count,
+            "chunk_strategy_version": requested_strategy,
             "indexed_count": version.indexed_count,
             "collection": version.collection_name,
             "validation": {

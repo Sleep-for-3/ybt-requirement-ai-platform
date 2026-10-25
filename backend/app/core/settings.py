@@ -270,11 +270,13 @@ class Settings(BaseSettings):
                 "llm_interactive_timeout_invalid",
                 "LLM_INTERACTIVE_TIMEOUT_SECONDS must be between 1 and 180.",
             )
-        if not 256 <= self.llm_max_output_tokens <= 8192:
+        if not 256 <= self.llm_max_output_tokens <= 32768:
             add(
                 "error",
                 "llm_max_output_tokens_invalid",
-                "LLM_MAX_OUTPUT_TOKENS must be between 256 and 8192.",
+                # 真实证据：推理型模型先输出 reasoning，8192 上限会被思维链吃光，
+                # finish_reason=length 且正文为空。上限放到 32768 让推理与正文都有预算。
+                "LLM_MAX_OUTPUT_TOKENS must be between 256 and 32768.",
             )
         if self.field_rerank_timeout_seconds != 0 and not 1 <= self.field_rerank_timeout_seconds <= 180:
             add(

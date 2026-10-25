@@ -1,12 +1,15 @@
 """Project-scoped requirements, deterministic gaps, and frozen exports."""
 from datetime import date
 from io import BytesIO
+import copy
 import hashlib
 import json
 
 from fastapi import HTTPException
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+
+from app.services.office_determinism import normalize_office_bytes
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -68,11 +71,58 @@ def load_requirement(db, project_id, requirement_id):
     return row
 
 
+#: 表级口径（调研表“表级口径”sheet）：属于引用元数据，不进需求正文审核，
+#: 但导出文档第 3-8 行要用它；冻结内容里没有时按当前模板事实补齐。
+_TABLE_META_KEYS = ("theme", "filing_note", "reporting_domain_code", "reporting_domain_name")
+
+
+def _with_table_meta(db, content):
+    """把表级口径补进 target_table——只补空缺，绝不覆盖已有值。"""
+
+    target = content.get("target_table")
+    if not isinstance(target, dict):
+        return content
+    table_id = target.get("id")
+    if not table_id:
+        return content
+    table = db.get(TargetTable, table_id)
+    if table is None:
+        return content
+    filled = False
+    for key in _TABLE_META_KEYS:
+        if target.get(key):
+            continue
+        value = getattr(table, key, None)
+        if value:
+            target[key] = value
+            filled = True
+    return content
+
+
+def caliber_digest(content):
+    """口径身份：剔除表级引用元数据后再算 hash。
+
+    为什么需要第二份身份：把调研表“表级口径”（主题 / 报送数据域）补进 `target_table`
+    之后，已冻结需求的 `content_hash` 全部变化，项目看板把它们显示成“有未冻结改动”——
+    用户并没有改任何正文。这里给“正文口径”单独一个身份，让看板能说清“变的是引用元数据，
+    还是需求本身”。
+
+    它**不替代** `content_hash`：冻结去重、产物身份、正式交付哈希仍然用 `content_hash`。
+    """
+
+    data = copy.deepcopy(content) if isinstance(content, dict) else content
+    target = data.get("target_table") if isinstance(data, dict) else None
+    if isinstance(target, dict):
+        for key in _TABLE_META_KEYS:
+            target.pop(key, None)
+    return content_digest(data)
+
+
 def document_content(db, row):
     if row.content_version:
         from app.services.requirement_revisions import revision_document, load_revision
-        return revision_document(load_revision(db, row.project_id, row.id, row.content_version))
-    return live_document_content(db, row)
+        return _with_table_meta(db, revision_document(load_revision(db, row.project_id, row.id, row.content_version)))
+    return _with_table_meta(db, live_document_content(db, row))
 
 
 def live_document_content(db, row):
@@ -272,4 +322,5 @@ def export_document(content):
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
     stream = BytesIO()
     workbook.save(stream)
-    return stream.getvalue()
+    # openpyxl 会把当前时间写进 docProps/core.xml，导致同内容跨秒导出字节不同。
+    return normalize_office_bytes(stream.getvalue())

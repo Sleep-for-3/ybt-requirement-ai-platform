@@ -146,6 +146,73 @@ def export_word(content):
         paragraph("正式交付版本", formal.get("version_no"))
         for row in formal.get("review_record", []):
             paragraph(row.get("step") or "审核步骤", f"{row.get('decision')} 审核人 {row.get('reviewer')} 时间 {row.get('decided_at')} 意见 {row.get('comment') or '未填写'}")
+    return _deterministic_docx_bytes(document)
+
+
+def _deterministic_docx_bytes(document) -> bytes:
+    """同内容两次导出字节一致：移除时间类元数据并固定 zip 条目属性。
+
+    python-docx 默认把当前时间写进 ``docProps/core.xml`` 与 zip 条目头，导致同一份
+    冻结内容每次导出得到不同字节。正式文件审计要求"同一冻结内容 = 同一文件"，
+    因此这里删掉 created/modified 元素后再重排 zip（正文与版式不受影响）。
+    """
+
+    from app.services.requirement_doc_template import _deterministic_package
+
+    properties = document.core_properties
+    properties.revision = 1
+    properties.version = ""
     output = BytesIO()
     document.save(output)
-    return output.getvalue()
+    return _deterministic_package(_strip_core_timestamps(output.getvalue()))
+
+
+_CORE_TIME_PATTERN = re.compile(
+    rb"<dcterms:(?:created|modified|lastPrinted)[^>]*/>|<dcterms:(?:created|modified|lastPrinted)[^>]*>.*?</dcterms:(?:created|modified|lastPrinted)>",
+    re.DOTALL,
+)
+
+
+def _strip_core_timestamps(data: bytes) -> bytes:
+    import zipfile
+
+    from app.services.requirement_doc_template import _deterministic_package
+
+    source = zipfile.ZipFile(BytesIO(data))
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
+        for name in source.namelist():
+            payload = source.read(name)
+            if name == "docProps/core.xml":
+                payload = _CORE_TIME_PATTERN.sub(b"", payload)
+            info = zipfile.ZipInfo(name, date_time=(2000, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o600 << 16
+            target.writestr(info, payload)
+    source.close()
+    return _deterministic_package(buffer.getvalue())
+
+
+def export_word_with_template(content, template_bytes=None, config=None, *, frozen_at=None):
+    """客户模板导出入口：基于客户 .docx 骨架原位填充，返回 ``(docx 字节, 诊断)``。
+
+    - ``template_bytes`` 为 ``None`` 时使用内置默认模板（与 :func:`export_word` 版式等价）；
+    - ``config`` 为 ``None`` 时使用默认模板的默认配置；
+    - 客户模板必须先在外部完成适配（sha256、锚点、必需映射），本函数不做自动模板理解；
+    - 只消费冻结 ``content``：不查库、不联网、不调模型、不执行宏；
+    - 传入 ``frozen_at`` 可固定文档属性时间，保证同一输入重复渲染字节一致。
+
+    :func:`export_word` 仍是既有导出契约，本函数不改变其行为，供需要客户模板时显式选用。
+    """
+    from app.services.requirement_doc_template import (
+        build_default_template,
+        default_config,
+        render,
+    )
+
+    if template_bytes is None:
+        template_bytes = build_default_template()
+    if config is None:
+        config = default_config(template_bytes)
+    return render(template_bytes, content, config, frozen_at=frozen_at)

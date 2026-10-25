@@ -258,6 +258,62 @@ export async function apiDownload(path: string): Promise<{ blob: Blob; fileName:
   }
 }
 
+/** Fallback file name when a download response carries no Content-Disposition. */
+function defaultDownloadName(contentType: string): string {
+  if (contentType.includes("spreadsheetml")) return "\u9700\u6c42\u6587\u6863.xlsx";
+  if (contentType.includes("wordprocessingml")) return "\u9700\u6c42\u6587\u6863.docx";
+  return "\u9700\u6c42\u6587\u6863.bin";
+}
+
+/** Multipart upload whose response is the rendered file itself (customer templates). */
+export type DownloadIdentityHeaders = Record<string, string>;
+
+// 只透出"交付身份"相关的响应头：前端要用它们告诉评审"这份文件的快照号/产物号/hash"，
+// 而不是把任意响应头都塞进页面。
+const DOWNLOAD_IDENTITY_HEADERS = [
+  "x-requirement-render-artifact-id",
+  "x-requirement-rendered-file-sha256",
+  "x-requirement-renderer-version",
+  "x-requirement-snapshot-id",
+  "x-requirement-snapshot-created",
+  "x-requirement-snapshot-hash",
+  // 批量导出的身份头：CORS 已经 expose，这里如果不再透出，
+  // 页面只能显示"本次新建快照 未返回"（真实事故：下载成功但结果区一片"未返回"）。
+  "x-requirement-batch-items",
+  "x-requirement-batch-snapshots-created",
+  "x-requirement-batch-file-sha256",
+];
+
+function downloadIdentityHeaders(response: Response): DownloadIdentityHeaders {
+  const headers: DownloadIdentityHeaders = {};
+  for (const name of DOWNLOAD_IDENTITY_HEADERS) {
+    const value = response.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  return headers;
+}
+
+export async function uploadFormDownload(path: string, formData: FormData): Promise<{ blob: Blob; fileName: string; headers: DownloadIdentityHeaders }> {
+  const epoch = currentSessionEpoch();
+  try {
+    const response = await fetchWithSessionRetry(path, () => ({ method: "POST", headers: authHeaders(), body: formData }));
+    if (!response.ok) return throwApiError(response, path, browserAuthEnvironment(epoch));
+    const disposition = response.headers.get("content-disposition") || "";
+    const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    const blob = await response.blob();
+    return {
+      blob,
+      // 没有 Content-Disposition 时按响应类型给扩展名：调用方可能是 xlsx（一表通调研表式）
+      // 或 docx（内置版式），固定写成 .docx 会让用户拿到"打不开的 Word"。
+      fileName: encodedName ? decodeURIComponent(encodedName) : plainName || defaultDownloadName(blob.type),
+      headers: downloadIdentityHeaders(response),
+    };
+  } catch (error) {
+    throw normalizeRequestError(error);
+  }
+}
+
 export async function apiPostDownload(path: string, body: unknown = {}): Promise<{ blob: Blob; fileName: string }> {
   const epoch = currentSessionEpoch();
   try {

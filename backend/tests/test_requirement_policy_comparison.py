@@ -170,6 +170,17 @@ def test_model_comparison_is_separate_and_regeneration_keeps_human_conflict(snap
     assert response.status_code == 201, response.text
     result = client.get(base + "/policy-comparison?content_version=3").json()
     assert result["ai_suggestions"][0]["comparisons"][0]["status"] == "matched"
+    # 送进模型的 script_basis 经过字段投影（长文本转引用、模板行裁剪），它的 hash
+    # 必然与冻结在需求里的完整 basis 不同；投影块必须记录原始身份，否则制度对照
+    # 候选会被 ai_suggestions 静默丢弃（真实回归：legacy/skill 两条路径均失败）。
+    from app.models import RequirementGenerationInput as _Input
+    from app.services.requirement_policy_comparison import basis_hash as _basis_hash
+    _frozen = db.get(_Input, db.query(_Input).order_by(_Input.id.desc()).first().id).input_json
+    if _frozen.get("script_basis"):
+        _projection = _frozen["script_basis"].get("projection") or {}
+        assert _projection.get("source_basis_hash") == _basis_hash(
+            load_revision(db, project.id, req.id, 3).content_json["script_basis"]
+        )
     assert result["decisions"][str(unit.id)]["status"] == "conflict"
     assert load_revision(db, project.id, req.id, 3).content_json == saved
     # Provenance readers must never return prompts or full regression inputs.

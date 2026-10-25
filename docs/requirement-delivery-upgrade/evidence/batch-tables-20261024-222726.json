@@ -1,0 +1,22 @@
+{
+  "project_id": 9,
+  "tables": [
+    "T_1_2",
+    "T_3_8",
+    "T_10_1"
+  ],
+  "results": [
+    {
+      "table_code": "T_1_2",
+      "error": "AttributeError: 'dict' object has no attribute 'status_code'"
+    },
+    {
+      "table_code": "T_3_8",
+      "error": "AttributeError: 'dict' object has no attribute 'status_code'"
+    },
+    {
+      "table_code": "T_10_1",
+      "error": "AttributeError: 'dict' object has no attribute 'status_code'"
+    }
+  ]
+}

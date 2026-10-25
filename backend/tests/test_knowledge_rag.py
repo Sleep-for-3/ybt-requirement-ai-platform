@@ -607,3 +607,41 @@ def _client():
     try:
         with TestClient(app) as client:yield client
     finally:app.dependency_overrides.clear();Base.metadata.drop_all(engine);get_vector_store.cache_clear();get_embedding_service.cache_clear();get_storage_service.cache_clear();get_task_queue.cache_clear()
+
+
+def test_hybrid_search_reports_fragment_locator_but_keeps_full_unit_content(tmp_path:Path,monkeypatch):
+    """分片命中要能说清"哪一段被匹配"，但证据仍是完整单元正文。
+
+    真实链路（2026-10-25，项目 9，Milvus 真实索引 v10）：长单元被切成 3 片，
+    向量记录只存片段文本与坐标；如果检索只做 unit_id->max(score)，命中位置就
+    丢了，审核者无法判断命中的是口径的哪一部分。
+    """
+    store=MockVectorStore();monkeypatch.setenv("STORAGE_DIR",str(tmp_path))
+    get_embedding_service.cache_clear();get_vector_store.cache_clear()
+    monkeypatch.setattr("app.services.knowledge_ingestion.ingestion_service.get_vector_store",lambda:store)
+    monkeypatch.setattr("app.api.knowledge_rag.get_vector_store",lambda:store)
+    monkeypatch.setattr("app.services.retrieval.hybrid_retriever.get_vector_store",lambda:store)
+    with _client() as api:
+        project=_post(api,"/api/projects",{"name":"分片检索项目","bank_name":"甲银行"})
+        full_text="贷款余额口径说明：" + "。" * 20 + "尾部信号出现"
+        document=_upload(api,project["id"],"分片口径.txt",full_text.encode("utf-8"),"manual_note","project")
+        unit=_get(api,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}")[0]
+        vector=get_embedding_service().embed_query("贷款余额口径说明")
+        metadata={
+            "project_id":project["id"],"knowledge_scope":"project","knowledge_type":"manual_note",
+            "knowledge_unit_id":unit["id"],"citation_id":f"knowledge-unit-{unit['id']}",
+            "parent_unit_id":unit["id"],"fragment_index":2,
+            "fragment_char_start":40,"fragment_char_end":len(full_text),
+            "fragment_strategy_version":"knowledge-fragment-v1","estimated_tokens":12,
+        }
+        store.upsert([VectorRecord(f"fragment-{unit['id']}-2",vector,"",metadata)])
+        response=_post(api,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"贷款余额口径说明","top_k":5})
+        item=next(entry for entry in response["items"] if entry["knowledge_unit_id"]==unit["id"])
+        assert item["content"]==full_text, "证据必须是完整单元正文，不能被片段正文替换"
+        assert item["fragment"]=={
+            "parent_unit_id":unit["id"],"fragment_index":2,
+            "char_start":40,"char_end":len(full_text),
+            "strategy_version":"knowledge-fragment-v1","estimated_tokens":12,
+        }
+        keyword_only=_post(api,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"贷款余额口径说明","top_k":5,"retrieval_mode":"keyword_only"})
+        assert keyword_only["items"][0]["fragment"] is None

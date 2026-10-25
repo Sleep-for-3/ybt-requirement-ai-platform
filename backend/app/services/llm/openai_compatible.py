@@ -83,7 +83,10 @@ class OpenAICompatibleLLMService(LLMService):
         self.embedding_model = embedding_model or model
         self.json_mode = json_mode
         self.temperature = min(max(float(temperature), 0), 2)
-        self.max_output_tokens = min(max(int(max_output_tokens), 1), 8192)
+        # 真实证据（2026-10-24）：推理型网关先输出 reasoning_content，8192 上限会被思维链
+        # 吃光（reasoning_chars≈26000），finish_reason=length 且正文为空。上限放到 32768，
+        # 具体值仍由设置项控制，不在这里猜模型能力。
+        self.max_output_tokens = min(max(int(max_output_tokens), 1), 32768)
         self.timeout_seconds = min(max(float(timeout_seconds), 1), 180)
         self.retry_count = min(max(int(retry_count), 0), 2)
         self.fallback_models = _dedupe_models(fallback_models or [], primary=self.model)

@@ -1,0 +1,84 @@
+{
+  "kind": "p1d-chunking-signal-evidence",
+  "not_recall_measurement": true,
+  "statement": "本报告只验证分片规划是否保留原文信号与坐标，不构成召回率、TopK 或 MRR 结论；真实召回须在真实 embedding 与真实向量库上测量，当前环境不具备。",
+  "fragment_strategy_version": "knowledge-fragment-v1",
+  "max_tokens": 480,
+  "counter": "estimate-tokens-v1（CJK 1 字符≈1 token、ASCII 4 字符≈1 token，非真实 tokenizer）",
+  "unit": {
+    "content_chars": 3771,
+    "estimated_tokens": 3407,
+    "content_sha256": "91c825ab583b7a1506acad499c1ac06a54701d6afef52f9d1e4ae4d19a213c4d"
+  },
+  "fragments": {
+    "count": 8,
+    "sizes_chars": [
+      526,
+      528,
+      528,
+      520,
+      522,
+      522,
+      522,
+      103
+    ],
+    "max_estimated_tokens": 480,
+    "all_within_budget": true,
+    "non_overlapping": true,
+    "reconstruction_equals_source": true
+  },
+  "baseline_truncation": {
+    "kept_chars": 528,
+    "signal_occurrences": {
+      "head": 1,
+      "middle": 0,
+      "tail": 0
+    },
+    "lost_signals": [
+      "middle",
+      "tail"
+    ]
+  },
+  "fragment_signals": {
+    "placement": {
+      "head": [
+        0
+      ],
+      "middle": [
+        3
+      ],
+      "tail": [
+        7
+      ]
+    },
+    "each_signal_present_once": true,
+    "signals_in_distinct_fragments": true
+  },
+  "citation_resolution": {
+    "parent_unit_id": 9001,
+    "citation_id": "knowledge-unit-9001",
+    "fragment_index": 2,
+    "char_range": [
+      1054,
+      1582
+    ]
+  },
+  "audit": {
+    "unit_count": 1,
+    "over_budget_count": 1,
+    "fragment_count": 8,
+    "max_estimated_tokens": 3407,
+    "truncated_risk_count": 1,
+    "max_tokens": 480,
+    "fragment_strategy_version": "knowledge-fragment-v1",
+    "token_counter": "estimate-tokens",
+    "token_counter_version": "estimate-tokens-v1"
+  },
+  "verdict": "FRAGMENT_PLANNING_PRESERVES_SIGNALS（隔离测试：信号保留与坐标可复原）",
+  "business_or_recall_verified": false,
+  "unverified": [
+    "真实 tokenizer 下的片段长度（当前用估算计数器）",
+    "真实 embedding 与向量库下的检索命中率、TopK、MRR",
+    "接入 reindex 后的索引切换与回滚（本轮未接线）"
+  ]
+}

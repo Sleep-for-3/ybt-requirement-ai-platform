@@ -127,3 +127,24 @@ def test_out_of_scope_or_ambiguous_queue_items_never_start_a_model(monkeypatch, 
         worker.generate_candidate(None, SimpleNamespace(input_json=frozen),
             SimpleNamespace(field_id=field_id, section=section), None)
     assert error.value.status_code == 409
+
+
+def test_mapping_sources_are_citable_without_widening_selected_scope():
+    """需求字段已固定的集市映射可被引用，但不会把未映射的集市字段放行。
+
+    回归真实缺陷：由跑批脚本建的需求不含 source_table_ids/mart_table_ids，
+    模型引用自身集市映射（HYF_* 字段）会被判成"引用范围外物理字段"整条阻断。
+    """
+    context = frozen_context()
+    context["mapping_sources"] = [{"kind": "mart", "table_id": 30, "field_id": 31}]
+    mapped = candidate()
+    mapped["physical_references"] = [{"kind": "mart", "table_id": 30, "field_id": 31}]
+    assert check_candidate_compliance(context, mapped) == []
+
+    unmapped = candidate()
+    unmapped["physical_references"] = [{"kind": "mart", "table_id": 30, "field_id": 99}]
+    assert "生成结果引用了范围外的物理字段" in check_candidate_compliance(context, unmapped)
+
+    without_mapping = candidate()
+    without_mapping["physical_references"] = [{"kind": "mart", "table_id": 30, "field_id": 31}]
+    assert "生成结果引用了范围外的物理字段" in check_candidate_compliance(frozen_context(), without_mapping)

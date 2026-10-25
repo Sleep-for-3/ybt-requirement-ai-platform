@@ -57,4 +57,6 @@ frontend/.next-verify-*/
 docs/research/__pycache__/
 *.bak.py
 *.orig.py
-
+/backend/*.log
+/backend/_celery.*.log
+/backend/_e2e_state.json

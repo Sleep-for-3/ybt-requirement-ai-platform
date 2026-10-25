@@ -274,6 +274,7 @@ class TemplateUploadResponse(BaseModel):
     table_count: int
     field_count: int
     warnings: list[str]
+    parse_report: dict[str, Any] | None = None
     preview: list[TemplatePreviewItem]
 
 
@@ -314,6 +315,9 @@ class TemplateApplyResponse(BaseModel):
     updated_tables: int
     created_fields: int
     updated_fields: int
+    created_mart_tables: int = 0
+    created_mart_fields: int = 0
+    created_mart_mappings: int = 0
     skipped_rows: int
     warnings: list[str]
     template_version_id: int | None = None
@@ -341,6 +345,7 @@ class TemplateVersionRead(OrmModel):
     file_hash: str
     sheet_names_json: list[Any]
     parsed_snapshot_json: list[Any]
+    parse_report_json: dict[str, Any] | None = None
     parse_status: str
     error_message: str | None = None
     uploaded_by: str | None = None
@@ -1127,6 +1132,7 @@ class TraceabilityTemplateUploadResponse(BaseModel):
     row_count: int
     detected_scenarios: list[dict[str, str]]
     warnings: list[str]
+    parse_report: dict[str, Any] | None = None
 
 
 class TraceabilityTemplatePreviewResponse(BaseModel):

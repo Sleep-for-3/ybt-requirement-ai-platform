@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-10-23T18:16:02+0800",
+  "python": "3.12.4",
+  "cases": [
+    {
+      "case": "R1",
+      "title": "无缓存公式静默丢值",
+      "file_bytes": 5002,
+      "formula_cell_data_only_false": "=IF(1=1,\"只报送正常贷款余额\",\"\")",
+      "formula_cell_data_only_true": null,
+      "unit_count": 1,
+      "unit_texts": [
+        "字段代码：CUST_NO；字段名称：客户号"
+      ],
+      "unit_type": [
+        "qa"
+      ],
+      "warnings": [],
+      "observed_loss": true,
+      "warnings_mention_formula": false
+    },
+    {
+      "case": "R2",
+      "title": "合法引用配错误正文",
+      "evidence_text": "只报送正常贷款余额。",
+      "candidate_body": "报送所有逾期贷款余额，无需筛选正常状态。",
+      "violations": [],
+      "contradiction_undetected": true
+    },
+    {
+      "case": "R3",
+      "title": "同快照 Word 重复导出字节不一致",
+      "first_sha256": "c0e64f2d1839f1971fdd4522cf599ad7cb6c2460b83dc998fbc3de10789d53cf",
+      "second_sha256": "fc5c38ea631ec10bcdc1bac74b110a3d3dc7969d88c035d1df2b9ce774c6574c",
+      "byte_identical": false,
+      "first_size": 37598,
+      "second_size": 37598
+    }
+  ]
+}

@@ -1,10 +1,27 @@
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 import re
 from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+
+from app.services.parse_diagnostics import (
+    CELL_FORMULA_UNCACHED,
+    SEVERITY_BLOCKING,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+    ParseFinding,
+    ParseReport,
+    cell_reference,
+    scan_formulas,
+)
+
+TRACEABILITY_CONFIG_VERSION = "xlsx-traceability-config-v1"
+CRITICAL_FIXED_COLUMNS = ("field_code", "field_name")
+# Codes whose message is already produced by the legacy warning strings below.
+LEGACY_COVERED_CODES = {"critical_column_missing", "sheet_skipped"}
 
 FIXED_COLUMNS = {
     "field_code": {"数据项编码"}, "field_name": {"数据项名称"}, "data_category": {"数据类别"},
@@ -46,6 +63,7 @@ class TraceabilitySheetResult:
     scenario_groups: list[dict[str, Any]]
     parsed_rows: list[dict[str, Any]]
     warnings: list[str] = field(default_factory=list)
+    parse_report: dict[str, Any] | None = None
 
 
 @dataclass
@@ -56,22 +74,51 @@ class TraceabilityParseOutput:
     detected_scenarios: list[dict[str, str]]
     results: list[TraceabilitySheetResult]
     warnings: list[str]
+    parse_report: dict[str, Any] | None = None
 
 
 class TraceabilityExcelParser:
     def parse(self, file_path: Any) -> TraceabilityParseOutput:
-        source = file_path
+        payload: bytes | None = None
+        target: Any = file_path
         if isinstance(file_path, (str, Path)):
             path = Path(file_path)
             if path.suffix.lower() != ".xlsx":
                 raise ValueError("业务口径及溯源表只支持 .xlsx 文件。")
-            source = path
-        workbook = load_workbook(source, data_only=True)
+            target = path
+        else:
+            payload = file_path.read() if hasattr(file_path, "read") else bytes(file_path)
+            target = BytesIO(payload)
+
+        if payload is None:
+            workbook = load_workbook(target, data_only=True)
+            formula_workbook = load_workbook(target, data_only=False)
+        else:
+            workbook = load_workbook(BytesIO(payload), data_only=True)
+            formula_workbook = load_workbook(BytesIO(payload), data_only=False)
+
+        report = ParseReport(
+            config_version=TRACEABILITY_CONFIG_VERSION,
+            reader="traceability-template",
+            file_suffix=".xlsx",
+            sheet_total=len(workbook.worksheets),
+        )
         results = []
         for sheet in workbook.worksheets:
+            start = len(report.findings)
+            formula_sheet = formula_workbook[sheet.title] if sheet.title in formula_workbook.sheetnames else None
             try:
-                results.append(self._parse_sheet(sheet))
+                results.append(self._parse_sheet(sheet, formula_sheet, report))
             except Exception as exc:
+                report.sheets_skipped.append({"sheet": sheet.title, "reason": type(exc).__name__})
+                report.add(
+                    ParseFinding(
+                        "sheet_skipped",
+                        SEVERITY_BLOCKING,
+                        f"Sheet {sheet.title} 解析失败，已跳过：{exc}",
+                        locator={"sheet": sheet.title},
+                    )
+                )
                 results.append(TraceabilitySheetResult(
                     sheet_name=sheet.title,
                     header_start_row=1,
@@ -80,7 +127,9 @@ class TraceabilityExcelParser:
                     scenario_groups=[],
                     parsed_rows=[],
                     warnings=[f"Sheet {sheet.title} 解析失败，已跳过：{exc}"],
+                    parse_report=_sheet_report(report, start),
                 ))
+        report.row_emitted = sum(len(item.parsed_rows) for item in results)
         scenarios: dict[str, dict[str, str]] = {}
         for result in results:
             for group in result.scenario_groups:
@@ -91,15 +140,48 @@ class TraceabilityExcelParser:
             sheet_count=len(results), row_count=sum(len(item.parsed_rows) for item in results),
             sheet_names=[sheet.title for sheet in workbook.worksheets], detected_scenarios=list(scenarios.values()),
             results=results, warnings=[warning for item in results for warning in item.warnings],
+            parse_report=report.to_dict(),
         )
 
-    def _parse_sheet(self, sheet) -> TraceabilitySheetResult:
+    def _parse_sheet(self, sheet, formula_sheet, report: ParseReport) -> TraceabilitySheetResult:
+        start = len(report.findings)
         matrix = _expanded_matrix(sheet)
+        kinds = scan_formulas(
+            sheet.title,
+            formula_sheet,
+            lambda row, column: _matrix_value(matrix, row, column),
+            report,
+        )
         header_start = _find_header_start(matrix)
         if header_start is None:
+            has_content = any(_cell_text(value) for row in matrix for value in row)
+            report.sheets_skipped.append({"sheet": sheet.title, "row_total": len(matrix)})
+            report.add(
+                ParseFinding(
+                    "sheet_skipped",
+                    SEVERITY_BLOCKING if has_content else SEVERITY_INFO,
+                    f"Sheet {sheet.title} 未识别到数据项编码或场景分组表头",
+                    locator={"sheet": sheet.title, "scanned_rows": len(matrix)},
+                )
+            )
             warning = f"Sheet {sheet.title} 未识别到数据项编码或场景分组表头"
-            return TraceabilitySheetResult(sheet.title, 1, 1, [], [], [], [warning])
+            return TraceabilitySheetResult(
+                sheet.title, 1, 1, [], [], [], [warning], _sheet_report(report, start)
+            )
+        report.sheet_parsed += 1
         header_end = _find_header_end(matrix, header_start)
+        report.header_rows.append({"sheet": sheet.title, "start": header_start, "end": header_end})
+        merged_header_cells = _merged_header_cells(sheet, header_start, header_end)
+        if merged_header_cells:
+            report.merged_header_cells += merged_header_cells
+            report.add(
+                ParseFinding(
+                    "merged_header",
+                    SEVERITY_INFO,
+                    f"Sheet {sheet.title} 表头区域有 {merged_header_cells} 个单元格来自合并区域，其值已展开到整块区域",
+                    locator={"sheet": sheet.title, "rows": f"{header_start}-{header_end}"},
+                )
+            )
         fixed_map = _fixed_column_map(matrix, header_start, header_end)
         group_columns, warnings = _scenario_column_map(matrix, header_start, header_end)
         fixed_columns = [
@@ -110,6 +192,33 @@ class TraceabilityExcelParser:
             warnings.append(f"Sheet {sheet.title} 缺少关键列：数据项编码")
         if "field_name" not in fixed_map:
             warnings.append(f"Sheet {sheet.title} 缺少关键列：数据项名称")
+        for name in CRITICAL_FIXED_COLUMNS:
+            if name not in fixed_map:
+                report.columns_critical_missing.append({"sheet": sheet.title, "column": name})
+                report.add(
+                    ParseFinding(
+                        "critical_column_missing",
+                        SEVERITY_BLOCKING,
+                        f"Sheet {sheet.title} 缺少关键列 {'数据项编码' if name == 'field_code' else '数据项名称'}",
+                        locator={"sheet": sheet.title},
+                    )
+                )
+        consumed_columns = sorted(set(fixed_map.values()) | {item["column"] for item in group_columns})
+        header_formula_cells = [
+            cell_reference(row, column)
+            for row in range(header_start, header_end + 1)
+            for column in consumed_columns
+            if kinds.get((row, column)) == CELL_FORMULA_UNCACHED
+        ]
+        if header_formula_cells:
+            report.add(
+                ParseFinding(
+                    "formula_in_header",
+                    SEVERITY_BLOCKING,
+                    f"Sheet {sheet.title} 表头含无缓存公式，列名可能为空",
+                    locator={"sheet": sheet.title, "cells": ",".join(header_formula_cells[:5])},
+                )
+            )
         parsed_rows: list[dict[str, Any]] = []
         for row_number in range(header_end + 1, len(matrix) + 1):
             values = matrix[row_number - 1]
@@ -130,13 +239,63 @@ class TraceabilityExcelParser:
                     sources[f"scenarios.{info['scenario_name']}.{info['layer']}.{info['field']}"] = _location(
                         sheet.title, row_number, info["column"]
                     )
+            missing_cells = [
+                cell_reference(row_number, column)
+                for column in consumed_columns
+                if kinds.get((row_number, column)) == CELL_FORMULA_UNCACHED
+            ]
+            if missing_cells:
+                report.add(
+                    ParseFinding(
+                        "formula_cache_missing",
+                        SEVERITY_BLOCKING,
+                        f"Sheet {sheet.title} 第 {row_number} 行有 {len(missing_cells)} 列是无缓存公式，这些值会被当作空值",
+                        locator={
+                            "sheet": sheet.title,
+                            "row": row_number,
+                            "cells": ",".join(missing_cells[:5]),
+                        },
+                    )
+                )
             if fixed.get("field_code") or fixed.get("field_name") or any(item["business"] or item["technical"] for item in scenarios.values()):
                 if not fixed.get("field_code"):
                     warnings.append(f"Sheet {sheet.title} 第 {row_number} 行缺少数据项编码，apply 时将跳过")
                 parsed_rows.append({"row_number": row_number, "fixed": fixed, "scenarios": scenarios, "sources": sources})
+        diagnostics = [
+            item.as_warning()
+            for item in report.findings[start:]
+            if item.severity != SEVERITY_INFO and item.code not in LEGACY_COVERED_CODES
+        ]
         return TraceabilitySheetResult(
-            sheet.title, header_start, header_end, fixed_columns, _scenario_group_summary(group_columns), parsed_rows, warnings
+            sheet.title, header_start, header_end, fixed_columns, _scenario_group_summary(group_columns),
+            parsed_rows, [*warnings, *diagnostics], _sheet_report(report, start)
         )
+
+
+def _matrix_value(matrix: list[list[Any]], row: int, column: int) -> Any:
+    if 1 <= row <= len(matrix) and matrix and 1 <= column <= len(matrix[0]):
+        return matrix[row - 1][column - 1]
+    return None
+
+
+def _merged_header_cells(sheet, header_start: int, header_end: int) -> int:
+    count = 0
+    for merged in sheet.merged_cells.ranges:
+        if merged.max_row < header_start or merged.min_row > header_end:
+            continue
+        count += (merged.max_row - merged.min_row + 1) * (merged.max_col - merged.min_col + 1)
+    return count
+
+
+def _sheet_report(report: ParseReport, start: int) -> dict[str, Any]:
+    findings = report.findings[start:]
+    return {
+        "strategy_version": report.strategy_version,
+        "config_version": report.config_version,
+        "findings": [item.to_dict() for item in findings],
+        "complete": all(item.severity == SEVERITY_INFO for item in findings),
+    }
+
 
 
 def _expanded_matrix(sheet) -> list[list[Any]]:

@@ -4,6 +4,16 @@ import re
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from app.services.sql_parser import parse_sql
+from app.services.parse_diagnostics import (
+    CELL_FORMULA_UNCACHED,
+    SEVERITY_BLOCKING,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+    ParseFinding,
+    ParseReport,
+    cell_reference,
+    scan_formulas,
+)
 from app.core.settings import get_settings
 from .base import KnowledgeUnitDraft
 from .ocr import IMAGE_SUFFIXES
@@ -14,9 +24,34 @@ from .ocr import IMAGE_SUFFIXES
 CLAUSE_NUMBER_PATTERN = re.compile(r"^(?:第[零一二三四五六七八九十百千\d]{1,12}条|\d+(?:\.\d+){1,4})(?![\d.])")
 CHAPTER_NUMBER_PATTERN = re.compile(r"^(第[零一二三四五六七八九十百千\d]{1,12}章)")
 QUESTION={"问题","答疑问题","监管问题","银行问题"};ANSWER={"回复","监管回复","答疑结果","处理意见"};SUGGESTION={"同业建议"};FIELD_CODE={"字段代码","数据项编码"};FIELD_NAME={"字段名称","字段中文名","数据项名称"};TABLE={"一表通表","表代码"};SCENARIO={"业务场景","产品场景","场景名称"};BUSINESS_SYSTEM={"来源系统","业务系统","系统名称"};SOURCE_TABLE={"来源表","来源表英文名","源表","源表英文名"};SOURCE_FIELD={"来源字段","来源字段英文名","源字段","源字段英文名"};MART_TABLE={"集市表","监管集市表"};MART_FIELD={"集市字段","监管集市字段"}
+HEADER_MARKERS=QUESTION|ANSWER|FIELD_CODE|FIELD_NAME
+ALL_ALIASES=(QUESTION|ANSWER|SUGGESTION|FIELD_CODE|FIELD_NAME|TABLE|SCENARIO|BUSINESS_SYSTEM
+             |SOURCE_TABLE|SOURCE_FIELD|MART_TABLE|MART_FIELD)
+
+# Versioned parsing rules.  Changing any value here requires bumping the version:
+# a frozen requirement keeps pointing at the rules that produced its snapshot, and
+# a configuration upgrade must never rewrite facts that are already frozen.
+XLSX_PARSE_CONFIG_VERSION="xlsx-knowledge-config-v1"
+XLSX_PARSE_CONFIG={
+    # Historical code scanned the first 50 rows only; a header on row 51 was an
+    # invisible whole-sheet loss.  The window is a documented, versioned setting.
+    "header_scan_rows":200,
+    "legacy_header_scan_rows":50,
+    "column_aliases":sorted(ALL_ALIASES),
+}
 
 def parse_document(file_name,content,knowledge_type):
-    units, warnings = _parse_document(file_name, content, knowledge_type)
+    units, warnings, _report = parse_document_with_report(file_name, content, knowledge_type)
+    return units, warnings
+
+
+def parse_document_with_report(file_name,content,knowledge_type):
+    """Parse a document and return the loss-visible report alongside the units.
+
+    The report is ``None`` for formats whose reader cannot lose cell-level data in
+    a way this module can describe (docx/pdf/text/sql); XLSX always returns one.
+    """
+    units, warnings, report = _parse_document(file_name, content, knowledge_type)
     for index, unit in enumerate(units, 1):
         locator = unit.metadata.setdefault("locator", {})
         locator.setdefault("block_id", f"parsed-block-{index}")
@@ -26,7 +61,7 @@ def parse_document(file_name,content,knowledge_type):
                            ("chapter_no", unit.metadata.get("chapter_no")), ("clause_no", unit.metadata.get("clause_no"))):
             if value is not None:
                 locator.setdefault(key, value)
-    return units, warnings
+    return units, warnings, report
 
 
 def _text_units(text, file_name, unit_type="paragraph"):
@@ -47,37 +82,125 @@ def _parse_document(file_name,content,knowledge_type):
     SUPPORTED_SUFFIXES = {".xlsx", ".docx", ".pdf", ".txt", ".md", ".sql"} | IMAGE_SUFFIXES
     if suffix not in SUPPORTED_SUFFIXES:raise ValueError(f"Unsupported knowledge document format: {suffix or 'missing extension'}")
     if suffix==".xlsx":return _excel(content,knowledge_type)
-    if suffix==".docx":return _docx(content)
-    if suffix==".pdf":return _pdf(content)
+    if suffix==".docx":units,warnings=_docx(content);return units,warnings,None
+    if suffix==".pdf":units,warnings=_pdf(content);return units,warnings,None
     if suffix in IMAGE_SUFFIXES:
         # Images are only a knowledge document once OCR can read them; otherwise the
         # historical "unsupported format" contract is preserved byte-for-byte.
         if not getattr(get_settings(),"ocr_enabled",False):raise ValueError(f"Unsupported knowledge document format: {suffix or 'missing extension'}")
-        return _image(content,suffix)
+        units,warnings=_image(content,suffix);return units,warnings,None
     text=content.decode("utf-8",errors="replace").replace("\r\n","\n").replace("\r","\n")
     if suffix==".sql":
         parsed=parse_sql(text);summary=f"来源表: {', '.join(parsed.source_tables)}\n来源字段: {', '.join(parsed.selected_fields)}\n关联条件: {'; '.join(parsed.joins)}\n过滤条件: {'; '.join(parsed.where_conditions)}"
-        return [KnowledgeUnitDraft("sql_summary",file_name,summary,metadata={"raw_sql":text,"parsed_success":parsed.parsed_success,"locator":{"line_start":1,"line_end":len(text.splitlines()) or 1}}), *_text_units(text,file_name,"sql_text")],[parsed.error_message] if parsed.error_message else []
-    return _text_units(text,file_name),[]
+        return [KnowledgeUnitDraft("sql_summary",file_name,summary,metadata={"raw_sql":text,"parsed_success":parsed.parsed_success,"locator":{"line_start":1,"line_end":len(text.splitlines()) or 1}}), *_text_units(text,file_name,"sql_text")],[parsed.error_message] if parsed.error_message else [],None
+    return _text_units(text,file_name),[],None
+
+def _cell_text(value):
+    if value is None:return ""
+    if isinstance(value,str):return value.strip()
+    return str(value).strip()
+
+
+def _first_text(values,keys):
+    """First mapped value that is actually present; ``0`` is a value, not absence."""
+    for key in keys:
+        if key not in values:continue
+        text=_cell_text(values[key])
+        if text:return text
+    return None
+
+
+def _record_header_findings(sheet,headers,header_row,report):
+    seen={};duplicates=[]
+    for column,name in headers.items():
+        if not name:continue
+        if name in seen:duplicates.append({"sheet":sheet.title,"row":header_row,"name":name,"columns":[seen[name],column]})
+        else:seen[name]=column
+    for item in duplicates:
+        report.duplicate_headers.append(item)
+        report.add(ParseFinding("duplicate_header",SEVERITY_WARNING,
+                                f"{sheet.title} 第 {header_row} 行重复列名“{item['name']}”，后出现的列会覆盖先出现的列",
+                                locator={"sheet":sheet.title,"row":header_row,"column":get_column_letter(item["columns"][1])}))
+    unmapped=sorted({name for name in headers.values() if name and name not in ALL_ALIASES})
+    if unmapped:
+        report.columns_unrecognized.append({"sheet":sheet.title,"row":header_row,"columns":unmapped})
+        report.add(ParseFinding("unrecognized_column",SEVERITY_INFO,
+                                f"{sheet.title} 有 {len(unmapped)} 个未映射列：{'、'.join(unmapped[:10])}",
+                                locator={"sheet":sheet.title,"row":header_row},
+                                suggestion="列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"))
+    merged=[item for item in sheet.merged_cells.ranges if item.min_row<=header_row<=item.max_row]
+    if merged:
+        report.merged_header_cells+=len(merged)
+        report.add(ParseFinding("merged_header",SEVERITY_INFO,
+                                f"{sheet.title} 表头含 {len(merged)} 个合并单元格，其值已展开到合并区域",
+                                locator={"sheet":sheet.title,"row":header_row}))
+
 
 def _excel(content,knowledge_type):
-    wb=load_workbook(BytesIO(content),data_only=True);units=[];warnings=[]
-    for sheet in wb.worksheets:
+    values_workbook=load_workbook(BytesIO(content),data_only=True)
+    # A second, formula-view workbook is what makes an uncached formula visible:
+    # data_only=True silently returns None for a formula Excel never recalculated.
+    formula_workbook=load_workbook(BytesIO(content),data_only=False)
+    report=ParseReport(config_version=XLSX_PARSE_CONFIG_VERSION,reader="knowledge-ingestion",
+                       file_suffix=".xlsx",sheet_total=len(values_workbook.worksheets))
+    units=[]
+    for sheet in values_workbook.worksheets:
         matrix=_expanded_matrix(sheet)
+        formula_sheet=formula_workbook[sheet.title] if sheet.title in formula_workbook.sheetnames else None
+        def _cached(row,column,_matrix=matrix):
+            if row<=len(_matrix) and column<=len(_matrix[row-1]):return _matrix[row-1][column-1]
+            return None
+        kinds=scan_formulas(sheet.title,formula_sheet,_cached,report)
         header_row=None;headers={}
-        for row in range(1,min(len(matrix),50)+1):
-            values={column:str(matrix[row-1][column-1] or "").strip() for column in range(1,sheet.max_column+1)}
-            if any(value in QUESTION|ANSWER|FIELD_CODE|FIELD_NAME for value in values.values()):header_row=row;headers=values;break
-        if not header_row:warnings.append(f"{sheet.title} 未识别表头");continue
+        scan_rows=min(len(matrix),XLSX_PARSE_CONFIG["header_scan_rows"])
+        for row in range(1,scan_rows+1):
+            values={column:_cell_text(matrix[row-1][column-1]) for column in range(1,sheet.max_column+1)}
+            if any(value in HEADER_MARKERS for value in values.values()):header_row=row;headers=values;break
+        if not header_row:
+            report.sheets_skipped.append({"sheet":sheet.title,"row_total":sheet.max_row})
+            lost=any(_cell_text(cell) for line in matrix for cell in line)
+            report.add(ParseFinding("sheet_skipped",SEVERITY_BLOCKING if lost else SEVERITY_INFO,
+                                    f"{sheet.title} 未识别表头，整张 sheet 未导入",
+                                    locator={"sheet":sheet.title,"scanned_rows":scan_rows}))
+            continue
+        report.sheet_parsed+=1
+        report.header_rows.append({"sheet":sheet.title,"row":header_row})
+        if header_row>XLSX_PARSE_CONFIG["legacy_header_scan_rows"]:
+            report.add(ParseFinding("header_beyond_legacy_scan",SEVERITY_INFO,
+                                    f"{sheet.title} 表头在第 {header_row} 行，超出历史扫描范围（前 {XLSX_PARSE_CONFIG['legacy_header_scan_rows']} 行）",
+                                    locator={"sheet":sheet.title,"row":header_row}))
+        _record_header_findings(sheet,headers,header_row,report)
+        for (row_index,column_index),kind in kinds.items():
+            if row_index==header_row and kind==CELL_FORMULA_UNCACHED:
+                report.add(ParseFinding("formula_in_header",SEVERITY_BLOCKING,
+                                        f"{sheet.title} 第 {row_index} 行表头含无缓存公式，表头识别可能失败",
+                                        locator={"sheet":sheet.title,"cell":cell_reference(row_index,column_index)}))
+        uncached_rows={}
+        for (row_index,column_index),kind in kinds.items():
+            if kind==CELL_FORMULA_UNCACHED:uncached_rows.setdefault(row_index,[]).append(column_index)
         for row in range(header_row+1,sheet.max_row+1):
+            report.row_total+=1
             values={headers[column]:matrix[row-1][column-1] for column in headers if headers[column]}
-            if not any(value not in (None,"") for value in values.values()):continue
-            question=next((str(values[key]) for key in QUESTION if values.get(key)),"");answer=next((str(values[key]) for key in ANSWER if values.get(key)),"");suggestion=next((str(values[key]) for key in SUGGESTION if values.get(key)),"")
-            field_code=next((str(values[key]) for key in FIELD_CODE if values.get(key)),None);field_name=next((str(values[key]) for key in FIELD_NAME if values.get(key)),None);table=next((str(values[key]) for key in TABLE if values.get(key)),None);scenario_name=next((str(values[key]) for key in SCENARIO if values.get(key)),None);business_system=next((str(values[key]) for key in BUSINESS_SYSTEM if values.get(key)),None);source_table=next((str(values[key]) for key in SOURCE_TABLE if values.get(key)),None);source_field=next((str(values[key]) for key in SOURCE_FIELD if values.get(key)),None);mart_table=next((str(values[key]) for key in MART_TABLE if values.get(key)),None);mart_field=next((str(values[key]) for key in MART_FIELD if values.get(key)),None)
-            content_text="\n".join(filter(None,[f"问题：{question}" if question else "",f"回复：{answer}" if answer else "",f"同业建议：{suggestion}" if suggestion else "", "；".join(f"{key}：{value}" for key,value in values.items() if value not in (None,"") and key not in QUESTION|ANSWER|SUGGESTION)]))
+            missing_cells=uncached_rows.get(row,[])
+            if not any(value not in (None,"") for value in values.values()):
+                report.row_skipped_blank+=1
+                if missing_cells:
+                    report.add(ParseFinding("formula_cache_missing",SEVERITY_BLOCKING,
+                                            f"{sheet.title} 第 {row} 行只有无缓存公式，被当作空行跳过",
+                                            locator={"sheet":sheet.title,"row":row,"cells":",".join(cell_reference(row,column) for column in missing_cells[:5])}))
+                continue
+            missing=[headers[column] for column in headers if headers[column] and kinds.get((row,column))==CELL_FORMULA_UNCACHED]
+            if missing:
+                report.add(ParseFinding("formula_cache_missing",SEVERITY_BLOCKING,
+                                        f"{sheet.title} 第 {row} 行有 {len(missing)} 列是无缓存公式（{'、'.join(missing[:5])}），这些值未被解析",
+                                        locator={"sheet":sheet.title,"row":row,"cells":",".join(cell_reference(row,column) for column in missing_cells[:5])}))
+            question=_first_text(values,QUESTION) or "";answer=_first_text(values,ANSWER) or "";suggestion=_first_text(values,SUGGESTION) or ""
+            field_code=_first_text(values,FIELD_CODE);field_name=_first_text(values,FIELD_NAME);table=_first_text(values,TABLE);scenario_name=_first_text(values,SCENARIO);business_system=_first_text(values,BUSINESS_SYSTEM);source_table=_first_text(values,SOURCE_TABLE);source_field=_first_text(values,SOURCE_FIELD);mart_table=_first_text(values,MART_TABLE);mart_field=_first_text(values,MART_FIELD)
+            content_text="\n".join(filter(None,[f"问题：{question}" if question else "",f"回复：{answer}" if answer else "",f"同业建议：{suggestion}" if suggestion else "", "；".join(f"{key}：{_cell_text(value)}" for key,value in values.items() if value not in (None,"") and key not in QUESTION|ANSWER|SUGGESTION)]))
             unit_type="qa" if question or knowledge_type=="regulatory_qa" else "field_mapping" if field_code else "table_row"
             units.append(KnowledgeUnitDraft(unit_type,question or field_name or f"{sheet.title} 第{row}行",content_text,source_sheet_name=sheet.title,source_cell_range=f"A{row}:{get_column_letter(sheet.max_column)}{row}",target_table_code=table,target_field_code=field_code,target_field_name=field_name,scenario_name=scenario_name,source_table_name=source_table,source_field_name=source_field,metadata={"row":row,"scenario_name":scenario_name,"business_system_name":business_system,"mart_table_name":mart_table,"mart_field_name":mart_field}))
-    return units,warnings
+    report.row_emitted=len(units)
+    return units,report.warnings(),report
 
 def _expanded_matrix(sheet):
     matrix=[[sheet.cell(row,column).value for column in range(1,sheet.max_column+1)] for row in range(1,sheet.max_row+1)]

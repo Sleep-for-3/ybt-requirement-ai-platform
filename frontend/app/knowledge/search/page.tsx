@@ -71,6 +71,17 @@ export default function Page() {
               </div>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.content}</p>
               {item.retrieval_rounds && <p className="mt-2 text-xs text-slate-500">命中轮次：{item.retrieval_rounds.map(hit => `第 ${hit.round} 轮 / 第 ${hit.rank} 名`).join("、")}</p>}
+              {item.fragment && (
+                <p className="mt-1 text-xs text-slate-500">
+                  命中片段 {item.fragment.fragment_index + 1}
+                  {item.fragment.char_start != null && item.fragment.char_end != null
+                    ? `（原文第 ${item.fragment.char_start}–${item.fragment.char_end} 字）`
+                    : ""}
+                  {item.fragment.strategy_version ? ` · ${item.fragment.strategy_version}` : ""}
+                  {item.fragment.estimated_tokens != null ? ` · 约 ${item.fragment.estimated_tokens} tokens` : ""}
+                  ；引用仍取整条资料单元，片段坐标只说明匹配位置。
+                </p>
+              )}
               {projectId?<KnowledgeCitations items={[item]} projectId={projectId}/>:null}
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-xs text-slate-500">
                 <span className="inline-flex items-center gap-1">

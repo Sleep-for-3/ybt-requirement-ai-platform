@@ -162,7 +162,16 @@ def ai_suggestions(db, project_id, requirement_id, content):
             raise HTTPException(409, "制度对照候选完整性检查失败")
         basis["policy_snapshot"] = {"allowed": {"document_ids": frozen["allowed"]["document_ids"]},
             "requirement": {"scenario_id": frozen["requirement"].get("scenario_id")}, "evidence": frozen["evidence"]}
-        if basis_hash(basis) != expected:
+        # 送进模型的那份 basis 经过字段投影（长文本转引用、模板行按字段裁剪），
+        # 它的 basis_hash 必然与冻结在需求里的完整 basis 不同。投影里记录了原始
+        # 身份 source_basis_hash，用它判断"是不是同一份固定脚本事实"；没有投影的
+        # 旧输入仍按 basis_hash 比对，保持向后兼容。
+        projected_source = (frozen.get("script_basis") or {}).get("projection") or {}
+        source_hash = projected_source.get("source_basis_hash")
+        if source_hash is not None:
+            if source_hash != expected:
+                continue
+        elif basis_hash(basis) != expected:
             continue
         runtime = item.candidate_json.get("runtime", {})
         result.append({

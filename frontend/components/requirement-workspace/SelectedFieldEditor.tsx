@@ -1,5 +1,6 @@
 "use client";
 
+import { FieldTraceSummary } from "@/components/requirement-workspace/FieldTraceSummary";
 import { Check, Save, ShieldAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -125,12 +126,14 @@ export function SelectedFieldEditor({
         {record.business && <div><p className="mb-1 text-xs font-semibold">业务草稿来源</p><MappingGenerationProvenance mappingType="scenario_business" mappingId={record.business.id} draftText={record.business.ai_generated_content}/></div>}
         {record.lineage && <div><p className="mb-1 text-xs font-semibold">技术草稿来源</p><MappingGenerationProvenance mappingType="scenario_technical" mappingId={record.lineage.id} draftText={record.lineage.ai_generated_content}/></div>}
       </div>}
+      <FieldTraceSummary record={record} />
       <div className="mt-3 flex justify-end">
         <button className="button-primary" disabled={saveState === "saving" || (businessLocked && technicalLocked) || (!record.business && !record.lineage)} onClick={() => void save()} type="button"><Save size={15} />保存人工最终内容</button>
       </div>
     </section>
   );
 }
+
 
 function MappingEditor({ label, status, aiDraft, finalContent, locked, onAdopt, onChange }: { label: string; status: string; aiDraft: string; finalContent: string; locked: boolean; onAdopt: () => void; onChange: (value: string) => void }) {
   return <div className="rounded-lg border border-line bg-white p-3"><div className="flex items-center gap-2"><strong className="text-xs text-ink">{label}</strong><StatusBadge tone={mappingStatusTone(status)} value={mappingStatusLabel(status)} />{locked ? <span className="ml-auto flex items-center gap-1 text-[10px] text-gold-700"><ShieldAlert size={13} />治理态保护</span> : null}</div><label className="mt-3 block text-[10px] font-semibold text-slate-500">系统候选（只读，来源以运行标签为准）</label><textarea className="control mt-1 min-h-24 resize-y bg-pine-50/40 text-xs leading-5" readOnly value={aiDraft} placeholder="尚未生成系统候选" /><button className="button-secondary mt-2 h-8 text-xs" disabled={!aiDraft || locked} onClick={onAdopt} type="button"><Check size={14} />采用系统候选</button><label className="mt-3 block text-[10px] font-semibold text-slate-500">人工最终内容</label><textarea className="control mt-1 min-h-28 resize-y text-xs leading-5" disabled={locked} onChange={(event) => onChange(event.target.value)} value={finalContent} placeholder="输入经人工校核的最终内容" /></div>;

@@ -7,7 +7,11 @@ from zipfile import ZipFile
 import sqlglot
 from sqlglot import exp
 
-from app.services.lineage.sql_parser import parse_sql_lineage
+from app.services.lineage.preprocessing import (
+    strip_hash_comments,
+    truncate_unterminated_block_comment,
+)
+from app.services.lineage.sql_parser import parse_sql_lineage, resolve_dialect
 from app.services.metadata.excel_import import _parse, _bool
 
 MAX_ROWS = 10000
@@ -116,37 +120,59 @@ def parse_ddl(text, dialect):
     return {"tables": tables, "warnings": warnings, "complete": not warnings}
 
 
+def effective_dialect(dialect):
+    """Resolve vendor aliases (GBase/4A, Hive, ...) once for every sqlglot call.
+
+    ``sqlglot`` rejects vendor names such as ``gbase`` with
+    ``ValueError: Unknown dialect``.  Legacy batch parsing passed the raw value
+    straight to sqlglot, so the whole file failed even though the statement
+    itself parses fine under the compatible grammar.  Returning the resolved
+    dialect plus the resolver's warning keeps that fall back explicit instead of
+    silently guessing.
+    """
+
+    resolution = resolve_dialect(dialect)
+    return resolution.effective, ([resolution.warning] if resolution.warning else [])
+
+
 def parse_file(data, name, kind="auto", dialect=""):
     if len(data) > 10 * 1024 * 1024:
         raise ValueError("单文件大小不能超过 10 MB")
     if name.lower().endswith(".xlsx"):
         return "excel", parse_dictionary(data)
     text = data.decode("utf-8-sig")
+    # A script that was switched off by commenting out everything after an
+    # unterminated ``/*`` must be reported as "disabled", not as a parser error.
+    text, block_warning = truncate_unterminated_block_comment(text)
+    block_warnings = [block_warning] if block_warning else []
+    # GBase/4A scripts use ``#`` line comments; normalize before any sqlglot call.
+    parse_text = strip_hash_comments(text)
+    read, dialect_warnings = effective_dialect(dialect)
     if kind == "auto":
         kind = "ddl" if name.lower().endswith(".ddl") else "sql"
         if kind == "sql":
             try:
-                statements = [x for x in sqlglot.parse(text, read=dialect or None) if x is not None]
+                statements = [x for x in sqlglot.parse(parse_text, read=read or None) if x is not None]
                 if statements and all(isinstance(x, exp.Comment) or
                     (isinstance(x, exp.Create) and x.args.get("kind") == "TABLE" and isinstance(x.this, exp.Schema)) for x in statements):
                     kind = "ddl"
-            except sqlglot.errors.ParseError:
+            except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
                 pass
     if kind == "ddl":
-        return kind, parse_ddl(text, dialect)
+        return kind, parse_ddl(text, read)
     if kind != "sql":
         raise ValueError("不支持的文件类型")
-    result = parse_sql_lineage(text, dialect=dialect)
-    warnings = list(result.warnings)
+    result = parse_sql_lineage(text, dialect=read)
+    warnings = list(block_warnings) + list(dialect_warnings) + list(result.warnings)
     if not result.edges:
         warnings.append("未提取可用血缘规则")
     if re.search(r"\b(EXECUTE|EXEC|PROCEDURE|TEMPORARY)\b|\$\{|\bSELECT\s+\*", text, re.I):
         warnings.append("动态 SQL、过程、临时表或星号需要人工核验")
     try:
-        for statement in sqlglot.parse(text, read=dialect or None):
+        for statement in sqlglot.parse(parse_text, read=read or None):
             if isinstance(statement, exp.Insert) and not isinstance(statement.this, exp.Schema):
                 warnings.append("INSERT 缺少显式目标字段列表，不能确认字段映射完整性")
-    except (sqlglot.errors.ParseError, ValueError):
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
         pass
     return "sql", {"rules": [asdict(edge) for edge in result.edges],
         "statements": [asdict(statement) for statement in result.statements],

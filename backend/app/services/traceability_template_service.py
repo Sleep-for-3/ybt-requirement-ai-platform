@@ -60,7 +60,11 @@ async def ingest_traceability_template(db: Session, project_id: int, upload: Upl
         document.parse_status = "success"
         document.sheet_names_json = output.sheet_names
         document.detected_scenarios_json = output.detected_scenarios
-        document.parse_summary_json = {"sheet_count": output.sheet_count, "row_count": output.row_count}
+        document.parse_summary_json = {
+            "sheet_count": output.sheet_count,
+            "row_count": output.row_count,
+            "parse_report": output.parse_report or {},
+        }
         document.warnings_json = output.warnings
         for result in output.results:
             db.add(TraceabilityTemplateParseResult(
@@ -74,6 +78,7 @@ async def ingest_traceability_template(db: Session, project_id: int, upload: Upl
             template_id=document.id, file_name=document.file_name, parse_status=document.parse_status,
             sheet_count=output.sheet_count, row_count=output.row_count,
             detected_scenarios=output.detected_scenarios, warnings=output.warnings,
+            parse_report=output.parse_report,
         )
     except Exception as exc:
         document.parse_status = "failed"

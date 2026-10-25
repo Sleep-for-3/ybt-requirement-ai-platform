@@ -1,0 +1,174 @@
+{
+  "project_id": 9,
+  "tables": [
+    "T_3_5",
+    "T_10_2",
+    "T_1_4",
+    "T_3_3"
+  ],
+  "results": [
+    {
+      "table_code": "T_3_5",
+      "error": "RuntimeError: 预览里没有 T_3_5 的写入目标：[]"
+    },
+    {
+      "table_code": "T_10_2",
+      "steps": {
+        "preview": {
+          "targets": 1,
+          "rules": 24,
+          "gaps": 14,
+          "preview_hash": "4e50c6925ead966494c1aeda1c3dfe8d958cc1578edf8c62674d269e25d6a365"
+        },
+        "create": {
+          "content_version": 2
+        },
+        "scope_text": "ok",
+        "generation": {
+          "counts": {
+            "completed": 20
+          },
+          "seconds": 1142.8
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null,
+          "keys": [
+            "document",
+            "idempotent"
+          ]
+        },
+        "freeze": {
+          "id": 9,
+          "requirement_id": 18,
+          "requirement_version": 2,
+          "content_hash": "437dc7296c1c883762744f78f4d845c0bc69e729e581bceefde56166e4a58319",
+          "created_at": "2026-10-24T16:49:23.012550+00:00",
+          "status": "frozen_draft",
+          "deduplicated": false
+        },
+        "export": {
+          "bytes": 10818,
+          "path": "T_10_2-survey.xlsx",
+          "renderer": "survey-requirement-doc-v6",
+          "artifact_id": "35"
+        }
+      },
+      "field_count": 11,
+      "script_version_id": 6,
+      "bound_fields": 10,
+      "scoped_fields": 11,
+      "generated_fields": 10,
+      "requirement_id": 18,
+      "input_id": 38,
+      "failures": [],
+      "seconds": 1147.9
+    },
+    {
+      "table_code": "T_1_4",
+      "steps": {
+        "preview": {
+          "targets": 1,
+          "rules": 28,
+          "gaps": 20,
+          "preview_hash": "4db60aae41386dc233605924183aba7f5b4d737ef445d6913f88963ffa138cea"
+        },
+        "create": {
+          "content_version": 2
+        },
+        "scope_text": "ok",
+        "generation": {
+          "counts": {
+            "completed": 20
+          },
+          "seconds": 841.9
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null,
+          "keys": [
+            "document",
+            "idempotent"
+          ]
+        },
+        "freeze": {
+          "id": 10,
+          "requirement_id": 19,
+          "requirement_version": 2,
+          "content_hash": "864184e76f97d4a3d3cea6f177ecd6f9065ea80a3daacb186401683bf50bb7b0",
+          "created_at": "2026-10-24T17:03:29.032374+00:00",
+          "status": "frozen_draft",
+          "deduplicated": false
+        },
+        "export": {
+          "bytes": 10355,
+          "path": "T_1_4-survey.xlsx",
+          "renderer": "survey-requirement-doc-v6",
+          "artifact_id": "36"
+        }
+      },
+      "field_count": 11,
+      "script_version_id": 10,
+      "bound_fields": 10,
+      "scoped_fields": 11,
+      "generated_fields": 10,
+      "requirement_id": 19,
+      "input_id": 39,
+      "failures": [],
+      "seconds": 846.0
+    },
+    {
+      "table_code": "T_3_3",
+      "steps": {
+        "preview": {
+          "targets": 1,
+          "rules": 50,
+          "gaps": 27,
+          "preview_hash": "ba7456d74dc265b8063d89ea72ce798320bad208c6a38f58fd6ca82992c2ada3"
+        },
+        "create": {
+          "content_version": 2
+        },
+        "scope_text": "ok",
+        "generation": {
+          "counts": {
+            "completed": 22
+          },
+          "seconds": 1042.5
+        },
+        "adopt": {
+          "adopted": null,
+          "content_version": null,
+          "keys": [
+            "document",
+            "idempotent"
+          ]
+        },
+        "freeze": {
+          "id": 11,
+          "requirement_id": 20,
+          "requirement_version": 2,
+          "content_hash": "0103cca66ef9a153e56e9aff0f9247b346fc60585c5ecdef06e135e9f694a121",
+          "created_at": "2026-10-24T17:20:56.639460+00:00",
+          "status": "frozen_draft",
+          "deduplicated": false
+        },
+        "export": {
+          "bytes": 11319,
+          "path": "T_3_3-survey.xlsx",
+          "renderer": "survey-requirement-doc-v6",
+          "artifact_id": "37"
+        }
+      },
+      "field_count": 11,
+      "script_version_id": 22,
+      "bound_fields": 11,
+      "scoped_fields": 11,
+      "generated_fields": 11,
+      "requirement_id": 20,
+      "input_id": 40,
+      "failures": [],
+      "seconds": 1047.6
+    }
+  ]
+}

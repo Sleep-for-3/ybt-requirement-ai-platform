@@ -322,6 +322,21 @@ async def execute_runtime_chat_with_metadata(
             citations=citations,
             rejected_claims=rejected_claims,
         )
+        # Usage and latency travel with the candidate so每一条候选都能对账到
+        # 具体 provider 用量；provider 没回 usage 时显式标 unavailable，
+        # 不用字符数冒充 token。
+        last_call = getattr(service, "last_call", None)
+        if last_call is not None:
+            usage = dict(getattr(last_call, "token_usage", None) or {"usage_available": False})
+            usage["source"] = "provider_reported" if usage.get("usage_available") else "unavailable"
+            metadata["token_usage"] = usage
+            metadata["latency_ms"] = int(getattr(last_call, "latency_ms", 0) or 0)
+            metadata["retry_count"] = int(getattr(last_call, "retry_count", 0) or 0)
+            metadata["http_status"] = getattr(last_call, "http_status", None)
+        else:  # pragma: no cover - providers we wrap always expose last_call
+            metadata["token_usage"] = {"usage_available": False, "source": "unavailable"}
+            metadata["latency_ms"] = int((time.perf_counter() - started) * 1000)
+            metadata["retry_count"] = 0
         record_model_call(
             db,
             project_id,

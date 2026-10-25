@@ -26,6 +26,25 @@ from app.services.governance import (
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 CHAIN_REVISION = "202611010001"
+
+
+def _current_head() -> str:
+    """当前迁移脚本目录里的唯一 head。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    heads = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini"))).get_heads()
+    assert len(heads) == 1, f"expected exactly one alembic head, got {sorted(heads)}"
+    return heads[0]
+
+
+def _revision_chain() -> list[str]:
+    """从 head 回溯到 base 的线性迁移链（head 在最前）。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
+    return [revision.revision for revision in script.walk_revisions(base="base", head="head")]
 PREVIOUS_REVISION = "202610060001"
 TAIL_INDEX = "ix_audit_logs_chain_tail"
 
@@ -264,7 +283,12 @@ def test_audit_chain_migration_is_reversible(tmp_path: Path, steps: tuple[tuple[
 
     with sa.create_engine(f"sqlite:///{database}").begin() as connection:
         head = connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert head == CHAIN_REVISION
+    # 结论是"只有一个 head、且审计链迁移在 head 的祖先链上"，不是"审计链就是最后一个迁移"。
+    # 后续合法迁移会推进 head，这里必须随脚本目录自动跟随，否则每加一个迁移就要改测试。
+    assert head == _current_head()
+    assert CHAIN_REVISION in _revision_chain(), (
+        f"audit-chain revision {CHAIN_REVISION} is not on the applied migration chain {_revision_chain()}"
+    )
 
 
 def test_step_back_removes_the_chain_state(tmp_path: Path) -> None:
@@ -296,7 +320,11 @@ def test_single_head_after_the_change() -> None:
     config = Config(str(BACKEND_DIR / "alembic.ini"))
     heads = ScriptDirectory.from_config(config).get_heads()
     assert len(heads) == 1, f"expected exactly one alembic head, got {sorted(heads)}"
-    assert heads[0] == CHAIN_REVISION
+    # 原断言是 heads[0] == CHAIN_REVISION，只在审计链恰好是唯一迁移时成立；
+    # 保留原意（单一 head + 审计链已并入主链），允许后续迁移推进 head。
+    assert CHAIN_REVISION in _revision_chain(), (
+        f"audit-chain revision {CHAIN_REVISION} is not on the applied migration chain {_revision_chain()}"
+    )
 
 
 def test_audit_rows_created_without_the_helper_stay_readable(db_session: Session) -> None:

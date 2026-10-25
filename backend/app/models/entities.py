@@ -56,6 +56,12 @@ class TargetTable(Base):
     table_code: Mapped[str] = mapped_column(String(100), nullable=False)
     table_name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    # 调研表“表级口径”sheet 带回的表级信息（示例需求文档第 3-8 行）：
+    # 数据主题、填报说明、报送数据域。缺失时保持 None，导出写“待业务补充”，不猜。
+    theme: Mapped[str | None] = mapped_column(String(200))
+    filing_note: Mapped[str | None] = mapped_column(Text)
+    reporting_domain_code: Mapped[str | None] = mapped_column(String(64))
+    reporting_domain_name: Mapped[str | None] = mapped_column(String(200))
 
     project: Mapped[Project] = relationship(back_populates="target_tables")
     fields: Mapped[list["TargetField"]] = relationship(back_populates="target_table")
@@ -573,7 +579,7 @@ class EmbeddingIndexVersion(Base, TimestampMixin):
 
 
 class EmbeddingRecord(Base,TimestampMixin):
-    __tablename__="embedding_records";__table_args__=(UniqueConstraint("embedding_index_version_id","knowledge_unit_id","content_hash",name="uq_embedding_index_unit_hash"),);id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);embedding_index_version_id:Mapped[int|None]=mapped_column(ForeignKey("embedding_index_versions.id"),index=True);embedding_provider:Mapped[str]=mapped_column(String(50));embedding_model:Mapped[str]=mapped_column(String(255));vector_store_provider:Mapped[str]=mapped_column(String(50));vector_record_id:Mapped[str]=mapped_column(String(255));embedding_dimension:Mapped[int]=mapped_column(Integer);content_hash:Mapped[str]=mapped_column(String(64));status:Mapped[str]=mapped_column(String(50))
+    __tablename__="embedding_records";__table_args__=(UniqueConstraint("embedding_index_version_id","knowledge_unit_id","content_hash",name="uq_embedding_index_unit_hash"),);id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);knowledge_unit_id:Mapped[int]=mapped_column(ForeignKey("knowledge_units.id"),index=True);embedding_index_version_id:Mapped[int|None]=mapped_column(ForeignKey("embedding_index_versions.id"),index=True);embedding_provider:Mapped[str]=mapped_column(String(50));embedding_model:Mapped[str]=mapped_column(String(255));vector_store_provider:Mapped[str]=mapped_column(String(50));vector_record_id:Mapped[str]=mapped_column(String(255));embedding_dimension:Mapped[int]=mapped_column(Integer);content_hash:Mapped[str]=mapped_column(String(64));status:Mapped[str]=mapped_column(String(50));vector_record_ids_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list)
 
 class RetrievalLog(Base):
     __tablename__="retrieval_logs";id:Mapped[int]=mapped_column(Integer,primary_key=True);project_id:Mapped[int]=mapped_column(ForeignKey("projects.id"),index=True);query_text:Mapped[str]=mapped_column(Text);query_type:Mapped[str]=mapped_column(String(50));target_field_id:Mapped[int|None]=mapped_column(ForeignKey("target_fields.id"));scenario_id:Mapped[int|None]=mapped_column(ForeignKey("product_scenarios.id"));filters_json:Mapped[dict]=mapped_column(MutableDict.as_mutable(JSON),default=dict);retrieval_strategy:Mapped[str]=mapped_column(String(50));keyword_result_count:Mapped[int]=mapped_column(Integer,default=0);vector_result_count:Mapped[int]=mapped_column(Integer,default=0);final_result_count:Mapped[int]=mapped_column(Integer,default=0);result_ids_json:Mapped[list]=mapped_column(MutableList.as_mutable(JSON),default=list);latency_ms:Mapped[int]=mapped_column(Integer,default=0);created_at:Mapped[object]=mapped_column(DateTime(timezone=True),server_default=func.now());created_by:Mapped[str|None]=mapped_column(String(100))
@@ -763,6 +769,9 @@ class TemplateVersion(Base, TimestampMixin):
     file_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     sheet_names_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     parsed_snapshot_json: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    # 调研表“表级口径”sheet 解析结果：{表编号: {theme, filing_note, reporting_domain_*}}
+    table_meta_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    parse_report_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     parse_status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
     error_message: Mapped[str | None] = mapped_column(Text)
     uploaded_by: Mapped[str | None] = mapped_column(String(100))

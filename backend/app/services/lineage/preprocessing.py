@@ -32,6 +32,109 @@ class PreprocessedSql:
     warnings: tuple[str, ...]
 
 
+def strip_hash_comments(sql: str) -> str:
+    """Normalize GBase/4A ``#`` line comments into ``--`` comments.
+
+    GBase batch scripts use ``#`` for comments (``####`` banners, ``# 说明：…``)
+    and ``#{VAR}`` for templated placeholders.  sqlglot's generic grammar and
+    some dialect tokenizers either reject ``#`` outright or crash on a
+    ``#`` comment that reaches end of input, which used to drop the whole
+    statement.  Converting the comment marker keeps the statement text (and all
+    line numbers) intact without inventing lineage.
+
+    ``#{…}`` placeholders are *not* comments and are left for the variable
+    substitution step.
+    """
+
+    out: list[str] = []
+    index = 0
+    length = len(sql)
+    while index < length:
+        char = sql[index]
+        if char in ("'", '"'):
+            quote = char
+            out.append(char)
+            index += 1
+            while index < length:
+                current = sql[index]
+                out.append(current)
+                if current == "\\" and index + 1 < length:
+                    out.append(sql[index + 1])
+                    index += 2
+                    continue
+                if current == quote:
+                    if index + 1 < length and sql[index + 1] == quote:
+                        out.append(sql[index + 1])
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+        if char == "#" and not sql.startswith("#{", index):
+            while index < length and sql[index] != "\n":
+                index += 1
+            out.append("--")
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def truncate_unterminated_block_comment(sql: str) -> tuple[str, str | None]:
+    """Cut the script at an unterminated ``/*`` block comment.
+
+    Some GBase batch scripts are switched off by commenting out everything after
+    a banner and never closing it (``YBT_T_3_5.sql`` starts one at line 17 with
+    no ``*/`` anywhere in the file).  Feeding the rest of such a file to a parser
+    yields ``Error tokenizing`` / ``Statement path parse failed``, which looks
+    like a parser defect and hides the real reason: the script is disabled.
+
+    Truncating at the comment keeps the statements before it parseable and
+    returns an explicit warning so the requirement pipeline can say "this table
+    is not reported" instead of inventing a target.  Quoted literals, ``--`` and
+    ``#`` line comments are skipped so their content is never mistaken for a
+    block comment.
+    """
+
+    index = 0
+    length = len(sql)
+    while index < length:
+        char = sql[index]
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            while index < length:
+                if sql[index] == "\\" and index + 1 < length:
+                    index += 2
+                    continue
+                if sql[index] == quote:
+                    if index + 1 < length and sql[index + 1] == quote:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+        if sql.startswith("--", index) or (char == "#" and not sql.startswith("#{", index)):
+            while index < length and sql[index] != "\n":
+                index += 1
+            continue
+        if sql.startswith("/*", index):
+            close = sql.find("*/", index + 2)
+            if close == -1:
+                line_no = sql.count("\n", 0, index) + 1
+                warning = (
+                    f"未闭合的块注释：第 {line_no} 行起的 SQL 被视为注释（脚本可能被人工屏蔽），"
+                    "其后的语句不参与解析"
+                )
+                return sql[:index], warning
+            index = close + 2
+            continue
+        index += 1
+    return sql, None
+
+
 def preprocess_sql(sql: str, variables: dict[str, str] | None = None) -> PreprocessedSql:
     """Prepare templated SQL for parsing without losing source expressions.
 
@@ -43,6 +146,9 @@ def preprocess_sql(sql: str, variables: dict[str, str] | None = None) -> Preproc
     configured = {key.upper(): value for key, value in (variables or {}).items()}
     occurrences: list[TemplateVariableOccurrence] = []
     warnings: list[str] = []
+    visible_sql, block_warning = truncate_unterminated_block_comment(sql)
+    if block_warning:
+        warnings.append(block_warning)
 
     def replace(match: re.Match[str]) -> str:
         name = next(value for value in match.groupdict().values() if value and value != match.group("expression"))
@@ -61,7 +167,10 @@ def preprocess_sql(sql: str, variables: dict[str, str] | None = None) -> Preproc
             return expression
         return f"SAFE_{re.sub(r'[^A-Za-z0-9_]', '_', name).upper()}"
 
-    parse_sql = _VARIABLE_PATTERN.sub(replace, sql)
+    parse_sql = _VARIABLE_PATTERN.sub(replace, strip_hash_comments(visible_sql))
+    if not parse_sql.endswith("\n"):
+        # sqlglot raises IndexError when a ``--`` comment reaches end of input.
+        parse_sql += "\n"
     normalized_sql = re.sub(r"[ \t]+", " ", sql).strip()
     return PreprocessedSql(
         original_sql=sql,
