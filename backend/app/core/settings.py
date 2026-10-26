@@ -151,8 +151,14 @@ class Settings(BaseSettings):
     vector_top_k: int = 30
     keyword_top_k: int = 500
     hybrid_final_top_k: int = 20
-    hybrid_vector_weight: float = 0.45
-    hybrid_keyword_weight: float = 0.55
+    # round 75（M2 网格实测）：81 条金标用例上 rrf k=20 + authority 加分最优
+    # （recall@5 0.696 / recall@10 0.848）；weighted 0.4/0.6 次之，留作对照配置。
+    hybrid_vector_weight: float = 0.6
+    hybrid_keyword_weight: float = 0.4
+    # ``boost`` 把来源权威度折算成 [0, authority_boost] 的加分，排序仍以
+    # 相关性分数为主；``strict`` 保留旧的"权威度硬主键"行为，仅供 A/B 对照。
+    retrieval_authority_mode: str = "boost"
+    retrieval_authority_boost: float = 0.15
 
     # ② 重排 / ③ BM25 / ⑦ 融合
     reranker_enabled: bool = False
@@ -162,7 +168,7 @@ class Settings(BaseSettings):
     keyword_bm25_k1: float = 1.2
     keyword_bm25_b: float = 0.75
     fusion_strategy: str = "rrf"
-    rrf_k: int = 60
+    rrf_k: int = 20
 
     # ① OCR / ⑥ 切分
     ocr_enabled: bool = False
@@ -178,6 +184,13 @@ class Settings(BaseSettings):
     # ⑤ 引用蕴含校验 / ⑧ LLM 裁判
     citation_support_check: str = "off"
     ragas_judge_enabled: bool = False
+    # ④-B 候选主张的证据接地：主张与所引证据原文的字符二连覆盖率门限。
+    # 只有"无法确定性校验"的结论能被接地取代，冲突永远优先；设为 >1 可关闭接地（A/B 用）。
+    claim_grounding_min_coverage: float = 0.75
+    # ④-C 导出软门禁：字段级"有据可查率"低于阈值时只标记（mark），不阻断导出。
+    # 关闭后导出不再计算统计（A/B 与紧急导出用），响应头会给出 unknown。
+    grounding_gate_enabled: bool = True
+    grounding_gate_threshold: float = 0.7
 
     def validate_projection_budget_reasonable(self) -> list[dict[str, str]]:
         """Keep the generator projection budget inside a sane, reviewable band."""

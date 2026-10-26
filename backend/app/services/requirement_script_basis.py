@@ -171,12 +171,16 @@ def confirm_script_basis(db, requirement, payload, actor_id):
     missing = field_ids - set(payload.field_bindings.values())
     basis["gaps"].extend(f"需求字段 {i} 尚未确认对应脚本输出列" for i in sorted(missing))
     from app.services.knowledge_eligibility import requirement_evidence
+    from app.models import TargetField
+    bound_codes = sorted({str(code) for code in db.scalars(select(TargetField.field_code).where(
+        TargetField.project_id == requirement.project_id, TargetField.id.in_(field_ids))) if code})
     evidence = requirement_evidence(db, requirement.project_id, requirement.scope_json.get("document_ids", []),
-        requirement.scope_json.get("scenario_id"))
+        requirement.scope_json.get("scenario_id"), field_codes=bound_codes)
     if len(evidence) > 500:
         raise HTTPException(422, "制度片段超出固定输入限制，请缩小资料范围")
     basis["policy_snapshot"] = {"allowed": {"document_ids": sorted(set(requirement.scope_json.get("document_ids", [])))},
-        "requirement": {"scenario_id": requirement.scope_json.get("scenario_id")}, "evidence": evidence}
+        "requirement": {"scenario_id": requirement.scope_json.get("scenario_id")},
+        "field_codes": bound_codes, "evidence": evidence}
     if not evidence:
         basis["gaps"].append("缺少依据：没有明确选择且当前有效的制度条款；脚本事实不能替代制度要求")
     basis["gaps"].append("制度条款与脚本规则的逐条对照尚未人工确认")

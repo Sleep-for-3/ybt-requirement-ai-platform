@@ -383,12 +383,16 @@ def test_openai_compatible_embedding_and_milvus_adapter(monkeypatch):
 
     calls = []
 
-    def fake_post(url, **kwargs):
-        calls.append((url, kwargs))
-        return Response(len(kwargs["json"]["input"]))
+    class FakeClient:
+        def post(self, url, **kwargs):  # noqa: N802 - 与 httpx.Client.post 同名
+            calls.append((url, kwargs))
+            return Response(len(kwargs["json"]["input"]))
 
     monkeypatch.setenv("TEST_EMBEDDING_KEY", "not-a-real-secret")
-    monkeypatch.setattr("app.services.embeddings.openai_compatible.httpx.post", fake_post)
+    monkeypatch.setattr(
+        "app.services.embeddings.openai_compatible._embedding_client",
+        lambda base_url, timeout_seconds, trust_env: FakeClient(),
+    )
     embedding = OpenAICompatibleEmbeddingService("http://embedding.test/v1", "demo-model", "TEST_EMBEDDING_KEY")
     assert embedding.embed_texts(["a", "b"]) == [[0.1, 0.2], [0.3, 0.4]]
     assert calls[0][0] == "http://embedding.test/v1/embeddings"
@@ -555,8 +559,10 @@ def test_excel_merged_cells_scenario_links_and_persistent_keyword_index(tmp_path
         assert all("合并备注" in item["content"] for item in units)
         paragraphs=[f"普通历史知识段落 {index}" for index in range(550)]+["持久关键词索引唯一标记 UNIQUE_LAST_550"]
         _upload(client,project["id"],"大量知识.txt","\n\n".join(paragraphs).encode(),"manual_note")
-        result=_post(client,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"UNIQUE_LAST_550","top_k":5})
-        assert result["items"] and "UNIQUE_LAST_550" in result["items"][0]["content"]
+        keyword=_post(client,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"UNIQUE_LAST_550","top_k":5,"retrieval_mode":"keyword_only"})
+        assert "UNIQUE_LAST_550" in keyword["items"][0]["content"]
+        result=_post(client,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"UNIQUE_LAST_550","top_k":20})
+        assert any("UNIQUE_LAST_550" in item["content"] for item in result["items"])
 
 
 def test_prompt_version_external_policy_and_model_call_audit(db_session):

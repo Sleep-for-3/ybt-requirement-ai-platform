@@ -60,7 +60,7 @@ def governed_document_visible(document, version, project_id, institution, histor
     return True
 
 
-def selected_requirement_units(db, project_id, document_ids, scenario_id=None, limit=501):
+def selected_requirement_units(db, project_id, document_ids, scenario_id=None, limit=501, field_codes=None):
     """Explicit selection only; no search, vector service or implicit documents."""
     from app.models import Project
     project = db.get(Project, project_id)
@@ -78,6 +78,18 @@ def selected_requirement_units(db, project_id, document_ids, scenario_id=None, l
     )
     if scenario_id:
         query = query.where(or_(KnowledgeUnit.scenario_id.is_(None), KnowledgeUnit.scenario_id == scenario_id))
+    # 字段级证据：选了 18 个字段就只送这 18 个字段的制度片段。之前的实现把选定资料里的
+    # 全部单元都送进模型，语料一补齐就撑爆 128KB 输入预算（真实报错：请求 410135 字节）。
+    # 没有字段代码的单元是通用条款，仍然保留；过滤结果写进 projection 审计可查。
+    if field_codes:
+        codes = sorted({str(code) for code in field_codes if code})
+        query = query.where(
+            or_(
+                KnowledgeUnit.target_field_code.is_(None),
+                KnowledgeUnit.target_field_code == "",
+                KnowledgeUnit.target_field_code.in_(codes),
+            )
+        )
     # Apply JSON applicability before the evidence budget: hidden clauses must
     # neither enter the model nor consume its visible evidence limit.
     result = []
@@ -96,7 +108,7 @@ def validate_frozen_requirement_evidence(db, project_id, snapshot):
     if not evidence:
         return
     rows = selected_requirement_units(db, project_id, snapshot["allowed"]["document_ids"],
-        snapshot.get("requirement", {}).get("scenario_id"))
+        snapshot.get("requirement", {}).get("scenario_id"), field_codes=snapshot.get("field_codes"))
     current = {unit.id: unit for unit, _, _ in rows}
     for saved in evidence:
         unit = current.get(saved["unit_id"])
@@ -106,11 +118,12 @@ def validate_frozen_requirement_evidence(db, project_id, snapshot):
             raise HTTPException(409, "固定制度依据已失效或变化，请显式建立新修订")
 
 
-def requirement_evidence(db, project_id, document_ids, scenario_id=None, limit=501):
+def requirement_evidence(db, project_id, document_ids, scenario_id=None, limit=501, field_codes=None):
     from app.services.knowledge_evidence import unit_locator
     return [{"unit_id": unit.id, "document_id": unit.document_id,
         "document_version_id": unit.document_version_id, "content_hash": unit.content_hash,
         "content": unit.content, "title": unit.title, "confidentiality_level": unit.confidentiality_level,
         "source_category": document.source_category, "regulatory_version": version.regulatory_version,
         "lifecycle_status": version.lifecycle_status, "locator": unit_locator(unit)}
-        for unit, document, version in selected_requirement_units(db, project_id, document_ids, scenario_id, limit)]
+        for unit, document, version in selected_requirement_units(
+            db, project_id, document_ids, scenario_id, limit, field_codes=field_codes)]

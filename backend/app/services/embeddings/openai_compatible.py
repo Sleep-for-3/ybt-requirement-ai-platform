@@ -1,4 +1,5 @@
 import math
+import threading
 import time
 
 import httpx
@@ -12,6 +13,32 @@ from app.services.llm.providers import (
     resolve_api_key,
 )
 from app.services.embeddings.base import EmbeddingBatchResult
+
+
+_CLIENT_LOCK = threading.Lock()
+_CLIENT_CACHE: dict[tuple[str, float, bool], httpx.Client] = {}
+
+
+def _embedding_client(base_url: str, timeout_seconds: float, trust_env: bool) -> httpx.Client:
+    """按 (base_url, timeout, trust_env) 复用 Client，避免每次请求重建连接/SSL 上下文。
+
+    ``httpx.Client`` 的连接池是线程安全的；进程退出时由操作系统回收。
+    """
+    key = (base_url, float(timeout_seconds), bool(trust_env))
+    client = _CLIENT_CACHE.get(key)
+    if client is not None and not client.is_closed:
+        return client
+    with _CLIENT_LOCK:
+        client = _CLIENT_CACHE.get(key)
+        if client is None or client.is_closed:
+            client = httpx.Client(
+                timeout=timeout_seconds,
+                follow_redirects=False,
+                trust_env=trust_env,
+                limits=httpx.Limits(max_keepalive_connections=8, max_connections=16),
+            )
+            _CLIENT_CACHE[key] = client
+        return client
 
 
 class OpenAICompatibleEmbeddingService:
@@ -124,12 +151,17 @@ class OpenAICompatibleEmbeddingService:
         while True:
             try:
                 if self.transport is None:
-                    response = httpx.post(
+                    # 复用 Client：新建 Client 会重新解析代理环境并构建连接/SSL 上下文，
+                    # 对回环地址单次多花 650ms+；本地 provider 走直连（trust_env=False）。
+                    client = _embedding_client(
+                        self.base_url,
+                        self.timeout_seconds,
+                        not self.local_only,
+                    )
+                    response = client.post(
                         f"{self.base_url}/embeddings",
                         json=payload,
                         headers=headers,
-                        timeout=self.timeout_seconds,
-                        follow_redirects=False,
                     )
                 else:
                     with httpx.Client(timeout=self.timeout_seconds, transport=self.transport, follow_redirects=False, trust_env=False) as client:

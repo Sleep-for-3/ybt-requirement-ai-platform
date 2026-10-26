@@ -236,6 +236,10 @@ class HybridRetriever:
         }.get(retrieval_mode, ("keyword", "vector"))
         vector_weight = settings.hybrid_vector_weight
         keyword_weight = settings.hybrid_keyword_weight
+        authority_mode = str(
+            getattr(settings, "retrieval_authority_mode", "boost")
+        ).strip().lower() or "boost"
+        authority_boost = _setting_float(settings, "retrieval_authority_boost", 0.15)
         if retrieval_mode == "keyword_only":
             keyword_weight, vector_weight = 1.0, 0.0
         elif retrieval_mode == "vector_only":
@@ -317,11 +321,15 @@ class HybridRetriever:
             if authority_rank >= 5:
                 reasons.append("当前生效监管资料")
             rule_boost = 0.05 if reasons else 0.0
+            authority_bonus = 0.0
+            if authority_mode != "strict":
+                # 6 档 -> [0, authority_boost]，只做加分不改变相关性主序。
+                authority_bonus = authority_boost * max(authority_rank - 1, 0) / 5.0
             # ``ranking_score`` keeps the pre-clamp value: the API contract caps
             # ``final_score`` at 1.0, but two strong candidates with the rule boost hit
             # that cap together and a clamped-score sort would fall back to ``-id``,
             # dropping the genuinely better fused candidate below an older, weaker one.
-            ranking_score = fused.get(unit_id, 0.0) + rule_boost
+            ranking_score = fused.get(unit_id, 0.0) + rule_boost + authority_bonus
             ranking_by_id[unit_id] = ranking_score
             final_score = min(1.0, ranking_score)
             items.append({
@@ -361,15 +369,7 @@ class HybridRetriever:
                 "metadata_json": unit.metadata_json,
                 "historical": historical and version.lifecycle_status != "active",
             })
-        items = sorted(
-            items,
-            key=lambda item: (
-                item["authority_rank"],
-                ranking_by_id[item["knowledge_unit_id"]],
-                -item["knowledge_unit_id"],
-            ),
-            reverse=True,
-        )[:top_k]
+        items = _order_items(items, ranking_by_id, authority_mode)[:top_k]
         # The reranker is inert unless settings.reranker_enabled is True; when it
         # is on it refines ordering inside an authority tier and degrades to the
         # order above on any failure.
@@ -391,6 +391,8 @@ class HybridRetriever:
                 "fusion_strategy": fusion_strategy,
                 "rrf_k": rrf_k if fusion_strategy == "rrf" else None,
                 "reranker": rerank_outcome.diagnostics(),
+                "authority_mode": authority_mode,
+                "authority_boost": authority_boost,
             },
             retrieval_strategy=effective_retrieval_mode,
             keyword_result_count=len(keyword),
@@ -407,6 +409,37 @@ class HybridRetriever:
             self.db.flush()
         self.db.refresh(log)
         return log, items
+
+
+def _order_items(
+    items: list[dict],
+    ranking_by_id: dict[int, float],
+    authority_mode: str,
+) -> list[dict]:
+    """按 authority 策略排序：
+
+    * ``strict`` —— 旧的"权威度硬主键"：``(authority_rank, 分数, -id)``；
+    * 其它（默认 ``boost``）—— 相关性分数优先，authority 只做次序键。
+    """
+    if authority_mode == "strict":
+        return sorted(
+            items,
+            key=lambda item: (
+                item["authority_rank"],
+                ranking_by_id[item["knowledge_unit_id"]],
+                -item["knowledge_unit_id"],
+            ),
+            reverse=True,
+        )
+    return sorted(
+        items,
+        key=lambda item: (
+            ranking_by_id[item["knowledge_unit_id"]],
+            item["authority_rank"],
+            -item["knowledge_unit_id"],
+        ),
+        reverse=True,
+    )
 
 
 def _fragment_metadata(metadata: dict) -> dict | None:
