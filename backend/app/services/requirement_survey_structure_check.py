@@ -123,6 +123,9 @@ def contract_for_renderer(renderer_version: str | None) -> dict[str, Any] | None
         "renderer_version": value,
         "label": spec["label"],
         "required_keys": list(spec["required_keys"]),
+        # v10 起列组按场景分列：业务口径-借记卡 与 溯源-借记卡系统 是成对的两组，
+        # 组名本来就不相同，只能按位置配对判定，不能再要求去掉前缀后同名。
+        "pair_by_position": generation >= 10,
     }
 
 
@@ -184,16 +187,19 @@ def check_survey_structure(
                 group_titles.append(value)
     business_groups = [value[len("业务口径-"):] for value in group_titles if value.startswith("业务口径-")]
     source_groups = [value[len("溯源-"):] for value in group_titles if value.startswith("溯源-")]
+    paired = business_groups == source_groups
+    if contract.get("pair_by_position"):
+        paired = len(business_groups) == len(source_groups)
     groups_ok = (
         title_row is not None
         and _BASE_TITLE in group_titles
         and _EAST_TITLE in group_titles
-        and business_groups == source_groups
+        and paired
         and len(business_groups) >= 1
     )
     add(
         "groups",
-        "按来源系统分组（业务口径/溯源成对）",
+        "列组分组（业务口径/溯源成对）",
         groups_ok,
         f"第 {title_row or '?'} 行；业务口径组={business_groups}；溯源组={source_groups}",
     )

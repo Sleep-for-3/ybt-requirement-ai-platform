@@ -30,7 +30,7 @@ from openpyxl.utils import get_column_letter
 
 # 渲染器行为变化必须升版：产物身份（render_identity）含 renderer_version，
 # 否则改了版式却命中旧产物，正式文件内容与代码不一致。
-SURVEY_DOC_VERSION = "survey-requirement-doc-v9"
+SURVEY_DOC_VERSION = "survey-requirement-doc-v10"
 
 #: 表级信息：键 -> (标签, 取值来源)
 #: 表级信息：键 -> (标签, 主取值路径, 备选取值路径)。
@@ -52,12 +52,12 @@ _BASE_COLUMNS = (
     ("field_name", "数据项名称", 16),
     ("data_category", "数据类别", 12),
     ("data_format", "数据格式", 12),
-    ("regulatory_original_definition", "字段业务定义\n（监管原始口径）", 46),
-    ("regulatory_refined_definition", "字段业务定义\n（监管定义细化）", 40),
+    ("regulatory_original_definition", "字段业务定义（监管原始口径）", 46),
+    ("regulatory_refined_definition", "字段业务定义（监管定义细化）", 40),
     ("report_name", "报表名称", 16),
     ("report_field_name", "字段名称", 16),
     ("east_definition", "EAST口径", 28),
-    ("internal_definition", "字段业务定义\n（行内）", 34),
+    ("internal_definition", "字段业务定义（行内）", 34),
     ("remarks", "备注", 26),
 )
 
@@ -379,6 +379,171 @@ def _source_values(
 
 
 
+def _scenario_groups(content: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """冻结内容里的场景分组（``scenario_groups``，由 document_content 读时补全）。
+
+    没有场景行时返回空列表——调用方回退到按来源系统分组，历史文档版式不变。
+    """
+
+    groups: list[dict[str, Any]] = []
+    for raw in content.get("scenario_groups") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        name = str(raw.get("scenario_name") or "").strip()
+        if not name:
+            continue
+        business: dict[int, Mapping[str, Any]] = {}
+        for row in raw.get("business") or []:
+            field_id = row.get("target_field_id")
+            if field_id is not None:
+                business[int(field_id)] = row
+        technical: dict[int, Mapping[str, Any]] = {}
+        for row in raw.get("technical") or []:
+            field_id = row.get("target_field_id")
+            if field_id is not None:
+                technical[int(field_id)] = row
+        if not business and not technical:
+            continue
+        systems: list[str] = []
+        for row in technical.values():
+            source = str(row.get("source_system_name") or "").strip()
+            if source and source not in systems:
+                systems.append(source)
+        groups.append(
+            {
+                "scenario_id": raw.get("scenario_id"),
+                "scenario_name": name,
+                "business": business,
+                "technical": technical,
+                "business_title": f"业务口径-{name}",
+                "source_title": f"溯源-{'、'.join(systems) if systems else name}",
+            }
+        )
+    return groups
+
+
+def _column_plan(
+    content: Mapping[str, Any],
+    fields: list[Mapping[str, Any]],
+    rules_by_target: Mapping[str, list[dict]],
+) -> list[dict[str, Any]]:
+    """列组计划：有场景数据时按场景分列，场景没覆盖到的字段回退来源系统分组。
+
+    示例文档的分组键是"场景"（借记卡 / 信用卡 / 代销保险…），每个场景一组业务口径
+    加一组溯源。场景没覆盖到的字段不能凭空消失，仍按原来的来源系统分组放在后面。
+    """
+
+    plan: list[dict[str, Any]] = []
+    covered: set[int] = set()
+    for group in _scenario_groups(content):
+        covered.update(group["business"])
+        covered.update(group["technical"])
+        plan.append(
+            {
+                "kind": "scenario",
+                "name": group["scenario_name"],
+                "group": group,
+                "business_title": group["business_title"],
+                "source_title": group["source_title"],
+            }
+        )
+    residual = [
+        record
+        for record in fields
+        if int((record.get("field") or {}).get("id") or 0) not in covered
+    ]
+    if residual:
+        for name in _groups_in_use(residual, rules_by_target):
+            plan.append(
+                {
+                    "kind": "system",
+                    "name": name,
+                    "group": None,
+                    "business_title": f"业务口径-{name}",
+                    "source_title": f"溯源-{name}",
+                }
+            )
+    if not plan:
+        plan.append(
+            {
+                "kind": "system",
+                "name": _UNREGISTERED_GROUP,
+                "group": None,
+                "business_title": f"业务口径-{_UNREGISTERED_GROUP}",
+                "source_title": f"溯源-{_UNREGISTERED_GROUP}",
+            }
+        )
+    return plan
+
+
+def _scenario_business_values(row: Mapping[str, Any] | None) -> dict[str, str]:
+    """场景业务口径组的取值：只用场景行里已有的事实，AI 草稿必须带标识。"""
+
+    if not row:
+        return {key: "" for key, _, _ in _BUSINESS_COLUMNS}
+    definition = str(row.get("final_content") or row.get("business_definition") or "").strip()
+    if not definition:
+        draft = str(row.get("ai_generated_content") or "").strip()
+        if draft:
+            # 文档里不能出现"看起来已确认"的口径：AI 草稿一律带标识。
+            definition = f"（AI 生成草稿，待业务确认）{draft}"
+    return {
+        "business_definition": _text(definition),
+        "screenshot": "是" if row.get("source_system_screenshot_required") else "",
+        "system_change": "是" if row.get("source_system_change_required") else "",
+        "external_data": "是" if row.get("external_data_required") else "",
+        "manual_entry": "是" if row.get("manual_supplement_required") else "",
+        "business_confirmer": _text(row.get("business_owner"), ""),
+    }
+
+
+def _scenario_source_values(row: Mapping[str, Any] | None) -> dict[str, str]:
+    """场景溯源组的取值：来源系统/表/字段/处理逻辑都照场景行写，AI 草稿带标识。"""
+
+    if not row:
+        return dict(_EMPTY_SOURCE_VALUES)
+    logic = str(row.get("final_content") or row.get("processing_logic") or "").strip()
+    if not logic:
+        draft = str(row.get("ai_generated_content") or "").strip()
+        if draft:
+            logic = f"（AI 生成草稿，待技术确认）{draft}"
+    return {
+        "source_system": _text(row.get("source_system_name"), ""),
+        "source_table_code": _text(row.get("source_table_english_name"), ""),
+        "source_table_name": _text(row.get("source_table_chinese_name"), ""),
+        "source_field_code": _text(row.get("source_field_english_name"), ""),
+        "source_field_name": _text(row.get("source_field_chinese_name"), ""),
+        "source_logic": logic,
+        "source_logic_type": _text(row.get("processing_logic_type"), "") or _logic_type(logic),
+        "technical_confirmer": _text(row.get("tech_owner"), ""),
+        "source_remark": _text(row.get("remarks"), ""),
+    }
+
+
+def _scenario_notes(
+    plan: list[dict[str, Any]], fields: list[Mapping[str, Any]]
+) -> list[str]:
+    """场景列组的说明：写清分组来源，以及这些口径是演示数据、可被人工覆盖。"""
+
+    scenario_plan = [item for item in plan if item["kind"] == "scenario"]
+    if not scenario_plan:
+        return []
+    total = len(fields)
+    names = "、".join(item["name"] for item in scenario_plan)
+    notes = [
+        f"本表按 {len(scenario_plan)} 个场景分列：{names}；场景业务口径与技术溯源为演示数据"
+        "（AI 生成草稿），可被人工覆盖，未经业务确认不得视为已确认。"
+    ]
+    for item in scenario_plan:
+        group = item["group"]
+        covered = len(set(group["business"]) | set(group["technical"]))
+        notes.append(
+            f"「{item['business_title']}」与「{item['source_title']}」覆盖 {covered}/{total} 个字段"
+            f"（业务口径 {len(group['business'])} 个、技术溯源 {len(group['technical'])} 个）。"
+        )
+    return notes
+
+
 def _completeness_rows(
     fields: list[Mapping[str, Any]],
     rules_by_target: Mapping[str, list[Mapping[str, Any]]],
@@ -499,7 +664,8 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
         record for record in all_fields if (record.get("field") or {}).get("field_code")
     ]
     rules_by_target = _script_rules_by_target(content)
-    groups = _groups_in_use(all_fields, rules_by_target)
+    plan = _column_plan(content, all_fields, rules_by_target)
+    scenario_plan = [item for item in plan if item["kind"] == "scenario"]
 
     sheet.cell(row=1, column=1, value="返回目录")
 
@@ -540,7 +706,7 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
         row=title_row, column=base_span + 1, value="EAST5.0同源映射列"
     ).fill = _GROUP_FILL
     column = len(_BASE_COLUMNS) + 1
-    for group in groups:
+    for item in plan:
         sheet.merge_cells(
             start_row=title_row,
             start_column=column,
@@ -548,7 +714,7 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
             end_column=column + len(_BUSINESS_COLUMNS) - 1,
         )
         sheet.cell(
-            row=title_row, column=column, value=f"业务口径-{group}"
+            row=title_row, column=column, value=item["business_title"]
         ).fill = _GROUP_FILL
         column += len(_BUSINESS_COLUMNS)
         sheet.merge_cells(
@@ -557,13 +723,13 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
             end_row=title_row,
             end_column=column + len(_SOURCE_COLUMNS) - 1,
         )
-        sheet.cell(row=title_row, column=column, value=f"溯源-{group}").fill = _GROUP_FILL
+        sheet.cell(row=title_row, column=column, value=item["source_title"]).fill = _GROUP_FILL
         column += len(_SOURCE_COLUMNS)
 
     header_row = title_row + 1
     headers = [label for _, label, _ in _BASE_COLUMNS]
     widths = [width for _, _, width in _BASE_COLUMNS]
-    for _ in groups:
+    for _ in plan:
         headers.extend(label for _, label, _ in _BUSINESS_COLUMNS)
         widths.extend(width for _, _, width in _BUSINESS_COLUMNS)
         headers.extend(label for _, label, _ in _SOURCE_COLUMNS)
@@ -599,7 +765,24 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
             _text(field.get("remarks"), ""),
         ]
         mappings = record.get("mart_mappings") or []
-        for group in groups:
+        field_id = int(field.get("id") or 0)
+        for item in plan:
+            if item["kind"] == "scenario":
+                group = item["group"]
+                business_row = group["business"].get(field_id)
+                technical_row = group["technical"].get(field_id)
+                # 该字段不属于这个场景（或场景里没有这一侧的事实）时整组留空：
+                # 留空是"这个场景不覆盖",不是"否",也不能写占位符冒充已核实。
+                if not business_row and not technical_row:
+                    row_values.extend("" for _ in _BUSINESS_COLUMNS)
+                    row_values.extend("" for _ in _SOURCE_COLUMNS)
+                    continue
+                business = _scenario_business_values(business_row)
+                source = _scenario_source_values(technical_row)
+                row_values.extend(business[key] for key, _, _ in _BUSINESS_COLUMNS)
+                row_values.extend(source[key] for key, _, _ in _SOURCE_COLUMNS)
+                continue
+            group = item["name"]
             group_mappings = _mappings_for_group(record, group)
             # 该字段在这个来源系统里没有映射且项目里确有集市映射时整组留空：空着是
             # "没有这项来源"，写"否"或占位会把未映射说成已核实。
@@ -623,6 +806,15 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
 
     # 交付完整度：写在数据之后，避免打乱监管模板的固定版式（表级信息 6 行 + 数据表）。
     completeness_rows = _completeness_rows(fields, rules_by_target)
+    if scenario_plan:
+        covered_fields: set[int] = set()
+        for item in scenario_plan:
+            covered_fields.update(item["group"]["business"])
+            covered_fields.update(item["group"]["technical"])
+        completeness_rows = completeness_rows + [
+            ("场景分组数", str(len(scenario_plan))),
+            ("场景覆盖字段", f"{len(covered_fields)}（其余字段按来源系统分组）"),
+        ]
     footer_row = data_row + 1
     title_cell = sheet.cell(row=footer_row, column=1, value="交付完整度（自动统计，不替代业务确认）")
     title_cell.font = Font(bold=True)
@@ -657,7 +849,10 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
         cell.fill = _HEADER_FILL
         cell.border = _BORDER
     notes_row = notes_title_row + 1
-    for note in _source_notes(fields, groups, rules_by_target):
+    system_groups = [item["name"] for item in plan if item["kind"] == "system"]
+    for note in _scenario_notes(plan, fields) + _source_notes(
+        fields, system_groups, rules_by_target
+    ):
         note_cell = sheet.cell(row=notes_row, column=1, value=note)
         note_cell.alignment = _WRAP
         note_cell.border = _BORDER
