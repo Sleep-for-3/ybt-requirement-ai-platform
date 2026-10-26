@@ -2471,3 +2471,21 @@ cd ..\frontend; $env:CONSISTENCY_SUFFIX='verified'; node scripts/browser_verify_
 | 逐列比对 | `backend/scripts/out/doc_compare.json` / `.md` | 差异 14 条（新增 `grounding_coverage`）、有据率 88.89% |
 | 浏览器 | `frontend/scripts/out/browser/ui-quality-gate-t51.json` + `ui-quality-gate-identity.png` | 面板文字精确匹配、产物 [70]、快照 [45]、consoleErrors [] |
 | 主线回归 | `frontend/scripts/browser_verify_mainline_t51.mjs` 同步更新为 16648 B / eef29a50… | 全部断言通过 |
+
+## 110. round 76 证据：召回提质（G2）与送审阻断分诊（G3）
+
+### 110.1 评测
+
+- `backend/scripts/out/retrieval/m4_v1.md`：81 条用例、79 条可回答、top_k=10；hybrid 开启展开 Recall@5 0.937 / @10 1.000 / MRR 0.317 / nDCG 0.655，P50 206ms / P95 330ms；关闭展开 0.722 / 0.949 / 0.233 / 0.446。
+- `backend/scripts/out/retrieval/m4_v1_noexp.md`：同一批用例的关闭展开对照，processing 0.444、scenario 0.444，与 m3_v3 一致。
+- `backend/scripts/out/retrieval/g2_api_evidence.json`：真实 `hybrid-search` 三条查询的 top-5 与 `intent/query_variant_count` 字段。
+
+### 110.2 送审阻断分诊
+
+- `backend/scripts/out/retrieval/g3_blockers_triage.md`：1140 项阻断的类别分布、原因分布、处置归属（needs_evidence 1053 / auto_verifiable 79 / manual_confirm 8）与每字段分布。
+- `backend/scripts/out/retrieval/g3_blockers_triage.json`：同上的机器可读版本。
+
+### 110.3 测试
+
+- `tests/test_retrieval_query_expansion.py` 9 项、`tests/test_retrieval_authority_ordering.py` 4 项、`tests/test_requirement_grounding_gate.py` 6 项、`tests/test_requirement_claim_grounding.py` 6 项、`tests/test_embedding_client_reuse.py` 3 项等，合计 **87 passed**（`PYTHONPATH=. AUTH_MODE=optional TASK_QUEUE_PROVIDER=inline DATABASE_URL=sqlite:///:memory:`）。
+- 后端与 celery 已重启加载本轮代码，`/health/ready` 11 项 healthy。

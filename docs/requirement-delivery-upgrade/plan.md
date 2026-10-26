@@ -656,3 +656,9 @@ sha `958e91c8…`；导出身份面板写"快照 #44（内容未变，复用已�
 `freeze-and-export`/`exports`/模板导出/正式交付共 6 处写入 `X-Requirement-Quality-Gate` 等三个响应头与审计；
 T_5_1 实测 gate=pass、coverage=0.8889、16648 B、sha eef29a50…、artifact 70 未重建；
 doc_compare 增"字段有据率"段与 `grounding_coverage` 差异（第 14 条）；前端身份面板可读，浏览器证据 14 项断言通过。
+
+### 7.81 G2 召回定稿与 G3 阻断分诊（round 76）
+
+- 检索默认：rrf k=20、authority boost 0.15、query 展开（3 变体）、场景 boosts 0.12、意图 boosts 0.18；81 条用例 Recall@5 0.937 / Recall@10 1.000 / P95 330ms。
+- 分类均衡：regulatory 0.944、lineage 1.000、processing 0.944、scenario 1.000；loan 0.333（语料覆盖，非本次范围）。
+- 送审阻断 1140 项可复现分诊：needs_evidence 1053、auto_verifiable 79、manual_confirm 8；分诊脚本只读，不改库、不写"已核验"。

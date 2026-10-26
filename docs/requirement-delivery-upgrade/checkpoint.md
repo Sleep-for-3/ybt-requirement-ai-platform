@@ -2170,3 +2170,11 @@ cd ..\frontend; node --test tests/worklist-archive-contract.test.mjs
 - 明确未做：G2（scenario/processing Recall@5 = 0.444 待提）、G3（589 项送审阻断分类治理）。
 - 关键不变量：加门禁没有改变产物身份（artifact 70、16648 字节、sha eef29a50…），冻结与重放仍确定性。
 - 待用户确认的后续：G2 是否允许为评测扩语料（当前只有 4 份 T_5_1 文档）；G3 的人工确认由谁签字。
+
+## 103. round 76 收口：召回与阻断分诊
+
+- G1 软门禁已提交（`377c3d4` 等），本轮在其上推进 G2/G3。
+- G2 定稿：hybrid 默认 rrf k=20 + authority 加分 + query 展开 + 意图加成；评测 Recall@5 0.7215→0.937、Recall@10 0.9494→1.000，processing 0.444→0.944、scenario 0.444→1.000；P95 330ms。
+- G3 分诊：1140 项阻断 = needs_evidence 1053 / auto_verifiable 79 / manual_confirm 8；92% 需要外部证据，平台不伪造核验。
+- 决策：不在门禁/阻断上开豁免；后续主线是"把 needs_evidence 的 1053 项按责任人分解"，而不是继续调检索参数。
+- 下一步：G4 文档与提交已完成（本轮），之后按用户指示推进 3 的治理清单与 1 的运营化（人工确认闭环）。

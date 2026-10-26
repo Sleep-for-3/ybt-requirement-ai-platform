@@ -643,3 +643,12 @@
 | 是否阻断导出 | 否（mode=mark） | 真实导出返回 200 与 16648 B |
 | 结论可观测 | 响应头 3 个 + 审计 `quality_gate` + 前端面板 | `p5_freeze_export_gate.json`、`ui-quality-gate-t51.json` |
 | 差异报告 | doc_compare 第 14 条 `grounding_coverage` | `doc_compare.md` |
+
+### 8.63 检索展开与意图加成
+
+| 能力 | 实现 | 验收数字 | 边界 |
+| --- | --- | --- | --- |
+| 术语同义词展开 | `query_expansion.py` 7 组 + 字段码/场景名识别，至多 3 变体 | processing Recall@5 0.444→0.944、scenario 0.444→1.000 | 只扩词不改写，不调用 LLM |
+| 意图加成 | `detect_intent()` 四类意图 + `query_intent_boost` 0.18 | 整体 Recall@5 0.722→0.937（关闭展开对照） | 意图靠关键词规则，非分类模型 |
+| 场景感知 | 场景名→`ProductScenario.id`，命中候选场景一致加 0.12 | scenario Recall@10 0.778→1.000 | 场景语料本身是 AI 草稿演示数据 |
+| 评测口径 | 金标按 `logical_code` 收窄到"该由哪份文档回答" | 4 配置可区分（此前完全重合） | 处理类金标允许 doc5/doc6 两处来源 |
