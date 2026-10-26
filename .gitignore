@@ -60,3 +60,6 @@ docs/research/__pycache__/
 /backend/*.log
 /backend/_celery.*.log
 /backend/_e2e_state.json
+
+# Local embedding model cache (fastembed/HF downloads) — never commit
+backend/fastembed_cache/
