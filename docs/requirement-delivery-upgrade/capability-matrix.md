@@ -589,3 +589,57 @@
 | 只读（不读文件、不重放、不写库） | 已实现、契约锁定 | 用例断言产物数不变 |
 | 清单导出 CSV | 未做 | 见 handoff 第 5 节 |
 | 冻结导出前的复核风险提示 | 未做 | 见 handoff 第 5 节 |
+
+### 8.58 场景优先分组的导出
+
+| 能力 | 状态 | 证据 |
+| --- | --- | --- |
+| 按场景分列（业务口径 6 列 + 溯源 9 列成对） | 已实现、真实导出验证 | `requirement_survey_export.py` v10；T_5_1 导出 3 组、56 列 |
+| 场景数据进冻结内容、可重放 | 已实现、哈希入口统一 | `requirement_scope.py` 的 `document_content` 补 `scenario_groups`；快照 44 内含 3 组 × 18 字段 |
+| 无场景数据回退来源系统分组 | 已实现、回归验证 | T_8_1 v10 与 v9 结构一致（35 行 × 56 列、8 个组标题、8 个数据行） |
+| 同一字段多场景并列 | 已实现 | 每场景一列组，18 字段 × 3 组 |
+| AI 草稿必须可见标记 | 已实现、用例锁定 | 前缀"（AI 生成草稿，待业务确认）/（AI 生成草稿，待技术确认）" |
+| 同场景按部门/条线再拆多组 | 未做 | `doc_compare.md` 的 `group_titles` 差异 |
+| comstar 类 8 列窄组 | 未做 | `doc_compare.md` 的 `group_titles` 差异 |
+| 表级采集范围/报送范围/EAST差异按场景重复写 | 未做 | `table_row_extra.*` 三条差异 |
+
+### 8.59 审批阻断下能交付什么
+
+| 能力 | 状态 | 证据 |
+| --- | --- | --- |
+| 冻结草稿快照（不依赖审批） | 已实现、真实验证 | 快照 44、产物 68；`freeze-and-export` 200 |
+| 正式交付（三级审批 + finalize） | 本环境不可达 | `review-readiness` 589 项；`formal_delivered=0` |
+| 审阅级校验无豁免通道 | 已实现 | `review_readiness` 任一条 reason 即 `eligible=false` |
+| 内容维护人不能自审 | 已实现 | `validate_review_decision` 命中即 409 |
+| 缺口只能补内容、不能用说明关字段类缺口 | 已实现 | `resolve_gap`（字段类缺口禁止说明关闭） |
+| 送审哈希与冻结哈希区分 | 已实现 | 送审用 revision 哈希、冻结用 `current_content_hash`；用错即 409 |
+
+### 8.60 检索与召回
+
+| 能力 | 状态 | 证据 |
+| --- | --- | --- |
+| 可复现评测（用例/指标/分母） | 有 | `retrieval_eval.py` + `out/retrieval/m3_v3.*`（Recall@5 0.7215 / @10 0.9494，79/81 可回答） |
+| 混合检索权重与 RRF 调参 | 有 | `m2_grid.*`（rrf k=20 + boost 0.696/0.848；weighted 0.4/0.6 0.646/0.734 作对照） |
+| 权威度排序 | 改为加分，保留 strict 对照 | `retrieval_authority_mode/boost`；strict 下技术类 Recall@5 全 0 的根因已修 |
+| 精排（cross-encoder） | 有实现，默认关闭（负结果） | `m2_tuned.*` 的 `tuned_w40_rerank`（9.7–16.6s、Recall@5 0.240） |
+| 证据接地 | 有 | `claim_support_ab.*`（unknown 14→5、supported 0→9）、`grounding_req30.*`（0.8889） |
+
+### 8.61 证据确认与导出正确性
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| 候选主张 + 证据确认结果可视化 | 有 | 候选抽屉"证据确认"面板（三段计数 + findings + 证据条数） |
+| 证据不足时的行为 | 明确 | 无证据黄字提示；冲突优先且不因接地而放松 |
+| 字段级有据可查率与门禁 | 有（报告级） | 0.8889 ≥ 0.7，verdict=pass；未接成导出阻断（下一步） |
+| 导出字节可复核 | 有 | 快照 45 / 产物 70 / sha256 `eef29a…`；重复冻结 `created=false` |
+| 浏览器证据 | 有 | `ui-evidence-t51.json`（consoleErrors=[]），修复 gaps 重复 key |
+
+### 8.62 导出链路上的有据率软门禁
+
+| 能力 | 现状 | 证据 |
+| --- | --- | --- |
+| 字段级有据率计算（按冻结内容） | 支持 | `requirement_grounding.py` + `grounding_req30.json` |
+| 门禁三种结论 | pass / mark / unknown | 单测 + 真实导出（pass） |
+| 是否阻断导出 | 否（mode=mark） | 真实导出返回 200 与 16648 B |
+| 结论可观测 | 响应头 3 个 + 审计 `quality_gate` + 前端面板 | `p5_freeze_export_gate.json`、`ui-quality-gate-t51.json` |
+| 差异报告 | doc_compare 第 14 条 `grounding_coverage` | `doc_compare.md` |

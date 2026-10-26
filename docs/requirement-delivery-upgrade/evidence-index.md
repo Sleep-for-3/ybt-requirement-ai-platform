@@ -2400,3 +2400,74 @@ cd ..\frontend; $env:CONSISTENCY_SUFFIX='verified'; node scripts/browser_verify_
 - 真实接口：`ai-platform/backend/scripts/out/replay_manifest.json`（47 个产物：11 / 35 / 1，7 项断言全 true）
 - 真实浏览器：`ai-platform/frontend/scripts/browser_verify_replay_manifest.mjs` → `frontend/scripts/out/browser/ui-replay-manifest-verified.png/.json`
 - 交接：`ai-platform/docs/requirement-delivery-upgrade/handoff-20261025.md`
+
+## 102. round 74 T_5_1 主线接口证据
+
+- 脚本预览：`POST /projects/9/requirements/script-preview`（`{"script_version_ids":[32]}`）→ statements 4 / targets 1 / rules 75 / `preview_hash=dfde2011…`；`ai-platform/backend/scripts/out/probe/p1_script_preview.json`
+- 一键建需：`POST /projects/9/requirements/author-from-scripts` → `requirement_id=30, content_version=2, bound_field_count=18/18, rule_count=75, gap_count=48`；`ai-platform/backend/scripts/out/probe/p1_author.json`
+- 生成：`POST .../requirements/30/generation-inputs` → input 49；`POST .../generation-runs` → job 83；终态 `partially_completed`（33/3/0）；`ai-platform/backend/scripts/out/probe/p1_runs_final.json`
+- 采纳：`ai-platform/backend/scripts/adopt_t51_candidates.py`（先 GET 候选详情取 `changes[].field`，再 `POST .../generation-candidates/adopt` 一次写入）→ content_version 3；`ai-platform/backend/scripts/out/probe/t51_adopt_plan.json`、`t51_adopt_result.json`
+- 送审被拒：`POST .../review-submissions` 三次 409（哈希用错 2 次 + 589 项阻断 1 次）；`ai-platform/backend/scripts/out/probe/p1_submit_attempt.json`
+- 审批阻断：`GET .../review-readiness?content_version=3` → 589；`GET .../requirements/30/gap-breakdown` → 510/385/125/281；`ai-platform/backend/scripts/out/probe/readiness_30_3.json`
+- 冻结导出：`POST .../requirements/30/freeze-and-export` → snapshot 44 / artifact 68 / 16650 B / sha `958e91c8…` / renderer `survey-requirement-doc-v10+0db3941019ea`；`ai-platform/backend/scripts/out/probe/p1_freeze_export.json`、`ai-platform/backend/scripts/out/probe/t51_survey_v10.xlsx`
+- 导出结构：`ai-platform/backend/scripts/out/probe/p1_t51_xlsx_structure.json`（47 行 × 56 列、8 个分组标题、18 个数据行、场景分组数 3）
+
+## 103. round 74 逐列比对与场景分组证据
+
+- 比对脚本：`ai-platform/backend/scripts/requirement_doc_compare.py`（只读；比表级 6 行、第 10 行组名、第 11 行列名、数据行编码、每列非空率）
+- 比对结果：`ai-platform/backend/scripts/out/doc_compare.json` + `ai-platform/backend/scripts/out/doc_compare.md`（13 条差异，每条含示例值/平台值/为什么/下一步；`base_columns_match=true`；场景交集 3）
+- 场景分组渲染器：`ai-platform/backend/app/services/requirement_survey_export.py`（`SURVEY_DOC_VERSION="survey-requirement-doc-v10"`；`_scenario_groups` / `_column_plan` / `_scenario_business_values` / `_scenario_source_values` / `_scenario_notes`）
+- 场景数据进冻结内容：`ai-platform/backend/app/services/requirement_scope.py`（`document_content` 读时补 `scenario_groups`，与 `current_content_hash`、`freeze_draft` 同一入口）
+- 场景演示数据：`ai-platform/backend/scripts/seed_t51_scenarios.py`（`--dry-run`/`--apply`；3 场景 × 18 字段 → 54 条业务口径 + 54 条技术血缘，正文只进 `ai_generated_content`，`confidence_level=low`，确认状态 `draft`）
+- 结构检查契约：`ai-platform/backend/app/services/requirement_survey_structure_check.py`（v10 起 `pair_by_position=true`，业务口径组与溯源组按位置成对）
+- 后端用例：`ai-platform/backend/tests/test_requirement_survey_export_scenarios.py`（6 passed）
+- 回归：survey 相关 43 passed；内容管线相关（scope/snapshot/delivery/formal-delivery/immutability/pins）60 passed
+
+## 104. round 74 稳定性、复核清单与浏览器证据
+
+- 稳定性（改渲染器 v9→v10 后重跑）：`GET /projects/9/export-stability?limit=50` → artifacts 49 / identical 10 / historical 38 / unsupported 1 / drift 0，`verdict=stable`；`ai-platform/backend/scripts/out/probe/p1_stability_all.json`
+- 单产物：`GET /projects/9/export-stability?requirement_id=30&limit=50` → artifacts 1 / identical 1，artifact 68 的 `replay_sha256 == stored_sha256`；`ai-platform/backend/scripts/out/probe/p1_stability_req30.json`
+- 复核清单：`GET /projects/9/replay-manifest` → 49 = 可复核 10 + 仅旧渲染器 38 + 不支持重放 1，`matched=49`；`ai-platform/backend/scripts/out/probe/p1_replay_manifest.json`
+- T_8_1 回归：`POST /projects/9/requirements/10/exports`（draft_snapshot 25）→ artifact 69 / 12375 B / 35 行 × 56 列，分组标题与 8 个数据行编码与 v9 一致；`ai-platform/backend/scripts/out/probe/p1_t81_regression.json`
+- 真实浏览器：`ai-platform/frontend/scripts/browser_verify_mainline_t51.mjs` → `ai-platform/frontend/scripts/out/browser/ui-mainline-t51.json`、`ui-t51-workspace.png`、`ui-t51-export-preflight.png`、`ui-t51-export-identity.png`；14 项断言全过（18 张字段卡编码逐个相等、场景下拉 4 项、下载 16650 B 且 sha 一致、身份面板只出现产物 #68/快照 #44、`consoleErrors=[]`）
+- 页面横幅（非 console 错误）：`前后端发布标识不一致（app_commit:unknown；build_time:unknown），请联系运维核对本次发布。`；`failedRequests` 14 条全为 `net::ERR_ABORTED`（切表/换需求时前端主动取消旧请求）
+
+## 105. round 75 检索评测证据
+
+- 用例集 `backend/scripts/retrieval_cases.py` → `backend/scripts/out/retrieval/cases_v1.jsonl`（81 条；sha256 `77bbf64a623e3549b53f95d371e5c06af045c2dae99ac5553692a4d32ee7b759`）。
+- 评测器 `backend/scripts/retrieval_eval.py`；结果文件（同目录）：`m1_v1.*`（四配置同值的 bug 现场）、`m1_v3.*`（strict vs boost）、`m2_grid.*`、`m2_tuned.*`、`m3_v1.*`、`m3_v2.*`、`m3_v3.*`（定稿：hybrid rrf k=20 + authority boost，Recall@5 0.7215 / @10 0.9494 / P95 327ms）。
+- 负结果：`m2_tuned.md` 里 `tuned_w40_rerank`（Recall@5 0.240、P50 9725ms）为精排对照，默认关闭。
+- 基线口径：M0 只有 doc4/5/6、166 单元、strict 排序时 boost 配置 Recall@5 0.5063 / @10 0.8354（`m1_v3.json`），定稿相比 +21.5pp / +11.4pp。
+
+## 106. round 75 知识底座与证据确认证据
+
+- 知识文档（真实上传→提交审核→审核→激活→项目级重建索引）：`ybt-t51-regulatory-20261026` 48 条、`ybt-t51-lineage-20261026` 34 条、`ybt-t51-script-rules-20261026` 75 条、`ybt-t51-scenarios-20261026` 54 条；项目 9 共 220 条单元；索引 active v14（214 chunk / 234 向量 / valid）。
+- 生成输入预算：`backend/scripts/_patch_evidence_scoping.py`、`_patch_frozen_evidence_scope.py`、`_patch_template_scope.py`；分批再生成 `backend/scripts/regenerate_t51_batched.py` → `backend/scripts/out/retrieval/regen_batch_0..4.json` + `regenerate_t51_summary.json`（content_version 6→11），后续补跑 → v14。
+- 证据接地：`backend/scripts/claim_support_ab.py` → `backend/scripts/out/retrieval/claim_support_ab.json|.md`（5 候选 / 19 主张：unknown 14→5、supported 0→9、冲突 5 不变）；测试 `backend/tests/test_requirement_claim_grounding.py`（7 例）+ `test_requirement_claim_support.py` 共 33 passed。
+- 有据率：`backend/scripts/requirement_grounding_report.py` → `backend/scripts/out/retrieval/grounding_req30.json|.md`（18 字段 / 171 主张 / supported 64 / unknown 107 / conflict 0 / coverage 0.8889 / quality_gate pass）。
+
+## 107. round 75 冻结导出与浏览器证据
+
+- 冻结导出 `backend/scripts/out/probe/p4_freeze_export_headers.json`：snapshot 45、artifact 70、renderer `survey-requirement-doc-v10+0db3941019ea`、16648 字节、sha256 `eef29a505fde4f71346fef105d7aeeb341deaa251ad0f2de769eb6f7c0ed6d88`；产物见 `backend/scripts/out/probe/t51_survey_v10_grounded.xlsx`。
+- 稳定性/复核：`p4_stability_all.json`（50 产物 / identical 11 / historical 38 / unsupported 1 / drift 0 / stable）、`p4_stability_req30.json`（2/2 identical）、`p4_replay_manifest.json`（50 = 11 + 38 + 1）。
+- 逐列比对：`backend/scripts/out/doc_compare.json` + `.md`（13 条差异，base_columns_match=true）。
+- 浏览器证据：`frontend/scripts/out/browser/ui-evidence-t51.json`、`ui-t51-evidence-panel.png`、`ui-t51-evidence-panel.txt`（run 59 候选：4 主张 = 3 支撑 + 1 待确认、2 条证据；consoleErrors=[]、pageErrors=[]）。
+
+## 108. round 75 回归测试
+
+- `pytest tests/test_requirement_claim_grounding.py tests/test_requirement_claim_support.py tests/test_retrieval_authority_ordering.py tests/test_embedding_client_reuse.py tests/test_knowledge_rag.py tests/test_rag_citation_support.py tests/test_retrieval_scope_boundary.py tests/test_requirement_survey_export.py tests/test_requirement_survey_export_scenarios.py -q` → **96 passed**（199s）。
+- 新增测试：`test_requirement_claim_grounding.py`（7 例，接地/否定/覆盖不足/冲突优先）、`test_retrieval_authority_ordering.py`（4 例，strict/boost/同分/未知模式）、`test_embedding_client_reuse.py`（3 例，客户端复用）。
+- 断言调整 1 例：`test_knowledge_rag.py` 的"持久关键词索引"由"top-1"改为"keyword_only 第 1 + hybrid top-20 命中"，原因见 real-run-20261024.md §84.7；产品代码未为测试让步。
+
+## 109. round 76：有据率软门禁（G1）证据
+
+| 类别 | 文件 / 命令 | 关键数字 |
+| --- | --- | --- |
+| 代码 | `backend/app/services/requirement_grounding.py`、`backend/app/api/requirements.py`（6 处接入）、`backend/app/core/settings.py` | 门禁 mode=mark、阈值 0.7 |
+| 测试 | `pytest tests/test_requirement_grounding_gate.py` 及 round 75/76 相关 10 个文件 | 6 passed / 合计 86 passed |
+| 真实导出 | `POST .../freeze-and-export`（expected_version=2, hash 3ae641df…） | 200、16648 B、sha eef29a50…、artifact 70、snapshot 45、gate pass、coverage 0.8889 |
+| 响应头落证 | `backend/scripts/out/probe/p5_freeze_export_gate.json` | 三个门禁头 + 产物/快照头 |
+| 审计 | `audit_logs.action=export_requirement_document` 最新一行 | `after_summary_json.quality_gate.verdict=pass`、`fields_without_support=["E010001","SFJJGDM"]` |
+| 逐列比对 | `backend/scripts/out/doc_compare.json` / `.md` | 差异 14 条（新增 `grounding_coverage`）、有据率 88.89% |
+| 浏览器 | `frontend/scripts/out/browser/ui-quality-gate-t51.json` + `ui-quality-gate-identity.png` | 面板文字精确匹配、产物 [70]、快照 [45]、consoleErrors [] |
+| 主线回归 | `frontend/scripts/browser_verify_mainline_t51.mjs` 同步更新为 16648 B / eef29a50… | 全部断言通过 |
