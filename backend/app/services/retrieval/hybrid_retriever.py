@@ -12,6 +12,7 @@ from app.services.vector import get_vector_store
 
 from .keyword_index import (DEFAULT_BM25_B, DEFAULT_BM25_K1, BM25Stats, compute_bm25_stats,
                             load_unit_statistics, score_bm25, tokenize, token_matches)
+from .query_expansion import INTENT_TYPES, detect_intent, expand_query, matched_scenarios
 from .reranker import rerank_items
 from app.services.knowledge_evidence import unit_locator
 from app.services.knowledge_eligibility import governed_unit_predicates, governed_document_visible
@@ -68,12 +69,35 @@ class HybridRetriever:
                     KnowledgeUnit.scenario_id.is_(None),
                 )
             )
+        expansion_enabled = bool(getattr(settings, "query_expansion_enabled", True))
+        max_variants = max(1, _setting_int(settings, "query_expansion_max_variants", 3))
+        variants = (
+            expand_query(query, max_variants=max_variants)
+            if expansion_enabled
+            else [query]
+        )
+        if not variants:
+            variants = [query]
+        scenario_names: set[str] = set()
+        scenario_ids_by_name: dict[str, int] = {}
+        if expansion_enabled:
+            # KnowledgeUnit 只存 scenario_id，名称要现查；按名称命中后再换成 id 集合。
+            rows = self.db.execute(
+                select(ProductScenario.id, ProductScenario.scenario_name).where(
+                    ProductScenario.project_id == project_id,
+                    ProductScenario.enabled.is_(True),
+                )
+            ).all()
+            scenario_ids_by_name = {name: sid for sid, name in rows if name}
+            scenario_names = matched_scenarios(query, list(scenario_ids_by_name))
+        scenario_ids = {scenario_ids_by_name[name] for name in scenario_names}
+        intent = detect_intent(query) if expansion_enabled else None
         tokens = tokenize(
             " ".join(
                 filter(
                     None,
                     [
-                        query,
+                        " ".join(variants),
                         target.field_code if target else None,
                         target.field_name if target else None,
                         target.field_definition if target else None,
@@ -240,6 +264,8 @@ class HybridRetriever:
             getattr(settings, "retrieval_authority_mode", "boost")
         ).strip().lower() or "boost"
         authority_boost = _setting_float(settings, "retrieval_authority_boost", 0.15)
+        scenario_boost = _setting_float(settings, "query_expansion_scenario_boost", 0.12)
+        intent_boost = _setting_float(settings, "query_intent_boost", 0.18)
         if retrieval_mode == "keyword_only":
             keyword_weight, vector_weight = 1.0, 0.0
         elif retrieval_mode == "vector_only":
@@ -320,7 +346,20 @@ class HybridRetriever:
             authority_rank = AUTHORITY_RANK.get(document.source_category or "business_material", 0)
             if authority_rank >= 5:
                 reasons.append("当前生效监管资料")
-            rule_boost = 0.05 if reasons else 0.0
+            scenario_hit = bool(scenario_ids) and unit.scenario_id in scenario_ids
+            if scenario_hit:
+                reasons.append("场景名匹配")
+            intent_hit = False
+            if intent:
+                preferred_type, marker = INTENT_TYPES[intent]
+                if unit.knowledge_type == preferred_type and (
+                    marker is None or marker in (unit.content or "")
+                ):
+                    intent_hit = True
+                    reasons.append(f"意图匹配（{intent}）")
+            rule_boost = (0.05 if reasons else 0.0) + (
+                scenario_boost if scenario_hit else 0.0
+            )
             authority_bonus = 0.0
             if authority_mode != "strict":
                 # 6 档 -> [0, authority_boost]，只做加分不改变相关性主序。
@@ -329,7 +368,12 @@ class HybridRetriever:
             # ``final_score`` at 1.0, but two strong candidates with the rule boost hit
             # that cap together and a clamped-score sort would fall back to ``-id``,
             # dropping the genuinely better fused candidate below an older, weaker one.
-            ranking_score = fused.get(unit_id, 0.0) + rule_boost + authority_bonus
+            ranking_score = (
+                fused.get(unit_id, 0.0)
+                + rule_boost
+                + authority_bonus
+                + (intent_boost if intent_hit else 0.0)
+            )
             ranking_by_id[unit_id] = ranking_score
             final_score = min(1.0, ranking_score)
             items.append({
@@ -393,6 +437,9 @@ class HybridRetriever:
                 "reranker": rerank_outcome.diagnostics(),
                 "authority_mode": authority_mode,
                 "authority_boost": authority_boost,
+                "query_variant_count": len(variants),
+                "scenario_hint": sorted(scenario_names),
+                "intent": intent,
             },
             retrieval_strategy=effective_retrieval_mode,
             keyword_result_count=len(keyword),

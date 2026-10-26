@@ -47,6 +47,7 @@ class Config:
     reranker_enabled: bool = False
     rrf_k: int | None = None
     authority_mode: str = "boost"
+    query_expansion: bool = True
 
     def label(self, top_k: int) -> str:
         parts = [self.retrieval_mode]
@@ -59,6 +60,8 @@ class Config:
             if self.authority_mode != "boost":
                 parts.append(self.authority_mode)
         parts.append(f"rr{int(self.reranker_enabled)}")
+        if not self.query_expansion:
+            parts.append("noexp")
         parts.append(f"tk{top_k}")
         return "|".join(parts)
 
@@ -83,6 +86,8 @@ CONFIGS = [
     # M2：authority 硬排序（旧行为）与加分（新行为）对照。
     Config("hybrid_rrf_strict", retrieval_mode="hybrid", fusion_strategy="rrf", authority_mode="strict"),
     Config("hybrid_rrf_boost", retrieval_mode="hybrid", fusion_strategy="rrf"),
+    # G2：query 展开（默认开）与关闭展开的对照。
+    Config("hybrid_rrf_noexp", retrieval_mode="hybrid", fusion_strategy="rrf", query_expansion=False),
 ]
 
 
@@ -130,6 +135,7 @@ def apply_config(settings, config: Config) -> None:
     settings.fusion_strategy = config.fusion_strategy
     settings.reranker_enabled = config.reranker_enabled
     settings.retrieval_authority_mode = config.authority_mode
+    settings.query_expansion_enabled = config.query_expansion
     if config.rrf_k is not None:
         settings.rrf_k = config.rrf_k
     if config.keyword_weight is not None:
@@ -201,6 +207,7 @@ def main() -> None:
         "hybrid_vector_weight": settings.hybrid_vector_weight,
         "rrf_k": settings.rrf_k,
         "retrieval_authority_mode": settings.retrieval_authority_mode,
+        "query_expansion_enabled": settings.query_expansion_enabled,
         "retrieval_authority_boost": settings.retrieval_authority_boost,
     }
     print(json.dumps({"cases": len(cases), "configs": [c.name for c in selected], "top_k": top_ks}, ensure_ascii=False))

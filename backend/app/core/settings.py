@@ -159,6 +159,10 @@ class Settings(BaseSettings):
     # 相关性分数为主；``strict`` 保留旧的"权威度硬主键"行为，仅供 A/B 对照。
     retrieval_authority_mode: str = "boost"
     retrieval_authority_boost: float = 0.15
+    query_expansion_enabled: bool = True
+    query_expansion_max_variants: int = 3
+    query_expansion_scenario_boost: float = 0.12
+    query_intent_boost: float = 0.18
 
     # ② 重排 / ③ BM25 / ⑦ 融合
     reranker_enabled: bool = False
