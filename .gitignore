@@ -63,3 +63,4 @@ docs/research/__pycache__/
 
 # Local embedding model cache (fastembed/HF downloads) — never commit
 backend/fastembed_cache/
+fastembed_cache/
