@@ -282,6 +282,11 @@ const DOWNLOAD_IDENTITY_HEADERS = [
   "x-requirement-batch-items",
   "x-requirement-batch-snapshots-created",
   "x-requirement-batch-file-sha256",
+  // 有据率软门禁：导出时后端按冻结内容算出的"有多少字段的正文被证据支撑"。
+  // 它只标记、不阻断导出；不在这里透出，页面就看不到这条结论。
+  "x-requirement-quality-gate",
+  "x-requirement-grounding-coverage",
+  "x-requirement-grounding-reason-count",
 ];
 
 function downloadIdentityHeaders(response: Response): DownloadIdentityHeaders {

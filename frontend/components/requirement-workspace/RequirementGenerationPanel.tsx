@@ -20,6 +20,9 @@ type Candidate = {id:number;field_id:number;section:Section;candidate_hash:strin
   current_content_version:number;stale:boolean;decision:string;changes:Difference[];
   physical_references:{kind:string;table_code:string;table_name:string;field_code:string;field_name:string;field_type?:string|null}[];
   evidence:{unit_id:number;title:string;content:string}[];gaps:string[];execution_metadata?:CandidateExecution;
+  claims?:{claim_id:string;section?:string;text?:string;assertion_kind?:string}[];
+  claim_support?:{version:string;status:string;claim_count:number;supported_count:number;conflict_count:number;unknown_count:number;
+    findings:{claim_id:string;section?:string;assertion_kind?:string;status:string;code:string;message:string}[]}|null;
   script_rules?:{rule_id:string;script_version_id:number;source_line_start?:number;source_line_end?:number;
     transformation_expression?:string;join_condition?:string;filter_condition?:string;aggregation_rule?:string;code_mapping_rule?:string}[]};
 type BasketSelection={item_id:number;candidate_hash:string;selected_fields:string[];replace_manual_fields:string[]};
@@ -231,6 +234,7 @@ function CandidateBody({data,selected,replace,onSelected,onReplace}:{data:Candid
   return <div className="mt-4 space-y-3">{data.stale?<p className="border border-amber-200 bg-amber-50 p-3 text-xs">这是内容 v{data.input_content_version} 的历史候选，只能查看或拒绝，不能写入当前 v{data.current_content_version}。</p>:null}
     <SkillRunProvenance metadata={data.execution_metadata}/>
     <p className="text-xs text-slate-500" role="note">阶段：单次模型生成，未经过候选间分批比较（需求正文候选不做重排，也就不存在“进入最终比较”的分数）；采用只代表写入候选内容，仍需人工确认与审核。</p>
+    <ClaimSupportPanel support={data.claim_support} evidenceCount={data.evidence.length}/>
     {!!data.script_rules?.length && <section aria-label="候选引用的固定脚本规则" className="rounded border p-3 text-xs"><h3 className="font-semibold">固定脚本规则 · 事实依据</h3><p className="mt-1 text-slate-500">这些规则描述脚本现状，不能替代有效制度条款。</p>{data.script_rules.map(rule => <details key={rule.rule_id} className="mt-2 rounded border p-2"><summary className="cursor-pointer">{rule.rule_id} · 脚本版本 #{rule.script_version_id}{rule.source_line_start ? ` · 第 ${rule.source_line_start} 行` : ""}</summary>{[
       ["加工表达式", rule.transformation_expression], ["关联条件", rule.join_condition], ["过滤条件", rule.filter_condition], ["聚合规则", rule.aggregation_rule], ["码值规则", rule.code_mapping_rule]
     ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="mt-2"><strong>{label}</strong><pre className="mt-1 overflow-auto whitespace-pre-wrap break-all">{value}</pre></div>)}</details>)}</section>}
@@ -241,4 +245,17 @@ function CandidateBody({data,selected,replace,onSelected,onReplace}:{data:Candid
   </div>;
 }
 function OptionalChoice({field,label,selected,disabled,onSelected,children}:{field:string;label:string;selected:string[];disabled:boolean;onSelected:(value:string[])=>void;children:React.ReactNode}){return <div className="border border-line p-3"><label className="text-sm font-semibold"><input checked={selected.includes(field)} disabled={disabled} onChange={event=>onSelected(event.target.checked?[...selected,field]:selected.filter(value=>value!==field))} type="checkbox"/> {label}</label>{children}</div>}
+
+const SUPPORT_STATUS_LABELS:Record<string,string>={supported:"已由固定事实支撑",unknown:"待人工确认",conflict:"与固定事实冲突"};
+
+function ClaimSupportPanel({support,evidenceCount}:{support:Candidate["claim_support"];evidenceCount:number}){
+  if(!support)return <section aria-label="证据确认" className="rounded border border-line p-3 text-xs"><h3 className="font-semibold">证据确认</h3><p className="mt-1 text-slate-500">该候选未登记主张（claims 为空），本次未执行证据确认；采用前请人工核对依据。</p></section>;
+  const findings=support.findings||[];
+  return <section aria-label="证据确认" className="rounded border border-line p-3 text-xs">
+    <h3 className="font-semibold">证据确认 · {support.version} · 总体 {SUPPORT_STATUS_LABELS[support.status]||support.status}</h3>
+    <p className="mt-1 text-slate-600">主张 {support.claim_count} 条：已支撑 {support.supported_count} · 待人工确认 {support.unknown_count} · 冲突 {support.conflict_count}；候选引用证据 {evidenceCount} 条。</p>
+    {evidenceCount===0?<p className="mt-1 text-amber-700">该候选没有引用任何检索证据，正文里的口径只能靠人工核验。</p>:null}
+    {findings.length?<ul className="mt-2 list-disc pl-4 text-slate-700">{findings.map((finding,index)=><li key={`${finding.claim_id}-${index}`}>{SUPPORT_STATUS_LABELS[finding.status]||finding.status}：{finding.message}（{finding.code}）</li>)}</ul>:null}
+  </section>;
+}
 function TextBlock({label,value}:{label:string;value:string}){return <div><strong className="text-[11px] text-slate-500">{label}</strong><p className="mt-1 whitespace-pre-wrap text-xs leading-5">{value}</p></div>}

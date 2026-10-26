@@ -1,0 +1,15 @@
+﻿import { chromium } from "playwright";
+const API="http://127.0.0.1:8011", APP="http://127.0.0.1:3010";
+const login=await fetch(`${API}/api/auth/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:"ybt-lead",password:"Ybt#20261024lead"})}).then(r=>r.json());
+const token=login.access_token||login.accessToken;
+const browser=await chromium.launch({headless:true});
+const ctx=await browser.newContext();
+await ctx.addInitScript(([t])=>{sessionStorage.setItem("ybt:access-token",t);localStorage.setItem("ybt:selected-project-id","9");},[token]);
+const page=await ctx.newPage();
+const errs=[]; page.on("console",m=>{if(m.type()==="error")errs.push(m.text());});
+await page.goto(`${APP}/workspace?projectId=9`,{waitUntil:"networkidle"});
+const selects=await page.locator("select").evaluateAll(els=>els.map(e=>({aria:e.getAttribute("aria-label"),cls:e.className,opts:Array.from(e.options).slice(0,40).map(o=>o.text)})));
+console.log("SELECTS",JSON.stringify(selects,null,1).slice(0,4000));
+console.log("BODY",(await page.locator("body").innerText()).slice(0,3000));
+console.log("ERRS",errs.slice(0,5));
+await browser.close();

@@ -356,6 +356,9 @@ export function RequirementWorkspace() {
         snapshotCreated: file.headers["x-requirement-snapshot-created"] === "true",
         artifactId: file.headers["x-requirement-render-artifact-id"] || "未返回",
         fileSha256: file.headers["x-requirement-rendered-file-sha256"] || "未返回",
+        qualityGate: file.headers["x-requirement-quality-gate"] || "",
+        groundingCoverage: file.headers["x-requirement-grounding-coverage"] || "",
+        groundingReasonCount: file.headers["x-requirement-grounding-reason-count"] || "",
       };
       setNotice(`已冻结并导出 ${file.fileName}（快照 #${outcome.snapshotId}）`);
       await refreshWorkspace();
@@ -613,7 +616,7 @@ function RequirementGapList({ projectId, requirementId, contentVersion, gaps, as
   return <>
     <p className="my-2 text-xs">{summary}</p>
     <ul className="max-h-64 space-y-2 overflow-auto text-xs">
-      {[...openGaps,...closedGaps].map((gap)=><li key={gap.id} className={isGapClosed(gap)?"rounded bg-slate-50 p-2 opacity-75":"rounded bg-amber-50 p-2"}>
+      {[...openGaps,...closedGaps].map((gap, index)=><li key={`${gap.id}-${index}`} className={isGapClosed(gap)?"rounded bg-slate-50 p-2 opacity-75":"rounded bg-amber-50 p-2"}>
         <span>{isGapClosed(gap)?"已关闭":gap.origin === "manual" ? "人工问题" : "分析发现"}：</span>
         <button className="text-left underline" onClick={()=>{if(gap.field_id)onSelectField(gap.field_id);}} type="button">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</button>
         <RequirementGapResolver projectId={projectId} requirementId={requirementId} contentVersion={contentVersion} gap={gap} onChanged={onChanged} />

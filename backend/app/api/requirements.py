@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
 from app.core.database import get_db
+from app.core.settings import get_settings
 from app.models import (
     KnowledgeDocument,
     MartTable,
@@ -32,6 +33,7 @@ from app.services.requirement_scope import ScopeInput, validate_scope, requireme
 from app.services.requirement_scope import content_digest
 from app.services.requirement_batch_archive import BatchArchiveError, build_archive
 from app.services.requirement_delivery import freeze_draft, load_frozen_draft, snapshot_summary
+from app.services.requirement_grounding import gate_headers, grounding_summary, quality_gate
 from app.services.requirement_script_basis_decision import (
     DECISION_CHOICES as SCRIPT_BASIS_DECISION_CHOICES,
     ScriptBasisDecisionError,
@@ -1112,7 +1114,8 @@ def export_requirement_formal_delivery(project_id: int, requirement_id: int, del
     except RenderArtifactError as failure:
         raise HTTPException(409, f"{failure.message}（错误代码：{failure.code}）") from failure
     payload = _stored_artifact_bytes(record)
-    headers = _deprecated_export_headers(record)
+    gate = _quality_gate_for_frozen_source(db, project_id, requirement_id, delivery_id, None)
+    headers = _deprecated_export_headers(record) | gate_headers(gate)
     media_type = record.media_type
     # 产物记录必须落库：get_db 不自动提交，缺这一步会让"同一身份只渲一次"永远失效。
     db.commit()
@@ -1620,7 +1623,8 @@ def export_draft_snapshot(project_id: int, requirement_id: int, snapshot_id: int
     except RenderArtifactError as failure:
         raise HTTPException(409, f"{failure.message}（错误代码：{failure.code}）") from failure
     payload = _stored_artifact_bytes(record)
-    headers = _deprecated_export_headers(record)
+    gate = _quality_gate_for_frozen_source(db, project_id, requirement_id, None, snapshot_id)
+    headers = _deprecated_export_headers(record) | gate_headers(gate)
     media_type = record.media_type
     # 产物记录必须落库：get_db 不自动提交，缺这一步会让"同一身份只渲一次"永远失效。
     db.commit()
@@ -1651,6 +1655,27 @@ def _frozen_content_for_template(db: Session, project_id: int, requirement_id: i
     raise HTTPException(409,
         "客户模板导出只接受已冻结内容：请指定正式交付版本（delivery_id）或冻结草稿快照（snapshot_id）。"
         "未冻结的需求内容可能随时变化，不能作为正式文档来源。")
+
+
+def _quality_gate_for_frozen_source(db: Session, project_id: int, requirement_id: int,
+                                   delivery_id: int | None, snapshot_id: int | None) -> dict:
+    """按**导出用的那份冻结内容**算软门禁；算不出来只返回 unknown，绝不挡住导出。"""
+
+    settings_enabled = bool(getattr(get_settings(), "grounding_gate_enabled", True))
+    if not settings_enabled:
+        return {"mode": "mark", "enabled": False, "verdict": "unknown", "threshold": None,
+                "coverage_all_fields": None, "reasons": ["有据率软门禁已关闭（grounding_gate_enabled=false）"],
+                "ai_draft_fields": [], "fields_without_candidate": [], "fields_without_support": []}
+    try:
+        content, _ = _frozen_content_for_template(db, project_id, requirement_id, delivery_id, snapshot_id)
+        requirement = db.get(Requirement, requirement_id)
+        summary = grounding_summary(db, requirement, content=content)
+        return quality_gate(summary)
+    except Exception as failure:  # noqa: BLE001 - 软门禁只标记，统计失败不能阻断导出
+        return {"mode": "mark", "enabled": True, "verdict": "unknown", "threshold": None,
+                "coverage_all_fields": None,
+                "reasons": [f"有据率统计失败（{type(failure).__name__}: {failure}），本次导出未评估"],
+                "ai_draft_fields": [], "fields_without_candidate": [], "fields_without_support": []}
 
 
 def _template_config(raw: str | None) -> dict[str, Any]:
@@ -1905,8 +1930,9 @@ def export_requirement_document(project_id: int, requirement_id: int,
             delivery_id=delivery_id, snapshot_id=snapshot_id, principal=principal,
             audit_action="export_requirement_with_customer_template", template_id=template_id,
         )
+        gate = _quality_gate_for_frozen_source(db, project_id, requirement_id, delivery_id, snapshot_id)
         payload = _stored_artifact_bytes(record)
-        headers = _artifact_headers(record)
+        headers = _artifact_headers(record) | gate_headers(gate)
         media_type = record.media_type
         # 带客户模板的分支同样必须提交产物记录。
         db.commit()
@@ -1921,6 +1947,7 @@ def export_requirement_document(project_id: int, requirement_id: int,
         source_kind=source_kind, source_id=source_id, format=format, layout=layout,
         created_by=principal.user_id,
     )
+    gate = _quality_gate_for_frozen_source(db, project_id, requirement_id, delivery_id, snapshot_id)
     record_audit(db, action="export_requirement_document", resource_type="requirement_export",
                  resource_id=requirement_id, actor_user_id=principal.user_id,
                  project_id=project_id,
@@ -1928,9 +1955,10 @@ def export_requirement_document(project_id: int, requirement_id: int,
                         "source_kind": record.source_kind,
                         "source_id": record.source_id, "file_sha256": record.file_sha256,
                         "renderer_version": record.renderer_version,
-                        "render_artifact_id": record.id})
+                        "render_artifact_id": record.id,
+                        "quality_gate": gate})
     payload = _stored_artifact_bytes(record)
-    headers = _artifact_headers(record)
+    headers = _artifact_headers(record) | gate_headers(gate)
     media_type = record.media_type
     # 产物记录必须落库：get_db 不自动提交，缺这一步会让"同一身份只渲一次"永远失效。
     db.commit()
@@ -1974,14 +2002,15 @@ def freeze_and_export(project_id: int, requirement_id: int,
         source_kind="draft_snapshot", source_id=snapshot.id,
         format=format, layout=layout, created_by=principal.user_id,
     )
+    gate = _quality_gate_for_frozen_source(db, project_id, requirement_id, None, snapshot.id)
     record_audit(db, action="export_requirement_document", resource_type="requirement_export",
                  resource_id=requirement_id, actor_user_id=principal.user_id, project_id=project_id,
                  after={"format": record.format, "layout": layout, "source_kind": record.source_kind,
                         "source_id": record.source_id, "file_sha256": record.file_sha256,
                         "renderer_version": record.renderer_version, "render_artifact_id": record.id,
-                        "snapshot_created": created})
+                        "snapshot_created": created, "quality_gate": gate})
     payload = _stored_artifact_bytes(record)
-    headers = _artifact_headers(record) | {
+    headers = _artifact_headers(record) | gate_headers(gate) | {
         "X-Requirement-Snapshot-Id": str(snapshot.id),
         "X-Requirement-Snapshot-Created": "true" if created else "false",
         "X-Requirement-Snapshot-Hash": snapshot.content_hash,
@@ -2620,8 +2649,9 @@ def export_with_customer_template(project_id: int, requirement_id: int,
         db, project_id, requirement_id, template=template, format=format, config=config,
         delivery_id=delivery_id, snapshot_id=snapshot_id, principal=principal,
         audit_action="export_requirement_template", template_id=template_id)
+    gate = _quality_gate_for_frozen_source(db, project_id, requirement_id, delivery_id, snapshot_id)
     payload = _stored_artifact_bytes(record)
-    headers = _artifact_headers(record)
+    headers = _artifact_headers(record) | gate_headers(gate)
     media_type = record.media_type
     # 产物记录必须落库：get_db 不自动提交，缺这一步会让"同一身份只渲一次"永远失效。
     db.commit()

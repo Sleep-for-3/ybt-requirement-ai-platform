@@ -29,6 +29,10 @@ export type ExportOutcome = {
   snapshotCreated: boolean;
   artifactId: string;
   fileSha256: string;
+  /** 有据率软门禁：pass/mark/unknown，导出时由后端按冻结内容计算，不阻断导出。 */
+  qualityGate?: string;
+  groundingCoverage?: string;
+  groundingReasonCount?: string;
 };
 
 export type RequirementGap = {id:string; field_id:number|null; origin:string; message:string; status:string};
@@ -275,6 +279,13 @@ export function DocumentPreview({
                 <p className="font-medium">已导出 {exportOutcome.fileName}</p>
                 <p>快照 #{exportOutcome.snapshotId}（{exportOutcome.snapshotCreated ? "本次新建" : "内容未变，复用已有快照"}） · 产物 #{exportOutcome.artifactId}</p>
                 <p className="break-all">文件 hash {exportOutcome.fileSha256}</p>
+                {exportOutcome.qualityGate ? (
+                  <p data-testid="export-quality-gate" className={exportOutcome.qualityGate === "pass" ? "text-pine-800" : "text-amber-800"}>
+                    有据率软门禁 {exportOutcome.qualityGate === "pass" ? "pass（通过）" : exportOutcome.qualityGate === "mark" ? "mark（有字段未被证据支撑，已标记，不阻断导出）" : "unknown（本次未评估）"}
+                    {exportOutcome.groundingCoverage && exportOutcome.groundingCoverage !== "unknown" ? ` · 覆盖率 ${exportOutcome.groundingCoverage}` : ""}
+                    {exportOutcome.groundingReasonCount && exportOutcome.groundingReasonCount !== "0" ? ` · 原因 ${exportOutcome.groundingReasonCount} 条（见审计）` : ""}
+                  </p>
+                ) : null}
                 <p className="text-pine-800">凭快照号可重新导出同一份文件；改动内容需要新的快照。</p>
               </div>
             ) : null}
@@ -490,8 +501,8 @@ function RequirementGapList({gaps, records, onFocusField}: {gaps?:RequirementGap
               )}
             </summary>
             <ul className="mt-2 space-y-1.5">
-              {bucket.slice(0, 5).map((gap: RequirementGap) => (
-                <li key={gap.id} className="whitespace-pre-wrap">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</li>
+              {bucket.slice(0, 5).map((gap: RequirementGap, index) => (
+                <li key={`${gap.id}-${index}`} className="whitespace-pre-wrap">{describeUserMessage(gap.message, "该问题说明待补充，请人工核验。")}</li>
               ))}
               {bucket.length > 5 ? <li className="text-slate-500">…另有 {bucket.length - 5} 项同类缺口（同一字段）。</li> : null}
             </ul>

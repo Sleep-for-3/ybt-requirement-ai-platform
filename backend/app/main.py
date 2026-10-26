@@ -141,6 +141,10 @@ app.add_middleware(
         "X-Requirement-Worklist-Tables",
         "X-Requirement-Worklist-Items",
         "X-Requirement-Worklist-File-Sha256",
+        # 有据率软门禁头：导出时标记"这份文档有多少字段有证据支撑"，漏 expose 前端读不到。
+        "X-Requirement-Quality-Gate",
+        "X-Requirement-Grounding-Coverage",
+        "X-Requirement-Grounding-Reason-Count",
         "X-Request-Id",
     ],
 )

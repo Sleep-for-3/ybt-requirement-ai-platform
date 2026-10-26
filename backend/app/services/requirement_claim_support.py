@@ -281,6 +281,97 @@ class _Issues:
         self.refs.extend(str(ref) for ref in refs if ref not in (None, ""))
 
 
+# "无法确定性校验"这一类结论可以被证据原文的文本级核对取代；冲突永远不被取代。
+_GROUNDING_SUPERSEDABLE = frozenset({
+    "declared_support_unknown",
+    "assertion_not_verifiable",
+    "assertion_kind_unknown",
+    "claim_unverifiable_tokens",
+    "evidence_missing",
+    "claim_without_support",
+})
+_GROUNDING_PUNCTUATION = re.compile(r"[\s，。；：、！？,.;:!?（）()\[\]【】“”\"'`]+")
+
+
+def _normalize_for_grounding(value) -> str:
+    return _GROUNDING_PUNCTUATION.sub("", str(value or "").lower())
+
+
+def _grounding_coverage(claim_text: str, evidence_texts: list[str]) -> float:
+    claim = _normalize_for_grounding(claim_text)
+    if len(claim) < 8:
+        return 0.0
+    corpus = _normalize_for_grounding("\n".join(evidence_texts))
+    if not corpus:
+        return 0.0
+    shingles = [claim[index:index + 2] for index in range(len(claim) - 1)]
+    if not shingles:
+        return 0.0
+    return sum(1 for shingle in shingles if shingle in corpus) / len(shingles)
+
+
+def _grounding_threshold() -> float:
+    try:
+        from app.core.settings import get_settings
+
+        value = getattr(get_settings(), "claim_grounding_min_coverage", None)
+    except Exception:  # noqa: BLE001 - settings must never break verification
+        value = None
+    return float(value) if isinstance(value, (int, float)) else 0.75
+
+
+#: 极性词：主张里出现，但所引证据同一语境里没有，就说明主张把证据说反了。
+_POLARITY_MARKERS = re.compile(r"[不非无未勿]|无需|不能|不得")
+
+
+def _polarity_mismatch(claim_text: str, evidence_texts: list[str]) -> bool:
+    """主张的否定语境是否在所引证据里找不到对应原文。
+
+    "不超过24位" 这类否定在证据里通常原样存在，能命中；而 "并不相同" 这种
+    对证据结论的反转，证据里不会出现，从而被拦下，避免把反转主张判成"一致"。
+    """
+    claim = str(claim_text or "")
+    corpus = _normalize_for_grounding("\n".join(evidence_texts))
+    if not claim or not corpus:
+        return False
+    for match in _POLARITY_MARKERS.finditer(claim):
+        start = max(0, match.start() - 3)
+        end = min(len(claim), match.end() + 3)
+        window = _normalize_for_grounding(claim[start:end])
+        if len(window) < 3:
+            continue
+        if window in corpus:
+            continue
+        return True
+    return False
+
+
+def _supersede_with_grounding(lowered, text, cited_evidence, issues):
+    """证据原文覆盖主张关键词时，把"无法校验"降级为"与证据原文一致"。
+
+    这是文本级核对：它证明"这句话确实抄自召回到的证据"，不证明"这句话的业务
+    结论正确"。因此 finding 里必须写清楚覆盖率和这一点，供人工复核时区分。
+    """
+    if not cited_evidence:
+        return None
+    candidates = {item[1] for item in issues.items}
+    if not candidates & _GROUNDING_SUPERSEDABLE:
+        return None
+    texts = [str(unit.get("content") or "") for unit in cited_evidence if str(unit.get("content") or "").strip()]
+    if not texts:
+        return None
+    threshold = _grounding_threshold()
+    coverage = _grounding_coverage(text, texts)
+    if coverage < threshold:
+        return None
+    if _polarity_mismatch(text, texts):
+        return None
+    if _negation_conflict(lowered, "\n".join(texts).lower(), []):
+        return None
+    issues.items = [item for item in issues.items if item[1] not in _GROUNDING_SUPERSEDABLE]
+    return {"coverage": round(coverage, 3), "threshold": threshold}
+
+
 def _evaluate_claim(claim, index, sources):
     """返回 (ClaimEvaluation, list[ClaimSupportFinding])。"""
     claim_id = str(claim.get("claim_id") or f"claim-{index + 1}")
@@ -358,10 +449,18 @@ def _evaluate_claim(claim, index, sources):
     elif not declared_conflict and not declared_unknown:
         _dispatch(kind, lowered, text, cited_rules, cited_evidence, sources, issues)
 
+    grounding = _supersede_with_grounding(lowered, text, cited_evidence, issues)
     status = CONFLICT if any(item[0] == CONFLICT for item in issues.items) else (
-        UNKNOWN if issues.items else SUPPORTED)
+        UNKNOWN if any(item[0] == UNKNOWN for item in issues.items) else SUPPORTED)
     message = issues.items[0][2] if issues.items else "主张内容与固定事实一致"
     codes = list(dict.fromkeys(item[1] for item in issues.items))
+    if grounding is not None:
+        # 文本级核对：证明主张确实抄自所引证据原文，不证明业务结论已确认。
+        codes.append("evidence_grounding_verified")
+        message = (
+            f"主张关键片段与所引证据原文一致（字符二连覆盖 {grounding['coverage']:.0%}）；"
+            "这是文本级核对，不代表业务结论已经业务确认"
+        )
     evaluation = ClaimEvaluation(claim_id=claim_id, section=section, assertion_kind=kind,
                                  status=status, codes=codes, message=message)
     findings = [ClaimSupportFinding(claim_id=claim_id, section=section, assertion_kind=kind,
