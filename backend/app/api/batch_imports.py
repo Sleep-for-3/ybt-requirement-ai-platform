@@ -74,9 +74,18 @@ async def upload(project_id: int, principal: RealPrincipal, files: list[UploadFi
             raise HTTPException(422, "上传文件超出大小限制")
         content.append((file.filename or "unknown", data))
     try:
-        batch = service.create_batch(db, project, principal.user_id, idempotency_key, content, settings)
+        batch = service.create_batch_pending(db, project, principal.user_id, idempotency_key, content, settings)
     except ValueError as exc:
         raise HTTPException(422, "文件路径或格式不受支持") from exc
+    # 解析放进后台任务：生产环境 Celery worker 执行，API 进程不再被 1000+ 张表的 DDL
+    # 或几十个集市脚本占满，健康检查/登录/其他页面保持可用。Inline 队列会同步执行，
+    # 返回值仍是解析后的预览，行为与旧版一致。
+    job = get_task_queue().enqueue(db, job_type="resource_batch_parse", institution_id=project.institution_id,
+        project_id=project_id, created_by=batch.created_by,
+        idempotency_key=f"resource-parse-{batch.id}-{batch.version}",
+        payload_summary={"batch_id": batch.id}, handler=service.parse_batch_handler)
+    batch.job_id = job.id
+    db.commit()
     return service.summary(db, batch)
 
 
@@ -110,6 +119,8 @@ def apply(project_id: int, batch_id: int, payload: ApplyRequest, principal: Real
     batch = service.load_batch(db, project_id, batch_id)
     if batch.version != payload.expected_version:
         raise HTTPException(409, "预览版本已更新，请刷新后确认")
+    if batch.status == "parsing":
+        raise HTTPException(409, "批次仍在解析中，请稍候刷新后再确认")
     if batch.status == "preview":
         if service.preview(db, batch) != batch.preview_json:
             raise HTTPException(409, "资产或架构已变化，请重新保存预览再确认")

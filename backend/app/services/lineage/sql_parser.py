@@ -775,6 +775,26 @@ def _update_edges(statement: exp.Update, statement_index: int, original_sql: str
     return edges
 
 
+def _direct_projection_sources(
+    projection: exp.Expression,
+    sources: list[LineageNodeSpec],
+    aliases: dict[str, LineageNodeSpec],
+) -> list[LineageNodeSpec]:
+    """不调用 sqlglot.lineage 的快速投影来源解析（大语句兜底路径）。"""
+    columns = list(projection.find_all(exp.Column))
+    if isinstance(projection, exp.Column) and not columns:
+        columns = [projection]
+    resolved: list[LineageNodeSpec] = []
+    seen: set[str] = set()
+    for column in columns:
+        node = _resolve_column(column, sources, aliases)
+        if node.logical_name in seen:
+            continue
+        seen.add(node.logical_name)
+        resolved.append(node)
+    return resolved
+
+
 def _physical_projection_sources(
     query: exp.Expression,
     projection: exp.Expression,
@@ -783,6 +803,14 @@ def _physical_projection_sources(
     dialect: str,
 ) -> list[LineageNodeSpec]:
     """Resolve a projection through CTEs, subqueries and UNION scopes."""
+
+    # sqlglot.lineage.trace_column_lineage 每次都会 deepcopy+qualify 整棵查询树。
+    # 真实集市脚本动辄 80~200 个投影、10+ 张源表，逐投影调用会让解析从秒级退化到
+    # 小时级（实测 7 个大脚本 45s 仍未结束，直接把 API/worker 拖死）。超过复杂度阈值时
+    # 改用 AST 内的列引用直接解析：牺牲"穿透多层子查询"的精度，换取可完成的解析。
+    projections = len(query.selects) if isinstance(query, exp.Query) else 0
+    if projections > 30 or len(sources) > 10:
+        return _direct_projection_sources(projection, sources, aliases)
 
     output_name = projection.alias_or_name
     if output_name:

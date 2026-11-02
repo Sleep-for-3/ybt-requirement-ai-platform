@@ -99,7 +99,37 @@ def project_candidate_context(frozen: dict, field_id: int, section: str) -> dict
     context = deepcopy(frozen)
     context["fields"] = deepcopy(fields)
     context["section"] = section
+    _project_script_basis_to_field(context, field_id)
     return context
+
+
+def _project_script_basis_to_field(context: dict, field_id: int) -> None:
+    """把整份脚本依据裁到"当前字段"这一列，并把脚本来源限定为该字段。
+
+    没有这一步时模型会看到其他字段的规则，实际出现过 F040002 候选写成机构ID定义。
+    来源登记在冻结输入里已完成（这样采纳时能按同一份事实解析），这里只做字段级投影，
+    不改动 revision 里的固定事实。
+    """
+    basis = context.get("script_basis")
+    if not basis:
+        return
+    bindings = (basis.get("confirmation") or {}).get("field_bindings") or {}
+    columns = {str(column) for column, bound in bindings.items() if bound == field_id}
+    if not columns:
+        return
+    rules = [rule for rule in basis.get("rules") or []
+             if str((rule.get("target") or {}).get("column_name") or "") in columns]
+    basis["rules"] = rules
+    basis["field_columns"] = sorted(columns)
+    if rules:
+        context["mapping_sources"] = [
+            item for item in context.get("mapping_sources") or []
+            if item.get("source") != "script_basis" or item.get("target_field_id") == field_id
+        ]
+        context.setdefault("limitations", []).append(
+            f"本字段的脚本事实只投影 {len(rules)} 条规则（绑定列 {', '.join(sorted(columns))}）；"
+            "其他字段规则不参与本次生成。"
+        )
 
 
 def check_candidate_compliance(context: dict, candidate: dict) -> list[str]:

@@ -165,9 +165,17 @@ def preprocess_sql(sql: str, variables: dict[str, str] | None = None) -> Preproc
             # Bind variables are accepted by most dialect parsers and are not
             # identifiers, so retaining them gives better evidence.
             return expression
+        # 库/模式限定符（``#{INSTANCE_GB}.T_6_4``）不能变成 SAFE_INSTANCE_GB，
+        # 否则解析出的物理表身份永远匹配不上目录资产，血缘与需求溯源全空。
+        # 这里把未知限定符整体去掉，让表名回到未限定形式，交由导入参数里的
+        # 默认库名/数据模式补齐；同时保留一条明确告警。
+        if re.match(r"\s*\.", match.string[match.end():match.end() + 8]):
+            warnings.append(f"Unknown template variable used as table qualifier dropped: {expression}")
+            return "__YBT_UNKNOWN_QUALIFIER__."
         return f"SAFE_{re.sub(r'[^A-Za-z0-9_]', '_', name).upper()}"
 
     parse_sql = _VARIABLE_PATTERN.sub(replace, strip_hash_comments(visible_sql))
+    parse_sql = re.sub(r"(?i)__YBT_UNKNOWN_QUALIFIER__\s*\.", "", parse_sql)
     if not parse_sql.endswith("\n"):
         # sqlglot raises IndexError when a ``--`` comment reaches end of input.
         parse_sql += "\n"

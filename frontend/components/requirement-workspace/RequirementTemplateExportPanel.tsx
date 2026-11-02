@@ -791,7 +791,7 @@ export function RequirementTemplateExportPanel({ projectId, requirementId }: { p
               type="button"
               aria-label="导出检查记录 CSV"
             >导出 CSV</button>
-            <span className="text-[11px] text-slate-500">记录是追加的，用来回答"交付前查过没、当时过没过"。</span>
+            <span className="text-[11px] text-slate-500">记录是追加的，用来回答&quot;交付前查过没、当时过没过&quot;。</span>
           </div>
           {checkNotice ? <p className="mt-2 text-xs text-emerald-700" aria-label="检查记录结果">{checkNotice}</p> : null}
           {checkHistory && checkHistory.items.length ? <ul className="mt-2 space-y-1 text-[11px] text-slate-600">{checkHistory.items.map((record) => <li key={record.id}>

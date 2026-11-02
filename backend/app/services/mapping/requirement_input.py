@@ -281,6 +281,43 @@ def build_requirement_input(db, revision, field_ids, sections):
                 "source": "field_mapping",
             })
 
+    # 跑批脚本已确认的字段血缘同样是"该字段自己的溯源证据"。把它们登记进
+    # mapping_sources（而不是 physical_sources，避免静默扩大用户选定范围），
+    # 模型才能给出合规的物理引用、文档"来源表/来源字段"列才有值。
+    script_basis = content.get("script_basis") or {}
+    script_rules = script_basis.get("rules") or []
+    if script_rules:
+        script_metadata = {item["id"]: item for item in script_basis.get("metadata") or [] if item.get("id")}
+        bindings = (script_basis.get("confirmation") or {}).get("field_bindings") or {}
+        column_to_field = {str(column): int(field_id) for column, field_id in bindings.items()}
+        existing_keys = {(item.get("kind"), item.get("table_id"), item.get("field_id")) for item in mapping_sources}
+        for rule in script_rules:
+            column = str((rule.get("target") or {}).get("column_name") or "")
+            target_field = column_to_field.get(column)
+            if not target_field or target_field not in selected:
+                continue
+            source = rule.get("source") or {}
+            table_id, field_id_ = source.get("catalog_table_id"), source.get("catalog_column_id")
+            if not table_id or not field_id_:
+                continue
+            table = script_metadata.get(table_id) or {}
+            table_name = str(table.get("table_name") or source.get("table_name") or "")
+            kind = "mart" if table_name.upper().startswith(("HYF_", "BL_", "YBT_")) else "source"
+            key = (kind, table_id, field_id_)
+            if key in existing_keys:
+                continue
+            existing_keys.add(key)
+            column_meta = next((item for item in table.get("columns") or [] if item.get("id") == field_id_), {})
+            mapping_sources.append({
+                "kind": kind, "table_id": table_id, "field_id": field_id_,
+                "table_code": table_name, "table_name": table_name,
+                "field_code": column_meta.get("name") or source.get("column_name"),
+                "field_name": column_meta.get("comment") or column_meta.get("name") or source.get("column_name"),
+                "field_type": column_meta.get("data_type") or "",
+                "table_version": "script_basis", "field_version": "script_basis",
+                "source": "script_basis", "target_field_id": target_field,
+            })
+
     from app.services.knowledge_eligibility import requirement_evidence, validate_frozen_requirement_evidence
     bound_codes = sorted({str(record["field"].get("field_code") or "") for record in records} - {""})
     frozen_policy = (content.get("script_basis") or {}).get("policy_snapshot")

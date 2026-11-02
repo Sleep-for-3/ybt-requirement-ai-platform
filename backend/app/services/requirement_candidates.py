@@ -70,7 +70,8 @@ def candidate_detail(db, project_id, requirement_id, item_id, principal):
             "manual": bool(owner) and owner.get("kind", "manual") == "manual"})
     physical = []
     allowed_physical = {(row["kind"], row["table_id"], row["field_id"]): row
-        for row in generation_input.input_json["physical_sources"]}
+        for row in [*generation_input.input_json["physical_sources"],
+                    *(generation_input.input_json.get("mapping_sources") or [])]}
     for reference in candidate.get("physical_references", []):
         resolved = allowed_physical.get((reference.get("kind"), reference.get("table_id"), reference.get("field_id")))
         if resolved:
@@ -175,7 +176,8 @@ def _apply_selection(content, generation_input, item, selected_fields, replace_m
     physical = []
     if "physical_references" in selected_fields:
         lookup = {(row["kind"], row["table_id"], row["field_id"]): row
-            for row in generation_input.input_json["physical_sources"]}
+            for row in [*generation_input.input_json["physical_sources"],
+                        *(generation_input.input_json.get("mapping_sources") or [])]}
         for reference in candidate.get("physical_references", []):
             resolved = lookup.get((reference.get("kind"), reference.get("table_id"), reference.get("field_id")))
             if resolved:

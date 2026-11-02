@@ -66,7 +66,7 @@ def fingerprint(db, table):
         "classification": classification.assignment_json if classification else None})
 
 
-def create_batch(db, project, actor_id, key, files, options, storage=None):
+def _create_batch_record(db, project, actor_id, key, files, options, storage=None, *, parse):
     if project.institution_id is None:
         raise HTTPException(409, "请先为项目关联机构，再导入受控资料")
     storage = storage or get_storage_service()
@@ -98,6 +98,12 @@ def create_batch(db, project, actor_id, key, files, options, storage=None):
             expanded.append((name, data))
     if not expanded or len(expanded) > 100 or len({name for name, _ in expanded}) != len(expanded):
         raise HTTPException(422, "批次为空、文件过多或相对路径重复")
+    # 解析当前是同步执行（API 进程内）。84 个真实集市脚本约需 8 分钟，浏览器
+    # 60s 超时后中断请求但服务端仍在解析，最终把整个 API 拖到 100% CPU、健康检查与
+    # 登录全部超时（真实事故）。在异步化完成前，用单批文件数硬门禁把最坏耗时压到
+    # 约 4 分钟，并给出"请分批"的可执行提示，而不是让用户等 60s 后看到超时。
+    if len(expanded) > 40:
+        raise HTTPException(422, "单批最多 40 个文件。请分批导入，例如 84 个脚本分 3 批。")
     if sum(len(data) for _, data in expanded) > 40 * 1024 * 1024:
         raise HTTPException(422, "展开后的批次超过 40 MB")
     batch = ResourceImportBatch(project_id=project.id, created_by=actor_id, idempotency_key=key,
@@ -123,18 +129,84 @@ def create_batch(db, project, actor_id, key, files, options, storage=None):
                 original_file_name=PurePosixPath(name).name, content_type="application/octet-stream", byte_size=saved.byte_size,
                 content_hash=saved.content_hash, classification=project.confidentiality_level, created_by=actor_id, enabled=True)
             db.add(stored); db.flush()
-        kind = options.get("file_options", {}).get(name, {}).get("kind", "auto")
+        db.add(ResourceImportItem(batch_id=batch.id, relative_path=name, stored_file_id=stored.id,
+            file_kind="auto", parsed_json={}, status="pending"))
+    db.flush()
+    if parse:
+        _parse_batch_items(db, batch)
+        batch.preview_json = preview(db, batch)
+        batch.status = "preview"
+        db.commit()
+    return batch
+
+
+def create_batch(db, project, actor_id, key, files, options, storage=None):
+    """兼容旧调用：落盘后立即同步解析（服务层测试与脚本仍用它）。"""
+    return _create_batch_record(db, project, actor_id, key, files, options, storage, parse=True)
+
+
+def create_batch_pending(db, project, actor_id, key, files, options, storage=None):
+    """只落盘并建立待解析条目；解析交给后台任务，避免长解析占住 API 进程。
+
+    生产环境用 Celery worker 执行 ``batch_parse_handler``：1000+ 张表的 DDL 或几十个
+    集市脚本不会再让 /health/live、登录和其他页面一起超时。Inline 队列（本地/测试）
+    仍会同步执行，因此 API 返回值与旧行为一致。
+    """
+    batch = _create_batch_record(db, project, actor_id, key, files, options, storage, parse=False)
+    if batch.status != "parsing":
+        batch.status = "parsing"
+        db.commit()
+    return batch
+
+
+def _parse_batch_items(db, batch, job=None):
+    storage = get_storage_service()
+    for item in items(db, batch):
+        if job is not None:
+            db.refresh(job)
+            if job.status == "cancelled":
+                return False
+        if item.status != "pending":
+            continue
         try:
-            kind, parsed = parse_file(data, name, kind, options.get("dialect", ""))
+            stored = db.get(StoredFile, item.stored_file_id)
+            if not stored or not stored.enabled:
+                raise ValueError("stored_file_unavailable")
+            data = storage.read(stored.storage_key)
+            kind = batch.options_json.get("file_options", {}).get(item.relative_path, {}).get("kind", "auto")
+            kind, parsed = parse_file(data, item.relative_path, kind, batch.options_json.get("dialect", ""))
+            item.file_kind, item.parsed_json, item.status = kind, parsed, "preview"
         except Exception:
             # Do not expose parser exceptions which can contain uploaded content.
-            parsed = {"tables": [], "warnings": ["文件解析失败，请检查编码、方言与格式"], "error": "parse_failed", "complete": False}
-        db.add(ResourceImportItem(batch_id=batch.id, relative_path=name, stored_file_id=stored.id,
-            file_kind=kind, parsed_json=parsed, status="preview"))
-    db.flush()
+            item.parsed_json = {"tables": [], "warnings": ["文件解析失败，请检查编码、方言与格式"],
+                                "error": "parse_failed", "complete": False}
+            item.status = "preview"
+        db.commit()
+    return True
+
+
+def parse_batch_handler(db, job):
+    """后台解析批次文件；逐条提交进度，失败条目落 parse_failed 而不拖垮整批。
+
+    必须返回 dict：任务队列用 ``result.get("failed_count")`` 判定终态，返回 None 会被
+    记成 "'NoneType' object has no attribute 'get'" 的失败作业（真实踩过）。
+    """
+    batch = load_batch(db, job.project_id, int(job.payload_summary_json["batch_id"]))
+    if batch.status != "parsing":
+        return {"batch_id": batch.id, "success_count": 0, "failed_count": 0, "skipped_count": 0}
+    completed = _parse_batch_items(db, batch, job)
+    if not completed:
+        batch.status = "partial"
+        db.commit()
+        return {"batch_id": batch.id, "success_count": 0, "failed_count": 0,
+                "skipped_count": 0, "cancelled": True}
     batch.preview_json = preview(db, batch)
+    batch.status = "preview"
     db.commit()
-    return batch
+    rows = items(db, batch)
+    failed = sum(1 for row in rows if (row.parsed_json or {}).get("error"))
+    return {"batch_id": batch.id, "success_count": len(rows) - failed,
+            "failed_count": failed, "skipped_count": 0}
 
 
 def options_for(batch, item, table=None):
@@ -435,11 +507,22 @@ def batch_import_handler(db, job):
             "skipped_count": skipped, "lineage_revision_id": revision_id}
 
 
-def summary(db, batch):
+def summary(db, batch, *, preview_table_limit: int | None = 200):
     status = batch.status
     job = db.get(BackgroundJob, batch.job_id) if batch.job_id else None
     if job and job.status in {"failed", "cancelled", "partially_completed"} and status in {"running", "queued"}:
         status = "partial" if any(x.status == "completed" for x in items(db, batch)) else "failed"
+    # 预览响应只回前 N 张表：1028 张表 × 每表全部字段会让浏览器渲染出数十万 DOM 节点，
+    # 页面直接卡死（真实事故）。数据库里的 preview_json 保持完整，确认应用仍按全量执行；
+    # 这里只裁剪"回给页面看的这一份"，并显式告诉前端总数。
+    preview = deepcopy(batch.preview_json or {})
+    if preview_table_limit is not None:
+        for entry in preview.get("items") or []:
+            tables = entry.get("tables") or []
+            if len(tables) > preview_table_limit:
+                entry["tables_total"] = len(tables)
+                entry["tables_truncated"] = True
+                entry["tables"] = tables[:preview_table_limit]
     return {"id": batch.id, "project_id": batch.project_id, "version": batch.version, "status": status,
-        "job_id": batch.job_id, "options": batch.options_json, "preview": batch.preview_json,
+        "job_id": batch.job_id, "options": batch.options_json, "preview": preview,
         "items": [{"id": x.id, "path": x.relative_path, "status": x.status, "result": x.result_json} for x in items(db, batch)]}

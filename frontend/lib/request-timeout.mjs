@@ -25,6 +25,7 @@ const LONG_RUNNING_PATH_PATTERNS = [
   /\/download$/,
   /\/export\//,
   /\/knowledge\/ask$/,
+  /\/resource-imports$/,
   /\/lineage\/edge-explanations$/,
   /\/ai-runtime\/test-chat$/
 ];

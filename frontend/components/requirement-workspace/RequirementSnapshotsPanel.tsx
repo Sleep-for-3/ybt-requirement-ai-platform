@@ -108,7 +108,7 @@ export function RequirementSnapshotsPanel({projectId, requirementId, version, co
     ) : null}
     {canSave?<button className="button-secondary" disabled={busy||dirty||!contentHash} onClick={()=>void freeze()}>{busy?"处理中…":"保存当前草稿快照"}</button>:null}
     {dirty?<p className="mt-2 text-xs text-amber-700">请先保存需求说明与人工编辑。</p>:null}
-    {canView && hasSnapshots ? <p className="mt-2 text-xs text-slate-500">任意两份快照可以互相对比：先选一份作为对比基准（默认最早一份），再点另一份的"与基准对比"。对比只读，不冻结、不改内容。</p> : null}
+    {canView && hasSnapshots ? <p className="mt-2 text-xs text-slate-500">任意两份快照可以互相对比：先选一份作为对比基准（默认最早一份），再点另一份的&quot;与基准对比&quot;。对比只读，不冻结、不改内容。</p> : null}
     {!canView ? (access.isSuccess?<p className="mt-2 text-xs">当前角色不能查看草稿快照，请联系项目负责人。</p>:null) : snapshots.isError?<p role="alert" className="mt-2 text-xs">无法读取快照记录。<button onClick={()=>void snapshots.refetch()}>重试</button></p>
       :snapshots.isPending?<p role="status" className="mt-2 text-xs">正在读取快照…</p>
       :<ul className="mt-3 max-h-64 space-y-2 overflow-auto text-xs">{snapshots.data?.length?snapshots.data.map(item=>{

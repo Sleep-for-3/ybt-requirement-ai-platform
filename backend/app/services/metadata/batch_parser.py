@@ -1,6 +1,7 @@
 """Bounded offline parsing only: none of these functions execute uploaded SQL."""
 from dataclasses import asdict
 from io import BytesIO
+import os
 import re
 from zipfile import ZipFile
 
@@ -15,6 +16,13 @@ from app.services.lineage.sql_parser import parse_sql_lineage, resolve_dialect
 from app.services.metadata.excel_import import _parse, _bool
 
 MAX_ROWS = 10000
+# 补录 DDL 一次导出可能包含 1000+ 张表 / 3.6 万字段（真实材料即如此）。
+# 旧的 10000 字段上限会把整份 DDL 判为"解析失败"，而错误提示只说
+# "请检查编码、方言与格式"，用户无法知道是上限问题。
+# DDL 单文件上限独立配置，默认 200000 字段（约 5000 张表），
+# 仍保留总量保护，避免恶意超大文件拖垮进程。
+DDL_MAX_COLUMNS = int(os.environ.get("IMPORT_DDL_MAX_COLUMNS", "200000"))
+
 
 
 def identity(database, schema, table):
@@ -73,13 +81,20 @@ def parse_ddl(text, dialect):
     for statement in statements:
         if statement is None:
             continue
-        if isinstance(statement, exp.Comment):
+        if isinstance(statement, (exp.Comment, exp.Semicolon)):
             comments.append(statement)
             continue
         if not isinstance(statement, exp.Create) or statement.args.get("kind") != "TABLE" or not isinstance(statement.this, exp.Schema):
             warnings.append("无法作为完整表结构识别的语句，需要单独核验")
             continue
         ref = statement.this.this
+        # Hive/GBase 的 ``db.table`` 是"库.表"，不是"schema.表"：sqlglot 把第一段
+        # 放在 ref.db，旧实现会把它当 schema，再叠加导入参数里的默认库名，
+        # 产生 ``dm_bappdb_tcyl.dm_bappdb_tcyl.hyf_x`` 这种永不匹配的资产身份。
+        if ref.catalog is None and ref.db is not None:
+            location = identity(ref.db, "", ref.name)
+        else:
+            location = identity(ref.catalog, ref.db, ref.name)
         columns = []
         for node in statement.this.expressions:
             if not isinstance(node, exp.ColumnDef):
@@ -99,7 +114,7 @@ def parse_ddl(text, dialect):
         comment = next(statement.find_all(exp.SchemaCommentProperty), None)
         if not columns:
             raise ValueError("DDL 未包含可识别字段")
-        tables.append({**identity(ref.catalog, ref.db, ref.name), "table_comment": comment.this.this if comment else "", "columns": columns})
+        tables.append({**location, "table_comment": comment.this.this if comment else "", "columns": columns})
     for comment in comments:
         ref = comment.this
         name = ref.table if isinstance(ref, exp.Column) else ref.name
@@ -115,8 +130,10 @@ def parse_ddl(text, dialect):
                 warnings.append("注释引用未知字段")
         else:
             matches[0]["table_comment"] = comment.expression.this
-    if not tables or sum(len(x["columns"]) for x in tables) > MAX_ROWS:
-        raise ValueError("DDL 未识别表或字段数超出限制")
+    if not tables or sum(len(x["columns"]) for x in tables) > DDL_MAX_COLUMNS:
+        raise ValueError(
+            f"DDL 未识别表或字段数超出限制（上限 {DDL_MAX_COLUMNS} 字段，"
+            "可通过 IMPORT_DDL_MAX_COLUMNS 调整）")
     return {"tables": tables, "warnings": warnings, "complete": not warnings}
 
 
@@ -153,7 +170,7 @@ def parse_file(data, name, kind="auto", dialect=""):
         if kind == "sql":
             try:
                 statements = [x for x in sqlglot.parse(parse_text, read=read or None) if x is not None]
-                if statements and all(isinstance(x, exp.Comment) or
+                if statements and all(isinstance(x, (exp.Comment, exp.Semicolon)) or
                     (isinstance(x, exp.Create) and x.args.get("kind") == "TABLE" and isinstance(x.this, exp.Schema)) for x in statements):
                     kind = "ddl"
             except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
@@ -166,7 +183,7 @@ def parse_file(data, name, kind="auto", dialect=""):
     warnings = list(block_warnings) + list(dialect_warnings) + list(result.warnings)
     if not result.edges:
         warnings.append("未提取可用血缘规则")
-    if re.search(r"\b(EXECUTE|EXEC|PROCEDURE|TEMPORARY)\b|\$\{|\bSELECT\s+\*", text, re.I):
+    if re.search(r"\b(EXECUTE|EXEC|PROCEDURE|TEMPORARY)\b|\bSELECT\s+\*", text, re.I):
         warnings.append("动态 SQL、过程、临时表或星号需要人工核验")
     try:
         for statement in sqlglot.parse(parse_text, read=read or None):
@@ -174,6 +191,12 @@ def parse_file(data, name, kind="auto", dialect=""):
                 warnings.append("INSERT 缺少显式目标字段列表，不能确认字段映射完整性")
     except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
         pass
+    # 模板变量、INSERT 无显式列清单是"可解释的已知限制"，不是解析缺口：真实跑批脚本
+    # 100% 带 ${DATA_DATE}，旧逻辑把它们全判成 complete=False，导致每个文件都要人工
+    # 勾选"保留解析缺口"才能应用，批量导入事实上不可用。真正的解析失败/过程/星号仍阻断。
+    informational = ("Unknown template variable preserved",
+                     "Unknown template variable used as table qualifier dropped")
+    blocking = [warning for warning in warnings if not warning.startswith(informational)]
     return "sql", {"rules": [asdict(edge) for edge in result.edges],
         "statements": [asdict(statement) for statement in result.statements],
-        "warnings": warnings, "complete": result.parse_status == "parsed" and not warnings, "tables": []}
+        "warnings": warnings, "complete": result.parse_status == "parsed" and not blocking, "tables": []}

@@ -21,10 +21,11 @@ def resolve_job_handler(job_type: str) -> JobHandler | None:
     )
     from app.services.uat.execution import uat_run_job_handler
     from app.services.requirement_generation_worker import requirement_generation_handler
-    from app.services.metadata.batch_import import batch_import_handler
+    from app.services.metadata.batch_import import batch_import_handler, parse_batch_handler
     from app.services.agent.runtime import run_agent_task
     handlers: dict[str, JobHandler] = {
         "resource_batch_import": batch_import_handler,
+        "resource_batch_parse": parse_batch_handler,
         "requirement_generation": requirement_generation_handler,
         "batch_ai_generation_business": _business_handler,
         "batch_ai_generation_technical": _technical_handler,

@@ -1,4 +1,4 @@
-﻿"""Durable scoped generation. Candidate writes are fenced by per-item leases."""
+"""Durable scoped generation. Candidate writes are fenced by per-item leases."""
 import asyncio
 from datetime import datetime, timedelta, timezone
 import json
@@ -74,6 +74,32 @@ def authorize_input(db, row, actor):
     return project
 
 
+def _attach_rule_physical_references(context: dict, candidate: dict) -> dict:
+    """模型引用脚本规则但没给物理引用时，用规则来源补齐（确定性事实，不靠模型）。"""
+    rules = {rule["rule_id"]: rule for rule in (context.get("script_basis") or {}).get("rules") or []}
+    sources = context.get("mapping_sources") or []
+    existing = {(ref.get("kind"), ref.get("table_id"), ref.get("field_id"))
+                for ref in candidate.get("physical_references") or []}
+    added = []
+    for rule_id in candidate.get("script_rule_ids") or []:
+        source = (rules.get(rule_id) or {}).get("source") or {}
+        table_id, field_id = source.get("catalog_table_id"), source.get("catalog_column_id")
+        if not table_id or not field_id:
+            continue
+        match = next((item for item in sources
+                      if item.get("table_id") == table_id and item.get("field_id") == field_id), None)
+        if not match:
+            continue
+        key = (match["kind"], table_id, field_id)
+        if key in existing:
+            continue
+        existing.add(key)
+        added.append({"kind": match["kind"], "table_id": table_id, "field_id": field_id})
+    if added:
+        candidate["physical_references"] = list(candidate.get("physical_references") or []) + added
+    return candidate
+
+
 def seal_candidate(context: dict, candidate: dict) -> dict:
     """公共出口：Skill 绑定路径与普通生成路径都必须经过同一套合规/语义支持校验。
 
@@ -81,6 +107,7 @@ def seal_candidate(context: dict, candidate: dict) -> dict:
     不写库、不改状态；随后把主张支持报告写入候选，供审计与人工采用页展示。
     未登记主张的候选不会被当作「已校验」：报告为 not_evaluated，并追加待人工核对 gap。
     """
+    candidate = _attach_rule_physical_references(context, candidate)
     violations = check_candidate_compliance(context, candidate)
     if violations:
         raise HTTPException(422, violations[0])

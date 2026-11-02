@@ -83,6 +83,7 @@ def script_preview(db, project_id, version_ids):
         return {"node_id": node.id, "table_key": table_key(node), "database_name": node.database_name,
             "schema_name": node.schema_name, "table_name": node.table_name, "column_name": node.column_name,
             "node_type": node.node_type, "catalog_table_id": catalog_id(node),
+            "catalog_column_id": node.catalog_column_id,
             "unresolved": node.unresolved_flag, "temporary": node.temporary_flag}
     targets = {}
     rules = []

@@ -1080,7 +1080,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
             <div>
               <h2 className="text-sm font-semibold text-ink">需求交付状态</h2>
               <p className="mt-1 text-xs text-slate-500">
-                判据与工作台一致：最近快照的 content hash 等于当前内容 hash 才算已冻结；"可直接重新导出"还要求已有产物。数字全部来自服务端聚合，不做推断。
+                判据与工作台一致：最近快照的 content hash 等于当前内容 hash 才算已冻结；&quot;可直接重新导出&quot;还要求已有产物。数字全部来自服务端聚合，不做推断。
               </p>
             </div>
             {delivery ? (
@@ -1448,7 +1448,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
                 {refreezeBusy ? "重新冻结中…" : `重新冻结这 ${selected.length} 条（不导出）`}
               </button>
               <span className="text-slate-400">
-                用于"正文没改、只是模板表级口径变了"的需求：把快照对齐到当前内容，不产生文件。
+                用于&quot;正文没改、只是模板表级口径变了&quot;的需求：把快照对齐到当前内容，不产生文件。
               </span>
             </div>
             {batchError ? (
@@ -1674,7 +1674,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
                     <p className="mt-1 text-xs text-slate-500">
                       共 {scriptBindingFor.script_binding?.table_field_count ?? 0} 个监管字段，脚本绑定了
                       {" "}{scriptBindingFor.script_binding?.bound_field_count ?? 0} 个，
-                      未覆盖 {scriptBindingFor.script_binding?.unbound_count ?? 0} 个。未覆盖不是"不需要"：
+                      未覆盖 {scriptBindingFor.script_binding?.unbound_count ?? 0} 个。未覆盖不是&quot;不需要&quot;：
                       它们可能是系统字段（可由平台补），也可能是脚本确实不产出的监管字段（需要补脚本或人工给口径）。
                     </p>
                   </div>
@@ -2408,7 +2408,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
             <div>
               <h2 className="text-sm font-semibold text-ink">监管表覆盖度</h2>
               <p className="mt-1 text-xs text-slate-500">
-                需求维与脚本维分开陈述：有脚本但解析不出写入（例如脚本被整段注释屏蔽）不等于"需求没做"，
+                需求维与脚本维分开陈述：有脚本但解析不出写入（例如脚本被整段注释屏蔽）不等于&quot;需求没做&quot;，
                 需要人工确认是否已停用；输入里没有脚本的表要补资料，而不是去调解析器。
               </p>
             </div>
@@ -2467,7 +2467,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
                       {authorBatchBusy ? "建需中…" : `批量建需（${authorSelected.length}）`}
                     </button>
                     <span className="text-[11px] text-slate-500">
-                      一次最多 10 张表；只绑"脚本输出列与监管字段同名"的字段，未绑字段留作缺口。
+                      一次最多 10 张表；只绑&quot;脚本输出列与监管字段同名&quot;的字段，未绑字段留作缺口。
                     </span>
                   </div>
                 );
@@ -2489,7 +2489,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
                 if (!visible.length) {
                   return (
                     <p className="mt-3 text-xs text-slate-500">
-                      当前条件下没有监管表。换一个筛选条件，或点"全部监管表"查看 {coverage.summary.table_count} 张。
+                      当前条件下没有监管表。换一个筛选条件，或点&quot;全部监管表&quot;查看 {coverage.summary.table_count} 张。
                     </p>
                   );
                 }
@@ -2601,7 +2601,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
               <h2 className="text-sm font-semibold text-ink">标准模板列填充</h2>
               <p className="mt-1 text-xs text-slate-500">
                 导出文档里的空列分三种：模板本身没给数据（要找业务）、集市或脚本缺（要补资料）、
-                需求侧还没写（待业务确认）。这里按列统计并把缺口归属标出来，不把"模板没给"算成平台缺陷。
+                需求侧还没写（待业务确认）。这里按列统计并把缺口归属标出来，不把&quot;模板没给&quot;算成平台缺陷。
               </p>
             </div>
             {templateCoverage ? (
@@ -2756,7 +2756,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
                     <p className="mt-2 text-[11px] text-slate-400">只列出条数最多的几类问题。</p>
                   ) : null}
                   <p className="mt-3 text-[11px] text-slate-500">
-                    这里只做归类，不改任何内容；处置与"补齐后重新冻结"仍在工作台完成。
+                    这里只做归类，不改任何内容；处置与&quot;补齐后重新冻结&quot;仍在工作台完成。
                   </p>
                 </div>
               ) : null}
@@ -2842,7 +2842,7 @@ const [worklistArchiveBusy, setWorklistArchiveBusy] = useState(false);
                 {gapPanel ? (
                   <>
                     <p className="mb-2 text-[11px] text-slate-500">
-                      只列"这一列没有值"的字段；当前值为「—」表示确实为空，不是读取失败。清单与实际导出口径同源，
+                      只列&quot;这一列没有值&quot;的字段；当前值为「—」表示确实为空，不是读取失败。清单与实际导出口径同源，
                       填补之后需要重新导出才会出现在文档里。
                     </p>
                     <table className="w-full min-w-[720px] text-left text-xs">
