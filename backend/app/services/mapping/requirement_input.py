@@ -523,6 +523,39 @@ def _project_script_basis(basis: dict, bound_codes: set[str], limitations: list[
     rules = unique_rules
     basis["rules"] = rules
     basis["condition_texts"] = pool
+    # 元数据也要按"本字段实际引用到的表/列"投影：真实脚本的 4~6 张源表合计几百个字段，
+    # 全量塞进单字段的模型上下文会直接超出 8k 预算，生成被阻断（线上真实事故：
+    # "完整输入超过模型预算，不进行截断"）。这里只保留被规则引用到的列名。
+    referenced_tables = set()
+    referenced_columns: set[tuple[str, str]] = set()
+    for rule in rules:
+        for side in ("source", "target"):
+            node = rule.get(side) or {}
+            table_name = str(node.get("table_name") or "")
+            if table_name:
+                referenced_tables.add(table_name)
+                if node.get("column_name"):
+                    referenced_columns.add((table_name, str(node["column_name"])))
+    projected_metadata = []
+    for table in basis.get("metadata") or []:
+        table_name = str(table.get("table_name") or "")
+        if table_name not in referenced_tables:
+            continue
+        columns = [column for column in table.get("columns") or []
+                   if (table_name, str(column.get("name") or "")) in referenced_columns]
+        projected_metadata.append({**table, "columns": columns})
+    if basis.get("metadata"):
+        basis["metadata"] = projected_metadata
+    statement_ids = {rule.get("statement_id") for rule in rules}
+    if basis.get("statements"):
+        basis["statements"] = [statement for statement in basis["statements"]
+                               if statement.get("id") in statement_ids]
+    if basis.get("targets"):
+        basis["targets"] = [
+            {**target, "columns": [column for column in target.get("columns") or [] if column in bound_codes]}
+            for target in basis["targets"]
+            if not target.get("columns") or any(column in bound_codes for column in target.get("columns") or [])
+        ]
     basis["projection"] = {
         "version": "requirement-script-basis-projection-v1",
         "bound_columns": sorted(bound_codes),

@@ -43,7 +43,7 @@ export default function Page(){
   function override(type:"file_options"|"table_options",key:string,value:Assignment){update({...options,[type]:{...options[type],[key]:{...options[type]?.[key],...value}}});}
   const editable=!batch||batch.status==="preview";
   const base=`/projects/${projectId}/resource-imports`;
-  useEffect(()=>{if(batch?.status!=="parsing"||!projectId)return;const timer=setTimeout(async()=>{try{const next=await apiGet<Batch>(`${base}/${batch.id}`);if(next?.id===batch.id)setBatch(next);}catch{/* 下一轮继续轮询 */}},3000);return()=>clearTimeout(timer);},[batch?.status,batch?.id,base,projectId]);
+  useEffect(()=>{if(batch?.status!=="parsing"||!projectId)return;const id=batch.id;const timer=setInterval(async()=>{try{const next=await apiGet<Batch>(`${base}/${id}`);if(next?.id===id)setBatch(next);}catch{/* 网络/登录异常时继续轮询，用户仍可手动刷新 */}},4000);return()=>clearInterval(timer);},[batch?.status,batch?.id,base,projectId]);
   const completedCatalogTableIds=batch?.items.flatMap(item=>item.status==="completed"?(item.result.catalog_table_ids??[]):[])??[];
   const completedScriptVersionIds=batch?.items.flatMap(item=>item.status==="completed"&&item.result.script_version_id?[item.result.script_version_id]:[])??[];
   async function upload(){const form=new FormData();for(const file of files)form.append("files",file);form.append("idempotency_key",uploadKey);form.append("options",JSON.stringify(options));return uploadForm<Batch>(base,form);}
