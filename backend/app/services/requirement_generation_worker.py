@@ -305,6 +305,7 @@ def generate_candidate(db, row, item, project):
                 violations = [f"模型输出不符合 schema：{detail[:120]}"]
                 continue
             raise
+        candidate = _sanitize_candidate(context, candidate)
         violations = check_candidate_compliance(context, candidate)
         if not violations:
             execution_metadata["self_correction_attempts"] = attempt
