@@ -100,6 +100,48 @@ def _attach_rule_physical_references(context: dict, candidate: dict) -> dict:
     return candidate
 
 
+def _sanitize_candidate(context: dict, candidate: dict) -> dict:
+    """剔除模型编造的物理引用和跨章节主张，而不是整条候选阻断。
+
+    真实线上（deepseek-v4.1-flash）会出现两类可收敛的偏差：①物理引用写了范围外的
+    table_id/field_id；②business 候选把 claim 标成 lineage。二者都不影响正文事实，
+    直接判死会让整字段没有候选。这里按固定事实过滤，并把剔除动作写成 gap 供审计，
+    保留"不落库范围外事实"的硬约束。
+    """
+    allowed = {(item.get("kind"), item.get("table_id"), item.get("field_id"))
+               for item in [*(context.get("physical_sources") or []), *(context.get("mapping_sources") or [])]}
+    refs = candidate.get("physical_references") or []
+    kept = [ref for ref in refs
+            if (ref.get("kind"), ref.get("table_id"), ref.get("field_id")) in allowed]
+    dropped_refs = len(refs) - len(kept)
+    if dropped_refs:
+        candidate["physical_references"] = kept
+    section = "business" if candidate.get("business_definition") else (
+        "lineage" if candidate.get("processing_logic") else None)
+    claims = candidate.get("claims") or []
+    kept_claims = [claim for claim in claims if not section or claim.get("section") in (None, section)]
+    dropped_claims = len(claims) - len(kept_claims)
+    if dropped_claims:
+        candidate["claims"] = kept_claims
+        # 被丢弃的主张可能仍被 policy_comparisons 引用，移除对应比较项避免二次阻断。
+        dropped_ids = {claim.get("claim_id") for claim in claims if claim not in kept_claims}
+        comparisons = []
+        for comparison in candidate.get("policy_comparisons") or []:
+            rules = set(comparison.get("rule_ids") or [])
+            if rules & dropped_ids:
+                continue
+            comparisons.append(comparison)
+        candidate["policy_comparisons"] = comparisons
+    gaps = list(candidate.get("gaps") or [])
+    if dropped_refs:
+        gaps.append(f"模型给出的 {dropped_refs} 个物理引用不在本字段固定映射范围内，已剔除，需人工核对来源字段")
+    if dropped_claims:
+        gaps.append(f"模型给出的 {dropped_claims} 条主张章节与当前章节不一致，已剔除，需人工复核")
+    if gaps:
+        candidate["gaps"] = list(dict.fromkeys(str(item).strip() for item in gaps if str(item).strip()))
+    return candidate
+
+
 def seal_candidate(context: dict, candidate: dict) -> dict:
     """公共出口：Skill 绑定路径与普通生成路径都必须经过同一套合规/语义支持校验。
 
@@ -107,7 +149,7 @@ def seal_candidate(context: dict, candidate: dict) -> dict:
     不写库、不改状态；随后把主张支持报告写入候选，供审计与人工采用页展示。
     未登记主张的候选不会被当作「已校验」：报告为 not_evaluated，并追加待人工核对 gap。
     """
-    candidate = _attach_rule_physical_references(context, candidate)
+    candidate = _sanitize_candidate(context, _attach_rule_physical_references(context, candidate))
     violations = check_candidate_compliance(context, candidate)
     if violations:
         raise HTTPException(422, violations[0])
