@@ -22,7 +22,13 @@ export function hasBusinessDefinition(record: FieldWorkspaceRecord): boolean {
 }
 
 export function hasMartMapping(record: FieldWorkspaceRecord): boolean {
-  return (record.martMappings || []).length > 0;
+  // 脚本建需没有 martMappings，但 technical lineage 已给出源表/字段；
+  // 导出 Excel 的溯源列组同样会用它，不能把这种字段误报成“无来源”。
+  const lineage = record.lineage;
+  return (record.martMappings || []).length > 0 || Boolean(
+    lineage && (lineage.source_table_english_name || lineage.source_field_english_name ||
+      lineage.source_table_chinese_name || lineage.source_field_chinese_name),
+  );
 }
 
 export function isMultiMapping(record: FieldWorkspaceRecord): boolean {

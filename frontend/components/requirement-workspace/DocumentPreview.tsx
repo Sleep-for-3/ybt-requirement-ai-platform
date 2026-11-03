@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Download, FileCheck2 } from "lucide-react";
 import Link from "next/link";
@@ -309,14 +309,14 @@ export function DocumentPreview({
             <dl className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">字段总数</dt><dd className="text-base font-semibold text-ink">{traceStats.total}</dd></div>
               <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">会带&quot;待业务补充&quot;占位</dt><dd className={`text-base font-semibold ${traceStats.pendingBusiness ? "text-amber-700" : "text-ink"}`}>{traceStats.pendingBusiness}</dd></div>
-              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">无集市映射（溯源列组留空）</dt><dd className="text-base font-semibold text-ink">{traceStats.unmapped}</dd></div>
+              <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">无来源（溯源列组留空）</dt><dd className="text-base font-semibold text-ink">{traceStats.unmapped}</dd></div>
               <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">多来源字段（需业务确认口径）</dt><dd className="text-base font-semibold text-ink">{traceStats.multiMapping}</dd></div>
               <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">仍打开的字段级缺口</dt><dd className={`text-base font-semibold ${traceStats.withGaps ? "text-amber-700" : "text-ink"}`}>{traceStats.withGaps} 个字段</dd></div>
               <div className="rounded border border-line px-3 py-2"><dt className="text-slate-500">缺口条数（含范围级）</dt><dd className="text-base font-semibold text-ink">{requirementGaps ? requirementGaps.length : 0}</dd></div>
             </dl>
             <ul className="mt-4 space-y-1 text-xs text-slate-600">
               {traceStats.pendingBusiness ? <li>· 有 {traceStats.pendingBusiness} 个字段没有业务口径正文，导出文档会写&quot;待业务补充&quot;——审阅者会看到你没有给出口径，而不是看到空白。</li> : null}
-              {traceStats.unmapped ? <li>· 有 {traceStats.unmapped} 个字段没有固定的集市映射，导出的溯源列组会留空。</li> : null}
+              {traceStats.unmapped ? <li>· 有 {traceStats.unmapped} 个字段没有来源表/字段，导出的溯源列组会留空。</li> : null}
               {traceStats.multiMapping ? <li>· 有 {traceStats.multiMapping} 个字段来自多个集市字段，导出后需业务确认取数口径，不能默认取第一条。</li> : null}
               {traceStats.withGaps ? <li>· 有 {traceStats.withGaps} 个字段仍带打开状态的缺口，导出不等于关闭缺口，送审仍会被阻断。</li> : null}
             </ul>
@@ -600,3 +600,4 @@ function StatusBadge({ tone, value }: { tone: string; value: string }) {
   const className = tone === "success" ? "badge-success" : tone === "danger" ? "badge-danger" : tone === "warning" ? "badge-warning" : tone === "info" ? "badge-info" : "badge-neutral";
   return <span className={`${className} whitespace-normal text-center text-[9px]`}>{value}</span>;
 }
+
