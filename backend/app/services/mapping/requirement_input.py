@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.models import (
+    CatalogColumn, CatalogTable,
     KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeUnit, SourceTable, SourceField, MartTable, MartField,
 )
 from app.services.rag.citation_trust import base_source_title, normalize_version
@@ -303,17 +304,30 @@ def build_requirement_input(db, revision, field_ids, sections):
             table = script_metadata.get(table_id) or {}
             table_name = str(table.get("table_name") or source.get("table_name") or "")
             table_chinese_name = str(table.get("comment") or "").strip()
+            # 旧需求的 script_basis 冻结时还没有 table_comment：回退到目录资产取中文名，
+            # 否则模型只能写"中文表名待核验"，导出文档也就没有中文来源表。
+            project_id = int(scope.get("project_id") or 0)
+            if not table_chinese_name and table_id and project_id:
+                catalog_table = db.scalar(select(CatalogTable).where(
+                    CatalogTable.id == table_id, CatalogTable.project_id == project_id))
+                if catalog_table is not None:
+                    table_chinese_name = str(catalog_table.table_comment or "").strip()
+            column_meta = next((item for item in table.get("columns") or [] if item.get("id") == field_id_), {})
+            column_chinese_name = str(column_meta.get("comment") or "").strip()
+            if not column_chinese_name and field_id_:
+                catalog_column = db.get(CatalogColumn, field_id_)
+                if catalog_column is not None and catalog_column.project_id == project_id:
+                    column_chinese_name = str(catalog_column.column_comment or "").strip()
             kind = "mart" if table_name.upper().startswith(("HYF_", "BL_", "YBT_")) else "source"
             key = (kind, table_id, field_id_)
             if key in existing_keys:
                 continue
             existing_keys.add(key)
-            column_meta = next((item for item in table.get("columns") or [] if item.get("id") == field_id_), {})
             mapping_sources.append({
                 "kind": kind, "table_id": table_id, "field_id": field_id_,
                 "table_code": table_name, "table_name": table_chinese_name or table_name,
                 "field_code": column_meta.get("name") or source.get("column_name"),
-                "field_name": column_meta.get("comment") or column_meta.get("name") or source.get("column_name"),
+                "field_name": column_chinese_name or column_meta.get("name") or source.get("column_name"),
                 "field_type": column_meta.get("data_type") or "",
                 "table_version": "script_basis", "field_version": "script_basis",
                 "source": "script_basis", "target_field_id": target_field,

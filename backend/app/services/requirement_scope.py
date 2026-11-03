@@ -293,7 +293,11 @@ def _with_script_source_names(db, project_id, content):
                       and (rule.get("source") or {}).get("column_name")]
         if not candidates:
             continue
-        rule = sorted(candidates, key=lambda item: str(item.get("rule_id")))[0]
+        # 优先选已解析到目录资产的来源（才有中文名），再按规则编号稳定排序。
+        rule = sorted(candidates, key=lambda item: (
+            0 if (item.get("source") or {}).get("catalog_table_id") else 1,
+            str(item.get("rule_id")),
+        ))[0]
         source = rule.get("source") or {}
         table_name = str(source.get("table_name") or "")
         column_name = str(source.get("column_name") or "")
