@@ -124,7 +124,8 @@ def _project_script_basis_to_field(context: dict, field_id: int) -> None:
     if rules:
         context["mapping_sources"] = [
             item for item in context.get("mapping_sources") or []
-            if item.get("source") != "script_basis" or item.get("target_field_id") == field_id
+            if item.get("source") not in {"script_basis", "mart_mapping"}
+            or item.get("target_field_id") == field_id
         ]
         context.setdefault("limitations", []).append(
             f"本字段的脚本事实只投影 {len(rules)} 条规则（绑定列 {', '.join(sorted(columns))}）；"

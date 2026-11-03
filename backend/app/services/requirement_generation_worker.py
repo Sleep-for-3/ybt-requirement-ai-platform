@@ -74,6 +74,24 @@ def authorize_input(db, row, actor):
     return project
 
 
+def _attach_mapping_references(context: dict, candidate: dict) -> dict:
+    """模板+映射建需没有脚本规则时，用该字段已固定的集市映射补物理引用。"""
+    existing = {(ref.get("kind"), ref.get("table_id"), ref.get("field_id"))
+                for ref in candidate.get("physical_references") or []}
+    added = []
+    for item in context.get("mapping_sources") or []:
+        if item.get("source") != "mart_mapping":
+            continue
+        key = (item.get("kind"), item.get("table_id"), item.get("field_id"))
+        if key in existing:
+            continue
+        existing.add(key)
+        added.append({"kind": key[0], "table_id": key[1], "field_id": key[2]})
+    if added:
+        candidate["physical_references"] = list(candidate.get("physical_references") or []) + added
+    return candidate
+
+
 def _attach_rule_physical_references(context: dict, candidate: dict) -> dict:
     """模型引用脚本规则但没给物理引用时，用规则来源补齐（确定性事实，不靠模型）。"""
     rules = {rule["rule_id"]: rule for rule in (context.get("script_basis") or {}).get("rules") or []}
@@ -149,7 +167,8 @@ def seal_candidate(context: dict, candidate: dict) -> dict:
     不写库、不改状态；随后把主张支持报告写入候选，供审计与人工采用页展示。
     未登记主张的候选不会被当作「已校验」：报告为 not_evaluated，并追加待人工核对 gap。
     """
-    candidate = _sanitize_candidate(context, _attach_rule_physical_references(context, candidate))
+    candidate = _sanitize_candidate(context, _attach_mapping_references(
+        context, _attach_rule_physical_references(context, candidate)))
     # 模型偶尔只填 final_content、空着章节专用字段：正文既然已给出，就不要让"加工规则"
     # 在文档里退化成"详见脚本事实，尚需人工核验"。
     if candidate.get("final_content"):

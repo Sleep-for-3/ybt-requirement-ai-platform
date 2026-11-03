@@ -282,6 +282,56 @@ def build_requirement_input(db, revision, field_ids, sections):
                 "source": "field_mapping",
             })
 
+    # 调研表/映射页建立的映射可能没有绑定 MartField（历史数据、手工映射），
+    # 但它的摘要里已有“中文表名（英文表名）/中文字段（英文列）”。这类映射不能
+    # 因为缺少 mart_field_id 就被丢掉：模板+映射建需时它是唯一的来源事实。
+    unbound = [
+        (record["field"]["id"], mapping)
+        for record in records
+        for mapping in record.get("mart_mappings") or []
+        if not isinstance(mapping.get("mart_field_id"), int)
+    ]
+    if unbound:
+        import re
+        def split_label(label: str) -> tuple[str, str]:
+            matched = re.match(r"^(.*?)[（(]([^（）()]*)[）)]\s*$", str(label or "").strip())
+            return (matched.group(1).strip(), matched.group(2).strip()) if matched else (str(label or "").strip(), "")
+        for field_id, mapping in unbound:
+            table_cn, table_code = split_label(mapping.get("mart_table_summary"))
+            field_cn, field_code = split_label(mapping.get("mart_field_summary"))
+            if not table_code or not field_code:
+                continue
+            catalog_table = db.scalar(select(CatalogTable).where(
+                CatalogTable.project_id == project_id,
+                CatalogTable.enabled.is_(True),
+                func.upper(CatalogTable.table_name) == table_code.upper(),
+            ).order_by(CatalogTable.id))
+            if catalog_table is None:
+                continue
+            catalog_column = db.scalar(select(CatalogColumn).where(
+                CatalogColumn.project_id == project_id,
+                CatalogColumn.catalog_table_id == catalog_table.id,
+                CatalogColumn.enabled.is_(True),
+                func.upper(CatalogColumn.column_name) == field_code.upper(),
+            ).order_by(CatalogColumn.id))
+            if catalog_column is None:
+                continue
+            kind = "mart" if catalog_table.table_name.upper().startswith(("HYF_", "BL_", "YBT_")) else "source"
+            key = (kind, catalog_table.id, catalog_column.id)
+            if key in existing_physical:
+                continue
+            existing_physical.add(key)
+            mapping_sources.append({
+                "kind": kind, "table_id": catalog_table.id, "field_id": catalog_column.id,
+                "table_code": catalog_table.table_name,
+                "table_name": catalog_table.table_comment or table_cn,
+                "field_code": catalog_column.column_name,
+                "field_name": catalog_column.column_comment or field_cn,
+                "field_type": catalog_column.data_type or "",
+                "table_version": str(catalog_table.updated_at), "field_version": str(catalog_column.updated_at),
+                "source": "mart_mapping", "target_field_id": int(field_id),
+            })
+
     # 跑批脚本已确认的字段血缘同样是"该字段自己的溯源证据"。把它们登记进
     # mapping_sources（而不是 physical_sources，避免静默扩大用户选定范围），
     # 模型才能给出合规的物理引用、文档"来源表/来源字段"列才有值。

@@ -261,9 +261,41 @@ def document_content(db, row):
         content = revision_document(load_revision(db, row.project_id, row.id, row.content_version))
     else:
         content = live_document_content(db, row)
+    content = _with_mapping_source_names(content)
     content = _with_script_source_names(db, row.project_id, content)
     content = _with_live_mart_mappings(db, row.project_id, content)
     return _with_scenario_groups(db, _with_table_meta(db, content))
+
+
+def _with_mapping_source_names(content):
+    """模板+映射建需（无脚本）时，用集市映射摘要补来源表/字段中文名与处理逻辑。"""
+    import re
+    def split_label(label: str) -> tuple[str, str]:
+        matched = re.match(r"^(.*?)[（(]([^（）()]*)[）)]\s*$", str(label or "").strip())
+        return (matched.group(1).strip(), matched.group(2).strip()) if matched else (str(label or "").strip(), "")
+    for record in content.get("fields") or []:
+        mappings = record.get("mart_mappings") or []
+        if not mappings:
+            continue
+        first = mappings[0]
+        table_cn, table_code = split_label(first.get("mart_table_summary"))
+        field_cn, field_code = split_label(first.get("mart_field_summary"))
+        lineage = record.setdefault("lineage", {}) or {}
+        record["lineage"] = lineage
+        if not (lineage.get("source_table_english_name") or "").strip() and table_code:
+            lineage["source_table_english_name"] = table_code
+        if not (lineage.get("source_table_chinese_name") or "").strip() and table_cn:
+            lineage["source_table_chinese_name"] = table_cn
+        if not (lineage.get("source_field_english_name") or "").strip() and field_code:
+            lineage["source_field_english_name"] = field_code
+        if not (lineage.get("source_field_chinese_name") or "").strip() and field_cn:
+            lineage["source_field_chinese_name"] = field_cn
+        if not (lineage.get("source_system_name") or "").strip():
+            lineage["source_system_name"] = "监管集市"
+        if not (lineage.get("processing_logic") or "").strip():
+            lineage["processing_logic"] = (first.get("final_content") or first.get("business_rule")
+                                           or lineage.get("final_content") or "")
+    return content
 
 
 def _with_live_mart_mappings(db, project_id, content):
