@@ -241,11 +241,13 @@ def build_requirement_input(db, revision, field_ids, sections):
     existing_physical = {(item["kind"], item["table_id"], item["field_id"]) for item in physical}
     mapping_sources: list[dict] = []
     mapped_field_ids: set[int] = set()
+    mart_target_fields: dict[int, set[int]] = {}
     for record in records:
         for mapping in record.get("mart_mappings") or []:
             mart_field_id = mapping.get("mart_field_id")
             if isinstance(mart_field_id, int):
                 mapped_field_ids.add(mart_field_id)
+                mart_target_fields.setdefault(mart_field_id, set()).add(int(record["field"]["id"]))
     if mapped_field_ids:
         mapped_rows = db.execute(
             select(MartTable, MartField)
@@ -280,6 +282,8 @@ def build_requirement_input(db, revision, field_ids, sections):
                 "table_version": str(table.updated_at),
                 "field_version": str(table.updated_at),
                 "source": "field_mapping",
+                "target_field_id": (next(iter(mart_target_fields[field.id]))
+                                    if len(mart_target_fields.get(field.id, set())) == 1 else None),
             })
 
     # 调研表/映射页建立的映射可能没有绑定 MartField（历史数据、手工映射），

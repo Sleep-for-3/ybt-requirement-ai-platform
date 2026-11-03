@@ -104,12 +104,20 @@ def project_candidate_context(frozen: dict, field_id: int, section: str) -> dict
 
 
 def _project_script_basis_to_field(context: dict, field_id: int) -> None:
-    """把整份脚本依据裁到"当前字段"这一列，并把脚本来源限定为该字段。
+    """把整份脚本依据裁到"当前字段"这一列，并把来源限定为该字段。
 
     没有这一步时模型会看到其他字段的规则，实际出现过 F040002 候选写成机构ID定义。
     来源登记在冻结输入里已完成（这样采纳时能按同一份事实解析），这里只做字段级投影，
     不改动 revision 里的固定事实。
+
+    模板+映射建需没有 script_basis，但 mapping_sources 同样必须按字段裁剪，
+    否则模型会把相邻字段的集市映射写进当前字段（F040002 写成 F040012）。
     """
+    context["mapping_sources"] = [
+        item for item in context.get("mapping_sources") or []
+        if item.get("source") not in {"script_basis", "mart_mapping", "field_mapping"}
+        or int(item.get("target_field_id") or 0) == field_id
+    ]
     basis = context.get("script_basis")
     if not basis:
         return
@@ -122,11 +130,6 @@ def _project_script_basis_to_field(context: dict, field_id: int) -> None:
     basis["rules"] = rules
     basis["field_columns"] = sorted(columns)
     if rules:
-        context["mapping_sources"] = [
-            item for item in context.get("mapping_sources") or []
-            if item.get("source") not in {"script_basis", "mart_mapping"}
-            or item.get("target_field_id") == field_id
-        ]
         context.setdefault("limitations", []).append(
             f"本字段的脚本事实只投影 {len(rules)} 条规则（绑定列 {', '.join(sorted(columns))}）；"
             "其他字段规则不参与本次生成。"
