@@ -81,6 +81,7 @@ export function DocumentPreview({
   onShowEvidence,
   onExport,
   onFreezeAndExport,
+  onDownloadArtifact,
   snapshotDiffLoader,
   exporting,
   initialFocusFieldId
@@ -118,6 +119,8 @@ export function DocumentPreview({
   onExport: () => void;
   // 需求模式下导出必须先冻结：调用方负责"冻结 + 导出"，并回报身份信息。
   onFreezeAndExport?: (options: { format: "xlsx" | "docx"; layout: "survey" | "standard" }) => Promise<ExportOutcome | null>;
+  // 成功后允许在弹窗里再次下载同一产物，不必重新冻结。
+  onDownloadArtifact?: (artifactId: string) => Promise<void>;
   // 与"最近一次冻结"的字段级差异；打开预检时现算，避免把过期差异当成事实。
   snapshotDiffLoader?: () => Promise<SnapshotDiff | null>;
   /** 从看板深链进来时带的字段：进入后要定位到它（切到文档预览并高亮）。 */
@@ -130,12 +133,19 @@ export function DocumentPreview({
   const [exportFormat, setExportFormat] = useState<"xlsx" | "docx">("xlsx");
   const [exportLayout, setExportLayout] = useState<"survey" | "standard">("survey");
   const [exportOutcome, setExportOutcome] = useState<ExportOutcome | null>(null);
+  const [downloadingArtifact, setDownloadingArtifact] = useState(false);
+  const exportDialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // 导出完成后把成功摘要滚到可见位置：结果比预检统计更重要。
+    if (exportOutcome) exportDialogRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [exportOutcome]);
   const [freezing, setFreezing] = useState(false);
   const [snapshotDiff, setSnapshotDiff] = useState<SnapshotDiff | null>(null);
   const [snapshotDiffLoading, setSnapshotDiffLoading] = useState(false);
   const [snapshotDiffError, setSnapshotDiffError] = useState("");
   const openPreflight = async () => {
     setShowPreflight(true);
+    setExportOutcome(null);
     if (!snapshotDiffLoader) return;
     setSnapshotDiffLoading(true);
     setSnapshotDiffError("");
@@ -212,9 +222,14 @@ export function DocumentPreview({
       </div>
 
       {showPreflight ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4" role="presentation">
-          <div aria-label="导出前预检" aria-modal="true" className="w-full max-w-lg rounded-lg border border-line bg-white p-5 shadow-xl" role="dialog">
-            <h3 className="text-sm font-semibold text-ink">导出前预检</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => { if (!freezing && !exporting && !downloadingArtifact) setShowPreflight(false); }} role="presentation">
+          <div ref={exportDialogRef} aria-label="导出前预检" aria-modal="true" className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-lg border border-line bg-white p-5 shadow-xl" role="dialog" onClick={(event) => event.stopPropagation()} data-export-state={exportOutcome ? "done" : "preflight"}>
+            <h3 className="text-sm font-semibold text-ink">{exportOutcome ? "导出完成" : "导出前预检"}</h3>
+            {exportOutcome ? (
+              <p className="mt-1 rounded border border-pine-200 bg-pine-50 px-3 py-2 text-xs text-pine-900" role="status">
+                已生成 <strong>{exportOutcome.fileName}</strong>，浏览器下载已触发。文件身份与快照信息见下方，可再次下载或直接关闭。
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-slate-500">
               {onFreezeAndExport
                 ? "只做统计；继续导出会先把当前内容冻结为快照，再按该快照导出——同一内容重复导出得到同一份文件。"
@@ -303,12 +318,27 @@ export function DocumentPreview({
               {traceStats.multiMapping ? <li>· 有 {traceStats.multiMapping} 个字段来自多个集市字段，导出后需业务确认取数口径，不能默认取第一条。</li> : null}
               {traceStats.withGaps ? <li>· 有 {traceStats.withGaps} 个字段仍带打开状态的缺口，导出不等于关闭缺口，送审仍会被阻断。</li> : null}
             </ul>
-            <div className="mt-5 flex justify-end gap-2">
-              <button className="button-secondary" onClick={() => setShowPreflight(false)} type="button">返回修改</button>
-              {onFreezeAndExport ? (
-                <button className="button-primary" disabled={exporting || freezing || surveyBlocked} onClick={() => void runFreezeAndExport()} type="button">{freezing ? "冻结并导出…" : "冻结并导出"}</button>
+            <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-5 flex flex-wrap justify-end gap-2 border-t border-line bg-white/95 px-5 py-3 backdrop-blur">
+              {exportOutcome ? (
+                <>
+                  {onDownloadArtifact && exportOutcome.artifactId && exportOutcome.artifactId !== "未返回" ? (
+                    <button className="button-secondary" disabled={downloadingArtifact} onClick={async () => {
+                      setDownloadingArtifact(true);
+                      try { await onDownloadArtifact(exportOutcome.artifactId); }
+                      finally { setDownloadingArtifact(false); }
+                    }} type="button">{downloadingArtifact ? "下载中…" : "再次下载"}</button>
+                  ) : null}
+                  <button className="button-primary" onClick={() => setShowPreflight(false)} type="button">完成</button>
+                </>
               ) : (
-                <button className="button-primary" disabled={exporting} onClick={() => { setShowPreflight(false); onExport(); }} type="button">{exporting ? "导出中…" : "继续导出"}</button>
+                <>
+                  <button className="button-secondary" onClick={() => setShowPreflight(false)} type="button">返回修改</button>
+                  {onFreezeAndExport ? (
+                    <button className="button-primary" disabled={exporting || freezing || surveyBlocked} onClick={() => void runFreezeAndExport()} type="button">{freezing ? "冻结并导出…" : "冻结并导出"}</button>
+                  ) : (
+                    <button className="button-primary" disabled={exporting} onClick={() => { setShowPreflight(false); onExport(); }} type="button">{exporting ? "导出中…" : "继续导出"}</button>
+                  )}
+                </>
               )}
             </div>
           </div>

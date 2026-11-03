@@ -336,6 +336,15 @@ export function RequirementWorkspace() {
   }
 
   // 需求模式的导出必须先冻结：编辑态内容每次都可能不同，评审拿到文件后无法复现。
+  async function downloadExportArtifact(artifactId: string) {
+    if (!projectId || !requirement) return;
+    try {
+      const file = await apiDownload(`/projects/${projectId}/requirements/${requirement.id}/render-artifacts/${artifactId}/download`);
+      saveBlob(file.blob, file.fileName);
+      setNotice(`已下载 ${file.fileName}`);
+    } catch (cause) { setError(readError(cause, "下载导出文件失败")); }
+  }
+
   async function freezeAndExport(options: { format: "xlsx" | "docx"; layout: "survey" | "standard" }): Promise<ExportOutcome | null> {
     if (!projectId || !requirement) return null;
     if (scopeDirty) { setError("请先保存需求说明后再导出。"); return null; }
@@ -493,6 +502,7 @@ export function RequirementWorkspace() {
               onEditorSaved={() => { setEditorDirty(false); setNotice(requirement ? "本需求内容版本已保存，尚未审核确认。" : "人工内容已保存。"); void refreshWorkspace(); }}
               onExport={() => void exportWorkbook()}
               onFreezeAndExport={requirement ? freezeAndExport : undefined}
+              onDownloadArtifact={requirement ? downloadExportArtifact : undefined}
               snapshotDiffLoader={requirement ? loadSnapshotDiff : undefined}
               onSelectField={changeField}
               onShowEvidence={() => setEvidenceOpen(true)}

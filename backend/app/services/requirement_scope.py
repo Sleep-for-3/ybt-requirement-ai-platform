@@ -11,11 +11,12 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from app.services.office_determinism import normalize_office_bytes
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import (
     Requirement, TargetField, TargetTable, ProductScenario, KnowledgeDocument,
     SourceTable, MartTable, ScenarioBusinessMapping, ScenarioTechnicalLineage,
+    CatalogTable, CatalogColumn,
 )
 from app.services.requirement_workspace_projection import RequirementWorkspaceProjectionService
 
@@ -260,7 +261,70 @@ def document_content(db, row):
         content = revision_document(load_revision(db, row.project_id, row.id, row.content_version))
     else:
         content = live_document_content(db, row)
+    content = _with_script_source_names(db, row.project_id, content)
     return _with_scenario_groups(db, _with_table_meta(db, content))
+
+
+def _with_script_source_names(db, project_id, content):
+    """按固定脚本事实补全来源表/字段的中英文名，不覆盖人工已填内容。
+
+    需求正文只存"加工逻辑"，来源表/字段名过去一直没写进冻结内容，导出文档只能显示
+    "来源系统：待核验"或英文表名。这里在读取时按 field_bindings + 已确认规则回填：
+    - 英文名来自规则 source.table_name / source.column_name；
+    - 中文名来自目录资产 catalog_tables.table_comment / catalog_columns.column_comment；
+    - processing_logic 为空时用技术正文兜底，避免文档写"详见脚本事实"。
+    只补空值、按规则编号排序取第一条，保证同一冻结内容每次得到同一结果。
+    """
+    basis = content.get("script_basis") or {}
+    rules = basis.get("rules") or []
+    bindings = (basis.get("confirmation") or {}).get("field_bindings") or {}
+    if not rules or not bindings:
+        return content
+    columns_by_field: dict[int, set[str]] = {}
+    for column, field_id in bindings.items():
+        columns_by_field.setdefault(int(field_id), set()).add(str(column))
+    for record in content.get("fields") or []:
+        field = record.get("field") or {}
+        field_id = field.get("id")
+        if field_id not in columns_by_field:
+            continue
+        candidates = [rule for rule in rules
+                      if str((rule.get("target") or {}).get("column_name") or "") in columns_by_field[field_id]
+                      and (rule.get("source") or {}).get("column_name")]
+        if not candidates:
+            continue
+        rule = sorted(candidates, key=lambda item: str(item.get("rule_id")))[0]
+        source = rule.get("source") or {}
+        table_name = str(source.get("table_name") or "")
+        column_name = str(source.get("column_name") or "")
+        if not table_name or not column_name:
+            continue
+        table = db.scalar(select(CatalogTable).where(
+            CatalogTable.project_id == project_id,
+            CatalogTable.enabled.is_(True),
+            func.upper(CatalogTable.table_name) == table_name.upper(),
+        ).order_by(CatalogTable.id))
+        column = None
+        if table is not None:
+            column = db.scalar(select(CatalogColumn).where(
+                CatalogColumn.project_id == project_id,
+                CatalogColumn.catalog_table_id == table.id,
+                CatalogColumn.enabled.is_(True),
+                func.upper(CatalogColumn.column_name) == column_name.upper(),
+            ).order_by(CatalogColumn.id))
+        lineage = record.setdefault("lineage", {}) or {}
+        record["lineage"] = lineage
+        if not (lineage.get("source_table_english_name") or "").strip():
+            lineage["source_table_english_name"] = table_name
+        if not (lineage.get("source_table_chinese_name") or "").strip() and table is not None:
+            lineage["source_table_chinese_name"] = table.table_comment
+        if not (lineage.get("source_field_english_name") or "").strip():
+            lineage["source_field_english_name"] = column_name
+        if not (lineage.get("source_field_chinese_name") or "").strip() and column is not None:
+            lineage["source_field_chinese_name"] = column.column_comment
+        if not (lineage.get("processing_logic") or "").strip() and (lineage.get("final_content") or "").strip():
+            lineage["processing_logic"] = lineage["final_content"]
+    return content
 
 
 def live_document_content(db, row):
@@ -363,13 +427,14 @@ def export_document(content):
                 record.get("comment") or "未填写意见",
             ])
     sheet = workbook.create_sheet("字段口径")
-    sheet.append(["字段", "名称", "业务定义", "业务口径", "来源系统", "来源表", "来源字段",
-                  "加工规则", "技术口径", "证据"])
+    sheet.append(["字段", "名称", "业务定义", "业务口径", "来源系统", "来源表中文名", "来源表英文名",
+                  "来源字段中文名", "来源字段英文名", "加工规则", "技术口径", "证据"])
     for record in content["fields"]:
         f, b, t = record["field"], record.get("business") or {}, record.get("lineage") or {}
         sheet.append([f["field_code"], f["field_name"], b.get("business_definition"),
                       b.get("final_content") or b.get("ai_generated_content") or "待确认",
-                      t.get("source_system_name"), t.get("source_table_english_name"), t.get("source_field_english_name"),
+                      t.get("source_system_name"), t.get("source_table_chinese_name"), t.get("source_table_english_name"),
+                      t.get("source_field_chinese_name"), t.get("source_field_english_name"),
                       t.get("processing_logic"), t.get("final_content") or t.get("ai_generated_content") or "待确认",
                       "\n".join(str(e.get("source_name") or e.get("quoted_content") or "已绑定依据") for e in record["evidence"])])
     rules = workbook.create_sheet("双层映射规则")

@@ -10,6 +10,19 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 
+def _source_label(chinese, english):
+    """来源对象统一写成"中文名（英文名）"，缺一侧时明确写待核验，不静默留空。"""
+    chinese = (chinese or "").strip()
+    english = (english or "").strip()
+    if chinese and english:
+        return f"{chinese}（{english}）"
+    if chinese:
+        return f"{chinese}（英文名待核验）"
+    if english:
+        return f"{english}（中文名待核验）"
+    return "待核验"
+
+
 def export_word(content):
     document = Document()
     section = document.sections[0]
@@ -76,6 +89,10 @@ def export_word(content):
         if lineage.get("ai_generated_content"):
             paragraph("AI 技术解释候选", lineage["ai_generated_content"])
         paragraph("来源系统", lineage.get("source_system_name"), "待核验")
+        paragraph("来源表", _source_label(lineage.get("source_table_chinese_name"),
+                                           lineage.get("source_table_english_name")))
+        paragraph("来源字段", _source_label(lineage.get("source_field_chinese_name"),
+                                             lineage.get("source_field_english_name")))
         paragraph("加工规则", lineage.get("processing_logic"), "详见脚本事实，尚需人工核验")
         ownership = content.get("manual_ownership", {}).get(str(field.get("id")), {})
         paragraph("内容维护记录", "；".join(f"{k} {v.get('kind', 'manual')} 确认人 {v.get('actor_id')}" for k, v in ownership.items()), "尚无本需求人工维护记录")

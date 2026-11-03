@@ -74,6 +74,7 @@ def script_preview(db, project_id, version_ids):
                     CatalogClassification.project_id == project_id, CatalogClassification.catalog_table_id == table.id))
                 metadata[table.id] = {"id": table.id, "database_name": table.database_name,
                     "schema_name": table.schema_name, "table_name": table.table_name,
+                    "comment": table.table_comment,
                     "assignment": current_assignment(assignment, architecture),
                     "architecture_revision_id": assignment.architecture_revision_id if assignment else None,
                     "columns": [{"id": c.id, "name": c.column_name, "data_type": c.data_type, "comment": c.column_comment}

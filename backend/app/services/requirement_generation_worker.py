@@ -150,6 +150,11 @@ def seal_candidate(context: dict, candidate: dict) -> dict:
     未登记主张的候选不会被当作「已校验」：报告为 not_evaluated，并追加待人工核对 gap。
     """
     candidate = _sanitize_candidate(context, _attach_rule_physical_references(context, candidate))
+    # 模型偶尔只填 final_content、空着章节专用字段：正文既然已给出，就不要让"加工规则"
+    # 在文档里退化成"详见脚本事实，尚需人工核验"。
+    if candidate.get("final_content"):
+        candidate["business_definition"] = candidate.get("business_definition") or candidate["final_content"]
+        candidate["processing_logic"] = candidate.get("processing_logic") or candidate["final_content"]
     violations = check_candidate_compliance(context, candidate)
     if violations:
         raise HTTPException(422, violations[0])
@@ -212,6 +217,10 @@ def generate_candidate(db, row, item, project):
         "能核对的写成可核对的事实（来源表字段、过滤条件、统计口径、码值规则），"
         "核对不了的口径细节写进 gaps，正文仍须给出可交付的定义本身。"
         "输入 evidence 非空时，evidence_unit_ids 至少引用一条；“无证据”不是可接受的候选。"
+        "\n涉及物理表或字段时，必须同时写出中文业务名与英文技术名，格式如“信贷借据互联网贷款补充信息表"
+        "（hyf_ln_bd_online_info_ext_ybt）的机构编号（branch_no）”；中文名只能来自"
+        "mapping_sources.table_name/field_name 或 script_basis.metadata 的注释，未知就写待核验，不要只写英文表名/字段名。"
+        "processing_logic 必须是完整中文加工口径，不得留空或用“详见脚本事实”代替。"
         "每个字段的正文只描述该字段本身的口径，不得把一个字段的正文写成整表或多个字段的说明"
         "（例如在机构ID 的正文里并列汇率ID、外币币种的定义）。"
         "字段取值是脚本内常量时，正文说明这是脚本固定常量并引用脚本行，不要编造上游表或字段。"

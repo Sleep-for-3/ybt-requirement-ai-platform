@@ -100,5 +100,9 @@ def test_projection_keeps_source_column_identity_and_rule_ids():
     rule = basis["rules"][0]
     # 血缘事实的定位信息必须保留：候选正文里的 script_rule_ids 将来要对得上。
     assert rule["rule_id"] == "script-edge-9"
-    assert rule["source"] == {"schema_name": "SAFE_INSTANCE_GB", "table_name": "HYF_LN_DUEBILL_INFO", "column_name": None}
+    assert rule["source"]["schema_name"] == "SAFE_INSTANCE_GB"
+    assert rule["source"]["table_name"] == "HYF_LN_DUEBILL_INFO"
+    assert rule["source"]["column_name"] is None
+    # 目录 id 必须随投影保留：封存候选时要用它把物理引用补成合规映射。
+    assert "catalog_table_id" in rule["source"] and "catalog_column_id" in rule["source"]
     assert rule["target"]["table_name"] == "T_8_1"

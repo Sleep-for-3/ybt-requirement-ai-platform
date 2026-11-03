@@ -302,6 +302,7 @@ def build_requirement_input(db, revision, field_ids, sections):
                 continue
             table = script_metadata.get(table_id) or {}
             table_name = str(table.get("table_name") or source.get("table_name") or "")
+            table_chinese_name = str(table.get("comment") or "").strip()
             kind = "mart" if table_name.upper().startswith(("HYF_", "BL_", "YBT_")) else "source"
             key = (kind, table_id, field_id_)
             if key in existing_keys:
@@ -310,7 +311,7 @@ def build_requirement_input(db, revision, field_ids, sections):
             column_meta = next((item for item in table.get("columns") or [] if item.get("id") == field_id_), {})
             mapping_sources.append({
                 "kind": kind, "table_id": table_id, "field_id": field_id_,
-                "table_code": table_name, "table_name": table_name,
+                "table_code": table_name, "table_name": table_chinese_name or table_name,
                 "field_code": column_meta.get("name") or source.get("column_name"),
                 "field_name": column_meta.get("comment") or column_meta.get("name") or source.get("column_name"),
                 "field_type": column_meta.get("data_type") or "",
@@ -489,9 +490,13 @@ def _project_script_basis(basis: dict, bound_codes: set[str], limitations: list[
             "rule_id", "script_version_id", "statement_id", "source_line_start", "source_line_end",
             "edge_type", "transformation_type", "confidence_level")}
         compact["source"] = {"schema_name": source.get("schema_name"), "table_name": source.get("table_name"),
-                             "column_name": source.get("column_name")}
+                             "column_name": source.get("column_name"),
+                             "catalog_table_id": source.get("catalog_table_id"),
+                             "catalog_column_id": source.get("catalog_column_id")}
         compact["target"] = {"schema_name": target.get("schema_name"), "table_name": target.get("table_name"),
-                             "column_name": target.get("column_name")}
+                             "column_name": target.get("column_name"),
+                             "catalog_table_id": target.get("catalog_table_id"),
+                             "catalog_column_id": target.get("catalog_column_id")}
         for field in _SCRIPT_TEXT_FIELDS:
             text = rule.get(field)
             if not text:
