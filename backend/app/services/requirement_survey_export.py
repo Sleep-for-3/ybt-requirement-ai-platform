@@ -375,6 +375,10 @@ def _source_values(
         field_cn = (lineage.get("source_field_chinese_name") or "").strip()
         table_en = (lineage.get("source_table_english_name") or "").strip()
         field_en = (lineage.get("source_field_english_name") or "").strip()
+        if table_en.upper() == "YBT_CODE_MAPPING":
+            table_cn = "码值映射表"
+        if field_en.upper() == "YBT_CODE" and table_en.upper() == "YBT_CODE_MAPPING":
+            field_cn = "映射代码"
         if table_en and table_en not in tables:
             tables.insert(0, table_en)
         if field_en and field_en not in columns:
