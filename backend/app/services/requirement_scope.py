@@ -261,9 +261,9 @@ def document_content(db, row):
         content = revision_document(load_revision(db, row.project_id, row.id, row.content_version))
     else:
         content = live_document_content(db, row)
-    content = _with_mapping_source_names(content)
-    content = _with_script_source_names(db, row.project_id, content)
     content = _with_live_mart_mappings(db, row.project_id, content)
+    content = _with_script_source_names(db, row.project_id, content)
+    content = _with_mapping_source_names(content)
     return _with_scenario_groups(db, _with_table_meta(db, content))
 
 
@@ -280,6 +280,11 @@ def _with_mapping_source_names(content):
         first = mappings[0]
         table_cn, table_code = split_label(first.get("mart_table_summary"))
         field_cn, field_code = split_label(first.get("mart_field_summary"))
+        has_cjk = lambda text: any("\u4e00" <= ch <= "\u9fff" for ch in text or "")
+        if not has_cjk(table_cn) and not table_code:
+            table_code, table_cn = table_cn, ""
+        if not has_cjk(field_cn) and not field_code:
+            field_code, field_cn = field_cn, ""
         lineage = record.setdefault("lineage", {}) or {}
         record["lineage"] = lineage
         if not (lineage.get("source_table_english_name") or "").strip() and table_code:
@@ -329,9 +334,14 @@ def _with_live_mart_mappings(db, project_id, content):
         })
     for record in records:
         field_id = record.get("field", {}).get("id")
-        if record.get("mart_mappings") or field_id not in by_field:
+        if field_id not in by_field:
             continue
-        record["mart_mappings"] = by_field[field_id]
+        merged = {item.get("id"): item for item in record.get("mart_mappings") or [] if item.get("id")}
+        for item in by_field[field_id]:
+            # 同一 mapping id 以数据库当前值为准：映射页补中文名/改口径后，
+            # 需求工作台和导出应立即生效，而不是一直用冻结时的旧摘要。
+            merged[item["id"]] = item
+        record["mart_mappings"] = list(merged.values())
     return content
 
 

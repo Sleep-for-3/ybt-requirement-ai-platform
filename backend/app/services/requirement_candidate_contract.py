@@ -115,7 +115,7 @@ def _project_script_basis_to_field(context: dict, field_id: int) -> None:
     """
     context["mapping_sources"] = [
         item for item in context.get("mapping_sources") or []
-        if item.get("source") not in {"script_basis", "mart_mapping", "field_mapping"}
+        if item.get("source") not in {"script_basis", "mart_mapping", "mart_mapping_text", "field_mapping"}
         or int(item.get("target_field_id") or 0) == field_id
     ]
     basis = context.get("script_basis")

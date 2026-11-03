@@ -82,6 +82,8 @@ def _attach_mapping_references(context: dict, candidate: dict) -> dict:
     for item in context.get("mapping_sources") or []:
         if item.get("source") != "mart_mapping":
             continue
+        if not isinstance(item.get("table_id"), int) or not isinstance(item.get("field_id"), int):
+            continue
         key = (item.get("kind"), item.get("table_id"), item.get("field_id"))
         if key in existing:
             continue
@@ -243,6 +245,11 @@ def generate_candidate(db, row, item, project):
         "每个字段的正文只描述该字段本身的口径，不得把一个字段的正文写成整表或多个字段的说明"
         "（例如在机构ID 的正文里并列汇率ID、外币币种的定义）。"
         "字段取值是脚本内常量时，正文说明这是脚本固定常量并引用脚本行，不要编造上游表或字段。"
+        "正文不得出现 table_id、field_id、mart_mapping、physical_sources、script_basis 等内部字段名，"
+        "也不得写“未提供ETL脚本/未提供mapping_sources”这类元描述；内部标识和资料缺口只放 gaps。"
+        "mapping_sources 是该字段已固定的监管集市映射，正文直接写“来源表（英文名）的字段（英文名）”，"
+        "不要复述映射记录编号。source=mart_mapping_text 表示该映射只有表名/字段名事实、"
+        "没有可引用的目录字段ID；正文可以写这条来源，但不要为它编造 physical_references。"
     )
     runtime.system_prompt += (
         "\n可为正文中的可核验主张登记 claims（最多 6 条，只登记正文确实出现、能用固定事实逐项核对的关键结论；每条 text 不超过 60 字，其余论断写进 gaps），每条含 claim_id、section、text、"

@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from app.models import (
     CatalogColumn, CatalogTable,
     KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeUnit, SourceTable, SourceField, MartTable, MartField,
+    MartToYbtMapping,
 )
 from app.services.rag.citation_trust import base_source_title, normalize_version
 from app.services.requirement_pins import pinned_versions_from_content
@@ -184,6 +185,25 @@ def build_requirement_input(db, revision, field_ids, sections):
     scope = content["requirement"]
     selected = set(field_ids)
     records = [record for record in content["fields"] if record["field"]["id"] in selected]
+    # 生成时读取“当前”映射事实，而不是修订时冻结的旧摘要：映射页补中文名/改口径
+    # 后，无需重新采纳一遍正文就能进入生成（否则会一直用旧表名直到重建修订）。
+    live_rows = db.scalars(select(MartToYbtMapping).where(
+        MartToYbtMapping.project_id == revision.project_id,
+        MartToYbtMapping.target_field_id.in_(selected),
+    ).order_by(MartToYbtMapping.id)).all()
+    live_by_field: dict[int, list[dict]] = {}
+    for item in live_rows:
+        live_by_field.setdefault(item.target_field_id, []).append({
+            "id": item.id, "mart_field_id": item.mart_field_id,
+            "mart_table_summary": item.mart_table_summary, "mart_field_summary": item.mart_field_summary,
+            "business_rule": item.business_rule, "final_content": item.final_content,
+            "ai_generated_content": item.ai_generated_content,
+            "mapping_status": getattr(item, "mapping_status", None),
+            "open_questions": getattr(item, "open_questions", None),
+        })
+    for record in records:
+        if live_by_field.get(record["field"]["id"]):
+            record["mart_mappings"] = live_by_field[record["field"]["id"]]
     if not selected or selected != {record["field"]["id"] for record in records}:
         raise HTTPException(422, "生成字段不在固定需求修订范围内")
     project_id = revision.project_id
@@ -303,6 +323,11 @@ def build_requirement_input(db, revision, field_ids, sections):
         for field_id, mapping in unbound:
             table_cn, table_code = split_label(mapping.get("mart_table_summary"))
             field_cn, field_code = split_label(mapping.get("mart_field_summary"))
+            has_cjk = lambda text: any("\u4e00" <= ch <= "\u9fff" for ch in text or "")
+            if not table_code and table_cn and not has_cjk(table_cn):
+                table_code, table_cn = table_cn, ""
+            if not field_code and field_cn and not has_cjk(field_cn):
+                field_code, field_cn = field_cn, ""
             if not table_code or not field_code:
                 continue
             catalog_table = db.scalar(select(CatalogTable).where(
@@ -310,15 +335,24 @@ def build_requirement_input(db, revision, field_ids, sections):
                 CatalogTable.enabled.is_(True),
                 func.upper(CatalogTable.table_name) == table_code.upper(),
             ).order_by(CatalogTable.id))
-            if catalog_table is None:
-                continue
-            catalog_column = db.scalar(select(CatalogColumn).where(
-                CatalogColumn.project_id == project_id,
-                CatalogColumn.catalog_table_id == catalog_table.id,
-                CatalogColumn.enabled.is_(True),
-                func.upper(CatalogColumn.column_name) == field_code.upper(),
-            ).order_by(CatalogColumn.id))
-            if catalog_column is None:
+            catalog_column = None
+            if catalog_table is not None:
+                catalog_column = db.scalar(select(CatalogColumn).where(
+                    CatalogColumn.project_id == project_id,
+                    CatalogColumn.catalog_table_id == catalog_table.id,
+                    CatalogColumn.enabled.is_(True),
+                    func.upper(CatalogColumn.column_name) == field_code.upper(),
+                ).order_by(CatalogColumn.id))
+            if catalog_table is None or catalog_column is None:
+                # 集市表不在目录里（如码值映射表 YBT_CODE_MAPPING）时，仍要把
+                # “来源表→字段”的固定映射作为文字事实提供，否则模型会写成“未提供来源”。
+                mapping_sources.append({
+                    "kind": "mart", "table_id": None, "field_id": None,
+                    "table_code": table_code, "table_name": table_cn or table_code,
+                    "field_code": field_code, "field_name": field_cn or field_code,
+                    "field_type": "", "source": "mart_mapping_text",
+                    "target_field_id": int(field_id),
+                })
                 continue
             kind = "mart" if catalog_table.table_name.upper().startswith(("HYF_", "BL_", "YBT_")) else "source"
             key = (kind, catalog_table.id, catalog_column.id)
