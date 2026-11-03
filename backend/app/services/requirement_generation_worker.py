@@ -247,6 +247,8 @@ def generate_candidate(db, row, item, project):
         "字段取值是脚本内常量时，正文说明这是脚本固定常量并引用脚本行，不要编造上游表或字段。"
         "正文不得出现 table_id、field_id、mart_mapping、physical_sources、script_basis 等内部字段名，"
         "也不得写“未提供ETL脚本/未提供mapping_sources”这类元描述；内部标识和资料缺口只放 gaps。"
+        "正文不得粘贴 SQL 片段或别名（如 COALESCE(...)、P1.CONTRACT_NO、AS F040002、WHERE ...），"
+        "要把空值处理、直取、拼接、过滤条件翻译成中文业务表述；确需保留技术表达式时只放 gaps。"
         "mapping_sources 是该字段已固定的监管集市映射，正文直接写“来源表（英文名）的字段（英文名）”，"
         "不要复述映射记录编号。source=mart_mapping_text 表示该映射只有表名/字段名事实、"
         "没有可引用的目录字段ID；正文可以写这条来源，但不要为它编造 physical_references。"

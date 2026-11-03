@@ -264,7 +264,31 @@ def document_content(db, row):
     content = _with_live_mart_mappings(db, row.project_id, content)
     content = _with_script_source_names(db, row.project_id, content)
     content = _with_mapping_source_names(content)
+    content = _with_readable_lineage(content)
     return _with_scenario_groups(db, _with_table_meta(db, content))
+
+
+def _with_readable_lineage(content):
+    """把正文里残留的脚本别名/SQL 片段清成中文表述（展示层，不改冻结事实）。"""
+    import re
+
+    def readable(text: str) -> str:
+        text = re.sub(r"P\d+\.", "", text or "")
+        text = re.sub(r"AS\s+(F\d{6})", r"写入\1", text, flags=re.I)
+        text = re.sub(r"COALESCE\(([^,()]+),\s*''\)", r"\1（空值转为空字符串）", text, flags=re.I)
+        text = re.sub(r"COALESCE\(([^,()]+),\s*\"\"\)", r"\1（空值转为空字符串）", text, flags=re.I)
+        return text
+    for record in content.get("fields") or []:
+        lineage = record.get("lineage") or {}
+        for key in ("processing_logic", "final_content"):
+            if (lineage.get(key) or "").strip():
+                lineage[key] = readable(lineage[key])
+        for section in ("business", "lineage"):
+            block = record.get(section) or {}
+            for key in ("business_definition", "processing_logic", "final_content"):
+                if (block.get(key) or "").strip():
+                    block[key] = readable(block[key])
+    return content
 
 
 def _with_mapping_source_names(content):

@@ -226,6 +226,40 @@ def _script_columns(rules: list[dict]) -> tuple[str, str]:
     return "；".join(sources), logic
 
 
+def _concise_script_logic(record: Mapping[str, Any], natural: str) -> str:
+    """调研表「处理逻辑」用一句话讲清来源与加工，完整过滤细节留在 DOCX/血缘。"""
+    field = record.get("field") or {}
+    lineage = record.get("lineage") or {}
+    table_cn = (lineage.get("source_table_chinese_name") or lineage.get("source_table_english_name") or "").strip()
+    field_cn = (lineage.get("source_field_chinese_name") or lineage.get("source_field_english_name") or "").strip()
+    field_en = (lineage.get("source_field_english_name") or "").strip()
+    target = f"{field.get('field_name') or ''}（{field.get('field_code') or ''}）"
+    if not table_cn or not field_cn:
+        return natural
+    if table_cn.upper() == "YBT_CODE_MAPPING":
+        table_cn = "码值映射表"
+        field_cn = "映射代码" if field_cn.upper() == "YBT_CODE" else field_cn
+    direct = any(token in natural for token in ("直接", "直通", "原值", "透传"))
+    text = f"取{table_cn}的{field_cn}"
+    if field_en and field_cn != field_en:
+        text += f"（{field_en}）"
+    text += "，原值直接写入" if direct else "，按脚本规则加工后写入"
+    text += target
+    if "空值" in natural or "COALESCE" in natural.upper():
+        text += "，空值按脚本规则处理"
+    if any(token in natural for token in ("过滤", "筛选", "剔除", "数据范围")):
+        text += "；取数范围按脚本固定的关联与过滤条件"
+    return text
+
+
+def _readable_logic(text: str) -> str:
+    import re
+    text = re.sub(r"P\d+\.", "", text or "")
+    text = re.sub(r"AS\s+(F\d{6})", r"写入\1", text, flags=re.I)
+    text = re.sub(r"COALESCE\(([^,()]+),\s*''\)", r"\1（空值转为空字符串）", text, flags=re.I)
+    return text
+
+
 def _logic_type(rule_text: str) -> str:
     if not rule_text:
         return "直取"
@@ -333,13 +367,40 @@ def _source_values(
         # 来源系统只能写平台确实知道的事实：来自脚本事实时写"跑批脚本"，连脚本事实都没有时留空；
         # 绝不能把分组名（如"未登记来源"）当成来源系统写进去，那等于替业务声明存在一个叫这个名字的系统。
         known_source_system = "跑批脚本" if (tables or columns or script_logic) else ""
+        lineage = record.get("lineage") or {}
+        natural_logic = _readable_logic(
+            lineage.get("processing_logic") or lineage.get("final_content") or ""
+        ).strip()
+        table_cn = (lineage.get("source_table_chinese_name") or "").strip()
+        field_cn = (lineage.get("source_field_chinese_name") or "").strip()
+        table_en = (lineage.get("source_table_english_name") or "").strip()
+        field_en = (lineage.get("source_field_english_name") or "").strip()
+        if table_en and table_en not in tables:
+            tables.insert(0, table_en)
+        if field_en and field_en not in columns:
+            columns.insert(0, field_en)
+        if not table_en and "SAFE_DATA_DATE" in (natural_logic + script_logic).upper():
+            field = record.get("field") or {}
+            return {
+                **_EMPTY_SOURCE_VALUES,
+                "source_system": "跑批脚本",
+                "source_logic": (f"取报送数据日期常量 SAFE_DATA_DATE（本次跑批的数据日期），"
+                                 f"直接写入{field.get('field_name') or ''}（{field.get('field_code') or ''}）；"
+                                 "不引用上游业务表字段。"),
+                "source_logic_type": "直取",
+            }
         return {
             **_EMPTY_SOURCE_VALUES,
-            "source_system": known_source_system,
+            "source_system": (lineage.get("source_system_name") or "").strip() or known_source_system,
             "source_table_code": "\n".join(tables),
+            "source_table_name": table_cn or ("\n".join(tables) if len(tables) == 1 else ""),
             "source_field_code": "\n".join(columns),
-            "source_logic": script_logic,
-            "source_logic_type": _logic_type(script_logic) if script_logic else "",
+            "source_field_name": field_cn or ("\n".join(columns) if len(columns) == 1 else ""),
+            # 脚本路径没有集市映射时，优先用需求正文里的中文加工口径；
+            # 直接贴 transformation_expression 会把 Excel「处理逻辑」写成 SQL。
+            "source_logic": (_concise_script_logic(record, natural_logic)
+                             if natural_logic else script_logic),
+            "source_logic_type": _logic_type(natural_logic or script_logic) if (natural_logic or script_logic) else "",
         }
     table_names: list[str] = []
     table_codes: list[str] = []
