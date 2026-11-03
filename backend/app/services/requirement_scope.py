@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from app.models import (
     Requirement, TargetField, TargetTable, ProductScenario, KnowledgeDocument,
     SourceTable, MartTable, ScenarioBusinessMapping, ScenarioTechnicalLineage,
-    CatalogTable, CatalogColumn,
+    CatalogTable, CatalogColumn, MartToYbtMapping,
 )
 from app.services.requirement_workspace_projection import RequirementWorkspaceProjectionService
 
@@ -262,7 +262,45 @@ def document_content(db, row):
     else:
         content = live_document_content(db, row)
     content = _with_script_source_names(db, row.project_id, content)
+    content = _with_live_mart_mappings(db, row.project_id, content)
     return _with_scenario_groups(db, _with_table_meta(db, content))
+
+
+def _with_live_mart_mappings(db, project_id, content):
+    """把当前已登记/已确认的集市→一表通映射补进读取视图，不覆盖冻结内容里已有的。
+
+    需求冻结后用户在映射页新确认的映射，过去不会进入需求工作台和导出统计，导致
+    "确认了映射，导出仍显示 15 个字段无集市映射"。这里按 target_field_id 读取当前
+    映射事实；冻结内容已有的映射保持不变。
+    """
+    records = content.get("fields") or []
+    field_ids = [record.get("field", {}).get("id") for record in records]
+    field_ids = [field_id for field_id in field_ids if isinstance(field_id, int)]
+    if not field_ids:
+        return content
+    rows = list(db.scalars(select(MartToYbtMapping).where(
+        MartToYbtMapping.project_id == project_id,
+        MartToYbtMapping.target_field_id.in_(field_ids),
+    ).order_by(MartToYbtMapping.id)))
+    by_field: dict[int, list[dict]] = {}
+    for row in rows:
+        by_field.setdefault(row.target_field_id, []).append({
+            "id": row.id, "project_id": row.project_id, "target_field_id": row.target_field_id,
+            "mart_field_id": row.mart_field_id, "mapping_name": row.mapping_name,
+            "mapping_status": row.mapping_status,
+            "mart_table_summary": row.mart_table_summary, "mart_field_summary": row.mart_field_summary,
+            "business_rule": row.business_rule, "filter_condition": row.filter_condition,
+            "join_condition": row.join_condition, "code_mapping_rule": row.code_mapping_rule,
+            "null_handling_rule": row.null_handling_rule, "reporting_condition": row.reporting_condition,
+            "validation_rule": row.validation_rule, "open_questions": row.open_questions,
+            "final_content": row.final_content, "confidence_level": row.confidence_level,
+        })
+    for record in records:
+        field_id = record.get("field", {}).get("id")
+        if record.get("mart_mappings") or field_id not in by_field:
+            continue
+        record["mart_mappings"] = by_field[field_id]
+    return content
 
 
 def _with_script_source_names(db, project_id, content):
