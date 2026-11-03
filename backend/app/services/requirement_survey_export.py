@@ -229,7 +229,7 @@ def _script_columns(rules: list[dict]) -> tuple[str, str]:
 def _logic_type(rule_text: str) -> str:
     if not rule_text:
         return "直取"
-    if any(token in rule_text for token in ("直取", "直接取", "直接取值", "同名字段")):
+    if any(token in rule_text for token in ("直取", "直接取", "直接取值", "同名字段", "原值直接写入")):
         return "直取"
     return "加工"
 
@@ -356,8 +356,8 @@ def _source_values(
         field_names.append(field_name or field_code)
         field_codes.append(field_code or field_name)
         rule_text = _text(
-            mapping.get("business_rule")
-            or mapping.get("final_content")
+            mapping.get("final_content")
+            or mapping.get("business_rule")
             or mapping.get("ai_generated_content"),
             "",
         )
