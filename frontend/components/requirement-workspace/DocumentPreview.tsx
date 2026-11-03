@@ -230,12 +230,14 @@ export function DocumentPreview({
                 已生成 <strong>{exportOutcome.fileName}</strong>，浏览器下载已触发。文件身份与快照信息见下方，可再次下载或直接关闭。
               </p>
             ) : null}
+            {exportOutcome ? null : (
             <p className="mt-1 text-xs text-slate-500">
               {onFreezeAndExport
                 ? "只做统计；继续导出会先把当前内容冻结为快照，再按该快照导出——同一内容重复导出得到同一份文件。"
                 : "只做统计，不冻结版本、不修改任何内容。"}
             </p>
-            {onFreezeAndExport ? (
+            )}
+            {onFreezeAndExport && !exportOutcome ? (
               <div className="mt-3 rounded border border-line bg-slate-50/70 px-3 py-2 text-xs">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-slate-500">导出格式</span>
@@ -253,7 +255,7 @@ export function DocumentPreview({
                 {surveyBlocked ? <p className="mt-1 text-amber-700">一表通调研表式只支持 xlsx；要导出 Word 请选平台内置版式。</p> : null}
               </div>
             ) : null}
-            {onFreezeAndExport && snapshotDiffLoader ? (
+            {onFreezeAndExport && !exportOutcome && snapshotDiffLoader ? (
               <section aria-label="与上次冻结相比" className="mt-3 rounded border border-line bg-white px-3 py-2 text-xs">
                 <p className="font-medium text-slate-700">与上次冻结相比</p>
                 {snapshotDiffLoading ? (
