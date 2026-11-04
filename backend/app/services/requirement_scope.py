@@ -17,6 +17,7 @@ from app.models import (
     Requirement, TargetField, TargetTable, ProductScenario, KnowledgeDocument,
     SourceTable, MartTable, ScenarioBusinessMapping, ScenarioTechnicalLineage,
     CatalogTable, CatalogColumn, MartToYbtMapping,
+    SqlStatement,
 )
 from app.services.requirement_workspace_projection import RequirementWorkspaceProjectionService
 
@@ -262,6 +263,7 @@ def document_content(db, row):
     else:
         content = live_document_content(db, row)
     content = _with_live_mart_mappings(db, row.project_id, content)
+    content = _with_script_structure(db, row.project_id, content)
     content = _with_script_source_names(db, row.project_id, content)
     content = _with_mapping_source_names(content)
     content = _with_readable_lineage(content)
@@ -366,6 +368,55 @@ def _with_live_mart_mappings(db, project_id, content):
             # 需求工作台和导出应立即生效，而不是一直用冻结时的旧摘要。
             merged[item["id"]] = item
         record["mart_mappings"] = list(merged.values())
+    return content
+
+
+def _with_script_structure(db, project_id, content):
+    """为脚本依据补上语句结构（别名/投影/关联/过滤）与表/字段中文名。
+
+    旧需求冻结时没有 structure；这里按 statement_id 读取 sql_statements 懒解析，
+    保证已有需求不重新生成也能导出可读的处理逻辑。
+    """
+    basis = content.get("script_basis") or {}
+    if not basis or basis.get("structure"):
+        return content
+    import re
+    statement_ids = [int(item["id"]) for item in basis.get("statements") or [] if item.get("id")]
+    if not statement_ids:
+        return content
+    from app.services.requirement_logic_text import parse_script_structure
+    rows = list(db.scalars(select(SqlStatement).where(
+        SqlStatement.project_id == project_id, SqlStatement.id.in_(statement_ids))))
+    structure = {str(row.id): parse_script_structure(row.normalized_sql, row.dialect) for row in rows}
+    basis["structure"] = structure
+    table_names: set[str] = set()
+    for item in structure.values():
+        for alias in (item.get("aliases") or {}).values():
+            if alias.get("table"):
+                table_names.add(str(alias["table"]).split(".")[-1].upper())
+        for projection in item.get("projections") or []:
+            if projection.get("expression"):
+                for alias in re.findall(r"\b[A-Za-z]\w*\.", projection["expression"]):
+                    table_names.add(alias.rstrip(".").upper())
+    for rule in basis.get("rules") or []:
+        table = str((rule.get("source") or {}).get("table_name") or "")
+        if table:
+            table_names.add(table.split(".")[-1].upper())
+    names: dict[str, dict] = {}
+    if table_names:
+        catalog_rows = list(db.scalars(select(CatalogTable).where(
+            CatalogTable.project_id == project_id,
+            func.upper(CatalogTable.table_name).in_(table_names))))
+        for table in catalog_rows:
+            columns = list(db.scalars(select(CatalogColumn).where(
+                CatalogColumn.project_id == project_id,
+                CatalogColumn.catalog_table_id == table.id)))
+            names[table.table_name.upper()] = {
+                "cn": table.table_comment or "",
+                "columns": {column.column_name.upper(): column.column_comment or ""
+                            for column in columns},
+            }
+    basis["names"] = names
     return content
 
 

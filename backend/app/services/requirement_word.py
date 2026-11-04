@@ -76,6 +76,27 @@ def export_word(content):
         paragraph(label, scope.get(key))
     paragraph("验收要求", scope.get("acceptance_criteria"))
 
+    # 表级取数范围/关联只写一次，字段行不再重复同一套 WHERE/JOIN。
+    basis_for_scope = content.get("script_basis") or {}
+    structure_map = basis_for_scope.get("structure") or {}
+    if structure_map:
+        from app.services.requirement_logic_text import build_table_scope
+        heading("取数范围与关联（脚本级，适用于本表全部字段）")
+        names = basis_for_scope.get("names") or {}
+        statements = {str(item.get("id")): item for item in basis_for_scope.get("statements") or []}
+        target_statements = {str(rule.get("statement_id")) for rule in basis_for_scope.get("rules") or []
+                             if rule.get("statement_id") and (rule.get("target") or {}).get("table_name")}
+        for statement_id, structure in structure_map.items():
+            if target_statements and str(statement_id) not in target_statements:
+                continue
+            statement = statements.get(str(statement_id)) or {}
+            location = ""
+            if statement.get("source_line_start"):
+                location = f"（第{statement['source_line_start']}-{statement.get('source_line_end') or ''}行）"
+            for item in build_table_scope(structure, names):
+                suffix = f"，涉及{item['tables']}" if item.get("tables") else ""
+                paragraph(item.get("category") or "条件", f"{item.get('text')}{suffix}{location}")
+
     heading("字段业务说明")
     for record in content.get("fields", []):
         field = record["field"]

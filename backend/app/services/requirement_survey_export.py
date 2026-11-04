@@ -24,13 +24,18 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from app.services.requirement_logic_text import (
+    build_table_scope,
+    classify_field_logic,
+)
+
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 # 渲染器行为变化必须升版：产物身份（render_identity）含 renderer_version，
 # 否则改了版式却命中旧产物，正式文件内容与代码不一致。
-SURVEY_DOC_VERSION = "survey-requirement-doc-v10"
+SURVEY_DOC_VERSION = "survey-requirement-doc-v11"
 
 #: 表级信息：键 -> (标签, 取值来源)
 #: 表级信息：键 -> (标签, 主取值路径, 备选取值路径)。
@@ -350,6 +355,9 @@ def _source_values(
     mappings: list[Mapping[str, Any]],
     script_logic: str,
     script_sources: str = "",
+    rules: list[Mapping[str, Any]] | None = None,
+    structure: Mapping[str, Any] | None = None,
+    names: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     if not mappings:
         # 没有集市映射：来源表/字段只能来自脚本事实（"表.字段"清单），不能编造。
@@ -383,6 +391,16 @@ def _source_values(
             tables.insert(0, table_en)
         if field_en and field_en not in columns:
             columns.insert(0, field_en)
+        structured = None
+        if rules and structure:
+            field_code = str((record.get("field") or {}).get("field_code") or "")
+            first_rule = next(
+                (item for item in rules
+                 if str((item.get("target") or {}).get("column_name") or "") == field_code
+                 and (item.get("transformation_expression") or "").strip()),
+                None,
+            ) or next((item for item in rules if (item.get("source") or {}).get("column_name")), rules[0])
+            structured = classify_field_logic(first_rule, record.get("field") or {}, structure, names or {})
         if not table_en and "SAFE_DATA_DATE" in (natural_logic + script_logic).upper():
             field = record.get("field") or {}
             return {
@@ -400,11 +418,11 @@ def _source_values(
             "source_table_name": table_cn or ("\n".join(tables) if len(tables) == 1 else ""),
             "source_field_code": "\n".join(columns),
             "source_field_name": field_cn or ("\n".join(columns) if len(columns) == 1 else ""),
-            # 脚本路径没有集市映射时，优先用需求正文里的中文加工口径；
-            # 直接贴 transformation_expression 会把 Excel「处理逻辑」写成 SQL。
-            "source_logic": (_concise_script_logic(record, natural_logic)
-                             if natural_logic else script_logic),
-            "source_logic_type": _logic_type(natural_logic or script_logic) if (natural_logic or script_logic) else "",
+            # 脚本路径没有集市映射时，用结构化分类生成短句；不再用“按脚本规则处理”。
+            "source_logic": (structured.get("text") if structured and structured.get("text")
+                             else (_concise_script_logic(record, natural_logic) if natural_logic else script_logic)),
+            "source_logic_type": (structured.get("logic_type") if structured and structured.get("logic_type")
+                                  else (_logic_type(natural_logic or script_logic) if (natural_logic or script_logic) else "")),
         }
     table_names: list[str] = []
     table_codes: list[str] = []
@@ -655,7 +673,10 @@ def _renderer_fingerprint() -> str:
     语义版本号仍必须按规范手动升。
     """
     try:
-        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+        digest = hashlib.sha256()
+        for source in (Path(__file__), Path(__file__).with_name("requirement_logic_text.py")):
+            digest.update(source.read_bytes())
+        return digest.hexdigest()[:12]
     except OSError:  # pragma: no cover - 源码被删/不可读时不让导出整条失败
         return "unknown"
 
@@ -812,7 +833,13 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
     for record in fields:
         field = record.get("field") or {}
         field_code = str(field.get("field_code") or "")
-        script_sources, script_logic = _script_columns(rules_by_target.get(field_code, []))
+        field_rules = rules_by_target.get(field_code, [])
+        script_sources, script_logic = _script_columns(field_rules)
+        script_basis = content.get("script_basis") or {}
+        structure_map = script_basis.get("structure") or {}
+        statement_id = str((field_rules[0] or {}).get("statement_id")) if field_rules else ""
+        field_structure = structure_map.get(statement_id) if statement_id else None
+        script_names = script_basis.get("names") or {}
         row_values = [
             field_code,
             _text(field.get("field_name"), ""),
@@ -859,7 +886,8 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
                 row_values.extend("" for _ in _SOURCE_COLUMNS)
                 continue
             business = _business_values(record, group, group_mappings[0] if group_mappings else None)
-            source = _source_values(record, group, group_mappings, script_logic, script_sources)
+            source = _source_values(record, group, group_mappings, script_logic, script_sources,
+                                    rules=field_rules, structure=field_structure, names=script_names)
             row_values.extend(business[key] for key, _, _ in _BUSINESS_COLUMNS)
             row_values.extend(source[key] for key, _, _ in _SOURCE_COLUMNS)
         for index, value in enumerate(row_values, start=1):
@@ -927,11 +955,55 @@ def export_survey_document(content: Mapping[str, Any]) -> bytes:
         notes_row += 1
 
     sheet.freeze_panes = sheet.cell(row=header_row + 1, column=3)
+    _append_scope_sheet(workbook, content)
     buffer = BytesIO()
     workbook.save(buffer)
     # openpyxl 会把当前时间写进 docProps/core.xml 与 zip 条目头：跨秒导出会得到
     # 不同字节，冻结产物因此失去意义（真实事故见 office_determinism 模块说明）。
     return normalize_office_bytes(buffer.getvalue())
+
+
+def _append_scope_sheet(workbook, content: Mapping[str, Any]) -> None:
+    """表级取数范围与关联：全表共享条件只写一次，不塞进每个字段的处理逻辑。"""
+    basis = content.get("script_basis") or {}
+    structure_map = basis.get("structure") or {}
+    if not structure_map:
+        return
+    statements = {str(item.get("id")): item for item in basis.get("statements") or []}
+    target_statements = {str(rule.get("statement_id")) for rule in basis.get("rules") or []
+                         if rule.get("statement_id") and (rule.get("target") or {}).get("table_name")}
+    names = basis.get("names") or {}
+    rows: list[list[str]] = []
+    for statement_id, structure in structure_map.items():
+        if target_statements and str(statement_id) not in target_statements:
+            continue
+        statement = statements.get(str(statement_id)) or {}
+        location = ""
+        if statement.get("source_line_start"):
+            location = f"第{statement['source_line_start']}-{statement.get('source_line_end') or ''}行"
+        for item in build_table_scope(structure, names):
+            rows.append([item.get("category") or "", item.get("text") or "",
+                         item.get("tables") or "", location, item.get("raw") or ""])
+    if not rows:
+        return
+    sheet = workbook.create_sheet("取数范围与关联")
+    headers = ["序号", "类别", "业务说明", "涉及表", "脚本位置", "原始条件（审计用）"]
+    for index, label in enumerate(headers, start=1):
+        cell = sheet.cell(row=1, column=index, value=label)
+        cell.font = Font(bold=True)
+        cell.fill = _HEADER_FILL
+        cell.alignment = _CENTER
+        cell.border = _BORDER
+    for index, row in enumerate(rows, start=1):
+        values = [index, row[0], row[1], row[2], row[3], row[4]]
+        for column, value in enumerate(values, start=1):
+            cell = sheet.cell(row=index + 1, column=column, value=value)
+            cell.alignment = _WRAP
+            cell.border = _BORDER
+    for column, width in zip("ABCDEF", (6, 10, 52, 24, 16, 70)):
+        sheet.column_dimensions[column].width = width
+    sheet.column_dimensions["F"].hidden = True
+    sheet.freeze_panes = "A2"
 
 
 __all__ = ["RENDERER_FINGERPRINT", "SURVEY_DOC_VERSION", "export_survey_document", "renderer_version"]

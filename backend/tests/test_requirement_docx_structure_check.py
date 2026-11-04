@@ -128,7 +128,7 @@ def test_customer_template_renderer_is_refused_not_scored():
 
 
 def test_contract_lookup_and_unreadable_payload():
-    contract = contract_for_docx_renderer("builtin-docx-v1")
+    contract = contract_for_docx_renderer("builtin-docx-v4")
     assert contract is not None
     assert contract["required_keys"] == ["title", "meta", "sections", "fields", "content_id"]
     assert contract_for_docx_renderer("customer-template-render-v1") is None

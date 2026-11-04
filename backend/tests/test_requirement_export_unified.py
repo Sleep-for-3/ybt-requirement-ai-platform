@@ -285,7 +285,7 @@ def test_structure_check_verdicts_on_real_artifacts(tmp_path, monkeypatch, snaps
     assert word_body["verdict"] == "pass", word_body
     assert word_body["failed_keys"] == []
     assert word_body["check_version"] == "docx-structure-check-v1"
-    assert word_body["contract"]["renderer_version"] == "builtin-docx-v1"
+    assert word_body["contract"]["renderer_version"] == "builtin-docx-v4"
     assert word_body["artifact"]["format"] == "docx"
 
 

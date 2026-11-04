@@ -30,7 +30,7 @@ from app.services.storage.factory import get_storage_service
 ARTIFACT_SCHEMA_VERSION = "render-artifact-v1"
 
 #: Built-in exports have no customer template; the version pins the renderer code.
-LEGACY_RENDERERS = {"docx": "builtin-docx-v1", "xlsx": "builtin-xlsx-v1"}
+LEGACY_RENDERERS = {"docx": "builtin-docx-v4", "xlsx": "builtin-xlsx-v1"}
 
 MEDIA_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

@@ -11,7 +11,7 @@ from typing import Any
 # "能不能自动验收"是产物自身的属性（格式 + 渲染代次），不是检查结果。
 SCOPE_VERSION = "requirement-acceptance-scope-v1"
 SURVEY_RENDERER_PREFIX = "survey-requirement-doc-"
-BUILTIN_DOCX_RENDERER = "builtin-docx-v1"
+BUILTIN_DOCX_RENDERER = "builtin-docx-v4"
 CUSTOMER_TEMPLATE_PREFIX = "customer-template"
 SCOPE_REASONS: dict[str, str] = {
     "layout_not_survey": "这份 xlsx 是平台内置版式，不是一表通调研表式，没有可自检的表级信息与列组结构。",

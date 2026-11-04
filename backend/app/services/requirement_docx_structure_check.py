@@ -19,7 +19,7 @@ from docx import Document
 DOCX_CHECK_VERSION = "docx-structure-check-v1"
 DOCX_CONTRACT_VERSION = "docx-structure-contract-v1"
 
-BUILTIN_DOCX_RENDERER = "builtin-docx-v1"
+BUILTIN_DOCX_RENDERER = "builtin-docx-v4"
 
 _TITLE = "跑批脚本需求说明"
 _REQUIRED_META = ("需求名称", "文档状态", "固定内容版本", "固定内容标识")
