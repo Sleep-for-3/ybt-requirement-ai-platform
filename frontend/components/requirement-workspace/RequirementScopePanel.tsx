@@ -18,7 +18,9 @@ export function RequirementScopePanel({projectId,tableId,scenarioId,fields,onSel
   if(restored.current || dirty || selected || !items.length)return;
   const params=new URLSearchParams(window.location.search);
   if(Number(params.get("projectId"))!==projectId)return;
-  const row=items.find(item=>item.id===Number(params.get("requirementId")) && item.project_id===projectId && item.target_table_id===tableId && item.scenario_id===scenarioId);
+  const requestedId=Number(params.get("requirementId"));
+  const candidates=items.filter(item=>item.project_id===projectId && item.target_table_id===tableId && item.scenario_id===scenarioId);
+  const row=requestedId?candidates.find(item=>item.id===requestedId):[...candidates].sort((a,b)=>b.id-a.id)[0];
   if(!row)return;
   restored.current=true;
   setSelected(row);setName(row.name);setBackground(row.background||"");setObjective(row.objective||"");setDate(row.effective_date||"");setInclusion(row.inclusion||"");setExclusion(row.exclusion||"");setIds(row.field_ids);onSelect(row);onDirty(false);

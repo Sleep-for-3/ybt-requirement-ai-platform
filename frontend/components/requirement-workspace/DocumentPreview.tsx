@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Download, FileCheck2 } from "lucide-react";
 import Link from "next/link";
@@ -217,7 +217,7 @@ export function DocumentPreview({
           <button className="badge-info cursor-pointer" onClick={onShowEvidence} type="button">证据 {evidenceForSelected} 条</button>
           {requirementId ? <button className="badge-warning" onClick={()=>onTabChange("questions")}>{requirementGaps ? `待确认 ${requirementGaps.length} 项` : "完整性待评估"}</button> : <Link className="badge-warning" href="/questions">人工问题 {openQuestions.length} 项 · 完整性待评估</Link>}
           <span className="badge-neutral">{versionLabel}</span>
-          <button className="button-primary" disabled={!table || exporting} onClick={() => void openPreflight()} type="button"><Download size={15} />{exporting ? "导出中…" : "导出需求文档"}</button>
+          <button className="button-primary" disabled={!table || exporting} onClick={() => void openPreflight()} type="button"><Download size={15} />{exporting ? "导出中…" : requirementId ? "导出需求文档" : "导出目标表底稿"}</button>
         </div>
       </div>
 
@@ -237,6 +237,11 @@ export function DocumentPreview({
                 : "只做统计，不冻结版本、不修改任何内容。"}
             </p>
             )}
+            {!onFreezeAndExport && !exportOutcome ? (
+              <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                当前是“新建需求”空态：这份导出只含目标表字段底稿，不含业务/技术口径。请先在左侧选择已有需求，或填写并保存需求后再导出。
+              </p>
+            ) : null}
             {onFreezeAndExport && !exportOutcome ? (
               <div className="mt-3 rounded border border-line bg-slate-50/70 px-3 py-2 text-xs">
                 <div className="flex flex-wrap items-center gap-2">
