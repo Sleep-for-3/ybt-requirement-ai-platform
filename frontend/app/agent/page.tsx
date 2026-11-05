@@ -129,7 +129,8 @@ export default function AgentWorkspacePage() {
   const create = useMutation({
     mutationFn: (text: string) => apiPost<AgentSnapshot>(`/projects/${projectId}/agent/tasks`, { objective: text, auto_start: true }),
     onSuccess: (data) => {
-      setObjective(""); setNotice("任务已创建并自动开始执行；遇到人工网关会暂停并等待确认。");
+      setObjective("");
+      setNotice("任务已创建，规划与执行在后台进行；只有写交付物的环节才会暂停等待人工确认，问答类任务会直接给出答案。");
       if (data?.task?.id) setPickedTaskId(data.task.id);
       refresh();
     },
@@ -186,9 +187,9 @@ export default function AgentWorkspacePage() {
               placeholder="描述要达成的监管目标，例如：分析二级市场福费廷报送需求，给出证据、缺口与交付物建议" />
             <div className={CHIP}>
               <button className="button-primary" disabled={!projectId || create.isPending} type="submit">
-                <Play size={15} />{create.isPending ? "正在提交…" : "创建并执行任务"}
+                <Play size={15} />{create.isPending ? "正在创建…" : "创建并执行任务"}
               </button>
-              <span className="text-xs text-slate-500">提交后由后端规划受控工具链，不会跳过人工网关。</span>
+              <span className="text-xs text-slate-500">提交后立即返回，规划与执行在后台进行；只读问答直接给答案，只有生成/写入交付物才需要人工确认。</span>
             </div>
           </form>
           {tools.data?.length ? (
@@ -267,6 +268,7 @@ export default function AgentWorkspacePage() {
         ) : null}
         {detail ? (
           <>
+            <AnswerPanel steps={detail.steps || []} />
             <ScenarioPanel scenarioKey={detail.task.scenario_key} summary={detail.task.result_summary} />
             <SubjectPanel busy={action.isPending} onSubmit={(body, stepId) => action.mutateAsync({ path: `/agent/tasks/${detail.task.id}/steps/${stepId}/decision`, body })} steps={detail.steps} summary={detail.task.result_summary} />
             <AdaptivePlanPanel plan={detail.plan} summary={detail.task.result_summary} />
@@ -347,6 +349,12 @@ function HumanGatePanel({ step, plan, busy, onSubmit }: {
   const [comment, setComment] = useState("");
   const [editedJson, setEditedJson] = useState(() => stepInputJson(plan, step.step_key));
   const [error, setError] = useState("");
+  // A clarification gate asks a question ("which field did you mean?"), it does not ask for
+  // approval of a write. Reusing "批准并继续" here made every Q&A look like a write gate.
+  const clarification = step.human_gate_key === "subject_clarification";
+  const labels: Record<AgentDecisionValue, string> = clarification
+    ? { approve: "按所选对象继续", edit_and_approve: "编辑对象后继续", reject: "拒绝该目标", request_reanalysis: "要求重新识别" }
+    : DECISION_LABELS;
   async function submit(decision: AgentDecisionValue) {
     setError("");
     try {
@@ -359,8 +367,13 @@ function HumanGatePanel({ step, plan, busy, onSubmit }: {
   return (
     <section aria-label="人工确认" className="panel border-gold-200">
       <div className="panel-header border-gold-200 bg-gold-50">
-        <h2 className="text-sm font-semibold text-gold-800">人工确认网关 · {step.step_key}</h2>
-        <p className="mt-1 text-xs text-gold-700">智能体已在此暂停，未经确认不会继续执行下游步骤。工具：{step.tool_key}</p>
+        <h2 className="text-sm font-semibold text-gold-800">{clarification ? "需要指定分析对象" : "人工确认网关"} · {step.step_key}</h2>
+        <p className="mt-1 text-xs text-gold-700">
+          {clarification
+            ? "目标里没有唯一匹配的字段或表，请先在下方“分析对象”面板选择对象，再按其继续。问答类任务不会出现此环节。"
+            : "智能体已在此暂停，未经确认不会继续执行下游步骤。"}
+          {" "}工具：{step.tool_key}
+        </p>
       </div>
       <div className="panel-body space-y-3">
         <DList items={[
@@ -385,13 +398,62 @@ function HumanGatePanel({ step, plan, busy, onSubmit }: {
               <button className={primary ? "button-primary" : danger ? "button-danger" : "button-secondary"} disabled={busy}
                 key={decision} onClick={() => void submit(decision)} type="button">
                 {primary ? <Check size={15} /> : danger ? <X size={15} /> : decision === "edit_and_approve" ? <PencilLine size={15} /> : <Undo2 size={15} />}
-                {DECISION_LABELS[decision]}
+                {labels[decision]}
               </button>
             );
           })}
         </div>
       </div>
     </section>
+  );
+}
+
+function AnswerPanel({ steps }: { steps: AgentStep[] }) {
+  const step = (steps || []).find((item) => item.tool_key === "answer_knowledge_question" && item.summary);
+  if (!step) return null;
+  const summary = (step.summary || {}) as Record<string, unknown>;
+  const answer = typeof summary.answer === "string" ? summary.answer : "";
+  const tables = Array.isArray(summary.catalog_tables) ? (summary.catalog_tables as string[]) : [];
+  const fields = Array.isArray(summary.catalog_fields) ? (summary.catalog_fields as string[]) : [];
+  const openQuestions = Array.isArray(summary.open_questions) ? (summary.open_questions as string[]) : [];
+  const grounded = summary.answer_status === "grounded";
+  if (!answer && !tables.length && !fields.length) return null;
+  return (
+    <Section title="问答结果"
+      meta={`${grounded ? "有引用支撑" : "证据有限，结论待确认"} · 引用 ${formatMetric(Number(summary.citation_count ?? 0))} 条 · 只读，未生成交付物`}>
+      <div className="space-y-3">
+        <div>
+          <div className="text-xs font-medium text-slate-500">问题</div>
+          <p className="mt-1 text-sm font-medium text-ink">{String(summary.query ?? "")}</p>
+        </div>
+        {answer ? (
+          <div>
+            <div className="text-xs font-medium text-slate-500">回答</div>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{answer}</p>
+          </div>
+        ) : null}
+        {tables.length || fields.length ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-medium text-slate-500">目录命中的表（{tables.length}）</div>
+              <p className="mt-1 text-sm text-slate-700">{tables.join("、") || "—"}</p>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-slate-500">目录命中的字段（{fields.length}）</div>
+              <p className="mt-1 break-all font-mono text-xs text-slate-700">{fields.join("、") || "—"}</p>
+            </div>
+          </div>
+        ) : null}
+        {openQuestions.length ? (
+          <div>
+            <div className="text-xs font-medium text-slate-500">仍需人工确认</div>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-700">
+              {openQuestions.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Section>
   );
 }
 

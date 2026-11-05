@@ -86,7 +86,8 @@ def create_agent_task(
     task = runtime.create_task(
         db, principal, project, payload.objective, scenario_key=payload.scenario_key,
         adaptive=payload.adaptive,
-        use_llm_planner=payload.use_llm_planner, max_retries=payload.max_retries,
+        use_llm_planner=payload.use_llm_planner, defer_llm_plan=True,
+        max_retries=payload.max_retries,
     )
     if payload.auto_start:
         runtime.submit_task(db, project, principal, task)

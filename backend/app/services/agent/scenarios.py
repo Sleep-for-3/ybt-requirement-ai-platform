@@ -22,6 +22,9 @@ SCENARIO_REGULATORY_FIELD = "regulatory_field_analysis"
 SCENARIO_REQUIREMENT_GENERATION = "requirement_generation"
 SCENARIO_SQL_CHANGE_IMPACT = "sql_change_impact"
 SCENARIO_MAPPING_RESOLUTION = "mapping_resolution"
+# A pure question ("这张表有哪些字段/怎么报送") is not an analysis job: it must be answered
+# from existing knowledge and metadata, never turned into a requirement-generation chain.
+SCENARIO_KNOWLEDGE_QUESTION = "knowledge_question"
 DEFAULT_SCENARIO = SCENARIO_REGULATORY_FIELD
 
 CONFIDENCE_RESOLVED = 0.75
@@ -79,6 +82,16 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         description="分析监管字段的报送口径与当前实现差异。",
         keywords=("口径", "监管", "报送", "字段", "分析", "血缘", "影响"),
         requires_subject=True, plan_key=SCENARIO_REGULATORY_FIELD,
+    ),
+    # A question is answered from existing evidence; it never requires the human to pick a
+    # target field first, and never produces a requirement/mapping deliverable.
+    SCENARIO_KNOWLEDGE_QUESTION: ScenarioSpec(
+        scenario_key=SCENARIO_KNOWLEDGE_QUESTION,
+        label="监管知识问答",
+        description="直接回答监管与元数据问题，只检索和解释，不生成需求、不改数据。",
+        keywords=("有哪些", "哪些字段", "是什么", "什么是", "怎么", "如何", "多少",
+                  "列出", "查一下", "查询", "介绍", "解释", "区别"),
+        requires_subject=False, plan_key=SCENARIO_KNOWLEDGE_QUESTION,
     ),
 }
 SCENARIO_KEYS: tuple[str, ...] = tuple(SCENARIOS)

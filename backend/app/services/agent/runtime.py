@@ -23,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from app.models import (
     AgentArtifact,
@@ -43,6 +43,7 @@ from app.services.agent import state_machine as sm
 from app.services.agent.planner import (
     PlanDraft,
     PlannedStep,
+    SCENARIO_KNOWLEDGE_QUESTION,
     detect_scenario,
     deterministic_plan,
     plan_hash,
@@ -228,6 +229,7 @@ def create_task(
     *,
     scenario_key: str | None = None,
     use_llm_planner: bool = False,
+    defer_llm_plan: bool = False,
     max_retries: int = 3,
     adaptive: bool = True,
 ) -> AgentTask:
@@ -236,6 +238,10 @@ def create_task(
         raise HTTPException(status_code=422, detail={"error_code": "objective_too_short"})
     routing = route_scenario(text)
     scenario = scenario_key or routing.scenario_key
+    if scenario == SCENARIO_KNOWLEDGE_QUESTION:
+        # A pure question has no unexecuted plan to revise; Observation would only add
+        # latency and model cost without changing the answer.
+        adaptive = False
     from app.services.agent.subject import resolve_subject_v2
 
     resolution = resolve_subject_v2(db, project, text)
@@ -249,6 +255,7 @@ def create_task(
         status=sm.TASK_CREATED,
         plan_version=1,
         max_retries=max_retries,
+        adaptive=bool(adaptive),
         created_by=int(principal.user_id or 0),
         result_summary_json={"subject": subject, "subject_resolution": resolution.as_dict(),
                              "scenario_routing": routing.as_dict(), "adaptive": bool(adaptive)},
@@ -263,7 +270,14 @@ def create_task(
     planner_source, degraded_reason = "deterministic", None
     validation_errors: list[str] = []
     planner_attempts = 1
-    if use_llm_planner:
+    if use_llm_planner and defer_llm_plan:
+        # The model plan is produced inside the background job. Planning in the request
+        # path made create-task block for the length of up to two model calls, which is
+        # exactly the "正在提交..." hang the operator saw: the task had already started.
+        summary = dict(task.result_summary_json or {})
+        summary["planner_pending"] = "llm"
+        task.result_summary_json = summary
+    elif use_llm_planner:
         permitted = frozenset(PermissionService(db, principal).effective_project_permissions(project.id))
         llm_draft, metadata, degraded = _run_llm_plan(db, project, text, scenario, subject, permitted)
         metadata = metadata or {}
@@ -391,6 +405,95 @@ def materialize_plan(
     db.flush()
     _refresh_task_status(db, task)
     return plan
+
+
+def _replace_unexecuted_plan(
+    db,
+    task: AgentTask,
+    draft: PlanDraft,
+    *,
+    planner_source: str,
+    degraded_reason: str | None = None,
+    validation_errors: list[str] | None = None,
+    planner_attempts: int = 1,
+) -> AgentPlan | None:
+    """Swap in a new plan while nothing has run yet (deferred model planning).
+
+    Only pending steps are removed: a plan may never be swapped under a started step.
+    """
+
+    started = db.scalar(select(func.count()).select_from(AgentStep).where(
+        AgentStep.task_id == task.id, AgentStep.status != sm.STEP_PENDING)) or 0
+    if int(started) > 0:
+        return None
+    db.execute(delete(AgentStep).where(AgentStep.task_id == task.id))
+    db.flush()
+    return materialize_plan(
+        db, task, draft, planner_source=planner_source, degraded_reason=degraded_reason,
+        created_by=task.created_by, validation_errors=validation_errors,
+        planner_attempts=planner_attempts,
+    )
+
+
+async def _finish_deferred_planning(db, task: AgentTask, project: Project, actor: Principal) -> None:
+    """Run the model planner on the job thread, then swap the still-unexecuted plan.
+
+    The task was created with the governed deterministic plan, so a planner failure
+    only records a degraded reason; the task still runs.
+    """
+
+    summary = dict(task.result_summary_json or {})
+    if summary.get("planner_pending") != "llm":
+        return
+    summary.pop("planner_pending", None)
+    task.result_summary_json = summary
+    db.commit()
+
+    from app.services.agent.planner import plan_with_llm
+
+    permitted = frozenset(PermissionService(db, actor).effective_project_permissions(project.id))
+    degraded: str | None = None
+    metadata: dict[str, Any] = {}
+    llm_draft = None
+    try:
+        llm_draft, metadata, degraded = await plan_with_llm(
+            db, project, objective=task.objective,
+            scenario_key=task.scenario_key or detect_scenario(task.objective),
+            subject=dict(summary.get("subject") or {}),
+            confidentiality=_project_confidentiality(project), permitted=permitted,
+        )
+    except Exception as exc:  # noqa: BLE001 - planning never kills a runnable deterministic plan
+        degraded = f"planner_exception_{type(exc).__name__}"
+        metadata = {"planner_error": str(exc)[:200]}
+    metadata = metadata or {}
+    if metadata:
+        task.model_metadata_json = redact_summary({**dict(task.model_metadata_json or {}), **metadata})
+    if llm_draft is not None:
+        replaced = _replace_unexecuted_plan(
+            db, task, llm_draft, planner_source="llm",
+            validation_errors=[str(item) for item in (metadata.get("plan_validation_errors") or [])],
+            planner_attempts=int(metadata.get("planner_attempts") or 1),
+        )
+        if replaced is not None:
+            record_audit(
+                db, action="agent_deferred_plan", resource_type="agent_task", resource_id=task.id,
+                actor_user_id=actor.user_id, institution_id=task.institution_id,
+                project_id=task.project_id,
+                after={"planner_source": "llm", "step_count": len(llm_draft.steps),
+                       "plan_version": replaced.version_no},
+            )
+            db.commit()
+            return
+        degraded = "plan_swap_refused_steps_started"
+    plan = db.scalar(select(AgentPlan).where(
+        AgentPlan.task_id == task.id, AgentPlan.status == "active",
+    ).order_by(AgentPlan.version_no.desc()))
+    if plan is not None:
+        plan.planner_source = "fallback"
+        plan.degraded_reason = str(degraded or "planner_output_rejected")[:100]
+        plan.validation_errors_json = [str(item) for item in (metadata.get("plan_validation_errors") or [])][:50]
+        plan.planner_attempts = max(1, int(metadata.get("planner_attempts") or 1))
+    db.commit()
 
 
 def submit_task(db, project: Project, principal: Principal, task: AgentTask,
@@ -806,6 +909,7 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
     project = PermissionService(db, actor).require_project_permission(task.project_id, READ_PERMISSION)
     if task.status in sm.TASK_TERMINAL:
         return {"success_count": 1, "failed_count": 0, "task_status": task.status, "note": "task already terminal"}
+    await _finish_deferred_planning(db, task, project, actor)
     _transition_task(task, sm.TASK_RUNNING)
     task.error_code = None
     task.error_message = None

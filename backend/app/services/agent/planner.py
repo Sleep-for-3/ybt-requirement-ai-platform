@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 from sqlalchemy import or_, select
 
 from app.models import Project, TargetField
@@ -43,6 +43,7 @@ PLANNER_SAFETY_PROMPT = (
 MAX_PLAN_STEPS = 24
 
 from app.services.agent.scenarios import (  # noqa: E402  (kept below the constants on purpose)
+    SCENARIO_KNOWLEDGE_QUESTION,
     SCENARIO_MAPPING_RESOLUTION,
     SCENARIO_REQUIREMENT_GENERATION,
     SCENARIO_SQL_CHANGE_IMPACT,
@@ -61,6 +62,12 @@ SCENARIO_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 
 class PlannedStep(ContractModel):
+    # Models routinely add explanatory keys (rules, candidates, confidence, notes) next to
+    # the contract fields. Those keys never reach a tool input (``step.input`` is validated
+    # separately against the registry schema), so ignoring them is safe; forbidding them
+    # only turned every real plan into a validation failure and a silent fallback.
+    model_config = ConfigDict(extra="ignore")
+
     step_key: Key
     tool_key: Key
     reason: str = Field(min_length=1, max_length=2000)
@@ -79,6 +86,8 @@ PATCHABLE_STATUS = "pending"
 
 class PlanPatchOp(ContractModel):
     """One planner-proposed mutation of the *unexecuted* part of the active plan."""
+
+    model_config = ConfigDict(extra="ignore")
 
     op: str = Field(min_length=1, max_length=40)
     step_key: str | None = Field(default=None, max_length=100)
@@ -106,6 +115,8 @@ class PlanPatchOp(ContractModel):
 
 class PlanPatch(ContractModel):
     """A bounded planner revision of a running plan (Observe -> Replan)."""
+
+    model_config = ConfigDict(extra="ignore")
 
     rationale: str = Field(min_length=1, max_length=2000)
     ops: list[PlanPatchOp] = Field(default_factory=list, max_length=MAX_PATCH_OPS)
@@ -161,6 +172,8 @@ def validate_plan_patch(
 
 
 class PlanDraft(ContractModel):
+    model_config = ConfigDict(extra="ignore")
+
     objective: str = Field(min_length=1, max_length=2000)
     scenario_key: str | None = None
     subject: dict[str, Any] = Field(default_factory=dict)
@@ -485,6 +498,14 @@ DETERMINISTIC_PLANS: dict[str, list[dict[str, Any]]] = {
         {"step_key": "create_gap_report", "tool_key": "create_gap_report",
          "reason": "输出缺口、冲突与缺失依据清单，明确不确定项。",
          "depends_on": ["summarize_evidence"], "input": {}},
+    ],
+    SCENARIO_KNOWLEDGE_QUESTION: [
+        {"step_key": "search_metadata", "tool_key": "search_metadata",
+         "reason": "先在元数据目录中定位问题涉及的表、字段与来源实体。",
+         "input": {"top_k": 20}},
+        {"step_key": "answer_question", "tool_key": "answer_knowledge_question",
+         "reason": "基于已授权知识库与上一步检索到的元数据直接回答问题并给出引用；只读，无需人工确认。",
+         "depends_on": ["search_metadata"], "input": {"top_k": 10, "retrieval_mode": "hybrid"}},
     ],
     SCENARIO_SQL_CHANGE_IMPACT: [
         {"step_key": "compare_versions", "tool_key": "compare_sql_versions",

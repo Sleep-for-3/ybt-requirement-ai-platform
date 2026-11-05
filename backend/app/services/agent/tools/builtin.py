@@ -160,6 +160,125 @@ def _search_regulatory_knowledge(ctx: ToolContext) -> ToolResult:
     )
 
 
+# --------------------------------------------------------------------------------------
+# 1b. answer_knowledge_question
+# --------------------------------------------------------------------------------------
+async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
+    """Read-only question answering from published knowledge (with citations).
+
+    A question is a read: this tool never writes a deliverable, never mutates data and
+    never opens a human gate. When the model is unavailable the answer degrades to the
+    retrieved evidence plus metadata hits, and the gap is recorded instead of failing.
+    """
+
+    _require(ctx, "knowledge.search")
+    query = str(ctx.tool_input.get("query") or ctx.task.objective or "").strip()
+    top_k = min(int(ctx.tool_input.get("top_k") or 10), MAX_TOOL_ROWS)
+    mode = str(ctx.tool_input.get("retrieval_mode") or "hybrid")
+    if not query:
+        raise ToolExecutionError("query_required", "知识问答需要 query 或任务目标。")
+    scope = project_scope(ctx.task)
+    confidentiality = confidentiality_of(ctx.project)
+    facts: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    degraded: str | None = None
+
+    from app.services.rag.grounded_answer_service import grounded_answer  # local: keeps startup light
+
+    try:
+        result = await grounded_answer(ctx.db, ctx.project_id, query, top_k=top_k,
+                                       retrieval_mode=mode, commit=False)
+    except Exception as exc:  # noqa: BLE001 - a slow/broken model must not kill the question
+        degraded = "knowledge_answer_unavailable"
+        result = None
+        gaps.append(gap(
+            "knowledge_answer_unavailable",
+            f"知识问答生成不可用（{type(exc).__name__}），本轮只返回检索到的证据。",
+        ).model_dump(mode="json"))
+
+    answer_text = str((result or {}).get("answer") or "").strip()
+    citations = [item for item in ((result or {}).get("citations") or []) if isinstance(item, dict)]
+    answer_status = str((result or {}).get("answer_status") or "needs_confirmation")
+    open_questions = [str(item)[:300] for item in ((result or {}).get("open_questions") or [])][:5]
+
+    for index, item in enumerate(citations[:10]):
+        unit_id = item.get("knowledge_unit_id") or index
+        facts.append(evidence(
+            evidence_id=f"knowledge_citation:{unit_id}",
+            kind="knowledge_citation",
+            value={"label": _clip(item.get("label"), 200),
+                   "quote": _clip(item.get("quoted_content"), 600),
+                   "source_file_name": item.get("source_file_name"),
+                   "source_heading": item.get("source_heading")},
+            source_type="knowledge_document",
+            source_id=unit_id,
+            locator=str(item.get("source_heading") or item.get("label") or "")[:200],
+            scope=scope,
+            confidentiality=confidentiality,
+        ).model_dump(mode="json"))
+
+    if answer_text:
+        facts.append(evidence(
+            evidence_id=f"knowledge_answer:{stable_hash({'q': query})[:16]}",
+            kind="knowledge_answer",
+            value={"question": query, "answer": _clip(answer_text, 1800), "answer_status": answer_status},
+            source_type="knowledge_answer",
+            source_id=ctx.task.id,
+            locator="answer",
+            scope=scope,
+            confidentiality=confidentiality,
+        ).model_dump(mode="json"))
+    if not citations:
+        gaps.append(gap("missing_basis", "本轮没有可引用的知识依据，结论需人工确认。").model_dump(mode="json"))
+
+    # Metadata hits from an earlier step ("这张表有哪些字段") are part of the answer, not a
+    # separate artifact: read them back from the task's own step outputs.
+    rows: list[dict[str, Any]] = []
+    for step in ctx.db.scalars(select(AgentStep).where(AgentStep.task_id == ctx.task.id)
+                               .order_by(AgentStep.id)).all():
+        summary = (step.output_summary_json or {}).get("summary") or {}
+        for row in (summary.get("rows") or [])[:50]:
+            if isinstance(row, dict):
+                rows.append(row)
+    tables = sorted({str(row.get("table_name")) for row in rows if row.get("table_name")})[:10]
+    fields = [f"{row.get('table_name')}.{row.get('column_name')}"
+              for row in rows if row.get("table_name") and row.get("column_name")][:20]
+
+    artifacts = [{
+        "artifact_type": "knowledge_answer",
+        "title": f"问答：{query[:60]}",
+        "status": "draft",
+        "summary": {
+            "question": query, "answer": _clip(answer_text, 1800), "answer_status": answer_status,
+            "citations": [{"label": item.get("label"), "source_heading": item.get("source_heading")}
+                          for item in citations[:10]],
+            "catalog_tables": tables, "catalog_fields": fields, "open_questions": open_questions,
+        },
+        "evidence_refs": [item["id"] for item in facts],
+    }]
+    return ToolResult(
+        facts=facts,
+        gaps=gaps,
+        evidence_refs=[item["id"] for item in facts],
+        artifacts=artifacts,
+        degraded_path=degraded,
+        model_metadata={"answer_status": answer_status, "citation_count": len(citations)},
+        output={
+            "query": query,
+            "answer": _clip(answer_text, 1800),
+            "answer_status": answer_status,
+            "citation_count": len(citations),
+            "catalog_table_count": len(tables),
+            "catalog_field_count": len(fields),
+            "catalog_tables": tables,
+            "catalog_fields": fields,
+            "open_questions": open_questions,
+            "evidence_only": not answer_text,
+        },
+        step_output={"answer_status": answer_status, "citation_count": len(citations)},
+    )
+
+
 MAX_TOKEN_ROWS = MAX_ROWS_PER_SOURCE
 
 
@@ -863,6 +982,32 @@ def register_builtin_tools() -> None:
         handler=_search_metadata,
     ))
     register_tool(AgentToolSpec(
+        tool_key="answer_knowledge_question",
+        display_name="知识问答",
+        description="用项目已发布的知识库与目录元数据直接回答问题并给出引用；只读，不生成交付物，无需人工确认。",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer"},
+                "retrieval_mode": {"type": "string", "enum": ["keyword_only", "vector_only", "hybrid"]},
+            },
+            "additionalProperties": False,
+        },
+        output_schema={"type": "object", "properties": {
+            "answer": {"type": "string"}, "citation_count": {"type": "integer"}}},
+        required_permissions=frozenset({"knowledge.search"}),
+        risk_level="low",
+        timeout_seconds=120,
+        retry_policy={"max_attempts": 1},
+        read_only=True,
+        requires_human_confirmation=False,
+        evidence_contract={"fact_kinds": ["knowledge_citation", "knowledge_answer"],
+                           "policy_kinds": [], "artifact_types": ["knowledge_answer"]},
+        audit_fields=("query", "answer_status", "citation_count"),
+        handler=_answer_knowledge_question,
+    ))
+    register_tool(AgentToolSpec(
         tool_key="get_lineage",
         display_name="查询血缘",
         description="围绕目标字段/集市字段/来源字段/目录列查询上下游血缘路径与边，只读。",
@@ -1002,7 +1147,7 @@ def register_builtin_tools() -> None:
     register_tool(AgentToolSpec(
         tool_key="compare_policy_and_implementation",
         display_name="对比监管要求与实现",
-        description="把已收集的监管条款与实现事实（SQL/血缘/元数据）做结构化比对，输出待人工确认的一致性结论；不自行判定监管合规。",
+        description="把已收集的监管条款与实现事实（SQL/血缘/元数据）做结构化只读比对，输出一致性与缺口结论；不写任何数据，也不需要人工批准即可完成。",
         input_schema={
             "type": "object",
             "properties": {"skill_key": {"type": "string"}, "note": {"type": "string"}},
@@ -1010,11 +1155,11 @@ def register_builtin_tools() -> None:
         },
         output_schema={"type": "object", "properties": {"comparison_count": {"type": "integer"}, "gap_count": {"type": "integer"}}},
         required_permissions=frozenset({"lineage.view"}),
-        risk_level="high",
+        risk_level="medium",
         timeout_seconds=90,
         retry_policy={"max_attempts": 1},
         read_only=True,
-        requires_human_confirmation=True,
+        requires_human_confirmation=False,
         evidence_contract={"fact_kinds": [], "policy_kinds": [], "artifact_types": []},
         audit_fields=("comparison_count", "skill_key"),
         handler=_compare_policy_and_implementation,
@@ -1022,7 +1167,7 @@ def register_builtin_tools() -> None:
     register_tool(AgentToolSpec(
         tool_key="compare_sql_versions",
         display_name="SQL 语义差异分析",
-        description="对比同一脚本两个版本的 SQL（WHERE/JOIN/聚合/CASE/来源字段等），输出需人工确认的口径影响候选；不做合规结论。",
+        description="对比同一脚本两个版本的 SQL（WHERE/JOIN/聚合/CASE/来源字段等），输出只读的口径影响候选；不写数据、不做合规结论、无需人工批准。",
         input_schema={
             "type": "object",
             "properties": {
@@ -1037,11 +1182,11 @@ def register_builtin_tools() -> None:
         output_schema={"type": "object", "properties": {
             "semantic_changed": {"type": "boolean"}, "item_count": {"type": "integer"}}},
         required_permissions=frozenset({"lineage.view"}),
-        risk_level="high",
+        risk_level="medium",
         timeout_seconds=60,
         retry_policy={"max_attempts": 1},
         read_only=True,
-        requires_human_confirmation=True,
+        requires_human_confirmation=False,
         evidence_contract={"fact_kinds": ["sql_semantic_diff"], "policy_kinds": [], "artifact_types": []},
         audit_fields=("script_file_id", "dialect"),
         handler=_compare_sql_versions,

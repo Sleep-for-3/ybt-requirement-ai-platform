@@ -101,7 +101,7 @@ def test_regulatory_field_analysis_reaches_gates_with_governed_evidence(db_sessi
     detail = [(step.step_key, step.status, step.error_code) for step in _steps(db_session, task)]
     assert task.status == sm.TASK_WAITING_HUMAN, detail
     compare_step = next(step for step in _steps(db_session, task) if step.step_key == "compare_policy")
-    assert compare_step.status == sm.STEP_WAITING_HUMAN
+    assert compare_step.status == sm.STEP_COMPLETED, "只读比对不再要求人工确认，应直接留下证据"
     comparisons = (compare_step.output_summary_json or {}).get("policy_comparisons") or []
     assert comparisons, "the comparison must be evidence-linked"
     assert comparisons[0]["status"] == "pending"  # never matched/conflict by the agent itself
@@ -114,7 +114,7 @@ def test_regulatory_field_analysis_reaches_gates_with_governed_evidence(db_sessi
         approved_keys.append(
             _approve_open_gate(db_session, principal, task, job,
                                f"验收确认 #{len(approved_keys) + 1}").step_key)
-    assert approved_keys[0] == "compare_policy"
+    assert "compare_policy" not in approved_keys, "只读比对不得出现在人工门控里"
     assert "generate_requirement_candidate" in approved_keys
     assert "confirm_requirement_candidate" in approved_keys
     # The document is only finished after its own gate was approved.

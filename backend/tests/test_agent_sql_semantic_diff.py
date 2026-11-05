@@ -77,11 +77,13 @@ def _context() -> tuple[Session, ToolContext]:
                            tool_input={"old_sql": OLD_SQL, "new_sql": NEW_SQL})
 
 
-def test_tool_is_registered_as_a_human_gated_high_risk_tool():
+def test_tool_is_registered_as_a_read_only_ungated_tool():
+    """只读比对不是写操作：它给证据和判读，结论仍需人工确认，但工具本身不开人工网关。"""
+
     spec = require_tool("compare_sql_versions")
-    assert spec.requires_human_confirmation is True
-    assert spec.risk_level == "high"
     assert spec.read_only is True
+    assert spec.requires_human_confirmation is False
+    assert spec.risk_level in {"low", "medium"}
     assert spec.evidence_contract["fact_kinds"] == ["sql_semantic_diff"]
     assert spec.required_permissions == frozenset({"lineage.view"})
 

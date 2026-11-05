@@ -33,7 +33,7 @@ from app.services.knowledge_evidence import document_citation, evidence_runtime
 DEGRADED_ANSWER_TEXT = "模型生成暂时不可用，以下为检索到的证据，结论待确认。"
 
 
-async def grounded_answer(db, project_id, query, *, interactive: bool = True, **filters):
+async def grounded_answer(db, project_id, query, *, interactive: bool = True, commit: bool = True, **filters):
     retrieval_log, items = HybridRetriever(db).search(
         project_id,
         query,
@@ -44,6 +44,8 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
         retrieval_mode=filters.get("retrieval_mode", "hybrid"),
         include_history=filters.get("include_history", False),
         historical_as_of=filters.get("historical_as_of"),
+        # Callers inside an agent step own their transaction; committing here would split it.
+        commit=commit,
     )
     if not items:
         return {
@@ -184,7 +186,8 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, **
             pinned_versions=filters.get("pinned_versions") or None,
         )
         claim_support = claim_support_summary(citation_support)
-    db.commit()
+    if commit:
+        db.commit()
     base_confidence = output.get("confidence_level") or (
         "high" if items[0]["rerank_score"] >= 0.75 else "medium")
     if claim_support is not None:
