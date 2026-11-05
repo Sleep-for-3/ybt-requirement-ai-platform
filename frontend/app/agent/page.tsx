@@ -270,7 +270,9 @@ export default function AgentWorkspacePage() {
           <>
             <AnswerPanel steps={detail.steps || []} />
             <ScenarioPanel scenarioKey={detail.task.scenario_key} summary={detail.task.result_summary} />
-            <SubjectPanel busy={action.isPending} onSubmit={(body, stepId) => action.mutateAsync({ path: `/agent/tasks/${detail.task.id}/steps/${stepId}/decision`, body })} steps={detail.steps} summary={detail.task.result_summary} />
+            {detail.task.scenario_key === "knowledge_question" ? null : (
+              <SubjectPanel busy={action.isPending} onSubmit={(body, stepId) => action.mutateAsync({ path: `/agent/tasks/${detail.task.id}/steps/${stepId}/decision`, body })} steps={detail.steps} summary={detail.task.result_summary} />
+            )}
             <AdaptivePlanPanel plan={detail.plan} summary={detail.task.result_summary} />
             <PlanPanel plan={detail.plan} />
             <StepTimeline snapshot={detail} />
@@ -417,10 +419,12 @@ function AnswerPanel({ steps }: { steps: AgentStep[] }) {
   const fields = Array.isArray(summary.catalog_fields) ? (summary.catalog_fields as string[]) : [];
   const openQuestions = Array.isArray(summary.open_questions) ? (summary.open_questions as string[]) : [];
   const grounded = summary.answer_status === "grounded";
+  const metadataOnly = summary.answer_status === "metadata_only";
+  const basis = grounded ? "有引用支撑" : metadataOnly ? "依据元数据目录（未引用监管文档）" : "证据有限，结论待确认";
   if (!answer && !tables.length && !fields.length) return null;
   return (
     <Section title="问答结果"
-      meta={`${grounded ? "有引用支撑" : "证据有限，结论待确认"} · 引用 ${formatMetric(Number(summary.citation_count ?? 0))} 条 · 只读，未生成交付物`}>
+      meta={`${basis} · 引用 ${formatMetric(Number(summary.citation_count ?? 0))} 条 · 只读，未生成交付物`}>
       <div className="space-y-3">
         <div>
           <div className="text-xs font-medium text-slate-500">问题</div>

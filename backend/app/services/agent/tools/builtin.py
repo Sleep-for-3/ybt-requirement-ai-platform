@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -201,6 +202,32 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
     answer_status = str((result or {}).get("answer_status") or "needs_confirmation")
     open_questions = [str(item)[:300] for item in ((result or {}).get("open_questions") or [])][:5]
 
+    # Metadata hits from an earlier step ("这张表有哪些字段") are part of the answer, not a
+    # separate artifact: read them back from the task's own step outputs.
+    rows: list[dict[str, Any]] = []
+    for step in ctx.db.scalars(select(AgentStep).where(AgentStep.task_id == ctx.task.id)
+                               .order_by(AgentStep.id)).all():
+        summary = (step.output_summary_json or {}).get("summary") or {}
+        for row in (summary.get("rows") or [])[:50]:
+            if isinstance(row, dict):
+                rows.append(row)
+    tables = sorted({str(row.get("table_name")) for row in rows if row.get("table_name")})[:10]
+    fields = [f"{row.get('table_name')}.{row.get('column_name')}"
+              for row in rows if row.get("table_name") and row.get("column_name")][:20]
+
+    # 知识库没有文档、但元数据目录能回答"有哪些字段"：用目录事实直接作答，
+    # 并明确标注依据，而不是让用户看到一个空的"证据不足"。
+    if not answer_text and (tables or fields):
+        if fields:
+            answer_text = (f"按项目元数据目录，「{'、'.join(tables[:3])}」共 {len(fields)} 个字段："
+                           f"{'、'.join(fields[:20])}。")
+        else:
+            answer_text = f"项目元数据目录中匹配到 {len(tables)} 张表：{'、'.join(tables[:10])}。"
+        answer_status = "metadata_only"
+        note = "本回答依据项目元数据目录，未引用监管文档；口径以最新发布为准。"
+        if note not in open_questions:
+            open_questions = (open_questions + [note])[:5]
+
     for index, item in enumerate(citations[:10]):
         unit_id = item.get("knowledge_unit_id") or index
         facts.append(evidence(
@@ -230,19 +257,6 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         ).model_dump(mode="json"))
     if not citations:
         gaps.append(gap("missing_basis", "本轮没有可引用的知识依据，结论需人工确认。").model_dump(mode="json"))
-
-    # Metadata hits from an earlier step ("这张表有哪些字段") are part of the answer, not a
-    # separate artifact: read them back from the task's own step outputs.
-    rows: list[dict[str, Any]] = []
-    for step in ctx.db.scalars(select(AgentStep).where(AgentStep.task_id == ctx.task.id)
-                               .order_by(AgentStep.id)).all():
-        summary = (step.output_summary_json or {}).get("summary") or {}
-        for row in (summary.get("rows") or [])[:50]:
-            if isinstance(row, dict):
-                rows.append(row)
-    tables = sorted({str(row.get("table_name")) for row in rows if row.get("table_name")})[:10]
-    fields = [f"{row.get('table_name')}.{row.get('column_name')}"
-              for row in rows if row.get("table_name") and row.get("column_name")][:20]
 
     artifacts = [{
         "artifact_type": "knowledge_answer",
@@ -285,57 +299,128 @@ MAX_TOKEN_ROWS = MAX_ROWS_PER_SOURCE
 # --------------------------------------------------------------------------------------
 # 2. search_metadata
 # --------------------------------------------------------------------------------------
+_QUESTION_TAIL = re.compile(r"(都有哪些|有哪些|有什么|包含哪些|包括哪些|是什么|是哪些|如何|怎么样|怎么|多少|几个|列出|列举|查询|解释|说明)")
+
+
+def _question_core_terms(query: str) -> list[str]:
+    """把「XX表都有哪些字段」截成可检索的核心词，避免拿整句去 ilike。"""
+
+    text = (query or "").strip()
+    if not text:
+        return []
+    match = _QUESTION_TAIL.search(text)
+    if not match or match.start() < 2:
+        return []
+    head = text[: match.start()].strip(" \t，,。.；;：:、?？!！的")
+    if 2 <= len(head) < len(text):
+        return [head]
+    return []
+
+
 def _search_metadata(ctx: ToolContext) -> ToolResult:
     _require(ctx, "catalog.search")
     query = str(ctx.tool_input.get("query") or ctx.task.objective or "").strip()
     top_k = min(int(ctx.tool_input.get("top_k") or 20), MAX_TOOL_ROWS)
     scope = project_scope(ctx.task)
     confidentiality = confidentiality_of(ctx.project)
-    pattern = like_pattern(query)
+    # 整句通常匹配不到（"都有哪些主要字段"是问法，不是表名/字段名），
+    # 所以先用原句、再用截出的核心词各检索一轮，按 id 去重。
+    terms = [query, *_question_core_terms(query)]
     facts: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
-
-    catalog_rows = search_catalog(ctx.db, ctx.project_id, CatalogSearchRequest(query=query, top_k=top_k))
-    for row in catalog_rows:
-        rows.append({"layer": "catalog", **{key: _clip(value, 120) for key, value in row.items()}})
-        facts.append(evidence(
-            evidence_id=f"catalog:{row['catalog_column_id']}",
-            kind="catalog_field",
-            value={
-                "database_name": row.get("database_name"), "schema_name": row.get("schema_name"),
-                "table_name": row.get("table_name"), "column_name": row.get("column_name"),
-                "column_comment": _clip(row.get("column_comment"), 200), "data_type": row.get("data_type"),
-                "score": row.get("score"),
-            },
-            source_type="catalog_column",
-            source_id=row["catalog_column_id"],
-            locator=f"{row.get('schema_name')}.{row.get('table_name')}.{row.get('column_name')}",
-            scope=scope,
-            confidentiality=confidentiality,
-        ).model_dump(mode="json"))
-
+    seen_columns: set[str] = set()
+    seen_entities: set[tuple[str, int]] = set()
     registered = (
         ("source_table", SourceTable, ("table_code", "table_name", "table_comment", "description"), "table_name", "table_code"),
         ("source_field", SourceField, ("field_code", "field_name", "field_comment", "description"), "field_name", "field_code"),
         ("mart_table", MartTable, ("table_code", "table_name", "table_comment", "description"), "table_name", "table_code"),
         ("mart_field", MartField, ("field_code", "field_name", "field_comment", "description"), "field_name", "field_code"),
     )
-    for kind, model, columns, label_attr, code_attr in registered:
-        filters = [getattr(model, name).ilike(pattern, escape="\\") for name in columns if hasattr(model, name)]
-        if not filters:
+    searched: list[str] = []
+    for term in terms:
+        if len(rows) >= top_k:
+            break
+        if not term or term in searched:
             continue
-        for row in ctx.db.scalars(select(model).where(model.project_id == ctx.project_id, or_(*filters)).limit(top_k)).all():
-            rows.append({"layer": kind, "id": row.id, "name": _clip(getattr(row, label_attr), 120), "code": _clip(getattr(row, code_attr), 120)})
+        searched.append(term)
+        pattern = like_pattern(term)
+        catalog_rows = search_catalog(ctx.db, ctx.project_id, CatalogSearchRequest(query=term, top_k=top_k))
+        for row in catalog_rows:
+            if len(rows) >= top_k:
+                break
+            column_id = row["catalog_column_id"]
+            if column_id in seen_columns:
+                continue
+            seen_columns.add(column_id)
+            rows.append({"layer": "catalog", **{key: _clip(value, 120) for key, value in row.items()}})
             facts.append(evidence(
-                evidence_id=f"{kind}:{row.id}",
-                kind=kind,
-                value={"name": getattr(row, label_attr), "code": getattr(row, code_attr)},
-                source_type=kind,
-                source_id=row.id,
-                locator=getattr(row, code_attr),
+                evidence_id=f"catalog:{column_id}",
+                kind="catalog_field",
+                value={
+                    "database_name": row.get("database_name"), "schema_name": row.get("schema_name"),
+                    "table_name": row.get("table_name"), "column_name": row.get("column_name"),
+                    "column_comment": _clip(row.get("column_comment"), 200), "data_type": row.get("data_type"),
+                    "score": row.get("score"),
+                },
+                source_type="catalog_column",
+                source_id=column_id,
+                locator=f"{row.get('schema_name')}.{row.get('table_name')}.{row.get('column_name')}",
                 scope=scope,
                 confidentiality=confidentiality,
             ).model_dump(mode="json"))
+        for kind, model, columns, label_attr, code_attr in registered:
+            if len(rows) >= top_k:
+                break
+            filters = [getattr(model, name).ilike(pattern, escape="\\") for name in columns if hasattr(model, name)]
+            if not filters:
+                continue
+            for row in ctx.db.scalars(select(model).where(model.project_id == ctx.project_id, or_(*filters)).limit(top_k)).all():
+                if len(rows) >= top_k:
+                    break
+                if (kind, row.id) in seen_entities:
+                    continue
+                seen_entities.add((kind, row.id))
+                rows.append({"layer": kind, "id": row.id, "name": _clip(getattr(row, label_attr), 120), "code": _clip(getattr(row, code_attr), 120)})
+                facts.append(evidence(
+                    evidence_id=f"{kind}:{row.id}",
+                    kind=kind,
+                    value={"name": getattr(row, label_attr), "code": getattr(row, code_attr)},
+                    source_type=kind,
+                    source_id=row.id,
+                    locator=getattr(row, code_attr),
+                    scope=scope,
+                    confidentiality=confidentiality,
+                ).model_dump(mode="json"))
+                if kind not in ("source_table", "mart_table"):
+                    continue
+                # 命中表名后把字段一并带回：「这张表有哪些字段」的答案必须落在字段清单上。
+                field_model = SourceField if kind == "source_table" else MartField
+                fk_name = "source_table_id" if kind == "source_table" else "mart_table_id"
+                field_kind = f"{kind}_field"
+                for field_row in ctx.db.scalars(
+                    select(field_model).where(getattr(field_model, fk_name) == row.id)
+                    .order_by(field_model.id).limit(top_k)
+                ).all():
+                    if len(rows) >= top_k:
+                        break
+                    if (field_kind, field_row.id) in seen_entities:
+                        continue
+                    seen_entities.add((field_kind, field_row.id))
+                    column_name = field_row.physical_column_name or field_row.field_name
+                    rows.append({"layer": field_kind, "id": field_row.id,
+                                 "table_name": getattr(row, label_attr), "column_name": column_name,
+                                 "code": field_row.field_code})
+                    facts.append(evidence(
+                        evidence_id=f"{field_kind}:{field_row.id}",
+                        kind=kind,
+                        value={"table_name": getattr(row, label_attr), "column_name": column_name,
+                               "code": field_row.field_code, "comment": _clip(field_row.field_comment, 200)},
+                        source_type=kind,
+                        source_id=field_row.id,
+                        locator=f"{getattr(row, code_attr)}.{field_row.field_code}",
+                        scope=scope,
+                        confidentiality=confidentiality,
+                    ).model_dump(mode="json"))
 
     gaps = []
     if not facts:
@@ -344,8 +429,10 @@ def _search_metadata(ctx: ToolContext) -> ToolResult:
         facts=facts,
         gaps=gaps,
         evidence_refs=[item["id"] for item in facts],
-        output={"query": query, "catalog_match_count": len(catalog_rows), "registered_match_count": len(facts) - len(catalog_rows), "rows": rows[:top_k]},
-        step_output={"catalog_column_ids": [row["catalog_column_id"] for row in catalog_rows], "fact_ids": [item["id"] for item in facts]},
+        output={"query": query, "search_terms": searched, "catalog_match_count": len(seen_columns),
+                "registered_match_count": len(seen_entities), "rows": rows[:top_k]},
+        step_output={"catalog_column_ids": [row["catalog_column_id"] for row in rows if row.get("layer") == "catalog"],
+                     "fact_ids": [item["id"] for item in facts]},
     )
 
 
