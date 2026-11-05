@@ -23,7 +23,7 @@ export default function Page(){
   const visible=(summary.data?.resources||[]).filter(item=>canViewNavigationAudience(item.audience==="all"?undefined:item.audience,access));
   return <main>
     <WorkspaceHeader title="资料与数据" meta="查依据、判权威、看版本，并集中处理资料与数据治理事项。" />
-    <div className="flex gap-3 px-6 pt-4"><Link className="btn-secondary" href="/resources/architecture">数据架构与表归属</Link><Link className="btn-primary" href="/resources/import">统一批量导入</Link></div>
+    <div className="flex gap-3 px-6 pt-4"><Link className="btn-secondary" href="/resources/architecture">数据架构与表归属</Link><Link className="btn-primary" href="/resources/import">批量导入（脚本 / DDL 建表语句 / 字典）</Link></div>
     <div className="mx-auto max-w-6xl space-y-6 p-4 lg:p-6">
       <div className="grid overflow-hidden rounded-xl border border-line bg-white md:grid-cols-2 md:divide-x md:divide-line">
         <section className="space-y-4 border-b border-line p-5 md:border-b-0 md:p-6"><h2 className="text-xl font-semibold">问监管与业务知识</h2><p className="text-sm leading-6 text-slate-600">只从当前生效、已审核并对本项目可见的资料中寻找依据。</p><p className="text-sm text-slate-500">例如：客户证件类型的报送范围和监管依据是什么？</p><Link className="button-primary" href="/knowledge/ask?mode=regulatory">进入监管知识问答</Link></section>

@@ -66,6 +66,35 @@ def fingerprint(db, table):
         "classification": classification.assignment_json if classification else None})
 
 
+def requested_layer_names(options):
+    """Layer names the user picked explicitly (presets or configured names)."""
+    names = []
+    for assignment in [options.get("defaults") or {}, *(options.get("file_options") or {}).values(),
+                       *(options.get("table_options") or {}).values()]:
+        name = str((assignment or {}).get("layer_name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def resolve_options(db, batch):
+    """Resolve import-time layer names to stable layer keys without mutating the batch."""
+    options = deepcopy(batch.options_json or {})
+    architecture = data_architecture.get_architecture(db, project_id=batch.project_id)
+    by_name = {x["name"]: x["key"] for x in architecture.definition_json["layers"] if x["active"]} if architecture else {}
+
+    def resolve(assignment):
+        assignment = dict(assignment or {})
+        if not assignment.get("layer_key") and assignment.get("layer_name"):
+            assignment["layer_key"] = by_name.get(str(assignment["layer_name"]).strip())
+        return assignment
+
+    options["defaults"] = resolve(options.get("defaults"))
+    options["file_options"] = {key: resolve(value) for key, value in (options.get("file_options") or {}).items()}
+    options["table_options"] = {key: resolve(value) for key, value in (options.get("table_options") or {}).items()}
+    return options, architecture
+
+
 def _create_batch_record(db, project, actor_id, key, files, options, storage=None, *, parse):
     if project.institution_id is None:
         raise HTTPException(409, "请先为项目关联机构，再导入受控资料")
@@ -89,12 +118,12 @@ def _create_batch_record(db, project, actor_id, key, files, options, storage=Non
             except ValueError as exc:
                 raise HTTPException(422, "ZIP 安全检查未通过") from exc
             for member in members:
-                if not member.file_name.lower().endswith(".sql"):
-                    raise HTTPException(422, "统一导入的 ZIP 首版仅接受 SQL 文件")
+                if not member.file_name.lower().endswith((".sql", ".ddl", ".txt")):
+                    raise HTTPException(422, "统一导入的 ZIP 仅接受 SQL、DDL、TXT 文件")
                 expanded.append((name + "/" + member.relative_path, member.content))
         else:
-            if PurePosixPath(name).suffix.lower() not in {".sql", ".ddl", ".xlsx"}:
-                raise HTTPException(422, "请选择 SQL、DDL、Excel 或 ZIP")
+            if PurePosixPath(name).suffix.lower() not in {".sql", ".ddl", ".txt", ".xlsx"}:
+                raise HTTPException(422, "请选择 SQL、DDL、TXT、Excel 或 ZIP")
             expanded.append((name, data))
     if not expanded or len(expanded) > 100 or len({name for name, _ in expanded}) != len(expanded):
         raise HTTPException(422, "批次为空、文件过多或相对路径重复")
@@ -132,6 +161,9 @@ def _create_batch_record(db, project, actor_id, key, files, options, storage=Non
         db.add(ResourceImportItem(batch_id=batch.id, relative_path=name, stored_file_id=stored.id,
             file_kind="auto", parsed_json={}, status="pending"))
     db.flush()
+    # 导入时显式选中的层级（如"补录系统"）若尚未配置，在这里补建，保证预览能把
+    # 建表语句归到用户选择的层级；未选择层级的批次不受影响。
+    data_architecture.ensure_layers(db, project, requested_layer_names(options))
     if parse:
         _parse_batch_items(db, batch)
         batch.preview_json = preview(db, batch)
@@ -209,8 +241,8 @@ def parse_batch_handler(db, job):
             "failed_count": failed, "skipped_count": 0}
 
 
-def options_for(batch, item, table=None):
-    options = batch.options_json
+def options_for(batch, item, table=None, options=None):
+    options = options or batch.options_json
     result = dict(options.get("defaults", {}))
     result.update(options.get("file_options", {}).get(item.relative_path, {}))
     if table:
@@ -219,31 +251,43 @@ def options_for(batch, item, table=None):
 
 
 def preview(db, batch):
-    architecture = data_architecture.get_architecture(db, project_id=batch.project_id)
+    options, architecture = resolve_options(db, batch)
     active_layers = {x["key"] for x in architecture.definition_json["layers"] if x["active"]} if architecture else set()
-    assignments = [batch.options_json.get("defaults", {}), *batch.options_json.get("file_options", {}).values(),
-                   *batch.options_json.get("table_options", {}).values()]
+    layer_names = {x["key"]: x["name"] for x in architecture.definition_json["layers"]} if architecture else {}
+    assignments = [options.get("defaults", {}), *options.get("file_options", {}).values(),
+                   *options.get("table_options", {}).values()]
     for assignment in assignments:
+        if assignment.get("layer_name") and not assignment.get("layer_key"):
+            raise HTTPException(422, f"层级“{assignment['layer_name']}”不存在或已停用，请刷新后重试")
         if assignment.get("layer_key") is not None and assignment["layer_key"] not in active_layers:
             raise HTTPException(422, "归属层级不存在或已停用，请先配置项目架构")
         if assignment.get("business_system_id") is not None:
             system = db.get(BusinessSystem, assignment["business_system_id"])
             if system is None or system.project_id != batch.project_id:
                 raise HTTPException(404, "Resource not found")
+    # 忽略建表语句里的库名：真实导出的 ``dm_bappdb_tcyl.xxx`` / ``ODS_YBT.xxx``
+    # 会把同一套层级拆成多个互不相干的离线库，跨层同名表也会互相顶掉。开启后
+    # 资产身份改由"所选层级 + 表名"决定，原库名只留在预览里供核对。
+    ignore_database = bool(options.get("ignore_database"))
     projected = []
     seen = {}
     for item in items(db, batch):
-        settings = options_for(batch, item)
+        settings = options_for(batch, item, options=options)
         entry = {"id": item.id, "path": item.relative_path, "kind": item.file_kind,
             "warnings": item.parsed_json.get("warnings", []), "error": item.parsed_json.get("error"),
             "complete": item.parsed_json.get("complete", False), "decision": settings.get("decision", "preserve"),
             "tables": [], "references": []}
         for raw in item.parsed_json.get("tables", []):
             table = deepcopy(raw)
+            if item.file_kind == "ddl" and ignore_database:
+                table["source_database_name"] = table.get("database_name") or table.get("schema_name") or ""
+                table["database_name"] = (settings.get("database_name")
+                    or layer_names.get(settings.get("layer_key") or "") or "")
+                table["schema_name"] = settings.get("schema_name") or ""
             table["database_name"] = table.get("database_name") or settings.get("database_name", "")
             table["schema_name"] = table.get("schema_name") or settings.get("schema_name") or "main"
             key = table_key(table)
-            table_settings = options_for(batch, item, table)
+            table_settings = options_for(batch, item, table, options)
             matches = find_tables(db, batch.project_id, table)
             target_id = table_settings.get("catalog_table_id")
             if target_id:
@@ -319,6 +363,9 @@ def save_options(db, batch, version, options):
     if changed.rowcount != 1:
         raise HTTPException(409, "预览已更新或已确认，请刷新批次")
     db.refresh(batch)
+    project = db.get(Project, batch.project_id)
+    if project is not None:
+        data_architecture.ensure_layers(db, project, requested_layer_names(options))
     # File kind / dialect are fixed at upload; changing these requires a new batch.
     batch.preview_json = preview(db, batch)
     db.commit()
@@ -470,7 +517,8 @@ def batch_import_handler(db, job):
             db.rollback()
             item = db.get(ResourceImportItem, item_id)
             item.status = "failed"
-            item.result_json = {"error": "导入未应用；请检查解析缺口、冲突确认、归属或资产版本", "error_type": type(exc).__name__}
+            item.result_json = {"error": "导入未应用；请检查解析缺口、冲突确认、归属或资产版本",
+                "error_type": type(exc).__name__, "detail": str(exc)[:300]}
             progress = db.scalar(select(BackgroundJobItem).where(BackgroundJobItem.background_job_id == job.id,
                 BackgroundJobItem.item_key == str(item_id)))
             if progress is None:

@@ -33,7 +33,10 @@ test("generation endpoints get the long budget instead of reporting a false time
     "/projects/1/export/lineage-workbook",
     "/projects/1/knowledge/ask",
     "/projects/1/lineage/edge-explanations",
-    "/ai-runtime/test-chat"
+    "/ai-runtime/test-chat",
+    "/projects/1/resource-imports",
+    "/projects/1/resource-imports/12/preview",
+    "/projects/1/resource-imports/12/apply"
   ]) {
     assert.equal(requestTimeoutMs(path), LONG_REQUEST_TIMEOUT_MS, path);
     assert.equal(isLongRunningRequest(path), true, path);

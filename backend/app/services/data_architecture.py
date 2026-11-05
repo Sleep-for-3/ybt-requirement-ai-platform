@@ -70,6 +70,53 @@ def save_architecture(db, definition, expected_version, *, project_id=None, inst
     return row
 
 
+STANDARD_LAYER_NAMES = ("一表通", "监管集市", "业务系统", "补录系统")
+
+
+def _next_layer_key(layers):
+    used = {layer["key"] for layer in layers}
+    index = 0
+    while f"layer_{index}" in used:
+        index += 1
+    return f"layer_{index}"
+
+
+def ensure_layers(db, project, names):
+    """Create the layers a user explicitly picked while importing a DDL file.
+
+    Import-time layer choice must work for the canonical bank layers (一表通 /
+    监管集市 / 业务系统 / 补录系统) even when the project architecture has not
+    been configured yet.  Existing layers, including disabled ones, keep their
+    stable key: a disabled layer matched by name is re-activated instead of
+    duplicated.  Nothing is created for names that were not requested.
+    """
+    requested = []
+    for name in names or []:
+        name = str(name or "").strip()
+        if name and len(name) <= 100 and name not in requested:
+            requested.append(name)
+    if not requested:
+        return get_architecture(db, project_id=project.id)
+    row = get_architecture(db, project_id=project.id)
+    definition = deepcopy(row.definition_json) if row else {"layers": [], "relations": []}
+    layers = definition["layers"]
+    by_name = {layer["name"]: layer for layer in layers}
+    changed = False
+    for name in requested:
+        layer = by_name.get(name)
+        if layer is None:
+            layer = {"key": _next_layer_key(layers), "name": name, "active": True}
+            layers.append(layer)
+            by_name[name] = layer
+            changed = True
+        elif not layer.get("active", True):
+            layer["active"] = True
+            changed = True
+    if not changed:
+        return row
+    return save_architecture(db, definition, row.version if row else 0, project_id=project.id)
+
+
 def copy_institution_template(db, project, expected_version=0):
     if project.institution_id is None:
         raise HTTPException(409, "项目尚未关联机构")

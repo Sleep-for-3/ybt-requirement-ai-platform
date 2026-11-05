@@ -21,6 +21,8 @@ class Assignment(BaseModel):
     database_name: str = Field(default="", max_length=255)
     schema_name: str = Field(default="", max_length=255)
     layer_key: str | None = Field(default=None, max_length=64)
+    # 导入时可只给出层级名（如"监管集市"）；服务端解析为稳定 key，缺失时自动补建。
+    layer_name: str | None = Field(default=None, max_length=100)
     business_system_id: int | None = None
     catalog_table_id: int | None = None
     decision: Literal["preserve", "merge", "skip"] = "preserve"
@@ -30,6 +32,8 @@ class Assignment(BaseModel):
 class ImportOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dialect: str = Field(default="", max_length=30)
+    # 忽略建表语句里的库名/模式前缀，用所选层级作为离线数据源分组。
+    ignore_database: bool = False
     defaults: Assignment = Field(default_factory=Assignment)
     file_options: dict[str, Assignment] = Field(default_factory=dict, max_length=100)
     table_options: dict[str, Assignment] = Field(default_factory=dict, max_length=1000)

@@ -26,6 +26,9 @@ const LONG_RUNNING_PATH_PATTERNS = [
   /\/export\//,
   /\/knowledge\/ask$/,
   /\/resource-imports$/,
+  // 大 DDL/脚本批次的解析预览与库表落库都会超过 60 s（实测 1734 张表 apply 约 90-100 s）。
+  /\/resource-imports\/\d+\/preview$/,
+  /\/resource-imports\/\d+\/apply$/,
   /\/lineage\/edge-explanations$/,
   /\/ai-runtime\/test-chat$/
 ];

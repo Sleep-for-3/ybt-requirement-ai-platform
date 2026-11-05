@@ -76,10 +76,10 @@ export default function Page() {
     } finally { setTestingId(null); }
   }
 
-  const createAction = <button className="button-primary" disabled={!projectId} onClick={() => setCreateOpen(true)} type="button"><Plus size={16} />新建数据源</button>;
+  const createAction = <div className="flex flex-wrap gap-2"><StatefulLink className="button-secondary" href="/resources/import">从建表语句导入（DDL）</StatefulLink><button className="button-primary" disabled={!projectId} onClick={() => setCreateOpen(true)} type="button"><Plus size={16} />新建数据源</button></div>;
   return (
     <main>
-      <WorkspaceHeader title="数据源" meta="只读连接、元数据同步与安全查询" actions={createAction} />
+      <WorkspaceHeader title="数据源" meta="只读连接、元数据同步与安全查询；也可用库表 DDL 直接导入离线数据源" actions={createAction} />
       <div className="mx-auto max-w-[1400px] p-4 lg:p-6">
         {!projectId ? <PageState kind="empty" title="请选择项目" description="数据源、元数据和连接状态均在项目边界内管理。" /> : null}
         {projectId && state === "loading" ? <PageState kind="loading" title="正在加载数据源" description="正在读取当前项目内可见的数据源。" /> : null}

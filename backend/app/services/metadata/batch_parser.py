@@ -75,6 +75,22 @@ def parse_dictionary(data):
     return {"tables": list(tables.values()), "warnings": warnings, "complete": not warnings}
 
 
+def infer_ddl_dialect(text):
+    """Pick the DDL grammar for vendor exports before any sqlglot call.
+
+    Real bank exports here are Hive/Spark style (``USING parquet``,
+    ``PARTITIONED BY``, ``TBLPROPERTIES``, backtick-quoted ``db.table``).  The
+    generic grammar turns those statements into ``Command`` nodes and the whole
+    file fails with "DDL 未识别表"; the same text parses cleanly as Hive.
+    """
+    sample = text[:200000]
+    if (re.search(r"(?i)\bTBLPROPERTIES\b|\bUSING\s+(?:PARQUET|ORC|TEXT|DELTA|JSON|AVRO)\b|"
+                  r"\bPARTITIONED\s+BY\b|\bROW\s+FORMAT\b", sample) or "`" in sample
+            or re.search(r"(?im)^\s*CREATE\s+(?:EXTERNAL\s+)?TABLE\s+`", sample)):
+        return "hive"
+    return ""
+
+
 def parse_ddl(text, dialect):
     statements = sqlglot.parse(text, read=dialect or None)
     tables, comments, warnings = [], [], []
@@ -113,7 +129,10 @@ def parse_ddl(text, dialect):
                     column["nullable"] = False
         comment = next(statement.find_all(exp.SchemaCommentProperty), None)
         if not columns:
-            raise ValueError("DDL 未包含可识别字段")
+            # 一份真实导出里常混有 ``CREATE TABLE x LIKE y`` / CTAS 这类没有字段
+            # 清单的语句；旧实现直接抛错，会把整份 1000+ 表的 DDL 判为解析失败。
+            warnings.append(f"表 {ref.name} 没有可识别字段定义，已跳过")
+            continue
         tables.append({**location, "table_comment": comment.this.this if comment else "", "columns": columns})
     for comment in comments:
         ref = comment.this
@@ -130,9 +149,11 @@ def parse_ddl(text, dialect):
                 warnings.append("注释引用未知字段")
         else:
             matches[0]["table_comment"] = comment.expression.this
-    if not tables or sum(len(x["columns"]) for x in tables) > DDL_MAX_COLUMNS:
+    if not tables:
+        raise ValueError("DDL 未包含可识别的建表语句（需要 CREATE TABLE 与字段定义）")
+    if sum(len(x["columns"]) for x in tables) > DDL_MAX_COLUMNS:
         raise ValueError(
-            f"DDL 未识别表或字段数超出限制（上限 {DDL_MAX_COLUMNS} 字段，"
+            f"DDL 字段数超出限制（上限 {DDL_MAX_COLUMNS} 字段，"
             "可通过 IMPORT_DDL_MAX_COLUMNS 调整）")
     return {"tables": tables, "warnings": warnings, "complete": not warnings}
 
@@ -165,18 +186,28 @@ def parse_file(data, name, kind="auto", dialect=""):
     # GBase/4A scripts use ``#`` line comments; normalize before any sqlglot call.
     parse_text = strip_hash_comments(text)
     read, dialect_warnings = effective_dialect(dialect)
+    # 数据库导出的建表语句经常直接存成 .txt（例如 ``监管集市ddl.txt``）：先按内容
+    # 判断是否为 Hive/Spark 方言，再决定是否走 DDL 分支，避免整份文件被误判成脚本。
+    ddl_read = read or infer_ddl_dialect(parse_text)
     if kind == "auto":
-        kind = "ddl" if name.lower().endswith(".ddl") else "sql"
-        if kind == "sql":
+        if name.lower().endswith(".ddl"):
+            kind = "ddl"
+        else:
+            # 建表语句里常混有 ``CREATE TABLE ... LIKE`` / CTAS 等 sqlglot 无法展开
+            # 成字段清单的写法（解析为 Command）。只要出现真正的 CREATE TABLE 且没有
+            # DML，就按 DDL 处理：被跳过的语句由 parse_ddl 记入提示，而不是把整份
+            # 1000+ 表的文件误判成脚本。
+            dml = (exp.Insert, exp.Select, exp.Update, exp.Delete, exp.Drop, exp.Alter, exp.Merge)
             try:
-                statements = [x for x in sqlglot.parse(parse_text, read=read or None) if x is not None]
-                if statements and all(isinstance(x, (exp.Comment, exp.Semicolon)) or
-                    (isinstance(x, exp.Create) and x.args.get("kind") == "TABLE" and isinstance(x.this, exp.Schema)) for x in statements):
-                    kind = "ddl"
+                statements = [x for x in sqlglot.parse(parse_text, read=ddl_read or None) if x is not None]
+                tables = [x for x in statements if isinstance(x, exp.Create) and x.args.get("kind") == "TABLE"]
+                has_dml = any(isinstance(x, dml) for x in statements)
+                looks_ddl = bool(tables) or bool(re.search(r"(?i)\bCREATE\s+(?:EXTERNAL\s+)?TABLE\b", parse_text))
+                kind = "ddl" if looks_ddl and not has_dml else "sql"
             except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
-                pass
+                kind = "sql"
     if kind == "ddl":
-        return kind, parse_ddl(text, read)
+        return kind, parse_ddl(text, ddl_read)
     if kind != "sql":
         raise ValueError("不支持的文件类型")
     result = parse_sql_lineage(text, dialect=read)
