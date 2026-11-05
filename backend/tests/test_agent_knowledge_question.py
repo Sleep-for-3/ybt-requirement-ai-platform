@@ -208,7 +208,9 @@ def test_question_falls_back_to_the_table_name_and_returns_its_fields(scope, mon
     db.commit()
 
     async def _no_documents(database, project_id, query, **kwargs):  # 知识库为空，只靠目录
-        return {"answer": "", "answer_status": "needs_confirmation", "citations": []}
+        # 与线上一致：知识检索侧只给一句占位结论，不能拿它当最终回答。
+        return {"answer": "现有知识库没有足够证据，结论待确认。",
+                "answer_status": "needs_confirmation", "citations": []}
 
     monkeypatch.setattr(grounded_answer_service, "grounded_answer", _no_documents)
     task = runtime.create_task(db, scope["principal"], scope["project"], QUESTION, use_llm_planner=False)

@@ -211,17 +211,26 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         for row in (summary.get("rows") or [])[:50]:
             if isinstance(row, dict):
                 rows.append(row)
-    tables = sorted({str(row.get("table_name")) for row in rows if row.get("table_name")})[:10]
+    tables = list(dict.fromkeys(str(row.get("table_name")) for row in rows if row.get("table_name")))[:10]
+    comments = {str(row.get("table_name")): row.get("table_comment")
+                for row in rows if row.get("table_name") and row.get("table_comment")}
     fields = [f"{row.get('table_name')}.{row.get('column_name')}"
               for row in rows if row.get("table_name") and row.get("column_name")][:20]
 
     # 知识库没有文档、但元数据目录能回答"有哪些字段"：用目录事实直接作答，
-    # 并明确标注依据，而不是让用户看到一个空的"证据不足"。
-    if not answer_text and (tables or fields):
-        if fields:
-            answer_text = (f"按项目元数据目录，「{'、'.join(tables[:3])}」共 {len(fields)} 个字段："
-                           f"{'、'.join(fields[:20])}。")
-        else:
+    # 并明确标注依据。模型/知识库那侧常返回"现有知识库没有足够证据"这类占位句，
+    # 只要没有引用支撑就改用目录事实，避免用户看到"什么都没有"。
+    if (not answer_text or answer_status != "grounded") and (tables or fields):
+        primary = tables[0] if tables else ""
+        label = f"{primary}（{comments[primary]}）" if primary and comments.get(primary) else primary
+        primary_fields = [item.split(".", 1)[1] for item in fields if primary and item.startswith(primary + ".")]
+        variants = [name for name in tables[1:]]
+        if primary_fields:
+            lines = [f"按项目元数据目录，{label}的字段共 {len(primary_fields)} 个：{'、'.join(primary_fields[:15])}。"]
+            if variants:
+                lines.append(f"同逻辑表的物理变体还有 {len(variants)} 个：{'、'.join(variants[:5])}。")
+            answer_text = "".join(lines)
+        elif tables:
             answer_text = f"项目元数据目录中匹配到 {len(tables)} 张表：{'、'.join(tables[:10])}。"
         answer_status = "metadata_only"
         note = "本回答依据项目元数据目录，未引用监管文档；口径以最新发布为准。"
