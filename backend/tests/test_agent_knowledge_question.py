@@ -252,3 +252,70 @@ def test_metadata_search_keeps_the_whole_question_first(scope):
     assert _question_core_terms(QUESTION) == ["互联网贷款协议表"]
     assert _question_core_terms("F040001 是什么") == ["F040001"]
     assert _question_core_terms("互联网贷款协议表") == []
+
+def test_physical_table_name_is_matched_exactly(scope, monkeypatch):
+    """问物理表名时不能被相似度更高的别的表挤掉（hyf_ln_pa_online_info 案例）。"""
+
+    from app.models import CatalogColumn, CatalogSchema, CatalogTable, DataSource
+
+    db = scope["db"]
+    datasource = DataSource(
+        project_id=scope["project"].id, name="dm_bappdb_tcyl", db_type="postgresql",
+        connection_params_json={}, readonly_flag=True, enabled=True, last_discovered_schemas_json=[],
+    )
+    db.add(datasource)
+    db.flush()
+    schema = CatalogSchema(project_id=scope["project"].id, datasource_id=datasource.id,
+                           schema_name="dm_bappdb_tcyl", enabled=True)
+    db.add(schema)
+    db.flush()
+
+    def add_table(name: str, comment: str, columns: list[str]) -> None:
+        table = CatalogTable(
+            project_id=scope["project"].id, datasource_id=datasource.id, catalog_schema_id=schema.id,
+            schema_name=schema.schema_name, table_name=name, table_comment=comment, table_type="BASE TABLE",
+            primary_key_columns_json=[], enabled=True,
+        )
+        db.add(table)
+        db.flush()
+        for position, column in enumerate(columns, start=1):
+            db.add(CatalogColumn(
+                project_id=scope["project"].id, datasource_id=datasource.id, catalog_table_id=table.id,
+                schema_name=schema.schema_name, table_name=name, column_name=column, column_comment=column,
+                nullable=True, ordinal_position=position, is_primary_key=False, enabled=True,
+            ))
+
+    add_table("hyf_ln_pa_online_info", "互联网贷款合作机构信息表", ["partner_no", "partner_nam", "partner_typ"])
+    add_table("hyf_bk_inst_info", "机构信息表", ["financial_institution_typ"])
+    db.commit()
+
+    async def _no_documents(database, project_id, query, **kwargs):
+        return {"answer": "现有知识库没有足够证据，结论待确认。",
+                "answer_status": "needs_confirmation", "citations": []}
+
+    monkeypatch.setattr(grounded_answer_service, "grounded_answer", _no_documents)
+    task = runtime.create_task(
+        db, scope["principal"], scope["project"], "hyf_ln_pa_online_info 表有哪些字段", use_llm_planner=False,
+    )
+    job = BackgroundJob(
+        institution_id=scope["project"].institution_id, project_id=scope["project"].id,
+        idempotency_key=f"test-agent-qa-exact-{task.id}", job_type=runtime.AGENT_JOB_TYPE, status="queued",
+        payload_summary_json={"agent_task_id": task.id, "plan_version": task.plan_version},
+        created_by=scope["user"].id,
+    )
+    db.add(job)
+    db.flush()
+    task.background_job_id = job.id
+    db.commit()
+    runtime.run_agent_task(db, job)
+    db.expire_all()
+
+    steps = db.query(AgentStep).filter_by(task_id=task.id).all()
+    answer_step = next(step for step in steps if step.step_key == "answer_question")
+    summary = (answer_step.output_summary_json or {}).get("summary") or {}
+    assert summary.get("answer_status") == "metadata_only"
+    assert summary.get("catalog_tables", [""])[0] == "hyf_ln_pa_online_info", "命中的必须是问句里的物理表"
+    answer = str(summary.get("answer"))
+    assert "hyf_ln_pa_online_info" in answer
+    assert "partner_no" in answer
+    assert "financial_institution_typ" not in answer

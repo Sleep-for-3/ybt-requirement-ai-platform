@@ -14,6 +14,8 @@ from sqlalchemy import func, or_, select
 
 from app.models import (
     AgentStep,
+    CatalogColumn,
+    CatalogTable,
     ImpactAnalysis,
     MartField,
     MartTable,
@@ -211,7 +213,12 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         for row in (summary.get("rows") or [])[:50]:
             if isinstance(row, dict):
                 rows.append(row)
-    tables = list(dict.fromkeys(str(row.get("table_name")) for row in rows if row.get("table_name")))[:10]
+    ordered_tables = list(dict.fromkeys(str(row.get("table_name")) for row in rows if row.get("table_name")))
+    query_key = query.lower().replace("_", "")
+    ordered_tables.sort(key=lambda name: (
+        0 if str(name).lower().replace("_", "") in query_key else 1, len(str(name)),
+    ))
+    tables = ordered_tables[:10]
     comments = {str(row.get("table_name")): row.get("table_comment")
                 for row in rows if row.get("table_name") and row.get("table_comment")}
     fields = [f"{row.get('table_name')}.{row.get('column_name')}"
@@ -377,6 +384,47 @@ def _search_metadata(ctx: ToolContext) -> ToolResult:
                 scope=scope,
                 confidentiality=confidentiality,
             ).model_dump(mode="json"))
+        # 问句里出现的物理表名（hyf_ln_pa_online_info）按相似度排序时容易被别的表挤掉，
+        # 这里对标识符再做一次精确表名查询，保证"这张表有哪些字段"落在正确的表上。
+        for ident in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", term)[:3]:
+            if len(rows) >= top_k:
+                break
+            table_row = ctx.db.scalar(select(CatalogTable).where(
+                CatalogTable.project_id == ctx.project_id,
+                CatalogTable.table_name == ident,
+            ))
+            if table_row is None:
+                continue
+            for column_row in ctx.db.scalars(
+                select(CatalogColumn).where(
+                    CatalogColumn.catalog_table_id == table_row.id,
+                    CatalogColumn.enabled.is_(True),
+                ).order_by(CatalogColumn.id).limit(top_k)
+            ).all():
+                if len(rows) >= top_k:
+                    break
+                if column_row.id in seen_columns:
+                    continue
+                seen_columns.add(column_row.id)
+                rows.append({
+                    "layer": "catalog", "catalog_column_id": column_row.id,
+                    "table_name": table_row.table_name, "table_comment": _clip(table_row.table_comment, 120),
+                    "column_name": column_row.column_name,
+                    "column_comment": _clip(column_row.column_comment, 200),
+                    "data_type": column_row.data_type,
+                })
+                facts.append(evidence(
+                    evidence_id=f"catalog:{column_row.id}",
+                    kind="catalog_field",
+                    value={"table_name": table_row.table_name, "column_name": column_row.column_name,
+                           "column_comment": _clip(column_row.column_comment, 200),
+                           "data_type": column_row.data_type},
+                    source_type="catalog_column",
+                    source_id=column_row.id,
+                    locator=f"{table_row.table_name}.{column_row.column_name}",
+                    scope=scope,
+                    confidentiality=confidentiality,
+                ).model_dump(mode="json"))
         for kind, model, columns, label_attr, code_attr in registered:
             if len(rows) >= top_k:
                 break
