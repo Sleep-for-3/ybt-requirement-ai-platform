@@ -359,31 +359,6 @@ def _search_metadata(ctx: ToolContext) -> ToolResult:
         if not term or term in searched:
             continue
         searched.append(term)
-        pattern = like_pattern(term)
-        catalog_rows = search_catalog(ctx.db, ctx.project_id, CatalogSearchRequest(query=term, top_k=top_k))
-        for row in catalog_rows:
-            if len(rows) >= top_k:
-                break
-            column_id = row["catalog_column_id"]
-            if column_id in seen_columns:
-                continue
-            seen_columns.add(column_id)
-            rows.append({"layer": "catalog", **{key: _clip(value, 120) for key, value in row.items()}})
-            facts.append(evidence(
-                evidence_id=f"catalog:{column_id}",
-                kind="catalog_field",
-                value={
-                    "database_name": row.get("database_name"), "schema_name": row.get("schema_name"),
-                    "table_name": row.get("table_name"), "column_name": row.get("column_name"),
-                    "column_comment": _clip(row.get("column_comment"), 200), "data_type": row.get("data_type"),
-                    "score": row.get("score"),
-                },
-                source_type="catalog_column",
-                source_id=column_id,
-                locator=f"{row.get('schema_name')}.{row.get('table_name')}.{row.get('column_name')}",
-                scope=scope,
-                confidentiality=confidentiality,
-            ).model_dump(mode="json"))
         # 问句里出现的物理表名（hyf_ln_pa_online_info）按相似度排序时容易被别的表挤掉，
         # 这里对标识符再做一次精确表名查询，保证"这张表有哪些字段"落在正确的表上。
         for ident in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", term)[:3]:
@@ -425,6 +400,31 @@ def _search_metadata(ctx: ToolContext) -> ToolResult:
                     scope=scope,
                     confidentiality=confidentiality,
                 ).model_dump(mode="json"))
+        pattern = like_pattern(term)
+        catalog_rows = search_catalog(ctx.db, ctx.project_id, CatalogSearchRequest(query=term, top_k=top_k))
+        for row in catalog_rows:
+            if len(rows) >= top_k:
+                break
+            column_id = row["catalog_column_id"]
+            if column_id in seen_columns:
+                continue
+            seen_columns.add(column_id)
+            rows.append({"layer": "catalog", **{key: _clip(value, 120) for key, value in row.items()}})
+            facts.append(evidence(
+                evidence_id=f"catalog:{column_id}",
+                kind="catalog_field",
+                value={
+                    "database_name": row.get("database_name"), "schema_name": row.get("schema_name"),
+                    "table_name": row.get("table_name"), "column_name": row.get("column_name"),
+                    "column_comment": _clip(row.get("column_comment"), 200), "data_type": row.get("data_type"),
+                    "score": row.get("score"),
+                },
+                source_type="catalog_column",
+                source_id=column_id,
+                locator=f"{row.get('schema_name')}.{row.get('table_name')}.{row.get('column_name')}",
+                scope=scope,
+                confidentiality=confidentiality,
+            ).model_dump(mode="json"))
         for kind, model, columns, label_attr, code_attr in registered:
             if len(rows) >= top_k:
                 break
