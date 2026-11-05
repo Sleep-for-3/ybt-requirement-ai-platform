@@ -213,6 +213,43 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         for row in (summary.get("rows") or [])[:50]:
             if isinstance(row, dict):
                 rows.append(row)
+    # 模型只排了一步"回答"（没有前置 search_metadata）时，这里自己补一次目录检索，
+    # 否则"某表有哪些字段"会退化成一句"证据不足"。
+    if not rows:
+        for term in [query, *_question_core_terms(query)]:
+            if rows:
+                break
+            try:
+                hits = search_catalog(ctx.db, ctx.project_id, CatalogSearchRequest(query=term, top_k=top_k))
+            except Exception:  # noqa: BLE001 - 目录不可用不应让问答整体失败
+                hits = []
+            for hit in hits:
+                rows.append({"table_name": hit.get("table_name"), "column_name": hit.get("column_name"),
+                             "table_comment": hit.get("table_comment"),
+                             "catalog_column_id": hit.get("catalog_column_id")})
+            for ident in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", term)[:3]:
+                table_row = ctx.db.scalar(select(CatalogTable).where(
+                    CatalogTable.project_id == ctx.project_id, CatalogTable.table_name == ident,
+                ))
+                if table_row is None:
+                    continue
+                for column_row in ctx.db.scalars(select(CatalogColumn).where(
+                    CatalogColumn.catalog_table_id == table_row.id, CatalogColumn.enabled.is_(True),
+                ).order_by(CatalogColumn.id).limit(top_k)).all():
+                    rows.append({"table_name": table_row.table_name, "column_name": column_row.column_name,
+                                 "table_comment": _clip(table_row.table_comment, 120),
+                                 "catalog_column_id": column_row.id})
+
+    seen_pairs: set[tuple[str, str]] = set()
+    unique_rows: list[dict[str, Any]] = []
+    for row in rows:
+        key = (str(row.get("table_name") or ""), str(row.get("column_name") or ""))
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        unique_rows.append(row)
+    rows = unique_rows
+
     ordered_tables = list(dict.fromkeys(str(row.get("table_name")) for row in rows if row.get("table_name")))
     query_key = query.lower().replace("_", "")
     ordered_tables.sort(key=lambda name: (
@@ -243,6 +280,27 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         note = "本回答依据项目元数据目录，未引用监管文档；口径以最新发布为准。"
         if note not in open_questions:
             open_questions = (open_questions + [note])[:5]
+
+    existing_fact_ids = {item.get("id") for item in facts}
+    for row in rows:
+        column_id = row.get("catalog_column_id")
+        if not column_id:
+            continue
+        fact_id = f"catalog:{column_id}"
+        if fact_id in existing_fact_ids:
+            continue
+        facts.append(evidence(
+            evidence_id=fact_id,
+            kind="catalog_field",
+            value={"table_name": row.get("table_name"), "column_name": row.get("column_name"),
+                   "column_comment": row.get("column_comment") or row.get("table_comment")},
+            source_type="catalog_column",
+            source_id=column_id,
+            locator=f"{row.get('table_name')}.{row.get('column_name')}",
+            scope=scope,
+            confidentiality=confidentiality,
+        ).model_dump(mode="json"))
+        existing_fact_ids.add(fact_id)
 
     for index, item in enumerate(citations[:10]):
         unit_id = item.get("knowledge_unit_id") or index
