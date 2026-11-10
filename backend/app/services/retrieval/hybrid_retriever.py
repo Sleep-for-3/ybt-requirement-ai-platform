@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_, select
 
@@ -12,7 +13,9 @@ from app.services.vector import get_vector_store
 
 from .keyword_index import (DEFAULT_BM25_B, DEFAULT_BM25_K1, BM25Stats, compute_bm25_stats,
                             load_unit_statistics, score_bm25, tokenize, token_matches)
-from .query_expansion import INTENT_TYPES, detect_intent, expand_query, matched_scenarios
+from .query_expansion import (INTENT_TYPES, detect_history_intent, detect_intent,
+                              detect_systems, expand_query, extract_field_codes,
+                              extract_table_codes, matched_scenarios, unit_system)
 from .reranker import rerank_items
 from app.services.knowledge_evidence import unit_locator
 from app.services.knowledge_eligibility import governed_unit_predicates, governed_document_visible
@@ -58,8 +61,17 @@ class HybridRetriever:
             scenario = self.db.get(ProductScenario, scenario_id)
             if scenario is None or scenario.project_id != project_id:
                 raise ValueError("Scenario not found in project")
+        # 历史意图词（"上一版/旧版"）必须切到历史分支，否则只会返回当前版本，
+        # "上一版规则是什么" 就会答成当前版。
+        history_hint = detect_history_intent(query)
+        if history_hint:
+            include_history = True
+        # One request time governs both the keyword SQL predicates and the
+        # vector-candidate re-read, so an expiring version cannot survive one
+        # branch while being filtered out by the other.
+        reference_time = historical_as_of or datetime.now(timezone.utc)
         historical = bool(include_history or historical_as_of)
-        predicates = governed_unit_predicates(project_id, historical=historical, historical_as_of=historical_as_of)
+        predicates = governed_unit_predicates(project_id, historical=historical, historical_as_of=historical_as_of, reference_time=reference_time)
         if knowledge_types:
             predicates.append(KnowledgeUnit.knowledge_type.in_(knowledge_types))
         if scenario_id:
@@ -92,6 +104,12 @@ class HybridRetriever:
             scenario_names = matched_scenarios(query, list(scenario_ids_by_name))
         scenario_ids = {scenario_ids_by_name[name] for name in scenario_names}
         intent = detect_intent(query) if expansion_enabled else None
+        # "EAST 的…怎么转成…" and "1104 的…" produce near-identical conversion
+        # rows; naming a system must nudge that system up without hard-filtering
+        # (a two-system question keeps both sides).
+        query_systems = detect_systems(query) if expansion_enabled else set()
+        query_field_codes = extract_field_codes(query) if expansion_enabled else set()
+        query_table_codes = extract_table_codes(query) if expansion_enabled else set()
         tokens = tokenize(
             " ".join(
                 filter(
@@ -159,6 +177,11 @@ class HybridRetriever:
         fragments: dict[int, dict] = {}
         active_index = None
         effective_retrieval_mode = retrieval_mode
+        # Requested vs effective mode must stay distinguishable in the retrieval
+        # log: hybrid degrades to keyword when a project has no formal index yet,
+        # and that degradation has to be diagnosable after the fact.
+        requested_retrieval_mode = retrieval_mode
+        degradation_reason = None
         if retrieval_mode in {"vector_only", "hybrid"}:
             if settings.vector_store_provider == "milvus":
                 active_index = get_active_index_version(self.db, project_id)
@@ -171,6 +194,7 @@ class HybridRetriever:
                     # its first formal index. Keyword retrieval is the explicit
                     # degradation path and is reported through index freshness.
                     effective_retrieval_mode = "keyword_only"
+                    degradation_reason = "no_active_formal_index"
                 else:
                     embedding = get_embedding_service()
                     query_vector = embed_with_observability(
@@ -266,6 +290,8 @@ class HybridRetriever:
         authority_boost = _setting_float(settings, "retrieval_authority_boost", 0.15)
         scenario_boost = _setting_float(settings, "query_expansion_scenario_boost", 0.12)
         intent_boost = _setting_float(settings, "query_intent_boost", 0.18)
+        system_boost = _setting_float(settings, "retrieval_system_boost", 0.12)
+        field_boost = _setting_float(settings, "retrieval_field_boost", 0.12)
         if retrieval_mode == "keyword_only":
             keyword_weight, vector_weight = 1.0, 0.0
         elif retrieval_mode == "vector_only":
@@ -323,7 +349,7 @@ class HybridRetriever:
                 continue
             document = document_by_id.get(unit.document_id)
             version = version_by_id.get(unit.document_version_id)
-            if not document or not version or not _governed_visible(document, version, project_id, project.bank_name, historical):
+            if not document or not version or not _governed_visible(document, version, project_id, project.bank_name, historical, reference_time=reference_time):
                 continue
             keyword_score = normalized_keyword.get(unit_id, 0.0)
             vector_score = normalized_vector.get(unit_id, 0.0)
@@ -368,10 +394,43 @@ class HybridRetriever:
             # ``final_score`` at 1.0, but two strong candidates with the rule boost hit
             # that cap together and a clamped-score sort would fall back to ``-id``,
             # dropping the genuinely better fused candidate below an older, weaker one.
+            system_bonus = 0.0
+            if query_systems:
+                unit_system_name = unit_system(unit.source_sheet_name, unit.content)
+                if unit_system_name in query_systems:
+                    system_bonus = system_boost
+                    reasons.append(f"报送体系匹配（{unit_system_name}）")
+            field_bonus = 0.0
+            if query_field_codes and unit.target_field_code:
+                if str(unit.target_field_code).upper() in query_field_codes:
+                    field_bonus = field_boost
+                    reasons.append("字段代码精确命中")
+            # 多证据题常问 "8.13 的单户授信总额和表外用信余额分别怎么填"：表号写进了
+            # 问题，但两张表的单元在语义上并不一定排前面。只有原文确实以该表号
+            # 作为主表/副表时才加分，避免把 "V2.0.0" 之类的数字误当表号。
+            table_bonus = 0.0
+            if query_table_codes and not field_bonus:
+                unit_content = unit.content or ""
+                for table_code in query_table_codes:
+                    if (f"表号（主）：{table_code}" in unit_content
+                            or f"表号（副）：{table_code}" in unit_content):
+                        table_bonus = field_boost
+                        reasons.append("表号精确命中")
+                        break
+            # "上一版规则是什么" must prefer the superseded version over the
+            # current one; without this the current text wins on similarity.
+            history_bonus = 0.0
+            if history_hint and version.version_no != document.current_version_no:
+                history_bonus = _setting_float(settings, "retrieval_history_boost", 0.25)
+                reasons.append("历史版本匹配")
             ranking_score = (
                 fused.get(unit_id, 0.0)
                 + rule_boost
                 + authority_bonus
+                + system_bonus
+                + field_bonus
+                + table_bonus
+                + history_bonus
                 + (intent_boost if intent_hit else 0.0)
             )
             ranking_by_id[unit_id] = ranking_score
@@ -412,8 +471,44 @@ class HybridRetriever:
                 "fragment": fragments.get(unit.id),
                 "metadata_json": unit.metadata_json,
                 "historical": historical and version.lifecycle_status != "active",
+                # A superseded-by-number version can still be lifecycle "active"
+                # in legacy data; history questions need the number comparison.
+                "is_old_version": version.version_no != document.current_version_no,
             })
-        items = _order_items(items, ranking_by_id, authority_mode)[:top_k]
+        ordered = _order_items(items, ranking_by_id, authority_mode)
+        # 去重：同一版本 + 同一 Sheet/单元格 + 同一内容哈希的重复解析行只留一条；
+        # 不同单元、不同位置（互补条款）一律保留。
+        deduped: list[dict] = []
+        seen_positions: set[tuple] = set()
+        for item in ordered:
+            position = (
+                item.get("document_version_id"),
+                item.get("source_sheet_name"),
+                item.get("source_cell_range"),
+                item.get("content_hash"),
+            )
+            if all(value is not None for value in position) and position in seen_positions:
+                continue
+            seen_positions.add(position)
+            deduped.append(item)
+        ordered = deduped
+        # "上一版规则是什么" asks for the superseded version; the current text is
+        # usually the stronger similarity match, so history questions put old
+        # versions first explicitly instead of relying on a small score bump.
+        if history_hint:
+            old_versions = [item for item in ordered if item.get("is_old_version")]
+            current_versions = [item for item in ordered if not item.get("is_old_version")]
+            ordered = old_versions + current_versions
+        # 跨体系题：每个体系先占住自己的名额，再按原序补足，避免一方证据
+        # 被另一方的同名字段整片挤掉（"EAST 和 1104 分别…"）。
+        if len(query_systems) >= 2:
+            ordered = _system_quota_order(ordered, query_systems, top_k)
+        # 未点明体系、但窗口被单一文档族占满时，保留一个其他族的最高分候选，
+        # 防止跨体系正确条款卡在窗口第 11 位。开关用于对照实验：关掉即可回到
+        # 上一轮 `e2e-20261107c` 的排序行为。
+        if getattr(settings, "retrieval_sheet_diversity_enabled", True):
+            ordered = _sheet_diversity_order(ordered, top_k)
+        items = ordered[:top_k]
         # The reranker is inert unless settings.reranker_enabled is True; when it
         # is on it refines ordering inside an authority tier and degrades to the
         # order above on any failure.
@@ -430,6 +525,16 @@ class HybridRetriever:
                 "knowledge_types": knowledge_types or [],
                 "embedding_index_version_id": active_index.id if active_index else None,
                 "collection": active_index.collection_name if active_index else None,
+                "requested_mode": requested_retrieval_mode,
+                "effective_mode": effective_retrieval_mode,
+                "degradation_reason": degradation_reason,
+                "candidate_count": len(ids),
+                "eligible_count": len(items),
+                "systems": sorted(query_systems),
+                "field_codes": sorted(query_field_codes),
+                "table_codes": sorted(query_table_codes),
+                "history_hint": history_hint,
+                "system_quota_applied": len(query_systems) >= 2,
                 "keyword_weight": keyword_weight,
                 "vector_weight": vector_weight,
                 "fusion_strategy": fusion_strategy,
@@ -487,6 +592,65 @@ def _order_items(
         ),
         reverse=True,
     )
+
+
+def _sheet_diversity_order(items: list[dict], top_k: int, context_size: int = 12) -> list[dict]:
+    """Keep the answer-model window from being filled by the *dominant* document family.
+
+    On a corpus where one sheet dominates (e.g. 5512 一表通 vs 157 转EAST), a
+    question that does not name a system can have its top-10 window filled
+    entirely by the dominant sheet, pushing a correct cross-system clause to
+    position 11. If the window holds only one sheet **and that sheet dominates
+    the candidate pool** (>= 90%), swap its last slot with the highest-ranked
+    candidate from another sheet.
+
+    The dominance guard matters: a window filled by a minority sheet (e.g. all
+    转1104 candidates) is normal, and swapping its 10th slot would push the
+    correct evidence out — that was a real regression. Only reorders; never
+    drops a candidate.
+    """
+
+    window = items[:context_size]
+    if not window or not items:
+        return items
+    sheets = {item.get("source_sheet_name") for item in window if item.get("source_sheet_name")}
+    if len(sheets) != 1:
+        return items
+    dominant = next(iter(sheets))
+    share = sum(1 for item in items if item.get("source_sheet_name") == dominant) / len(items)
+    if share < 0.9:
+        return items
+    for index in range(context_size, len(items)):
+        candidate = items[index]
+        sheet = candidate.get("source_sheet_name")
+        if sheet and sheet not in sheets:
+            head = items[: context_size - 1] + [candidate, items[context_size - 1]]
+            return head + items[context_size:index] + items[index + 1:]
+    return items
+
+
+def _system_quota_order(items: list[dict], systems: set[str], top_k: int) -> list[dict]:
+    """Give every named reporting system its own context quota.
+
+    Only reorders the candidate list; it never removes a candidate. If one side
+    has no evidence, it simply stays absent and the answer layer reports which
+    side is missing instead of letting the other side fill the slot.
+    """
+
+    # The quota is about the **context window** (about 10 rows), not the wide
+    # candidate window: reserving 25 rows per system reorders the entire list and
+    # destroys the global ranking.
+    quota = max(2, min(5, top_k // max(len(systems), 1)))
+    counts: dict[str, int] = {system: 0 for system in systems}
+    selected: list[dict] = []
+    for item in items:
+        system = unit_system(item.get("source_sheet_name"), item.get("content"))
+        if system in counts and counts[system] < quota:
+            counts[system] += 1
+            selected.append(item)
+    selected_ids = {item["knowledge_unit_id"] for item in selected}
+    rest = [item for item in items if item["knowledge_unit_id"] not in selected_ids]
+    return selected + rest
 
 
 def _fragment_metadata(metadata: dict) -> dict | None:

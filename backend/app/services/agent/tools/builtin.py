@@ -58,6 +58,10 @@ from app.schemas.ai_skill import (
 )
 from app.schemas.metadata import CatalogSearchRequest
 
+# 与 grounded_answer_service 的送模窗口保持一致：多证据题的第二条件证常在第 11-12 位。
+_EVIDENCE_WINDOW = 12
+
+
 MAX_TOOL_ROWS = 50
 MAX_ROWS_PER_SOURCE = 20
 
@@ -76,6 +80,115 @@ def _clip(value: Any, limit: int = 300) -> Any:
     if isinstance(value, list):
         return [_clip(item, limit) for item in value[:40]]
     return value
+
+
+# 引用必须带着「哪份文档、哪个版本、哪一段」一起进入产出物摘要，业务用户才能在
+# /agent 里打开回答当时使用的原文；只保留 label/source_heading 会让「查看原文」
+# 退化成打开当前版本、甚至无定位。字段与 KnowledgeCitation 契约保持一致。
+_CITATION_IDENTITY_KEYS = (
+    "citation_id", "citation_type", "source_type", "project_id",
+    "document_id", "document_version_id", "knowledge_unit_id",
+    "source_file_name", "source_sheet_name", "source_cell_range", "source_page_no",
+    "source_heading", "historical", "effective_at", "authority_rank", "href",
+    "usage",
+)
+
+
+def _evidence_source_kind(item: dict[str, Any]) -> str:
+    """Separate formal policy feedback from institution questions and suggestions.
+
+    ``regulatory_qa`` rows are institution questions even when they read like a
+    rule; business material is a suggestion, not a formal conclusion. The
+    knowledge type/category is the durable signal, so it is re-derived here
+    instead of trusting the answer text.
+    """
+    knowledge_type = str(item.get("source_type") or item.get("knowledge_type") or "")
+    source_category = str(item.get("source_category") or "")
+    if knowledge_type == "regulatory_qa":
+        return "institution_question"
+    if source_category == "regulatory_formal" or knowledge_type in {"regulatory_policy", "regulatory_formal"}:
+        return "formal_feedback"
+    return "reference_material"
+
+
+def _citation_summary(item: dict[str, Any]) -> dict[str, Any]:
+    payload = {key: item.get(key) for key in _CITATION_IDENTITY_KEYS if item.get(key) is not None}
+    payload["label"] = _clip(item.get("label"), 200)
+    payload["source_heading"] = item.get("source_heading")
+    payload["quoted_content"] = _clip(item.get("quoted_content"), 600)
+    payload["source_kind"] = _evidence_source_kind(item)
+    locator = item.get("locator")
+    if isinstance(locator, dict):
+        payload["locator"] = {
+            key: value for key, value in locator.items()
+            if value is not None and key in {
+                "block_id", "page_no", "sheet_name", "cell_range", "paragraph_index",
+                "heading", "text_quote", "line_start", "line_end", "table_index", "row_no",
+            }
+        }
+    return payload
+
+
+
+_CLASSIFICATION_QUERY = re.compile(r"类型|分类|类别|码值|代码")
+_CLASSIFICATION_ITEM = re.compile(r"^\s*(\d{2})\s*([\u4e00-\u9fa5A-Za-z][\u4e00-\u9fa5A-Za-z0-9（）()/·\-]{1,18})\s*$")
+
+
+def _classification_subject(query: str) -> str | None:
+    """从问句里取“被问的分类对象”，例如「合作方式」「合作机构」。"""
+
+    match = re.search(r"类型|分类|类别|码值", query or "")
+    if not match:
+        return None
+    before = re.split(r"[，,。；;、：:\s]", (query or "")[:match.start()])[-1]
+    before = re.sub(r"(都有哪些|有哪些|是什么|分别|应如何填报|如何填报|怎么填报|的)+$", "", before)
+    subject = before[-4:].lstrip("的")
+    return subject or None
+
+
+def _classification_result(query: str, citations: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """分类/码值类问题：能从原文逐项列出就列，列不出就明说缺什么。
+
+    返回 None 表示本轮问题不涉及分类；返回 items=[] 表示涉及但原文没有口径。
+    只有“代码清单前面的说明”确实在讲问句里的对象时才逐项列示，避免把
+    「合作方式」的码值当成「合作机构类型」的分类口径。
+    """
+
+    if not _CLASSIFICATION_QUERY.search(query or ""):
+        return None
+    subject = _classification_subject(query)
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for citation in citations:
+        content = str(citation.get("quoted_content") or "")
+        for segment in re.split(r"[。；;\n]", content):
+            match = _CLASSIFICATION_ITEM.match(segment)
+            if not match:
+                continue
+            if subject:
+                position = content.find(segment)
+                prefix = content[max(0, position - 160):position] if position >= 0 else ""
+                if not re.search(re.escape(subject) + r"(?:的)?(?:类型|分类|类别|码值)", prefix):
+                    continue
+            code, name = match.group(1), match.group(2).strip()
+            if code in seen:
+                continue
+            seen.add(code)
+            items.append({"code": code, "name": name})
+    # A code list cut off by the source ("…等", "详见附件", "略") is still listed,
+    # but the answer must say coverage is partial instead of presenting the visible
+    # rows as the complete classification.
+    truncated = False
+    for citation in citations:
+        content = str(citation.get("quoted_content") or "")
+        if items and re.search(r"(等\s*[，。；]?\s*$|详见|详见附件|略\s*[，。；]?\s*$|……|\.\.\.\s*$)", content[-120:]):
+            truncated = True
+            break
+    return {
+        "status": "listed" if items else "missing",
+        "items": items,
+        "coverage": ("partial" if truncated else "complete") if items else "missing",
+    }
 
 
 # --------------------------------------------------------------------------------------
@@ -176,7 +289,12 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
 
     _require(ctx, "knowledge.search")
     query = str(ctx.tool_input.get("query") or ctx.task.objective or "").strip()
-    top_k = min(int(ctx.tool_input.get("top_k") or 10), MAX_TOOL_ROWS)
+    # 步骤参数里的 top_k 是“引用条数”（默认 10）；检索多取一些，才能把未被引用的
+    # 材料单独放到「相关候选材料」，与真正支撑结论的引用分开。
+    # 这个值同时决定 RRF 的候选池：只取 20 时第二条件证可能被排到第 19 位，
+    # 反过来在 50 的候选池里它排第 10。检索取满 50，再由送模窗口截到 12。
+    requested_top_k = int(ctx.tool_input.get("top_k") or 10)
+    top_k = min(max(requested_top_k, 50), MAX_TOOL_ROWS)
     mode = str(ctx.tool_input.get("retrieval_mode") or "hybrid")
     if not query:
         raise ToolExecutionError("query_required", "知识问答需要 query 或任务目标。")
@@ -190,7 +308,7 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
 
     try:
         result = await grounded_answer(ctx.db, ctx.project_id, query, top_k=top_k,
-                                       retrieval_mode=mode, commit=False)
+                                       retrieval_mode=mode, commit=False, include_items=True)
     except Exception as exc:  # noqa: BLE001 - a slow/broken model must not kill the question
         degraded = "knowledge_answer_unavailable"
         result = None
@@ -203,6 +321,81 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
     citations = [item for item in ((result or {}).get("citations") or []) if isinstance(item, dict)]
     answer_status = str((result or {}).get("answer_status") or "needs_confirmation")
     open_questions = [str(item)[:300] for item in ((result or {}).get("open_questions") or [])][:5]
+
+    # Four states must not collapse into one: retrieved by the retriever, selected
+    # into the model context, actually cited by the answer, and (when the judge
+    # ran) able to support the claim. ``usage`` is the context-vs-cited split;
+    # claim support stays in the grounded_answer payload.
+    cited_unit_ids = {
+        int(value) for value in ((result or {}).get("cited_unit_ids") or [])
+        if str(value).isdigit()
+    }
+    for citation in citations:
+        citation["usage"] = "cited" if citation.get("knowledge_unit_id") in cited_unit_ids else "context_only"
+    usage_counts = {"cited": 0, "context_only": 0}
+    for citation in citations:
+        usage_counts[citation.get("usage", "context_only")] = usage_counts.get(citation.get("usage", "context_only"), 0) + 1
+    source_kinds: dict[str, int] = {}
+    for citation in citations:
+        kind = _evidence_source_kind(citation)
+        source_kinds[kind] = source_kinds.get(kind, 0) + 1
+    if source_kinds.get("institution_question") or source_kinds.get("reference_material"):
+        parts = []
+        if source_kinds.get("institution_question"):
+            parts.append(f"{source_kinds['institution_question']} 条机构答疑")
+        if source_kinds.get("reference_material"):
+            parts.append(f"{source_kinds['reference_material']} 条参考材料")
+        mixed_note = ("本次依据含 " + "、".join(parts)
+                      + "，属问答/建议性质，不能直接升格为正式制度结论。")
+        if mixed_note not in open_questions:
+            open_questions = (open_questions + [mixed_note])[:5]
+
+    # 业务用户必须能分开看：哪几条引用真正支撑了结论，哪些只是检索到但没被引用。
+    retrieval_items = [item for item in ((result or {}).get("retrieval_items") or []) if isinstance(item, dict)]
+    cited_ids = {item.get("knowledge_unit_id") for item in citations if item.get("knowledge_unit_id") is not None}
+    related_candidates = [item for item in retrieval_items
+                          if item.get("knowledge_unit_id") not in cited_ids][:5]
+    conflict_views: list[dict[str, Any]] = []
+    citation_by_id = {str(item.get("citation_id")): item for item in citations if item.get("citation_id")}
+    for conflict in ((result or {}).get("conflicts") or []):
+        if not isinstance(conflict, dict):
+            continue
+        sides = [_citation_summary(citation_by_id[str(citation_id)])
+                 for citation_id in (conflict.get("citation_ids") or [])
+                 if str(citation_id) in citation_by_id]
+        conflict_views.append({
+            "topic": conflict.get("topic"),
+            "message": conflict.get("message"),
+            "citations": sides,
+        })
+    if conflict_views:
+        gaps.append(gap(
+            "policy_conflict_pending",
+            "检索到多份当前资料口径不一致，结论待人工确认；请在「依据」中打开双方原文核对。",
+        ).model_dump(mode="json"))
+        if answer_status == "grounded":
+            answer_status = "needs_confirmation"
+
+    classification = _classification_result(query, citations)
+    if classification is not None:
+        if classification["items"]:
+            lines = [f"- {item['code']} {item['name']}" for item in classification["items"]]
+            answer_text = (answer_text + "\n\n按原文列示（共 %d 项）：\n%s" % (
+                len(classification["items"]), "\n".join(lines))).strip()
+            if classification.get("coverage") == "partial":
+                answer_text = (answer_text + "\n\n注意：原文清单可能被截断（出现「等/详见/略」），"
+                               "未列全的部分需回看原文或补充资料。").strip()
+                gaps.append(gap(
+                    "classification_coverage_partial",
+                    "分类清单可能不完整：原文以「等/详见/略」收尾，未列全部分需回看原文。",
+                ).model_dump(mode="json"))
+        else:
+            answer_text = (answer_text + "\n\n现有依据未列明分类口径。缺少：分类名称与代码对照、"
+                           "各项适用条件、以及与报送表数据项的对应关系。").strip()
+            gaps.append(gap(
+                "classification_scope_missing",
+                "现有依据未列明分类口径：缺少分类名称与代码、适用条件及与报送表的对应关系。",
+            ).model_dump(mode="json"))
 
     # Metadata hits from an earlier step ("这张表有哪些字段") are part of the answer, not a
     # separate artifact: read them back from the task's own step outputs.
@@ -302,7 +495,7 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         ).model_dump(mode="json"))
         existing_fact_ids.add(fact_id)
 
-    for index, item in enumerate(citations[:10]):
+    for index, item in enumerate(citations[:_EVIDENCE_WINDOW]):
         unit_id = item.get("knowledge_unit_id") or index
         facts.append(evidence(
             evidence_id=f"knowledge_citation:{unit_id}",
@@ -337,9 +530,22 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         "title": f"问答：{query[:60]}",
         "status": "draft",
         "summary": {
-            "question": query, "answer": _clip(answer_text, 1800), "answer_status": answer_status,
-            "citations": [{"label": item.get("label"), "source_heading": item.get("source_heading")}
-                          for item in citations[:10]],
+            "question": query, "answer": _clip(answer_text, 2600), "answer_status": answer_status,
+            "citations": [_citation_summary(item) for item in citations[:_EVIDENCE_WINDOW]],
+            "related_candidates": [_citation_summary(item) for item in related_candidates],
+            "evidence_usage": {
+                "retrieved": len(retrieval_items),
+                "context": len(citations),
+                "cited": usage_counts["cited"],
+                "related": len(related_candidates),
+            },
+            "evidence_mix": source_kinds,
+            "conflicts": conflict_views,
+            "classification": (
+                {"status": classification["status"], "items": classification["items"],
+                 "coverage": classification.get("coverage")}
+                if classification is not None else None
+            ),
             "catalog_tables": tables, "catalog_fields": fields, "open_questions": open_questions,
         },
         "evidence_refs": [item["id"] for item in facts],

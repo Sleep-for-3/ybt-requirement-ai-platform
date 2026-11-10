@@ -101,6 +101,10 @@ class RegulatoryFieldExplanationOutput(DraftOutput):
     answer: str = ""
     supported_claims: list[str] = Field(default_factory=list)
     unsupported_claims: list[str] = Field(default_factory=list)
+    # 模型必须显式声明"这条问法的结论是否完整可答"；留空视为未声明（按引用情况判定）。
+    # 这比在答案正文里堆"无法确认/缺少原文"等说法更稳定：同一题换一种措辞也不会
+    # 让状态从待确认漂回已证实。
+    cannot_answer_reason: str | None = None
 
     @model_validator(mode="after")
     def _requires_answer(self):

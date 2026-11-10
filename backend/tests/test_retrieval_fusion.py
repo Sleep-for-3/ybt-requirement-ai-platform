@@ -242,8 +242,13 @@ def test_weighted_fusion_is_score_proportional(db_session, monkeypatch):
     # keyword_weight (0.55) exceeds vector_weight (0.45).
     assert keyword_first["final_score"] > vector_first["final_score"]
     # ``rule_boost`` is absent here: no match reason applies to the vector-only unit.
+    # ``authority_mode`` defaults to boost, and both units share a
+    # business_material document (rank 2): 0.15 * (2 - 1) / 5 = 0.03 is added by
+    # contract. Keep the linear-blend assertion, with the authority bonus stated
+    # explicitly instead of assumed away.
+    authority_bonus = 0.15 * (2 - 1) / 5.0
     assert vector_first["final_score"] == pytest.approx(
-        vector_first["keyword_score"] * 0.55 + vector_first["vector_score"] * 0.45,
+        vector_first["keyword_score"] * 0.55 + vector_first["vector_score"] * 0.45 + authority_bonus,
         abs=1e-3,
     )
 

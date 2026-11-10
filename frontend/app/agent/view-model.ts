@@ -119,7 +119,7 @@ export type AgentStep = {
   policy_evidence_count?: number;
   edited_payload?: unknown;
   model_metadata?: Record<string, unknown> | null;
-  requires_human_confirmation?: boolean;
+  requires_human_confirmation?: boolean | null;
   human_gate_key?: string | null;
   review_task_id?: number | null;
   error_code?: string | null;
@@ -207,6 +207,8 @@ export type AgentTask = {
   created_at?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  /** 业务对象（服务端识别的表名），老数据可能没有。 */
+  object_label?: string | null;
 };
 
 export type AgentSnapshot = {
@@ -229,6 +231,29 @@ export type AgentTaskRow = {
   replanning_count?: number | null;
   created_at?: string | null;
   finished_at?: string | null;
+  // 业务补充字段（服务端兼容新增）：一行结论、业务对象、待办归属。
+  updated_at?: string | null;
+  object_label?: string | null;
+  result_brief?: AgentTaskResultBrief | null;
+  pending_action?: AgentTaskPendingAction | null;
+};
+
+export type AgentTaskResultBrief = {
+  kind?: string | null;
+  headline?: string | null;
+  artifact_id?: number | null;
+  artifact_type?: string | null;
+  artifact_status?: string | null;
+};
+
+export type AgentTaskPendingAction = {
+  step_key?: string | null;
+  gate_key?: string | null;
+  title?: string | null;
+  required_permission?: string | null;
+  review_task_id?: number | null;
+  assignee_role?: string | null;
+  mine?: boolean | null;
 };
 
 export type AgentToolDescriptor = {
@@ -1190,3 +1215,765 @@ export function sqlChangeView(step: AgentStep | null | undefined): SqlChangeView
     degradedCodes,
   };
 }
+
+// ===========================================================================
+// 任务中心 / 任务详情：面向银行业务人员的视图模型
+//
+// 设计约束（验收口径）：
+// 1. 业务状态、结论、下一步动作是首屏第一等公民；工具名/模型/Prompt/原始异常
+//    只出现在受服务端权限保护的技术诊断里，默认视图不得出现。
+// 2. 没有结论、结论依据不足、有结果待复核、处理失败，四种情况必须给出不同
+//    文案与不同操作，不允许统一显示“暂无数据”。
+// 3. 所有文案是中文业务表达；缺字段时给安全兜底，不抛异常、不显示 undefined。
+// ===========================================================================
+
+export type TaskResultKind =
+  | "answer"
+  | "draft"
+  | "gap"
+  | "running"
+  | "waiting"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "none";
+
+export const RESULT_KIND_LABELS: Record<TaskResultKind, string> = {
+  answer: "问答结论",
+  draft: "草稿产出",
+  gap: "缺口报告",
+  running: "处理中",
+  waiting: "等待人工处理",
+  blocked: "已暂停",
+  failed: "处理失败",
+  cancelled: "已取消",
+  none: "无结论",
+};
+
+/** 内部状态 → 业务人员能读懂的状态词。未知/老数据一律到“状态待确认”。 */
+export const TASK_BUSINESS_STATE_LABELS: Record<string, string> = {
+  created: "已提交，待开始",
+  planning: "正在制定方案",
+  running: "处理中",
+  waiting_human: "等待人工处理",
+  blocked: "已暂停",
+  completed: "已完成",
+  failed: "处理失败",
+  cancelled: "已取消",
+};
+
+export function taskBusinessStateLabel(status: string | null | undefined): string {
+  return TASK_BUSINESS_STATE_LABELS[status || ""] || "状态待确认";
+}
+
+export function taskBusinessStateTone(status: string | null | undefined): StatusTone {
+  return statusTone(status);
+}
+
+/** 任务标题：业务目标首句；老数据没有目标时给中性兜底，不显示空白行。 */
+export function taskTitle(objective: string | null | undefined, limit = 42): string {
+  const value = (objective || "").replace(/\s+/g, " ").trim();
+  if (!value) return "未命名任务";
+  if (value.length <= limit) return value;
+  // 尽量在词/标点边界截断，避免出现“字段变更对…”这种半截业务名词。
+  const head = value.slice(0, limit);
+  const boundary = Math.max(head.lastIndexOf(" "), head.lastIndexOf("，"), head.lastIndexOf("、"), head.lastIndexOf("："));
+  const cut = boundary >= Math.floor(limit * 0.6) ? head.slice(0, boundary) : head;
+  return `${cut.replace(/[，、：]$/, "")}…`;
+}
+
+export function businessObjectLabel(value: string | null | undefined): string {
+  const text = (value || "").trim();
+  return text || "未指定业务对象";
+}
+
+const ARTIFACT_TYPE_LABELS: Record<string, string> = {
+  knowledge_answer: "问答结论",
+  evidence_summary: "证据摘要",
+  gap_report: "缺口报告",
+  mapping_draft: "映射草稿",
+  requirement_candidate: "需求候选",
+  requirement_document: "需求文档",
+  plan: "执行方案",
+  sql_change: "SQL 变更说明",
+};
+
+export function artifactTypeLabel(type: string | null | undefined): string {
+  return ARTIFACT_TYPE_LABELS[type || ""] || "产出物";
+}
+
+export const ARTIFACT_STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  pending_review: "待复核",
+  confirmed: "已确认",
+  rejected: "已驳回",
+  archived: "已归档",
+};
+
+export function artifactStatusLabel(status: string | null | undefined): string {
+  return ARTIFACT_STATUS_LABELS[status || ""] || "状态待确认";
+}
+
+export function artifactStatusTone(status: string | null | undefined): StatusTone {
+  if (status === "confirmed") return "success";
+  if (status === "pending_review") return "warning";
+  if (status === "rejected") return "danger";
+  return "neutral";
+}
+
+function pad2(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+/** 更新时间：7 天内说“多久之前”，更早给具体日期，避免“刚刚/未知”糊弄。 */
+export function relativeTimeLabel(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "时间未知";
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return "时间未知";
+  const diff = now - ts;
+  if (diff < 45_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.max(1, Math.floor(diff / 60_000))} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  const date = new Date(ts);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+export type TaskRowActionKey = "handle" | "review" | "progress" | "result" | "process" | "empty";
+
+export type TaskRowAction = { key: TaskRowActionKey; label: string };
+
+export type TaskRowView = {
+  id: number;
+  title: string;
+  objectLabel: string;
+  stateLabel: string;
+  stateTone: StatusTone;
+  summary: string;
+  summaryLabel: string;
+  updatedLabel: string;
+  action: TaskRowAction;
+  mine: boolean;
+  needsReview: boolean;
+  signals: string[];
+};
+
+/** 列表一行：业务对象 + 当前状态 + 结果摘要 + 更新时间 + 主操作。 */
+export function taskRowView(row: AgentTaskRow): TaskRowView {
+  const brief = row.result_brief || {};
+  const kind = (brief.kind || "none") as TaskResultKind;
+  const pending = row.pending_action || null;
+  const mine = Boolean(pending?.mine);
+  const needsReview = Boolean(brief.artifact_status === "pending_review");
+  const summary = (brief.headline || "").trim() || "暂无结论摘要";
+  const status = row.status || "";
+
+  let action: TaskRowAction;
+  if (status === "waiting_human" || status === "blocked") {
+    action = mine ? { key: "handle", label: "去处理" } : { key: "review", label: "查看等待事项" };
+  } else if (status === "failed") {
+    action = { key: "result", label: "查看原因" };
+  } else if (status === "created" || status === "planning" || status === "running") {
+    action = { key: "progress", label: "查看进度" };
+  } else if (status === "completed" && kind === "none") {
+    action = { key: "process", label: "查看过程" };
+  } else if (status === "completed" && needsReview) {
+    action = { key: "review", label: "去复核" };
+  } else if (status === "completed") {
+    action = { key: "result", label: "查看结果" };
+  } else {
+    action = { key: "result", label: "查看记录" };
+  }
+
+  const signals: string[] = [];
+  if (mine) signals.push("待你处理");
+  if (needsReview) signals.push("待复核");
+  if (status === "completed" && kind === "none") signals.push("无结论");
+
+  return {
+    id: row.id,
+    title: taskTitle(row.objective),
+    objectLabel: businessObjectLabel(row.object_label),
+    stateLabel: taskBusinessStateLabel(status),
+    stateTone: taskBusinessStateTone(status),
+    summary,
+    summaryLabel: RESULT_KIND_LABELS[kind] || RESULT_KIND_LABELS.none,
+    updatedLabel: relativeTimeLabel(row.updated_at || row.finished_at || row.created_at),
+    action,
+    mine,
+    needsReview,
+    signals,
+  };
+}
+
+export const TASK_FILTERS = [
+  { key: "all", label: "全部任务" },
+  { key: "mine", label: "待我处理" },
+  { key: "active", label: "进行中" },
+  { key: "done", label: "已完成" },
+  { key: "issue", label: "失败或需关注" },
+] as const;
+
+export type TaskFilterKey = (typeof TASK_FILTERS)[number]["key"];
+
+export type TaskFilter = { key: TaskFilterKey; keyword?: string };
+
+function matchesFilter(row: AgentTaskRow, view: TaskRowView, key: TaskFilterKey): boolean {
+  const status = row.status || "";
+  if (key === "all") return true;
+  if (key === "mine") return view.mine;
+  if (key === "active") return ["created", "planning", "running", "waiting_human", "blocked"].includes(status);
+  if (key === "done") return status === "completed";
+  if (key === "issue") return status === "failed" || status === "blocked"
+    || (status === "completed" && (row.result_brief?.kind === "none" || view.needsReview));
+  return true;
+}
+
+export function filterTaskRows(rows: AgentTaskRow[] | null | undefined, filter: TaskFilter): AgentTaskRow[] {
+  const keyword = (filter.keyword || "").trim().toLowerCase();
+  return (rows || []).filter((row) => {
+    const view = taskRowView(row);
+    if (!matchesFilter(row, view, filter.key)) return false;
+    if (!keyword) return true;
+    const haystack = [view.title, view.objectLabel, view.summary, view.stateLabel].join(" ").toLowerCase();
+    return haystack.includes(keyword);
+  });
+}
+
+export function taskFilterCounts(rows: AgentTaskRow[] | null | undefined): Record<TaskFilterKey, number> {
+  const list = rows || [];
+  return {
+    all: list.length,
+    mine: list.filter((row) => taskRowView(row).mine).length,
+    active: list.filter((row) => matchesFilter(row, taskRowView(row), "active")).length,
+    done: list.filter((row) => matchesFilter(row, taskRowView(row), "done")).length,
+    issue: list.filter((row) => matchesFilter(row, taskRowView(row), "issue")).length,
+  };
+}
+
+export type TaskSignal = { tone: StatusTone; label: string };
+
+export type CitationView = {
+  title: string;
+  quote: string;
+  sourceLabel: string;
+  /** 引用身份：文档、版本、知识单元与定位，供「查看原文」打开回答当时的版本。 */
+  documentId?: number | null;
+  documentVersionId?: number | null;
+  knowledgeUnitId?: number | null;
+  sourceType?: string | null;
+  href?: string | null;
+  locator?: Record<string, unknown> | null;
+  /** cited = 答案实际引用；context_only = 送进模型但未被结论引用。 */
+  usage?: "cited" | "context_only";
+  /** 正式制度反馈 / 机构提问 / 参考材料：建议类不能升格为正式结论。 */
+  sourceKind?: "formal_feedback" | "institution_question" | "reference_material";
+  /** 原始引用对象，直接交给 KnowledgeEvidenceDrawer。 */
+  citation?: Record<string, unknown> | null;
+};
+
+const CITATION_SOURCE_LABELS: Record<string, string> = {
+  policy_clause: "监管条款",
+  regulatory_clause: "监管条款",
+  knowledge_evidence: "知识库依据",
+  catalog_field: "元数据字段",
+  catalog_table: "元数据表",
+  historical_decision: "历史人工决策",
+  sql_rule: "SQL 实现",
+};
+
+export function citationSourceLabel(source: string | null | undefined): string {
+  return CITATION_SOURCE_LABELS[source || ""] || "依据";
+}
+
+/** 依据：只取真实引用（条款/字段/历史决策），没有就说没有，不编造。 */
+export function citationViews(snapshot: AgentSnapshot | null | undefined): CitationView[] {
+  return collectCitationViews(snapshot, "citations");
+}
+
+/** 检索到但未被结论引用的候选材料，与「实际支撑答案的引用」分开展示。 */
+export function relatedCandidateViews(snapshot: AgentSnapshot | null | undefined): CitationView[] {
+  return collectCitationViews(snapshot, "related_candidates");
+}
+
+export type ConflictView = {
+  topic: string;
+  message: string;
+  citations: CitationView[];
+};
+
+/** 未解决的口径冲突：结论区提示 + 双方原文入口。 */
+export function conflictViews(snapshot: AgentSnapshot | null | undefined): ConflictView[] {
+  const out: ConflictView[] = [];
+  for (const artifact of snapshot?.artifacts || []) {
+    const summary = asRecord(artifact.summary);
+    const conflicts = Array.isArray(summary?.conflicts) ? summary?.conflicts : [];
+    for (const raw of conflicts as unknown[]) {
+      const item = asRecord(raw);
+      const citations = Array.isArray(item?.citations) ? item?.citations : [];
+      out.push({
+        topic: textValue(item?.topic) || "口径冲突",
+        message: textValue(item?.message) || "多份资料口径不一致，需要人工确认。",
+        citations: (citations as unknown[]).map((citation) => citationViewOf(citation)).filter(Boolean) as CitationView[],
+      });
+    }
+  }
+  return out;
+}
+
+function collectCitationViews(
+  snapshot: AgentSnapshot | null | undefined,
+  field: "citations" | "related_candidates",
+): CitationView[] {
+  const out: CitationView[] = [];
+  for (const artifact of snapshot?.artifacts || []) {
+    const summary = asRecord(artifact.summary);
+    const citations = Array.isArray(summary?.[field]) ? summary?.[field] : [];
+    for (const raw of citations as unknown[]) {
+      const view = citationViewOf(raw);
+      if (view) out.push(view);
+    }
+  }
+  return out;
+}
+
+function citationViewOf(raw: unknown): CitationView | null {
+  const item = asRecord(raw);
+  if (!item) return null;
+  const title = textValue(item.title) || textValue(item.document_title)
+    || textValue(item.label) || "未命名依据";
+  const quote = textValue(item.quote) || textValue(item.excerpt)
+    || textValue(item.quoted_content) || "";
+  const locator = asRecord(item.locator);
+  return {
+    title,
+    quote,
+    sourceLabel: citationSourceLabel(textValue(item.source_type)),
+    documentId: numberValue(item.document_id),
+    documentVersionId: numberValue(item.document_version_id),
+    knowledgeUnitId: numberValue(item.knowledge_unit_id),
+    sourceType: textValue(item.source_type) || null,
+    href: textValue(item.href) || null,
+    locator,
+    usage: (textValue(item.usage) || "context_only") as "cited" | "context_only",
+    sourceKind: (textValue(item.source_kind) || "reference_material") as
+      "formal_feedback" | "institution_question" | "reference_material",
+    citation: { ...item },
+  };
+}
+
+export type ArtifactView = {
+  id: number;
+  typeLabel: string;
+  title: string;
+  statusLabel: string;
+  statusTone: StatusTone;
+  summary: string;
+  fullText: string;
+  /** 后端给出的结论强度：grounded / metadata_only / insufficient_evidence。 */
+  answerStatus: string;
+  citations: CitationView[];
+  /** 该产出物对应的复核任务；存在时才能给出真实复核入口。 */
+  reviewTaskId: number | null;
+  refHref: string | null;
+};
+
+function artifactFullText(summary: Record<string, unknown> | null): string {
+  return textValue(summary?.body) || textValue(summary?.answer) || textValue(summary?.content)
+    || textValue(summary?.conclusion) || "";
+}
+
+function clip(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit)}…`;
+}
+
+/** 产出物：类型、审核状态、可读摘要、全文与依据。 */
+export function artifactViews(snapshot: AgentSnapshot | null | undefined): ArtifactView[] {
+  const artifacts = snapshot?.artifacts || [];
+  return artifacts
+    .filter((artifact) => artifact.artifact_type !== "evidence_summary")
+    .map((artifact) => {
+      const summary = asRecord(artifact.summary);
+      const fullText = artifactFullText(summary);
+      const citations: CitationView[] = [];
+      const rawCitations = Array.isArray(summary?.citations) ? (summary?.citations as unknown[]) : [];
+      for (const raw of rawCitations) {
+        const item = asRecord(raw);
+        citations.push({
+          title: textValue(item?.title) || textValue(item?.document_title) || "未命名依据",
+          quote: textValue(item?.quote) || textValue(item?.excerpt) || "",
+          sourceLabel: citationSourceLabel(textValue(item?.source_type)),
+        });
+      }
+      return {
+        id: artifact.id,
+        typeLabel: artifactTypeLabel(artifact.artifact_type),
+        title: textValue(artifact.title) || artifactTypeLabel(artifact.artifact_type),
+        statusLabel: artifactStatusLabel(artifact.status),
+        statusTone: artifactStatusTone(artifact.status),
+        summary: clip(fullText || textValue(summary?.title) || "", 160),
+        fullText,
+        answerStatus: textValue(summary?.answer_status),
+        citations,
+        reviewTaskId: numberValue(summary?.review_task_id),
+        refHref: artifactHref(artifact),
+      };
+    });
+}
+
+/**
+ * 产出物跳转：只对既有可跳转资源给链接，其余留在本页；不在前端拼不存在的路由。
+ */
+export function artifactHref(artifact: AgentArtifact | null | undefined): string | null {
+  if (!artifact || !artifact.ref_type || artifact.ref_id === null || artifact.ref_id === undefined) return null;
+  if (artifact.ref_type === "requirement") return `/workspace/requirements/${artifact.ref_id}`;
+  if (artifact.ref_type === "target_field") return `/semantics/fields/${artifact.ref_id}`;
+  return null;
+}
+
+export type WaitingGateCandidate = { id: number; code: string; name: string; score: number | null };
+
+export type WaitingGateView = {
+  stepKey: string | null;
+  title: string;
+  reason: string;
+  requirement: string;
+  candidates: WaitingGateCandidate[];
+};
+
+/** 等待人工处理：为什么需要人、需要人做什么、有哪些可选对象。 */
+export function waitingGateView(snapshot: AgentSnapshot | null | undefined): WaitingGateView | null {
+  const step = (snapshot?.steps || []).find((item) => item.status === "waiting_human");
+  if (!step) return null;
+  const summary = asRecord(step.summary);
+  const input = asRecord(step.input);
+  const rawCandidates = Array.isArray(input?.candidates) ? input?.candidates : [];
+  const candidates: WaitingGateCandidate[] = [];
+  for (const raw of rawCandidates as unknown[]) {
+    const item = asRecord(raw);
+    const id = integerValue(item?.target_field_id);
+    const name = textValue(item?.target_field_name) || textValue(item?.target_table_name);
+    if (id === null || !name) continue;
+    candidates.push({
+      id,
+      code: textValue(item?.target_field_code) || "",
+      name,
+      score: typeof item?.score === "number" ? (item?.score as number) : null,
+    });
+  }
+  return {
+    stepKey: textValue(step.step_key) || null,
+    title: textValue(summary?.title) || "需要人工确认",
+    reason: textValue(input?.rationale) || "这一步需要业务人员确认后才能继续。",
+    requirement: textValue(input?.requirement)
+      || "请在下面的候选中选择本次分析对象；智能体不会默认选取第一个。",
+    candidates,
+  };
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  clarify_subject: "确认分析对象",
+  locate_metadata: "定位业务对象",
+  search_policy: "查找监管依据",
+  search_metadata: "查找元数据依据",
+  inspect_sql: "读取当前实现",
+  analyze_impact: "评估影响范围",
+  compare_policy: "对比制度与实现",
+  summarize: "汇总证据",
+  summarize_evidence: "汇总证据",
+  s1_answer: "形成结论",
+  answer: "形成结论",
+  answer_fields: "形成结论",
+  draft_document: "生成草稿",
+  collect_fields: "收集字段依据",
+  aggregate: "汇总结果",
+};
+
+/** 步骤 → 业务阶段名，绝不把 tool_key 直接抛给业务人员。 */
+export function stepBusinessLabel(step: AgentStep | null | undefined): string {
+  const key = (step?.step_key || "").trim();
+  if (PHASE_LABELS[key]) return PHASE_LABELS[key];
+  const toolKey = (step?.tool_key || "").toLowerCase();
+  if (toolKey.includes("sql")) return "读取当前实现";
+  if (toolKey.includes("policy") || toolKey.includes("regulat")) return "查找监管依据";
+  if (toolKey.includes("lineage") || toolKey.includes("impact")) return "评估影响范围";
+  if (toolKey.includes("answer") || toolKey.includes("conclusion")) return "形成结论";
+  if (toolKey.includes("draft") || toolKey.includes("generate")) return "生成草稿";
+  if (toolKey.includes("metadata") || toolKey.includes("catalog")) return "查找元数据依据";
+  if (toolKey.includes("human") || toolKey.includes("confirm")) return "等待人工确认";
+  return "处理步骤";
+}
+
+export type ProcessPhaseView = {
+  key: string;
+  label: string;
+  stateLabel: string;
+  tone: StatusTone;
+  detail: string;
+};
+
+function stepDetailText(step: AgentStep): string {
+  const summary = asRecord(step.summary);
+  const candidate = textValue(summary?.answer) || textValue(summary?.summary) || textValue(summary?.conclusion)
+    || textValue(summary?.title) || textValue(summary?.rationale) || textValue(step.reason);
+  if (candidate) return clip(candidate, 70);
+  if (step.status === "waiting_human") return "等待业务人员确认后继续。";
+  if (step.status === "pending") return "尚未开始。";
+  if (step.status === "skipped") return "本次跳过。";
+  return "";
+}
+
+/** 执行过程：业务语言 + 状态，不展示工具名、参数、模型与异常栈。 */
+export function processPhaseViews(snapshot: AgentSnapshot | null | undefined): ProcessPhaseView[] {
+  return (snapshot?.steps || []).map((step, index) => ({
+    key: (step.step_key || `step_${index + 1}`) as string,
+    label: stepBusinessLabel(step),
+    stateLabel: stepStatusLabel(step) || STEP_STATUS_LABELS[step.status || ""] || "状态待确认",
+    tone: stepDisplayTone(step),
+    detail: stepDetailText(step),
+  }));
+}
+
+export type ErrorBusinessCopy = { title: string; advice: string };
+
+const ERROR_COPY: Record<string, ErrorBusinessCopy> = {
+  tool_timeout: { title: "处理超时", advice: "有一步处理等待过久被中断。可以重新运行；反复出现请联系管理员查看技术诊断。" },
+  timeout: { title: "处理超时", advice: "有一步处理等待过久被中断。可以重新运行；反复出现请联系管理员查看技术诊断。" },
+  tool_failed: { title: "处理失败", advice: "某个处理步骤没有成功完成。可以重新运行；如仍失败请查看技术诊断。" },
+  step_failed: { title: "处理失败", advice: "某个处理步骤没有成功完成。可以重新运行；如仍失败请查看技术诊断。" },
+  model_unavailable: { title: "模型暂时不可用", advice: "生成结论所需的能力暂时不可用，请稍后重新运行。" },
+  llm_unavailable: { title: "模型暂时不可用", advice: "生成结论所需的能力暂时不可用，请稍后重新运行。" },
+  permission_denied: { title: "权限不足", advice: "当前账号没有执行这一步的权限，请联系项目负责人处理。" },
+  plan_invalid: { title: "执行方案未通过校验", advice: "本次方案没有通过系统校验，未执行。可以重新运行或调整目标描述。" },
+  insufficient_evidence: { title: "依据不足", advice: "没有找到足够依据，结论不可用。可以补充资料或换个更具体的业务对象后重试。" },
+};
+
+export function errorBusinessCopy(code: string | null | undefined): ErrorBusinessCopy {
+  return ERROR_COPY[code || ""] || { title: "处理失败", advice: "本次处理没有完成，可以重新运行。" };
+}
+
+export type ConclusionAction = { key: string; label: string };
+
+/** 依据强度：决定依据区和结论旁给什么提示，不把“元数据依据”误报成“依据不足”。 */
+export type BasisKind = "cited" | "metadata_only" | "insufficient" | "missing" | "none";
+
+export type ConclusionView = {
+  kind: TaskResultKind;
+  heading: string;
+  body: string;
+  fullText: string;
+  hasFullText: boolean;
+  signals: TaskSignal[];
+  sourceLabel: string;
+  basisKind: BasisKind;
+  /** 结论对应的复核任务 id（草稿待复核/人工确认场景），用于给出真实复核入口。 */
+  reviewTaskId: number | null;
+  primaryAction: ConclusionAction;
+  secondaryActions: ConclusionAction[];
+};
+
+function pendingReviewArtifact(snapshot: AgentSnapshot | null | undefined): AgentArtifact | null {
+  return (snapshot?.artifacts || []).find((artifact) => artifact.status === "pending_review") || null;
+}
+
+/** 结论区：一句话结论 + 是否可展开全文 + 依据/缺口信号 + 唯一主操作。 */
+export function conclusionView(snapshot: AgentSnapshot | null | undefined): ConclusionView {
+  const task = snapshot?.task;
+  const status = task?.status || "";
+  const artifacts = artifactViews(snapshot);
+  const primary = artifacts.find((item) => item.typeLabel === "问答结论")
+    || artifacts.find((item) => item.typeLabel !== "证据摘要")
+    || artifacts[0]
+    || null;
+  const fullText = primary?.fullText || "";
+  const citations = citationViews(snapshot);
+  const review = pendingReviewArtifact(snapshot);
+  const waiting = waitingGateView(snapshot);
+  const failedStep = (snapshot?.steps || []).find((step) => step.status === "failed") || null;
+  const gaps = snapshot?.gaps || [];
+  const gapCodes = new Set(gaps.map((gap) => gap.code || ""));
+  for (const step of snapshot?.steps || []) {
+    for (const code of step.gap_codes || []) gapCodes.add(code);
+  }
+
+  const signals: TaskSignal[] = [];
+  if (review) signals.push({ tone: "warning", label: "有结果待复核" });
+  const answerStatus = primary?.answerStatus || "";
+  const countValues = task?.counts || {};
+  const evidenceCount = Number(countValues.evidence || 0);
+  let basisKind: BasisKind = "none";
+  if (citations.length > 0) basisKind = "cited";
+  else if (answerStatus === "insufficient_evidence" || gapCodes.has("insufficient_evidence")) basisKind = "insufficient";
+  else if (answerStatus === "metadata_only") basisKind = "metadata_only";
+  else if (primary) basisKind = "missing";
+  if (basisKind === "insufficient") signals.push({ tone: "warning", label: "依据不足" });
+  if (basisKind === "metadata_only") signals.push({ tone: "info", label: "依据：元数据目录" });
+  if (basisKind === "cited") signals.push({ tone: "info", label: `引用 ${citations.length} 条依据` });
+  // 依据类信号只在“已有结论”的状态下有意义；执行中/已取消的任务不该出现“无可追溯引用”。
+  if (basisKind === "missing" && (status === "completed" || status === "waiting_human" || status === "blocked")) {
+    signals.push({ tone: "warning", label: "无可追溯引用" });
+  }
+  if (status === "completed" && Number(countValues.failed || 0) + Number(countValues.skipped || 0) > 0) {
+    signals.push({ tone: "warning", label: "部分完成" });
+  }
+  if (evidenceCount === 0 && status === "completed" && primary) {
+    signals.push({ tone: "neutral", label: "无执行证据" });
+  }
+
+  let kind: TaskResultKind = "none";
+  if (status === "failed") kind = "failed";
+  else if (status === "cancelled") kind = "cancelled";
+  else if (status === "blocked") kind = "blocked";
+  else if (status === "waiting_human") kind = "waiting";
+  else if (["created", "planning", "running"].includes(status)) kind = "running";
+  else if (primary?.typeLabel === "问答结论") kind = "answer";
+  else if (primary?.typeLabel === "缺口报告") kind = "gap";
+  else if (primary) kind = "draft";
+
+  let heading = "本次结论";
+  let body = "";
+  let sourceLabel = "来源：智能体执行结果";
+  let primaryAction: ConclusionAction = { key: "artifacts", label: "查看完整产出" };
+  let secondaryActions: ConclusionAction[] = [{ key: "process", label: "查看执行过程" }];
+
+  if (kind === "failed") {
+    const copy = errorBusinessCopy(task?.error_code || failedStep?.error_code || "");
+    heading = copy.title;
+    body = copy.advice;
+    sourceLabel = "来源：执行失败记录";
+    primaryAction = { key: "retry", label: "重新运行" };
+    secondaryActions = [{ key: "process", label: "查看失败步骤" }];
+  } else if (kind === "waiting") {
+    heading = `等待你处理：${waiting?.title || "人工确认"}`;
+    body = waiting?.reason || "这一步需要业务人员确认后才能继续。";
+    sourceLabel = "来源：人工确认环节";
+    primaryAction = { key: "handle", label: "确认并继续" };
+    secondaryActions = [{ key: "process", label: "查看前序过程" }];
+  } else if (kind === "running") {
+    heading = "正在处理中";
+    body = "智能体正在执行，结论还没有生成。这个页面会自动刷新，也可以手动刷新进度。";
+    sourceLabel = "来源：执行中";
+    primaryAction = { key: "refresh", label: "刷新进度" };
+    secondaryActions = [{ key: "process", label: "查看执行过程" }];
+  } else if (kind === "cancelled") {
+    heading = "任务已取消";
+    body = "这个任务在上次处理中被取消，没有生成结论。如需结果可以重新运行。";
+    sourceLabel = "来源：任务记录";
+    primaryAction = { key: "retry", label: "重新运行" };
+    secondaryActions = [{ key: "process", label: "查看执行过程" }];
+  } else if (kind === "blocked") {
+    heading = "任务已暂停，需要人工处理";
+    body = "任务在处理过程中被阻断，继续之前需要业务人员确认或补充信息。";
+    sourceLabel = "来源：任务记录";
+    primaryAction = { key: "handle", label: "去处理" };
+    secondaryActions = [{ key: "process", label: "查看执行过程" }];
+  } else if (kind === "none") {
+    heading = "本次没有生成结论";
+    body = "智能体已完成执行，但没有可展示的结论或产出物。可以查看执行过程确认原因，或重新运行。";
+    sourceLabel = "来源：任务记录（无结论）";
+    primaryAction = { key: "process", label: "查看执行过程" };
+    secondaryActions = [{ key: "retry", label: "重新运行" }];
+  } else if (gaps.length > 0 && fullText) {
+    body = fullText;
+  }
+
+  if (fullText && !body) body = clip(fullText, 200);
+  // 只有“已经有结论”的状态才把产出内容抬到结论区；运行中/失败等状态保留自己的文案与主操作。
+  const hasSettledResult = kind === "draft" || kind === "answer" || kind === "gap";
+  if (fullText && hasSettledResult) {
+    body = clip(fullText, 200);
+    sourceLabel = review
+      ? "来源：已生成草稿（等待复核）"
+      : basisKind === "metadata_only"
+        ? "来源：项目元数据目录（未引用监管文档原文）"
+        : basisKind === "insufficient"
+          ? "来源：证据不足，结论仅供参考"
+          : "来源：智能体执行结果（需人工确认）";
+    primaryAction = review ? { key: "review", label: "去复核" } : { key: "artifacts", label: "查看完整产出" };
+  }
+  if (kind === "draft" || kind === "answer" || kind === "gap") {
+    if (review) heading = "已生成结果，等待复核";
+    // 依据不足时给出可执行的下一步：补充资料后重跑，而不是只让用户“看产出”。
+    if (!review && basisKind === "insufficient") {
+      secondaryActions = [{ key: "retry", label: "补充资料后重新运行" }, { key: "process", label: "查看执行过程" }];
+    }
+  }
+
+  const hasFullText = Boolean(fullText) && fullText.length > body.length;
+
+  const reviewTaskId = numberValue(
+    (snapshot?.steps || []).find((step) => step?.status === "waiting_human")?.review_task_id,
+  ) ?? primary?.reviewTaskId ?? null;
+
+  return {
+    kind,
+    heading,
+    body,
+    fullText,
+    hasFullText,
+    signals,
+    sourceLabel,
+    basisKind,
+    reviewTaskId,
+    primaryAction,
+    secondaryActions,
+  };
+}
+
+export type TaskDetailView = {
+  title: string;
+  objectLabel: string;
+  stateLabel: string;
+  stateTone: StatusTone;
+  updatedLabel: string;
+  conclusion: ConclusionView;
+  artifacts: ArtifactView[];
+  citations: CitationView[];
+  relatedCandidates: CitationView[];
+  conflicts: ConflictView[];
+  phases: ProcessPhaseView[];
+  waiting: WaitingGateView | null;
+  signals: TaskSignal[];
+  needsReview: boolean;
+};
+
+function firstCatalogTable(snapshot: AgentSnapshot | null | undefined): string {
+  for (const artifact of snapshot?.artifacts || []) {
+    const tables = asRecord(artifact.summary)?.catalog_tables;
+    if (Array.isArray(tables) && tables.length > 0) {
+      const first = textValue((tables as unknown[])[0]);
+      if (first) return first;
+    }
+  }
+  return "";
+}
+
+/** 详情页一次性取数：首屏只消费这里的结论/状态/动作。 */
+export function taskDetailView(snapshot: AgentSnapshot | null | undefined): TaskDetailView {
+  const task = snapshot?.task;
+  const conclusion = conclusionView(snapshot);
+  const artifacts = artifactViews(snapshot);
+  const citations = citationViews(snapshot);
+  const waiting = waitingGateView(snapshot);
+  const review = pendingReviewArtifact(snapshot);
+  return {
+    // 详情页标题展示完整业务目标（允许换行），列表行才需要截断。
+    title: (task?.objective || "").replace(/\s+/g, " ").trim() || "未命名任务",
+    objectLabel: businessObjectLabel(
+      (task?.object_label as string | undefined) || firstCatalogTable(snapshot) || null,
+    ),
+    stateLabel: taskBusinessStateLabel(task?.status),
+    stateTone: taskBusinessStateTone(task?.status),
+    updatedLabel: relativeTimeLabel(task?.finished_at || task?.created_at),
+    conclusion,
+    artifacts,
+    citations,
+    relatedCandidates: relatedCandidateViews(snapshot),
+    conflicts: conflictViews(snapshot),
+    phases: processPhaseViews(snapshot),
+    waiting,
+    signals: conclusion.signals,
+    needsReview: Boolean(review),
+  };
+}
+

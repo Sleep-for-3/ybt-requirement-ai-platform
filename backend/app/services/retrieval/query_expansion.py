@@ -40,6 +40,98 @@ _FIELD_CODE_RE = re.compile(r"\b(?:E\d{6}|E\d{4}|SFJJGDM|SFJJSSBM)\b", re.IGNORE
 #: Question words that carry no retrieval signal on their own.
 _STOP_PREFIXES = ("请问", "请说明", "帮我看看", "这个字段", "该字段", "字段")
 
+#: Reporting-system names that must constrain retrieval when the question names
+#: them explicitly. "一表通" is the local platform; EAST and 1104 are the two
+#: upstream systems whose conversion rows otherwise look nearly identical.
+SYSTEM_ALIASES: dict[str, tuple[str, ...]] = {
+    "east": ("EAST", "east"),
+    "1104": ("1104", "1104报表"),
+    "ybt": ("一表通", "一表通制度"),
+}
+
+#: Sheet names of the conversion Q&A workbook, used to label a unit's system.
+_SHEET_SYSTEMS: tuple[tuple[str, str], ...] = (
+    ("EAST", "east"),
+    ("1104", "1104"),
+    ("一表通", "ybt"),
+)
+
+#: 1104 table codes are ``G`` + four digits (G0901/G0902…); the 一表通 table
+#: codes are longer (G110001), so a bare four-digit ``G`` code names 1104 even
+#: when the question only says "G0902 和一表通的差异".
+_1104_TABLE_RE = re.compile(r"\bG\d{4}\b")
+
+#: Data-item codes carry the reporting field identity (F250007, E010008,
+#: G110001). The retriever can use them as structured signals instead of relying
+#: on BM25/vector similarity alone.
+_FIELD_CODE_RE = re.compile(r"\b(?:F\d{6}|E\d{6}|G\d{6})\b", re.IGNORECASE)
+
+#: Phrases that explicitly ask for an older version. They must switch retrieval
+#: to the historical branch and nudge superseded versions forward, otherwise a
+#: question like "上一版规则是什么" returns the current version's text.
+HISTORY_HINTS: tuple[str, ...] = (
+    "上一版", "旧版", "老版本", "历史版本", "之前版本", "上一期", "旧规则", "原来版本",
+)
+
+
+def detect_history_intent(query: str) -> bool:
+    text = query or ""
+    return any(hint in text for hint in HISTORY_HINTS)
+
+
+def extract_field_codes(query: str) -> set[str]:
+    return {match.upper() for match in _FIELD_CODE_RE.findall(query or "")}
+
+
+# 表号：一表通用 "8.13"，1104/EAST 用 "G01"/"S72"/"G0107"。数字部分宽松匹配，
+# 只在单元原文里出现 "表号（主）：<code>" 时才真正加分，所以 "V2.0.0" 之类
+# 不会被误当成表号。
+_TABLE_CODE_RE = re.compile(r"\b(\d{1,2}\.\d{1,2}|[A-Z]\d{2,3}[A-Z]?)\b", re.IGNORECASE)
+
+
+def extract_table_codes(query: str) -> set[str]:
+    return {match.upper() for match in _TABLE_CODE_RE.findall(query or "")}
+
+
+def detect_systems(query: str) -> set[str]:
+    """Return the reporting systems explicitly named in ``query``.
+
+    A question that names two systems ("EAST 和 1104 分别怎么转") returns both,
+    so the caller can keep evidence from each side instead of hard-filtering to
+    one. No alias means no constraint at all.
+    """
+
+    text = query or ""
+    found: set[str] = set()
+    for system, aliases in SYSTEM_ALIASES.items():
+        if any(alias in text for alias in aliases):
+            found.add(system)
+    if _1104_TABLE_RE.search(text):
+        found.add("1104")
+    return found
+
+
+def unit_system(sheet_name: str | None, content: str | None) -> str | None:
+    """Label a knowledge unit with its reporting system.
+
+    ``source_sheet_name`` is authoritative ("转EAST问答" / "转1104问答" /
+    "一表通制度问答"); the question id prefix is the fallback for units that lost
+    their sheet metadata during parsing.
+    """
+
+    sheet = str(sheet_name or "")
+    for marker, system in _SHEET_SYSTEMS:
+        if marker in sheet:
+            return system
+    head = str(content or "")[:160]
+    if "EAST_" in head:
+        return "east"
+    if "1104_" in head:
+        return "1104"
+    if "YBZD_" in head:
+        return "ybt"
+    return None
+
 
 def expand_query(query: str, *, max_variants: int = 3) -> list[str]:
     """Return the original query plus at most ``max_variants - 1`` rewrites."""
@@ -119,10 +211,16 @@ def detect_intent(query: str) -> str | None:
 
 
 __all__ = [
+    "HISTORY_HINTS",
     "INTENT_RULES",
     "INTENT_TYPES",
     "SYNONYM_GROUPS",
+    "SYSTEM_ALIASES",
+    "detect_history_intent",
     "detect_intent",
+    "detect_systems",
     "expand_query",
+    "extract_field_codes",
     "matched_scenarios",
+    "unit_system",
 ]

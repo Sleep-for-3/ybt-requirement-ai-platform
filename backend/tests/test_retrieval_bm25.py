@@ -262,7 +262,9 @@ def test_keyword_branch_adds_no_statements_when_no_candidate_matches(db_session,
 
     assert items == [] and log.keyword_result_count == 0
     # Candidate select + log insert/refresh only; no BM25 aggregation statements.
-    assert growth <= 4
+    # The refresh statement re-reads the inserted log so callers see server
+    # defaults (id/created_at); it is log bookkeeping, not BM25 work.
+    assert growth <= 5
 
 
 def test_candidate_match_does_aggregate_statistics(db_session, monkeypatch):

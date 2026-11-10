@@ -111,6 +111,16 @@ def document(document_id:int,project_id:int,db:Session=Depends(get_db)):
     return _document(item)
 @router.get("/knowledge/documents/{document_id}/versions")
 def versions(document_id:int,project_id:int,db:Session=Depends(get_db)):_visible_document_or_404(db,document_id,project_id);return [_safe_version(item) for item in db.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id==document_id).order_by(KnowledgeDocumentVersion.version_no.desc())).all()]
+@router.get("/knowledge/documents/{document_id}/versions/compare")
+def compare_document_versions(document_id:int,project_id:int,base_version_id:int,target_version_id:int,
+                              principal:CurrentPrincipal,db:Session=Depends(get_db)):
+    """固定两个版本做制度对比：逐条给出差异与双侧出处（只读）。"""
+    from app.services.knowledge_versions import compare_versions
+    try:
+        return compare_versions(db,principal,project_id,document_id,base_version_id,target_version_id)
+    except ValueError as exc:
+        code=str(exc)
+        raise HTTPException(404,"文档或版本不存在" if code in {"document_not_found","version_not_found"} else code) from exc
 @router.post("/knowledge/document-versions/{version_id}/review")
 def review_document_version(version_id:int,project_id:int,principal:CurrentPrincipal,db:Session=Depends(get_db)):
     PermissionService(db,principal).require_project_permission(project_id,"knowledge.manage")

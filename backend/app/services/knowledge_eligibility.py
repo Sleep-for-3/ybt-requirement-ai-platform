@@ -3,11 +3,22 @@
 Preserves the existing legacy-active compatibility rule. Current versions use
 knowledge governance activation; historical retrieval is explicitly opt-in.
 """
+from datetime import datetime, timezone
+
 from sqlalchemy import and_, func, or_, select
 from app.models import KnowledgeDocument, KnowledgeDocumentVersion, KnowledgeUnit
 
 
-def governed_unit_predicates(project_id, *, historical=False, historical_as_of=None):
+def _as_utc(moment):
+    """Normalise naive SQLite datetimes before comparing activation windows."""
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def governed_unit_predicates(project_id, *, historical=False, historical_as_of=None, reference_time=None):
     visibility = or_(
         and_(
             KnowledgeUnit.knowledge_scope.in_(("project", "institution")),
@@ -31,7 +42,7 @@ def governed_unit_predicates(project_id, *, historical=False, historical_as_of=N
                  KnowledgeDocument.document_status.in_(("indexed", "partially_indexed", "parsed", "parsed_with_warnings", "active"))),
         )
     )
-    reference_time = historical_as_of or func.now()
+    reference_time = reference_time or historical_as_of or func.now()
     eligible_versions = select(KnowledgeDocumentVersion.id).join(
         KnowledgeDocument, KnowledgeDocument.id == KnowledgeDocumentVersion.document_id
     ).where(
@@ -46,7 +57,7 @@ def governed_unit_predicates(project_id, *, historical=False, historical_as_of=N
     return predicates
 
 
-def governed_document_visible(document, version, project_id, institution, historical=False):
+def governed_document_visible(document, version, project_id, institution, historical=False, reference_time=None):
     legacy_active = (document.current_version_id is None and document.current_version_no == version.version_no
                      and document.document_status in {"indexed", "partially_indexed", "parsed", "parsed_with_warnings", "active"})
     if not historical and not legacy_active and (document.current_version_id != version.id or version.lifecycle_status != "active"):
@@ -56,6 +67,17 @@ def governed_document_visible(document, version, project_id, institution, histor
     if document.applicable_project_ids_json and project_id not in document.applicable_project_ids_json:
         return False
     if document.applicable_institution_names_json and institution not in document.applicable_institution_names_json:
+        return False
+    # Vector candidates are stored as unit ids and re-read from the database, so
+    # the activation window must be checked here as well: the keyword branch only
+    # filters through guarded SQL predicates. Use the caller's request time so both
+    # branches agree on the effective/expiry boundary within one request.
+    moment = _as_utc(reference_time) or datetime.now(timezone.utc)
+    effective_at = _as_utc(version.effective_at)
+    expires_at = _as_utc(version.expires_at)
+    if effective_at is not None and effective_at > moment:
+        return False
+    if expires_at is not None and expires_at <= moment:
         return False
     return True
 

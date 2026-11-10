@@ -319,3 +319,120 @@ def test_physical_table_name_is_matched_exactly(scope, monkeypatch):
     assert "hyf_ln_pa_online_info" in answer
     assert "partner_no" in answer
     assert "financial_institution_typ" not in answer
+
+def test_answer_artifact_preserves_citation_version_and_locator(scope, monkeypatch):
+    """「查看原文」需要的身份必须进产出物摘要：文档、版本、知识单元、Sheet/单元格。
+
+    只保留 label/source_heading 时，前端只能打开当前版本、也无法定位；
+    这条用例锁住摘要里的引用身份字段。
+    """
+
+    db = scope["db"]
+    citation = {
+        "citation_id": "knowledge-unit-77",
+        "citation_type": "knowledge_document",
+        "source_type": "regulatory_qa",
+        "project_id": scope["project"].id,
+        "document_id": 6,
+        "document_version_id": 6,
+        "knowledge_unit_id": 77,
+        "label": "【知识库共享】一表通答疑汇总_[账号].xlsx",
+        "source_file_name": "【知识库共享】一表通答疑汇总_[账号].xlsx",
+        "source_sheet_name": "一表通制度问答",
+        "source_cell_range": "A485:W485",
+        "quoted_content": "问题：仅提供咨询服务的机构是否属于互联网贷款合作机构……",
+        "locator": {"block_id": "knowledge-unit-77", "sheet_name": "一表通制度问答", "cell_range": "A485:W485",
+                    "text_quote": "仅提供咨询服务的机构"},
+        "href": "/knowledge/documents/6/preview?project_id=1&version_id=6",
+        "effective_at": "2025-04-17",
+        "authority_rank": 4,
+    }
+
+    async def _answer(database, project_id, query, **kwargs):
+        return {"answer": "按答疑口径，仅提供咨询、数据类服务的机构不属于互联网贷款合作机构。",
+                "answer_status": "grounded", "citations": [dict(citation)]}
+
+    monkeypatch.setattr(grounded_answer_service, "grounded_answer", _answer)
+    task = runtime.create_task(db, scope["principal"], scope["project"], QUESTION, use_llm_planner=False)
+    job = BackgroundJob(
+        institution_id=scope["project"].institution_id, project_id=scope["project"].id,
+        idempotency_key=f"test-agent-qa-citation-{task.id}", job_type=runtime.AGENT_JOB_TYPE, status="queued",
+        payload_summary_json={"agent_task_id": task.id, "plan_version": task.plan_version},
+        created_by=scope["user"].id,
+    )
+    db.add(job)
+    db.flush()
+    task.background_job_id = job.id
+    db.commit()
+    runtime.run_agent_task(db, job)
+    db.expire_all()
+
+    artifact = db.query(AgentArtifact).filter_by(task_id=task.id).one()
+    stored = artifact.summary_json["citations"][0]
+    assert stored["document_id"] == 6
+    assert stored["document_version_id"] == 6, "必须保留回答当时的版本，不能只留当前版本"
+    assert stored["knowledge_unit_id"] == 77
+    assert stored["source_sheet_name"] == "一表通制度问答"
+    assert stored["source_cell_range"] == "A485:W485"
+    assert stored["locator"]["cell_range"] == "A485:W485"
+    assert stored["quoted_content"].startswith("问题：仅提供咨询服务")
+
+def test_classification_items_are_only_listed_when_they_match_the_question_subject():
+    """分类口径必须逐项对应问句对象；「合作方式」码值不能冒充「合作机构类型」。"""
+
+    from app.services.agent.tools.builtin import _classification_result
+
+    code_citation = {"quoted_content": (
+        "反馈意见：同意浙江局意见。建议合作方式的码值修改为：。01 营销获客。02 联合贷款。"
+        "03 支付结算。04 风险分担。05 担保增信。06 信息科技。07 逾期清收。08 客户筛选。"
+        "09 部分风险评价。10 其他。00 无合作方。"
+    )}
+    listed = _classification_result("互联网贷款合作机构的合作方式有哪些码值？", [code_citation])
+    assert listed and listed["status"] == "listed"
+    assert [item["code"] for item in listed["items"]][:3] == ["01", "02", "03"]
+    assert len(listed["items"]) == 11
+
+    # 问的是「机构类型」，同一份原文讲的是「合作方式」，不能拿来充数。
+    missing = _classification_result("互联网贷款合作机构类型有哪些？", [code_citation])
+    assert missing and missing["status"] == "missing" and missing["items"] == []
+
+    generic = {"quoted_content": (
+        "问题类型：1.采集范围问题；表名（主）：互联网贷款合作协议；具体问题描述：仅提供咨询、"
+        "数据类服务的机构是否属于互联网贷款合作机构；若需报送，合作方式、合作式类型应如何填报。"
+    )}
+    missing_generic = _classification_result("合作机构类型有哪些？", [generic])
+    assert missing_generic and missing_generic["status"] == "missing"
+    # 与分类无关的问题不注入分类段落。
+    assert _classification_result("这张表有哪些字段？", [code_citation]) is None
+
+def test_conflicts_detect_same_data_item_with_different_code_sets():
+    """同一数据项的两份资料码值集合不同，才算冲突；同一口径的不同表述不算。"""
+
+    from app.services.rag.grounded_answer_service import _evidence_conflicts
+
+    def row(unit_id, content, rank=5):
+        return {"knowledge_unit_id": unit_id, "authority_rank": rank, "content": content,
+                "content_hash": f"hash-{unit_id}"}
+
+    base = "表号（主）：6.25；数据项编码：F250007；数据项名称：合作方式；具体问题描述："
+    old = row(1, base + "值域为（00,01,02,03,04,05,06,07,08）")
+    new = row(2, base + "反馈意见：建议合作方式的码值修改为：01 营销获客。02 联合贷款。03 支付结算。"
+                       "04 风险分担。05 担保增信。06 信息科技。07 逾期清收。08 客户筛选。09 部分风险评价。10 其他。00 无合作方。")
+    conflicts = _evidence_conflicts([old, new])
+    assert conflicts and conflicts[0]["topic"] == "F250007@6.25"
+    assert set(conflicts[0]["citation_ids"]) == {"knowledge-unit-1", "knowledge-unit-2"}
+
+    # 不同数据项不是同一口径冲突。
+    other = row(3, "数据项编码：F090006；数据项名称：发卡合作机构代码；具体问题描述：字段限长。")
+    assert _evidence_conflicts([old, other]) == []
+    # 同一数据项但属于不同报表（适用范围不同），不互相判冲突。
+    scoped = row(5, "表号（主）：6.9；数据项编码：F250007；数据项名称：合作方式；具体问题描述：值域（00,01）。")
+    assert _evidence_conflicts([old, scoped]) == []
+    # 同一码值集合、不同文字说明，不应报冲突。
+    same = row(4, base + "值域为（00,01,02,03,04,05,06,07,08），多个用分号隔开。")
+    assert _evidence_conflicts([old, same]) == []
+    # 业务问答（权威等级 2）之间出现码值集合差异，同样必须提示待确认。
+    low_old = row(6, base + "值域为（00,01,02）", rank=2)
+    low_new = row(7, base + "建议码值：01 营销获客。02 联合贷款。03 支付结算。09 部分风险评价。", rank=2)
+    low_conflicts = _evidence_conflicts([low_old, low_new])
+    assert low_conflicts and low_conflicts[0]["topic"] == "F250007@6.25"

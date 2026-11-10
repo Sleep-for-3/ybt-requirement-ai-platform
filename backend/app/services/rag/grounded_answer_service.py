@@ -26,6 +26,41 @@ from .citation_validator import (
 )
 from app.services.knowledge_evidence import document_citation, evidence_runtime
 
+# 送模证据窗口：多证据题常在第 10-12 位命中第二条件证，10 条会把它们裁掉。
+_EVIDENCE_WINDOW = 12
+
+# 「答案明确否定结论」+「承认缺少原文/条文」同时成立时，不能标 grounded。
+# 单看一个「无法确认」会把正常答案误降级；单看 open_questions 也不行，因为每条
+# 答案都会追加一条机构答疑口径的固定提示。两个信号组合才指向"引用了相关材料，
+# 但承认它不足以支撑结论"这一种情况（如把表号 3.2 当成报文规则第 3.2 条）。
+_NEGATIVE_CONCLUSION_MARKERS = (
+    "不能据此推定", "不能据此确定", "不能据此认定", "不能据此推断", "无法据此", "未包含",
+    "不能认定", "无法确定", "无法确认", "无法从所给", "无法依据", "不足以",
+)
+_MISSING_SOURCE_MARKERS = (
+    "原文", "条文", "具体规定", "具体文本",
+    # 无答案题的缺口常写成"字段定义 / 码值表 / 填报口径"，而不是"原文"。
+    "字段定义", "码值", "填报口径", "分类口径",
+)
+# 缺口描述也常直接写在答案正文（模型不填 open_questions）。
+_GAP_IN_ANSWER_MARKERS = ("缺少", "未包含", "无法确定", "无法确认", "原文", "条文")
+
+
+def _answer_denies_conclusion(answer: str, open_questions) -> bool:
+    text = (answer or "").strip()
+    if not text:
+        return False
+    # 模型显式把整条答案标成"待确认"，不必再看别的信号。
+    if text.startswith("待确认"):
+        return True
+    if not any(marker in text for marker in _NEGATIVE_CONCLUSION_MARKERS):
+        return False
+    # 缺口写在答案正文里（"未包含…相关信息；缺少…"）。
+    if any(marker in text for marker in _GAP_IN_ANSWER_MARKERS):
+        return True
+    joined = " ".join(open_questions or [])
+    return any(marker in joined for marker in _MISSING_SOURCE_MARKERS)
+
 
 # A slow or unavailable provider must not turn a grounded Q&A into an HTTP 500:
 # the citations are already known, so the answer degrades to "evidence only,
@@ -33,14 +68,16 @@ from app.services.knowledge_evidence import document_citation, evidence_runtime
 DEGRADED_ANSWER_TEXT = "模型生成暂时不可用，以下为检索到的证据，结论待确认。"
 
 
-async def grounded_answer(db, project_id, query, *, interactive: bool = True, commit: bool = True, **filters):
+async def grounded_answer(db, project_id, query, *, interactive: bool = True, commit: bool = True,
+                          include_items: bool = False, **filters):
     retrieval_log, items = HybridRetriever(db).search(
         project_id,
         query,
         filters.get("target_field_id"),
         filters.get("scenario_id"),
         filters.get("knowledge_types"),
-        filters.get("top_k", 10),
+        # 至少取满送模窗口：多证据题的第二条件证常落在第 10-12 位，按 10 取会被截断。
+        filters.get("top_k", _EVIDENCE_WINDOW),
         retrieval_mode=filters.get("retrieval_mode", "hybrid"),
         include_history=filters.get("include_history", False),
         historical_as_of=filters.get("historical_as_of"),
@@ -66,14 +103,28 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             ),
         }
 
-    citations = [document_citation(item, project_id) for item in items[:10]]
-    conflicts = _evidence_conflicts(items[:10])
+    citations = [document_citation(item, project_id) for item in items[:_EVIDENCE_WINDOW]]
+    conflicts = _evidence_conflicts(items[:_EVIDENCE_WINDOW])
     index_freshness = _index_freshness(db, project_id, filters.get("retrieval_mode", "hybrid"))
     validate_citations(db, citations, project_id=project_id)
     evidence = "\n".join(
-        f"[{item['knowledge_unit_id']}] {item['content']}" for item in items[:10]
+        f"[{item['knowledge_unit_id']}] {item['content']}" for item in items[:_EVIDENCE_WINDOW]
     )
-    prompt = f"问题：{query}\n只允许引用以下知识单元，不得新增来源表字段：\n{evidence}"
+    # 证据编号本来就在 prompt 里，但旧 prompt 只要求"不许新增来源"，没要求模型把编号
+    # 写回结论。结果同一题三次运行里，有时每条结论都带 [N]，有时整篇一个编号都没有，
+    # 「实际引用」指标只能靠运气。这里把"结论→编号"变成硬性格式要求。
+    prompt = (
+        f"问题：{query}\n"
+        f"只允许引用以下知识单元，不得新增来源表字段：\n{evidence}\n"
+        "输出要求：\n"
+        "1. answer 里每一条业务结论（码值、口径、适用范围、适用条件）末尾都必须标注"
+        "它所依据的知识单元编号，格式为半角方括号加数字，例如 [123]；\n"
+        "2. 无法由上述证据确认的内容不要标编号，写入 unsupported_claims；\n"
+        "3. supported_claims 里每条结论也要带同样的编号标注；\n"
+        "4. 证据不足以回答时，answer 直接说明缺什么，不要编造码值或条款；\n"
+        "5. 如果无法给出完整确定的监管结论（例如缺少条文原文、缺分类口径、缺少现行版本），"
+        "必须在 cannot_answer_reason 里写清楚缺什么；能完整回答时留空。"
+    )
     # C06: the caller's selected profile must reach the runtime; otherwise the recorded model and the
     # executed model disagree (and an evaluation could grade a different model than it names).
     # When no profile is selected, the call shape stays byte-for-byte the original two-argument form,
@@ -131,8 +182,10 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
     if not answer:
         answer = "；".join(item["content"].replace("\n", " ")[:180] for item in items[:3])
     invented = _invented_qualified_identifiers("\n".join([answer, *supported_claims]), evidence)
-    referenced = set(re.findall(r"\[(\d+)\]", "\n".join([answer, *supported_claims])))
-    unknown_references = referenced - {str(item["knowledge_unit_id"]) for item in items[:10]}
+    # 模型经常用中文方括号标引用（"不能将【2093】作为现行依据"），只认半角 [N]
+    # 会把真实引用计成零引用，连带把"实际引用命中"和状态判定都算错。
+    referenced = set(re.findall(r"[\[【](\d+)[\]】]", "\n".join([answer, *supported_claims])))
+    unknown_references = referenced - {str(item["knowledge_unit_id"]) for item in items[:_EVIDENCE_WINDOW]}
     invalid_output = bool(invented or unknown_references)
     if invented:
         supported_claims = []
@@ -144,6 +197,34 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         unsupported_claims.append("模型引用了不在本次证据范围内的知识单元编号。")
         answer = "模型引用编号未通过证据校验，结论待确认。"
         open_questions.append("请依据下方已校验的文档引用重新核实结论。")
+
+    # Judge 关闭时，合法编号只证明"引用可解析"，不证明"内容支撑断言"。这里做
+    # 确定性检查：断言里出现的字段码（F/E/G + 6 位）必须能在**被引用单元**的原文
+    # 里找到；找不到就不能把结论展示成已获支持的确定结论。
+    deterministic_gap: list[str] = []
+    if get_settings().citation_support_check != "judge" and not invalid_output and referenced:
+        cited_unit_ids = {int(ref) for ref in referenced if str(ref).isdigit()}
+        cited_text = "\n".join(
+            str(citation.get("quoted_content") or "")
+            for citation in citations
+            if citation.get("knowledge_unit_id") in cited_unit_ids
+        )
+        signals = set(re.findall(r"\b(?:F\d{6}|E\d{6}|G\d{6})\b", answer, re.IGNORECASE))
+        deterministic_gap = sorted(
+            signal for signal in signals if signal.lower() not in cited_text.lower()
+        )
+        # 码值级检查：答案里"码值/填报/可选/值域"上下文中的两位数字必须出现在
+        # 被引用原文的码值集合里，否则「原文只允许 01、答案说可以填 99」会被当成
+        # 确定结论。
+        cited_code_values = set(re.findall(r"\b\d{2}\b", cited_text))
+        answer_code_values = _answer_code_values(answer)
+        missing_codes = sorted(answer_code_values - cited_code_values)
+        deterministic_gap = sorted({*deterministic_gap, *missing_codes})
+        if deterministic_gap:
+            unsupported_claims.extend(
+                f"断言提到的标识未在被引用原文出现：{signal}" for signal in deterministic_gap
+            )
+            open_questions.append("请核对引用原文是否覆盖该标识所指的口径。")
 
     project = db.get(Project, project_id)
     validate_citations(
@@ -176,7 +257,7 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             conflict_unit_ids=sorted({
                 int(item["knowledge_unit_id"])
                 for conflict in conflicts
-                for item in items[:10]
+                for item in items[:_EVIDENCE_WINDOW]
                 if f"knowledge-unit-{item['knowledge_unit_id']}" in (conflict.get("citation_ids") or [])
             }) or None,
             project_id=project_id,
@@ -199,8 +280,20 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             claim_support["unsupported_claims"],
             claim_support["unknown_claims"],
         )
+    # 模型显式声明的"无法完整回答"优先于任何关键词推断；旧输出没有该字段时为 None，
+    # 退回原有判定，历史任务保持兼容。
+    cannot_answer_reason = str(output.get("cannot_answer_reason") or "").strip() or None
     answer_status = _answer_status(
-        invalid_output=invalid_output, claim_support=claim_support, cited=bool(citations))
+        invalid_output=invalid_output, claim_support=claim_support,
+        # "cited" must mean the model actually referenced a unit, not that the
+        # retrieval context is non-empty: an answer that says "no evidence covers
+        # this" while ten context rows were sent must not be graded grounded.
+        cited=bool(referenced),
+        deterministic_gap=bool(deterministic_gap),
+        # 引用了相关材料、但答案自己写明"不能据此推定"且承认缺原文/条文时，
+        # 这是"有引用无依据"，不能算 grounded。
+        denies_conclusion=_answer_denies_conclusion(answer, open_questions),
+        declared_unanswerable=bool(cannot_answer_reason))
     confidence_level = _confidence_level(
         invalid_output=invalid_output,
         claim_support=claim_support,
@@ -210,6 +303,9 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         "answer": answer,
         "confidence_level": confidence_level,
         "citations": citations,
+        # The model's bracketed ids say which context units it actually used, so
+        # callers can keep "selected into context" apart from "cited in answer".
+        "cited_unit_ids": sorted({int(value) for value in referenced if str(value).isdigit()}),
         # When a judge ran, only claims the judge actually confirmed may appear as supported.
         # The historical ``[answer]`` fallback survives only for the switch-off / no-judgement
         # path; otherwise a citation-level or all-unknown judgement would reintroduce the very
@@ -239,7 +335,45 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
     if pins:
         # 回显钉扎便于前端/审计说明“本次结论是按哪个版本判定的”。
         result["pinned_versions"] = pins
+    if include_items:
+        # 只给调用方（智能体工具）用于区分“实际支撑答案的引用”和“检索到但未被引用的候选材料”。
+        result["retrieval_items"] = [_compact_retrieval_item(item) for item in items[:25]]
     return result
+
+
+def _compact_retrieval_item(item: dict) -> dict:
+    locator = item.get("locator")
+    if not isinstance(locator, dict):
+        locator = {
+            "block_id": f"knowledge-unit-{item.get('knowledge_unit_id')}",
+            "page_no": item.get("source_page_no"),
+            "sheet_name": item.get("source_sheet_name"),
+            "cell_range": item.get("source_cell_range"),
+            "heading": item.get("source_heading"),
+        }
+    return {
+        "knowledge_unit_id": item.get("knowledge_unit_id"),
+        "document_id": item.get("document_id"),
+        "document_version_id": item.get("document_version_id"),
+        "project_id": item.get("project_id"),
+        "title": item.get("title") or item.get("source_heading"),
+        "source_file_name": item.get("source_file_name"),
+        "source_heading": item.get("source_heading"),
+        "source_sheet_name": item.get("source_sheet_name"),
+        "source_cell_range": item.get("source_cell_range"),
+        "source_page_no": item.get("source_page_no"),
+        "excerpt": (item.get("content") or "")[:300],
+        "historical": item.get("historical"),
+        "authority_rank": item.get("authority_rank"),
+        # Catalogue identity for the "formal policy / institution question /
+        # reference suggestion" distinction and for the classification subject
+        # check. Retrieval hits already carry them; compact items must not drop
+        # them or the answer layer cannot tell the three apart.
+        "knowledge_type": item.get("knowledge_type"),
+        "source_category": item.get("source_category"),
+        "quoted_content": (item.get("content") or "")[:600],
+        "locator": locator,
+    }
 
 
 def _merge_unique(*groups) -> list[str]:
@@ -253,17 +387,33 @@ def _merge_unique(*groups) -> list[str]:
     return merged
 
 
-def _answer_status(*, invalid_output: bool, claim_support, cited: bool) -> str:
+def _answer_status(*, invalid_output: bool, claim_support, cited: bool,
+                   deterministic_gap: bool = False,
+                   denies_conclusion: bool = False,
+                   declared_unanswerable: bool = False) -> str:
     """把引用支撑结论收敛到既有 answer_status 状态机。
 
     * 开关关闭（claim_support is None）或校验完全通过 → 维持 grounded；
     * 存在未支撑/未判断/覆盖不足 → needs_confirmation（不新增状态值）；
     * 裁判本身失败且没有可用引用 → degraded（本就无依据可用）。
+
+    ``deterministic_gap`` 是 judge 关闭时的确定性兜底：合法引用编号但断言里的
+    字段码不在被引用原文出现，同样不能算 grounded。
+
+    ``denies_conclusion`` 覆盖"有引用无依据"：答案引用了相关材料，但同时写明
+    不能据此推定、并承认缺原文/条文（典型是数字歧义，如把表号 3.2 当成
+    报文规则第 3.2 条）。
+
+    ``declared_unanswerable`` 是模型在结构化输出里显式填写了
+    ``cannot_answer_reason``：比措辞推断稳定，同一道题换一种说法也不会漂回
+    grounded。
     """
     if invalid_output:
         return "needs_confirmation"
     if claim_support is None:
-        return "grounded"
+        if deterministic_gap or denies_conclusion or declared_unanswerable:
+            return "needs_confirmation"
+        return "grounded" if cited else "needs_confirmation"
     verification = claim_support.get("verification")
     if verification == VERIFIED:
         return "grounded"
@@ -344,24 +494,49 @@ def _index_freshness(db, project_id, retrieval_mode):
         "using_previous_formal_index": bool(formal and active and not current)}
 
 
+def _code_set(content: str) -> set[str]:
+    """从原文里抽取两位码值（如 01 营销获客、值域（00,01,02））。"""
+
+    text = str(content or "")
+    return set(re.findall(r"(?<![\dA-Za-z])(\d{2})(?=\s*[\u4e00-\u9fa5A-Za-z]|[\s,，、;；)）])", text))
+
+
+def _conflict_key(item: dict) -> str | None:
+    metadata = item.get("metadata_json") or {}
+    key = metadata.get("conflict_key") or item.get("target_field_code")
+    content = str(item.get("content") or "")
+    if key:
+        return str(key)
+    match = re.search(r"数据项编码[：:]\s*([A-Z]\d{6})", content)
+    if not match:
+        match = re.search(r"数据项名称[：:]\s*([^\s；;，,。]{2,30})", content)
+    if not match:
+        return None
+    # 同一数据项在不同报表里适用不同范围，不应互相判冲突；把主表号带进分组键。
+    table = re.search(r"表号（主）[：:]\s*([0-9.]+)", content)
+    return f"{match.group(1)}@{table.group(1)}" if table else match.group(1)
+
+
 def _evidence_conflicts(items):
     groups = {}
     for item in items:
-        metadata = item.get("metadata_json") or {}
-        key = metadata.get("conflict_key") or item.get("target_field_code")
-        if key and item.get("authority_rank", 0) >= 4:
+        key = _conflict_key(item)
+        if key and item.get("authority_rank", 0) >= 2:
             groups.setdefault(str(key), []).append(item)
     conflicts = []
     for key, rows in groups.items():
-        # 旧实现只比 content_hash；但检索项未必带 content_hash（自有文档以外的证据、评测快照、
-        # 手工构造项都可能没有），此时全为 None → 集合只有 1 个元素，两份相互矛盾的高权威
-        # 资料会被误判为“口径一致”而静默合并。改为：优先比 hash，缺 hash 时退化为比正文。
-        signatures = {
-            row.get("content_hash") or str(row.get("content") or "")
-            for row in rows
-        }
-        if len(rows) > 1 and len(signatures) > 1:
-            conflicts.append({"topic": key, "message": "多份当前高权威资料口径不一致，需要人工确认。",
+        if len(rows) < 2:
+            continue
+        # 同一数据项的多份资料：优先比“码值集合”，集合不同才是口径冲突；
+        # 没有码值的资料仍退化为比 hash/正文，但只在显式 conflict_key 且高权威时才这样比，
+        # 避免把同一数据项的不同问答误判成冲突。
+        code_sets = {frozenset(_code_set(row.get("content"))) for row in rows if _code_set(row.get("content"))}
+        explicit = any((row.get("metadata_json") or {}).get("conflict_key") for row in rows)
+        high_authority = any(row.get("authority_rank", 0) >= 4 for row in rows)
+        signatures = {row.get("content_hash") or str(row.get("content") or "") for row in rows}
+        conflict = (len(code_sets) > 1) or (explicit and high_authority and len(signatures) > 1)
+        if conflict:
+            conflicts.append({"topic": key, "message": "多份资料对同一数据项的口径不一致，需要人工确认。",
                 "citation_ids": [f"knowledge-unit-{row['knowledge_unit_id']}" for row in rows]})
     return conflicts
 
@@ -424,6 +599,24 @@ def _string_list(value) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [value] if isinstance(value, str) and value else []
+
+
+_CODE_VALUE_CONTEXT = re.compile(r"(?:码值|填报|填写|可以填|只能填|应填|填|取值|应为|可选|值域|只能|允许)")
+
+
+def _answer_code_values(answer: str) -> set[str]:
+    """Two-digit code values stated near a code-value phrase in the answer.
+
+    Only a bounded window after the phrase is scanned, so years/amounts elsewhere
+    in the sentence are not mistaken for code values.
+    """
+
+    values: set[str] = set()
+    text = answer or ""
+    for match in _CODE_VALUE_CONTEXT.finditer(text):
+        window = text[match.start():match.start() + 80]
+        values.update(re.findall(r"\b\d{2}\b", window))
+    return values
 
 
 def _invented_qualified_identifiers(answer: str, evidence: str) -> list[str]:

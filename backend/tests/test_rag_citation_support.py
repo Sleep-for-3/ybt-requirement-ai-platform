@@ -173,7 +173,7 @@ def test_grounded_answer_is_unchanged_when_the_switch_is_off(db, monkeypatch):
     monkeypatch.setattr(grounded, "prepare_model_input", lambda *a, **k: "synthetic evidence")
 
     async def answer(*_args, **_kwargs):
-        return {"answer": "结论", "confidence_level": "high", "supported_claims": []}, {}
+        return {"answer": "结论 [1]", "confidence_level": "high", "supported_claims": []}, {}
 
     monkeypatch.setattr(grounded, "execute_runtime_chat_with_metadata", answer)
     result = asyncio.run(grounded.grounded_answer(db, 1, "question"))
