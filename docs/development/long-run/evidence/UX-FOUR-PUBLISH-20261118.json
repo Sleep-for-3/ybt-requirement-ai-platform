@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-18",
+  "status": "published",
+  "branch": "dsh/handoff-20261025-round73",
+  "application_commit": "413a77f9543e5fb386a297a9c709094686edceb1",
+  "previous_commit": "15826d39c6601c11d302531ba6a038d0c2f7d307",
+  "public_url": "http://103.236.92.193:18085",
+  "build_time": "2026-11-18T06:10:00Z",
+  "schema_head": "202611010014",
+  "images": {
+    "frontend": "ybt-frontend:413a77f-ux",
+    "backend_worker_beat": "ybt-backend:413a77f-ux"
+  },
+  "verification": {
+    "backend": {"passed": 24, "deselected": 32},
+    "frontend": {"passed": 64},
+    "linux_production_build": "passed",
+    "readiness": "ready",
+    "application_containers_healthy": 4,
+    "worker_probe_exit": 0,
+    "beat_probe_exit": 0,
+    "public_browser": {
+      "passed": true,
+      "viewports": [1440, 390],
+      "login_http": 200,
+      "anonymous_projects_http": 401,
+      "frontend_api_identity_match": true,
+      "focus_order": true,
+      "horizontal_overflow": false,
+      "page_errors": [],
+      "authenticated_business_retest": false
+    }
+  },
+  "counts_before": {
+    "projects": 33, "knowledge_documents": 43,
+    "knowledge_document_versions": 43, "agent_tasks": 13,
+    "background_jobs": 210, "stored_files": 86, "requirements": 12
+  },
+  "counts_after": {
+    "projects": 33, "knowledge_documents": 43,
+    "knowledge_document_versions": 43, "agent_tasks": 13,
+    "background_jobs": 210, "stored_files": 86, "requirements": 12
+  },
+  "database_migration": false,
+  "external_model_calls": 0,
+  "release_source": "/home/ybt-release-413a77f/source",
+  "compose_source": "/opt/ybt/source",
+  "backup_directory": "/home/ybt-release-413a77f/private/",
+  "rollback_tag": "15826d3-r2",
+  "rollback_command": "python3 /home/ybt-release-413a77f/publish.py rollback",
+  "rollback_exercised": false,
+  "known_limitations": [
+    "Authenticated online business workflows not retested in this release",
+    "Root filesystem 97 percent used with about 890 MB available",
+    "Historical domain version endpoint returned 404",
+    "Existing P0 and real-model quality acceptance remain separate"
+  ],
+  "raw_evidence_root": ".local-run/rag-long-run/ux-four-20261118/",
+  "raw_evidence": [
+    "remote-verification.json", "public-browser/results.json",
+    "public-browser/login-1440.png", "public-browser/login-390.png"
+  ],
+  "next_action": "stop"
+}
