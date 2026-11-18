@@ -99,7 +99,8 @@ def test_governed_knowledge_renamed_version_waits_and_failed_parse_keeps_active(
     assert db_session.query(KnowledgeUnit).filter_by(document_version_id=active_id, enabled=True).count() == 0
 
 
-def test_current_regulatory_authority_sorts_before_business_material(db_session, tmp_path, monkeypatch):
+def test_strict_regulatory_authority_sorts_before_business_material(db_session, tmp_path, monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_AUTHORITY_MODE", "strict")
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path)); get_settings.cache_clear(); get_storage_service.cache_clear()
     project = _project(db_session)
     business = asyncio.run(ingest_knowledge_document(db_session, project.id,
@@ -142,5 +143,5 @@ def test_conflicting_authoritative_evidence_is_reported():
         {"knowledge_unit_id": 1, "authority_rank": 6, "content_hash": "a", "metadata_json": {"conflict_key": "CERT_TYPE"}},
         {"knowledge_unit_id": 2, "authority_rank": 5, "content_hash": "b", "metadata_json": {"conflict_key": "CERT_TYPE"}},
     ])
-    assert conflicts == [{"topic": "CERT_TYPE", "message": "多份当前高权威资料口径不一致，需要人工确认。",
+    assert conflicts == [{"topic": "CERT_TYPE", "message": "多份资料对同一数据项的口径不一致，需要人工确认。",
         "citation_ids": ["knowledge-unit-1", "knowledge-unit-2"]}]

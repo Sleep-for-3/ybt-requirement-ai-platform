@@ -1,0 +1,27 @@
+{
+  "round": 49,
+  "date": "2026-11-17",
+  "scope": "p0c_project_isolation_and_original_source_failure",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "changes": [
+    "backend/tests/test_agent_business_view.py",
+    "backend/tests/test_rag_preview_lifecycle.py"
+  ],
+  "targeted_tests": {
+    "command": ".venv/Scripts/python.exe -m pytest tests/test_agent_business_view.py::test_agent_task_detail_and_list_are_scoped_to_the_callers_project tests/test_rag_preview_lifecycle.py -q",
+    "result": "8 passed",
+    "initial_attempt": "1 failed, 7 passed; expected 403 but service masks unauthorized project as 404; corrected to non-disclosure contract"
+  },
+  "evidence_tier": "isolated_api_service_tests",
+  "external_provider_requests": 0,
+  "application_code_changes": 0,
+  "runtime_database_index_remote_or_public_mutations": 0,
+  "old_isolation_credentials_read": false,
+  "goal_check": {
+    "consistent": true,
+    "complete": false,
+    "verified": 2,
+    "in_progress": 9,
+    "pending": 7
+  }
+}

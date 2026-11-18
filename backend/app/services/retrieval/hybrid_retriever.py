@@ -1,3 +1,4 @@
+import re
 import time
 from datetime import datetime, timezone
 
@@ -10,6 +11,7 @@ from app.services.embeddings import get_embedding_service
 from app.services.embeddings.observability import embed_with_observability
 from app.services.semantic_index.versioning import get_active_index_version
 from app.services.vector import get_vector_store
+from app.services.code_extraction import extract_sql_identifiers
 
 from .keyword_index import (DEFAULT_BM25_B, DEFAULT_BM25_K1, BM25Stats, compute_bm25_stats,
                             load_unit_statistics, score_bm25, tokenize, token_matches)
@@ -19,6 +21,8 @@ from .query_expansion import (INTENT_TYPES, detect_history_intent, detect_intent
 from .reranker import rerank_items
 from app.services.knowledge_evidence import unit_locator
 from app.services.knowledge_eligibility import governed_unit_predicates, governed_document_visible
+from app.services.knowledge_version_scope import matches_version_pins
+from app.services.llm.execution_metadata import stable_hash
 
 
 RETRIEVAL_MODES = {"keyword_only", "vector_only", "hybrid"}
@@ -46,6 +50,8 @@ class HybridRetriever:
         historical_as_of=None,
         include_history=False,
         commit=True,
+        pinned_versions=None,
+        reference_time=None,
     ):
         if retrieval_mode not in RETRIEVAL_MODES:
             raise ValueError("retrieval_mode must be keyword_only, vector_only, or hybrid")
@@ -69,7 +75,7 @@ class HybridRetriever:
         # One request time governs both the keyword SQL predicates and the
         # vector-candidate re-read, so an expiring version cannot survive one
         # branch while being filtered out by the other.
-        reference_time = historical_as_of or datetime.now(timezone.utc)
+        reference_time = historical_as_of or reference_time or datetime.now(timezone.utc)
         historical = bool(include_history or historical_as_of)
         predicates = governed_unit_predicates(project_id, historical=historical, historical_as_of=historical_as_of, reference_time=reference_time)
         if knowledge_types:
@@ -109,6 +115,7 @@ class HybridRetriever:
         # (a two-system question keeps both sides).
         query_systems = detect_systems(query) if expansion_enabled else set()
         query_field_codes = extract_field_codes(query) if expansion_enabled else set()
+        query_sql_identifiers = _query_sql_identifiers(query, settings)
         query_table_codes = extract_table_codes(query) if expansion_enabled else set()
         tokens = tokenize(
             " ".join(
@@ -351,6 +358,11 @@ class HybridRetriever:
             version = version_by_id.get(unit.document_version_id)
             if not document or not version or not _governed_visible(document, version, project_id, project.bank_name, historical, reference_time=reference_time):
                 continue
+            if not matches_version_pins(
+                document.file_name, version.regulatory_version or version.internal_revision or str(version.version_no),
+                pinned_versions,
+            ):
+                continue
             keyword_score = normalized_keyword.get(unit_id, 0.0)
             vector_score = normalized_vector.get(unit_id, 0.0)
             reasons = []
@@ -417,6 +429,19 @@ class HybridRetriever:
                         table_bonus = field_boost
                         reasons.append("表号精确命中")
                         break
+            # Explicit field/SQL identifiers are a high-signal request for
+            # evidence containing those exact identifiers. The bounded bonus
+            # improves relevance without changing authority or abstention.
+            identifier_matches = _content_identifier_matches(
+                unit.content, query_field_codes | query_sql_identifiers)
+            identifier_bonus = 0.0
+            if identifier_matches:
+                per_code = _setting_float(settings, "retrieval_identifier_boost", 0.55)
+                identifier_bonus = min(1.10, per_code * len(identifier_matches))
+                if identifier_matches & query_field_codes:
+                    reasons.append(f"字段码正文精确命中（{len(identifier_matches & query_field_codes)}）")
+                if identifier_matches & query_sql_identifiers:
+                    reasons.append(f"SQL标识符正文精确命中（{len(identifier_matches & query_sql_identifiers)}）")
             # "上一版规则是什么" must prefer the superseded version over the
             # current one; without this the current text wins on similarity.
             history_bonus = 0.0
@@ -430,6 +455,7 @@ class HybridRetriever:
                 + system_bonus
                 + field_bonus
                 + table_bonus
+                + identifier_bonus
                 + history_bonus
                 + (intent_boost if intent_hit else 0.0)
             )
@@ -447,6 +473,8 @@ class HybridRetriever:
                 "citation_id": f"knowledge-unit-{unit.id}",
                 "embedding_index_version_id": active_index.id if active_index else None,
                 "title": unit.title,
+                "document_title": document.file_name,
+                "version": version.regulatory_version or version.internal_revision or str(version.version_no),
                 "content": unit.content,
                 "target_field_code": unit.target_field_code,
                 "knowledge_type": unit.knowledge_type,
@@ -457,6 +485,8 @@ class HybridRetriever:
                 "source_page_no": unit.source_page_no,
                 "keyword_score": round(keyword_score, 4),
                 "vector_score": round(vector_score, 4),
+                "raw_keyword_score": keyword.get(unit_id),
+                "raw_vector_score": vector.get(unit_id),
                 "final_score": round(final_score, 4),
                 "rerank_score": round(final_score, 4),
                 "rank_sources": rank_sources,
@@ -492,6 +522,7 @@ class HybridRetriever:
             seen_positions.add(position)
             deduped.append(item)
         ordered = deduped
+        budgeted_context = getattr(settings, "rag_token_context_enabled", False)
         # "上一版规则是什么" asks for the superseded version; the current text is
         # usually the stronger similarity match, so history questions put old
         # versions first explicitly instead of relying on a small score bump.
@@ -501,12 +532,12 @@ class HybridRetriever:
             ordered = old_versions + current_versions
         # 跨体系题：每个体系先占住自己的名额，再按原序补足，避免一方证据
         # 被另一方的同名字段整片挤掉（"EAST 和 1104 分别…"）。
-        if len(query_systems) >= 2:
+        if len(query_systems) >= 2 and not budgeted_context:
             ordered = _system_quota_order(ordered, query_systems, top_k)
         # 未点明体系、但窗口被单一文档族占满时，保留一个其他族的最高分候选，
         # 防止跨体系正确条款卡在窗口第 11 位。开关用于对照实验：关掉即可回到
         # 上一轮 `e2e-20261107c` 的排序行为。
-        if getattr(settings, "retrieval_sheet_diversity_enabled", True):
+        if getattr(settings, "retrieval_sheet_diversity_enabled", True) and not budgeted_context:
             ordered = _sheet_diversity_order(ordered, top_k)
         items = ordered[:top_k]
         # The reranker is inert unless settings.reranker_enabled is True; when it
@@ -515,6 +546,17 @@ class HybridRetriever:
         rerank_outcome = rerank_items(items, query, settings)
         if rerank_outcome.applied:
             items = rerank_outcome.items[:top_k]
+        if budgeted_context:
+            if len(query_systems) >= 2:
+                items = _system_quota_order(items, query_systems, top_k)
+            if getattr(settings, "retrieval_sheet_diversity_enabled", True):
+                items = _sheet_diversity_order(items, top_k)
+        shadow_threshold = getattr(settings, "rag_abstention_shadow_threshold", None)
+        ranking_config = {
+            name: value for name, value in (
+                settings.model_dump().items() if hasattr(settings, "model_dump") else vars(settings).items())
+            if name.startswith(("rag_", "reranker_", "retrieval_", "keyword_", "hybrid_", "query_expansion_"))
+            and "cache_dir" not in name}
         log = RetrievalLog(
             project_id=project_id,
             query_text=query,
@@ -523,6 +565,7 @@ class HybridRetriever:
             scenario_id=scenario_id,
             filters_json={
                 "knowledge_types": knowledge_types or [],
+                "pinned_versions": dict(pinned_versions or {}),
                 "embedding_index_version_id": active_index.id if active_index else None,
                 "collection": active_index.collection_name if active_index else None,
                 "requested_mode": requested_retrieval_mode,
@@ -540,6 +583,16 @@ class HybridRetriever:
                 "fusion_strategy": fusion_strategy,
                 "rrf_k": rrf_k if fusion_strategy == "rrf" else None,
                 "reranker": rerank_outcome.diagnostics(),
+                "config_fingerprint": stable_hash(ranking_config),
+                "stages": {"eligible_candidates": len(ordered),
+                           "rerank_input": min(len(items), getattr(settings, "reranker_top_k", 50)),
+                           "returned": len(items), "quotas_after_rerank": budgeted_context},
+                "abstention_shadow": {
+                    "enabled": shadow_threshold is not None,
+                    "threshold": shadow_threshold,
+                    "would_abstain": (not items or items[0]["rerank_score"] < shadow_threshold)
+                    if shadow_threshold is not None else None,
+                    "score_kind": "display_score_uncalibrated", "applied": False},
                 "authority_mode": authority_mode,
                 "authority_boost": authority_boost,
                 "query_variant_count": len(variants),
@@ -627,6 +680,29 @@ def _sheet_diversity_order(items: list[dict], top_k: int, context_size: int = 12
             head = items[: context_size - 1] + [candidate, items[context_size - 1]]
             return head + items[context_size:index] + items[index + 1:]
     return items
+
+
+def _content_identifier_matches(content: str | None, identifiers: set[str]) -> set[str]:
+    """Return explicit identifiers present in a candidate's正文.
+
+    CJK text and SQL punctuation are common around codes, so use the same
+    ASCII identifier boundary as code extraction instead of substring matching
+    (which would make ``F0900290`` look like ``F090029``).
+    """
+    if not content or not identifiers:
+        return set()
+    normalized = str(content).upper()
+    return {
+        code for code in identifiers
+        if re.search(rf"(?<![0-9A-Z_]){re.escape(code)}(?![0-9A-Z_])", normalized)
+    }
+
+
+def _query_sql_identifiers(query: str, settings) -> set[str]:
+    """Keep the explicit SQL relevance experiment independent of query expansion."""
+    if not getattr(settings, "retrieval_sql_identifier_boost_enabled", False):
+        return set()
+    return extract_sql_identifiers(query)
 
 
 def _system_quota_order(items: list[dict], systems: set[str], top_k: int) -> list[dict]:

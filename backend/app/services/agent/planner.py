@@ -339,7 +339,46 @@ def validate_plan_draft_detailed(
                                               message=f"{step.step_key}: reason is too long"))
         seen.add(step.step_key)
 
+    issues.extend(_knowledge_answer_dependency_issues(draft))
     issues.extend(_dependency_cycle_issues(draft))
+    return issues
+
+
+def _knowledge_answer_dependency_issues(draft: PlanDraft) -> list[PlanValidationIssue]:
+    if draft.scenario_key != SCENARIO_KNOWLEDGE_QUESTION:
+        return []
+    steps = {step.step_key: step for step in draft.steps}
+    issues: list[PlanValidationIssue] = []
+    if not any(
+        step.tool_key == "answer_knowledge_question" and step.required
+        for step in draft.steps
+    ):
+        issues.append(PlanValidationIssue(
+            code="missing_required_knowledge_answer",
+            message="knowledge_question plans must include a required answer_knowledge_question step",
+        ))
+    for answer in draft.steps:
+        if answer.tool_key != "answer_knowledge_question" or not answer.required:
+            continue
+        pending = list(answer.depends_on)
+        seen: set[str] = set()
+        optional_history: set[str] = set()
+        while pending:
+            key = pending.pop()
+            if key in seen or key not in steps:
+                continue
+            seen.add(key)
+            upstream = steps[key]
+            if upstream.tool_key == "search_decision_cases" and not upstream.required:
+                optional_history.add(key)
+            pending.extend(upstream.depends_on)
+        if optional_history:
+            issues.append(PlanValidationIssue(
+                code="required_depends_on_optional_step", step_key=answer.step_key,
+                message=(f"{answer.step_key}: required knowledge answer has a hard dependency on "
+                         f"optional historical context {sorted(optional_history)}; declare supplemental "
+                         "history via optional_depends_on at the dependency edge"),
+            ))
     return issues
 
 
@@ -638,7 +677,11 @@ def plan_input_text(draft_objective: str, scenario_key: str, subject: dict[str, 
         f"可用工具（只能从中选择 tool_key）：\n{catalog}\n"
         f"已知主体：{subject}\n"
         "请输出 JSON：{\"objective\",\"scenario_key\",\"subject\",\"steps\":[{\"step_key\",\"tool_key\","
-        "\"reason\",\"depends_on\",\"required\",\"input\"}]}。步骤数不超过 24，depends_on 只能引用更早的 step_key。"
+        "\"reason\",\"depends_on\",\"optional_depends_on\",\"required\",\"input\"}]}。"
+        "步骤数不超过 24，两类依赖只能引用更早的 step_key，不能重叠。"
+        "depends_on 表示必需前置，失败或跳过会阻断本步骤；optional_depends_on 表示补充前置，缺失时记录缺口。"
+        "知识问答中，必需的 answer_knowledge_question 不得直接或间接硬依赖 required=false 的 "
+        "search_decision_cases；历史案例是补充依据，应使用 optional_depends_on。"
     )
 
 

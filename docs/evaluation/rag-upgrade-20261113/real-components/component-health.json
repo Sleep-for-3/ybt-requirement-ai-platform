@@ -1,0 +1,16 @@
+{
+  "status": "ready",
+  "checks": {
+    "application": "healthy",
+    "database": "healthy",
+    "alembic_revision": "healthy",
+    "storage": "healthy",
+    "redis": "healthy",
+    "task_queue": "healthy",
+    "vector_store": "healthy",
+    "llm_provider": "mock",
+    "embedding_provider": "healthy",
+    "semantic_index": "healthy",
+    "disk_space": "healthy"
+  }
+}

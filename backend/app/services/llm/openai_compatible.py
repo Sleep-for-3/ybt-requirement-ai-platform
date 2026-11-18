@@ -15,6 +15,7 @@ from app.services.llm.base import (
     StructuredResponse,
 )
 from app.services.llm.providers import ProviderRuntimeConfig, normalize_provider_type
+from app.services.llm.provider_budget import ProviderBudget, reservation_tokens
 
 
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504, 524}
@@ -293,11 +294,23 @@ class OpenAICompatibleLLMService(LLMService):
                     follow_redirects=False,
                     trust_env=False,
                 ) as client:
-                    response = await client.post(
-                        f"{base_url}{path}",
-                        json=payload,
-                        headers=headers,
-                    )
+                    budget = ProviderBudget.from_environment()
+                    reservation = budget.reserve(reservation_tokens(payload), model) if budget else None
+                    response = None
+                    try:
+                        response = await client.post(
+                            f"{base_url}{path}",
+                            json=payload,
+                            headers=headers,
+                        )
+                    finally:
+                        if budget and reservation:
+                            try:
+                                body = response.json() if response is not None else None
+                                usage = body.get('usage') if isinstance(body, dict) else None
+                            except ValueError:
+                                usage = None
+                            budget.finish(reservation, usage)
                 self.last_call.http_status = response.status_code
                 if response.status_code >= 400:
                     error = _http_error(response.status_code, response)
@@ -318,7 +331,7 @@ class OpenAICompatibleLLMService(LLMService):
                     http_status=response.status_code,
                 )
                 return response
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 if attempts < self.retry_count:
                     attempts += 1
                     await self.sleep_func(0.1 * (2 ** (attempts - 1)))

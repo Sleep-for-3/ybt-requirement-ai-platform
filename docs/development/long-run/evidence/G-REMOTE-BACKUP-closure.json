@@ -1,0 +1,11 @@
+{
+  "goal_id":"G-REMOTE-BACKUP",
+  "source_hash":"b79678afafb515e56372476f047b3a72114549241fa79a072630083fe6922d90",
+  "criteria":{
+    "database":{"passed":true,"path":"ROUND-20261116-25-backup.json","sha256":"c5418327c41f42454f76ffb804f00af85a3d9dd33f29ced7dc51580955d1b786"},
+    "uploads":{"passed":true,"path":"ROUND-20261116-25-backup.json","sha256":"c5418327c41f42454f76ffb804f00af85a3d9dd33f29ced7dc51580955d1b786"},
+    "deployment":{"passed":true,"path":"ROUND-20261116-25-backup.json","sha256":"c5418327c41f42454f76ffb804f00af85a3d9dd33f29ced7dc51580955d1b786"},
+    "restore":{"passed":true,"path":"ROUND-20261116-25-backup.json","sha256":"c5418327c41f42454f76ffb804f00af85a3d9dd33f29ced7dc51580955d1b786"}
+  },
+  "scope":"Restore of inventoried old releases, independent PostgreSQL and Milvus instances, no old data overwritten."
+}

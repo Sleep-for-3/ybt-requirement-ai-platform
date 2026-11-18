@@ -41,6 +41,12 @@ test("question failures distinguish permissions, network and invalid input witho
   assert.match(askErrorMessage({status:500,message:"private diagnostic"}),/服务暂不可用/);
   assert.equal(askErrorMessage(null),askErrorMessage({status:500}));
 });
+test("evidence conflicts use a fixed retry message without raw diagnostics",()=>{
+  const expected="回答期间引用资料状态发生变化，本次回答未返回。请重新提问。";
+  for(const detail of [undefined,"private unit 5971: /srv/private/source.txt",[{msg:"private"}]]){
+    assert.equal(askErrorMessage({status:409,detail}),expected);
+  }
+});
 test("locator priority is block, format position, then quote",()=>{
   const blocks=[{block_id:"a",text:"first",locator:{page_no:1}},{block_id:"b",text:"second",locator:{page_no:2}}];
   assert.equal(locateBlock(blocks,{block_id:"a",page_no:2,text_quote:"second"}),"a");

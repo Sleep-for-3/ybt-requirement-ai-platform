@@ -1,0 +1,54 @@
+{
+  "round": 50,
+  "date": "2026-11-17",
+  "scope": "p0c_ux_synthetic_production_frontend_governance_acceptance",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "changes": [
+    "frontend/tests/rag-round50-governance.browser.acceptance.mjs",
+    "docs/development/long-run/rounds/ROUND-20261117-50.md",
+    "docs/development/long-run/evidence/ROUND-20261117-50.json",
+    "docs/development/long-run/CURRENT-CHECKPOINT.md",
+    "docs/development/long-run/NEXT-TASK.md",
+    "docs/development/long-run/FAILURES.md"
+  ],
+  "production_build": {
+    "command": "NEXT_DIST_DIR=.next-round50-production; synthetic NEXT_PUBLIC release identity; npm run build",
+    "result": "success; lint/type validation and 54 routes completed; existing React Hook dependency warnings"
+  },
+  "browser_acceptance": {
+    "attempt": 5,
+    "result": "5 checks passed",
+    "output": ".local-run/rag-long-run/round-20261117-50/browser-attempt5/results.json",
+    "evidence_tier": "isolated_current_source_production_frontend_with_synthetic_intercepted_api",
+    "checks": [
+      "read-only create entry visible and submit disabled",
+      "cross-project task detail safely masked as 404",
+      "withdrawn warning shown when original content is unavailable",
+      "parsed evidence remains readable",
+      "390px layout has no horizontal overflow and Escape closes dialog"
+    ],
+    "unexpected_external_requests": 0,
+    "external_provider_requests": 0,
+    "application_data_mutations": 0
+  },
+  "failed_attempts": [
+    "Attempts 1-3 retained; fixture URL normalization and unsupported UI assertions.",
+    "Attempt 4 retained; read-only assertion passed, 404 copy punctuation expectation was wrong; screenshot also showed stale round47 build identity."
+  ],
+  "runtime": {
+    "round47_stale_frontend_stopped": true,
+    "round50_frontend_stopped": true,
+    "api_database_index_remote_or_public_mutations": 0
+  },
+  "goal_check": {
+    "consistent": true,
+    "complete": false,
+    "errors": [],
+    "counts": {
+      "verified": 2,
+      "in_progress": 9,
+      "pending": 7
+    },
+    "statuses_unchanged": true
+  }
+}

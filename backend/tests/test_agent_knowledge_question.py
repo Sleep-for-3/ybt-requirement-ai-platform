@@ -8,12 +8,15 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.models import (
     AgentArtifact,
     AgentStep,
     AgentTask,
+    AgentToolCall,
     BackgroundJob,
     Institution,
     Project,
@@ -59,6 +62,13 @@ def test_objective_routes_to_question_scenario():
     assert routing.requires_clarification is False
 
 
+def test_token_usage_summary_keeps_counts_without_credentials():
+    assert runtime._safe_token_usage({
+        "total_tokens": 42, "prompt_tokens": "secret-like-string", "completion_tokens": True,
+        "input_tokens": -1, "api_token": "sensitive", "usage_available": True,
+    }) == {"total_tokens": 42, "usage_available": True}
+
+
 def test_question_plan_uses_only_read_only_ungated_tools():
     draft = planner.deterministic_plan(QUESTION, scenario_key=SCENARIO_KNOWLEDGE_QUESTION, subject={})
     assert [step.tool_key for step in draft.steps] == ["search_metadata", "answer_knowledge_question"]
@@ -98,6 +108,38 @@ def test_create_task_defers_llm_planning_to_the_background_job(scope, monkeypatc
     assert steps and {step.status for step in steps} == {sm.STEP_PENDING}
 
 
+def test_rejected_llm_question_plan_keeps_required_answer_step(scope, monkeypatch):
+    from app.models import AgentPlan
+
+    async def _rejected_plan(*args, **kwargs):
+        return None, {
+            "planner_attempts": 2,
+            "plan_validation_codes": ["missing_required_knowledge_answer"],
+            "plan_validation_errors": [
+                "knowledge_question plans must include a required answer_knowledge_question step",
+            ],
+        }, "planner_plan_invalid"
+
+    monkeypatch.setattr(planner, "plan_with_llm", _rejected_plan)
+    db = scope["db"]
+    task = runtime.create_task(
+        db, scope["principal"], scope["project"], QUESTION,
+        use_llm_planner=True, defer_llm_plan=True,
+    )
+
+    asyncio.run(runtime._finish_deferred_planning(
+        db, task, scope["project"], scope["principal"],
+    ))
+    db.expire_all()
+
+    active_plan = db.query(AgentPlan).filter_by(task_id=task.id, status="active").one()
+    steps = db.query(AgentStep).filter_by(task_id=task.id).all()
+    assert active_plan.planner_source == "fallback"
+    assert active_plan.degraded_reason == "planner_plan_invalid"
+    assert "answer_knowledge_question" in active_plan.validation_errors_json[0]
+    assert any(step.tool_key == "answer_knowledge_question" and step.required for step in steps)
+
+
 def test_question_task_completes_without_a_human_gate(scope, monkeypatch):
     db = scope["db"]
 
@@ -106,6 +148,11 @@ def test_question_task_completes_without_a_human_gate(scope, monkeypatch):
         return {
             "answer": "互联网贷款协议表包含贷款余额、借款期限等主要字段。",
             "answer_status": "grounded",
+            "execution_metadata": {
+                "execution_kind": "real_model", "provider_type": "openai_compatible",
+                "model_name": "synthetic-model-identity", "prompt_version": "v-test",
+                "token_usage": {"total_tokens": 42},
+            },
             "citations": [{
                 "knowledge_unit_id": 1, "label": "互联网贷款管理办法",
                 "quoted_content": "互联网贷款应当报送贷款余额与借款期限。", "source_heading": "第三章",
@@ -140,6 +187,11 @@ def test_question_task_completes_without_a_human_gate(scope, monkeypatch):
     artifacts = db.query(AgentArtifact).filter_by(task_id=task.id).all()
     assert [item.artifact_type for item in artifacts] == ["knowledge_answer"]
     assert artifacts[0].summary_json["answer"]
+    call = db.query(AgentToolCall).filter_by(task_id=task.id, tool_key="answer_knowledge_question").one()
+    assert call.execution_metadata_json["execution_kind"] == "real_model"
+    assert call.model_name == "synthetic-model-identity"
+    assert call.provider_type == "openai_compatible"
+    assert call.token_usage_json["total_tokens"] == 42
 
 
 def test_create_endpoint_returns_a_pending_task_before_any_planning(scope, monkeypatch):

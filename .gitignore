@@ -12,6 +12,8 @@ venv/
 # Node
 node_modules/
 .next/
+.next-rag-upgrade/
+frontend/.next-*/
 out/
 npm-debug.log*
 *.tsbuildinfo
@@ -40,6 +42,7 @@ Thumbs.db
 # runtime artefacts observed 2026-10-01 (kept on disk, deliberately untracked)
 /backend/celerybeat-schedule*
 /backend/pytest-of-*/
+pytest-of-*/
 /backend/lifecycle-*/
 /docs/evaluation/**/push.log
 # B18: generated at release time (git rev-parse HEAD + timestamp); must not be committed
@@ -64,3 +67,7 @@ docs/research/__pycache__/
 # Local embedding model cache (fastembed/HF downloads) — never commit
 backend/fastembed_cache/
 fastembed_cache/
+.playwright-cli/
+# Dedicated RAG component browser build output.
+frontend/.next-rag-components/
+jieba.cache

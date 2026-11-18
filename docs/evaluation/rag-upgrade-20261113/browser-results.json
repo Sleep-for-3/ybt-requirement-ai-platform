@@ -1,0 +1,22 @@
+{
+  "evidence_tier": "browser_sqlite_mock",
+  "results": [
+    "wrong_credentials_401",
+    "form_login_200",
+    "ask_and_unverified_trust_ceiling",
+    "history_sent_as_complete_pair",
+    "clear_history",
+    "cross_project_task_uses_owner_and_frozen_original",
+    "mobile_no_horizontal_overflow"
+  ],
+  "evidenceRequests": [
+    {
+      "url": "http://127.0.0.1:18093/api/knowledge/documents/1/preview?project_id=1&version_id=1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18093/api/knowledge/documents/1/content?project_id=1&version_id=1",
+      "status": 200
+    }
+  ]
+}

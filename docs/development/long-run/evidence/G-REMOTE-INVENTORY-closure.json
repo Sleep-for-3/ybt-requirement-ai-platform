@@ -1,0 +1,10 @@
+{
+  "goal_id":"G-REMOTE-INVENTORY",
+  "source_hash":"5e5cbbf9defe81221db907e6106536444ce569f25fc70653b617ced7b9233cae",
+  "criteria":{
+    "host_identity":{"passed":true,"path":"ROUND-20261116-24-inventory.json","sha256":"83a9cf417b14a8de214b3dd56576fb2070a19838801a4ddf0a38cb165d306ba4"},
+    "services":{"passed":true,"path":"ROUND-20261116-24-inventory.json","sha256":"83a9cf417b14a8de214b3dd56576fb2070a19838801a4ddf0a38cb165d306ba4"},
+    "data_locations":{"passed":true,"path":"ROUND-20261116-24-inventory.json","sha256":"83a9cf417b14a8de214b3dd56576fb2070a19838801a4ddf0a38cb165d306ba4"}
+  },
+  "scope":"Only verified remote inventory; backup, deployment and acceptance require separate evidence."
+}

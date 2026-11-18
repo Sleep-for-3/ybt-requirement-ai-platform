@@ -40,6 +40,15 @@ DEPENDENCY_SKIPPED = "dependency_skipped"
 DEPENDENCY_WAITING = "dependency_waiting_human"
 OPTIONAL_DEPENDENCY_MISSING = "optional_dependency_missing"
 
+OPTIONAL_DEPENDENCY_LABELS = {
+    "search_decision_cases": "历史案例补充",
+    "search_cases": "历史案例补充",
+    "search_regulatory_knowledge": "监管依据补充",
+    "search_metadata": "元数据补充",
+    "get_lineage": "血缘补充",
+    "analyze_lineage_impact": "影响范围补充",
+}
+
 _NOT_READY = frozenset({sm.STEP_PENDING, sm.STEP_RUNNING})
 
 
@@ -170,5 +179,8 @@ def evaluate_dependencies(
 
 
 def optional_gap_message(optional_missing: Iterable[tuple[str, str]]) -> str:
-    parts = [f"{key}({status})" for key, status in optional_missing]
-    return "可选依赖未提供结果：" + "、".join(parts) if parts else ""
+    parts = []
+    for key, status in optional_missing:
+        label = OPTIONAL_DEPENDENCY_LABELS.get(key, "补充资料")
+        parts.append(f"{label}（{status}）")
+    return "可选补充资料未提供：" + "、".join(parts) if parts else ""

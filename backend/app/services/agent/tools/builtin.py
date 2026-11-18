@@ -59,7 +59,7 @@ from app.schemas.ai_skill import (
 from app.schemas.metadata import CatalogSearchRequest
 
 # 与 grounded_answer_service 的送模窗口保持一致：多证据题的第二条件证常在第 11-12 位。
-_EVIDENCE_WINDOW = 12
+from app.services.rag.context_assembly import MAX_CONTEXT_ITEMS as _EVIDENCE_WINDOW
 
 
 MAX_TOOL_ROWS = 50
@@ -308,7 +308,9 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
 
     try:
         result = await grounded_answer(ctx.db, ctx.project_id, query, top_k=top_k,
-                                       retrieval_mode=mode, commit=False, include_items=True)
+                                       retrieval_mode=mode, commit=False, include_items=True,
+                                       principal=ctx.principal,
+                                       history=ctx.tool_input.get("history"))
     except Exception as exc:  # noqa: BLE001 - a slow/broken model must not kill the question
         degraded = "knowledge_answer_unavailable"
         result = None
@@ -317,6 +319,7 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
             f"知识问答生成不可用（{type(exc).__name__}），本轮只返回检索到的证据。",
         ).model_dump(mode="json"))
 
+    _require(ctx, "knowledge.search")
     answer_text = str((result or {}).get("answer") or "").strip()
     citations = [item for item in ((result or {}).get("citations") or []) if isinstance(item, dict)]
     answer_status = str((result or {}).get("answer_status") or "needs_confirmation")
@@ -556,7 +559,12 @@ async def _answer_knowledge_question(ctx: ToolContext) -> ToolResult:
         evidence_refs=[item["id"] for item in facts],
         artifacts=artifacts,
         degraded_path=degraded,
-        model_metadata={"answer_status": answer_status, "citation_count": len(citations)},
+        model_metadata={
+            **{key: value for key, value in ((result or {}).get("execution_metadata") or {}).items()
+               if key in {"execution_kind", "provider_type", "model_name", "model_profile_id",
+                          "prompt_key", "prompt_version", "context_hash", "token_usage", "degraded_reason"}},
+            "answer_status": answer_status, "citation_count": len(citations),
+        },
         output={
             "query": query,
             "answer": _clip(answer_text, 1800),
@@ -1399,6 +1407,11 @@ def register_builtin_tools() -> None:
                 "query": {"type": "string"},
                 "top_k": {"type": "integer"},
                 "retrieval_mode": {"type": "string", "enum": ["keyword_only", "vector_only", "hybrid"]},
+                "history": {"type": "array", "maxItems": 12, "items": {
+                    "type": "object", "properties": {
+                        "role": {"type": "string", "enum": ["user", "assistant"]},
+                        "content": {"type": "string", "minLength": 1, "maxLength": 12000}},
+                    "required": ["role", "content"], "additionalProperties": False}},
             },
             "additionalProperties": False,
         },

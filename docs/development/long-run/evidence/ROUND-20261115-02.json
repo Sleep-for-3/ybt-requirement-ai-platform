@@ -1,0 +1,21 @@
+{
+  "round_id": "ROUND-20261115-02",
+  "verified_at": "2026-11-15T22:59:25+08:00",
+  "tcp": {
+    "windows": {"15439":"connected","16389":"connected","19530":"connected","5433":"connected","5432":"TimeoutError"},
+    "wsl": {"15439":"connected","16389":"connected","19530":"connected","5433":"connected","5432":"ConnectionRefusedError"}
+  },
+  "http": [
+    {"port":18105,"path":"/health/live","status":200,"state":"healthy","milliseconds":344},
+    {"port":18105,"path":"/health/ready","status":200,"state":"ready","milliseconds":2812},
+    {"port":18095,"path":"/health/live","status":200,"state":"healthy","milliseconds":47},
+    {"port":18097,"path":"/health","status":200,"state":"healthy","milliseconds":0}
+  ],
+  "first_attempt_preserved": {"ports":[18105,18095],"path":"/health/ready","timeout_seconds":8,"error_type":"TaskCanceledException"},
+  "running_backend": {"port":18105,"pid":24936,"process_start":"2026-11-15T00:09:35.1919514+08:00","app_commit":"206d4313a5805613f5bf7e0b5db41390ab92d31f","build_time":"2026-11-13T15:52:53Z","schema_head":"202611010014","image_digest":"unknown"},
+  "source_last_write":"2026-11-15T22:35:45.6085544+08:00",
+  "new_code_loaded_proven":false,
+  "redis_dbsize":{"6":0,"7":0},
+  "real_model_requests":0,
+  "remote_access":false
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Ban, MoreHorizontal, RefreshCw, RotateCcw, Search } from "lucide-react";
+import { ArrowLeft, Ban, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -12,7 +12,7 @@ import { DiagnosticsPanel } from "@/app/agent/diagnostics-panel";
 import { KnowledgeEvidenceDrawer } from "@/components/knowledge/KnowledgeEvidenceDrawer";
 import type { KnowledgeCitation } from "@/lib/knowledge-types";
 import {
-  TASK_FILTERS, filterTaskRows, isTaskTerminal, taskDetailView, taskFilterCounts, taskRowView,
+  TASK_FILTERS, filterTaskRows, isOptionalEnrichmentGap, isTaskTerminal, taskDetailView, taskFilterCounts, taskRowView,
   type AgentSnapshot, type AgentStep, type AgentTaskRow, type CitationView, type TaskFilterKey,
 } from "@/app/agent/view-model";
 import { useProjectWorkspace } from "@/components/ProjectContext";
@@ -88,6 +88,7 @@ export default function AgentWorkspacePage() {
   const [notice, setNotice] = useState("");
   const [objective, setObjective] = useState("");
   const [scenarioKey, setScenarioKey] = useState("knowledge_question");
+  const [createOpen, setCreateOpen] = useState(false);
   const [processOpen, setProcessOpen] = useState(false);
   const [fullTextOpen, setFullTextOpen] = useState(false);
   const [evidenceCitation, setEvidenceCitation] = useState<KnowledgeCitation | null>(null);
@@ -139,6 +140,7 @@ export default function AgentWorkspacePage() {
       }),
     onSuccess: (data) => {
       setObjective("");
+      setCreateOpen(false);
       setNotice("任务已创建。规划与执行在后台进行，页面会自动刷新。");
       refresh();
       if (data?.task?.id) navigate({ taskId: data.task.id }, "push");
@@ -186,10 +188,15 @@ export default function AgentWorkspacePage() {
   const gaps = useMemo(() => {
     const items: Array<{ code: string; message: string; stepKey?: string | null }> = [];
     for (const gap of detail?.gaps || []) {
+      // Optional enrichment is a status note, not a business evidence gap;
+      // showing it here makes a successful answer look incomplete.
+      const sourceStep = (detail?.steps || []).find((step) => step.step_key === gap.step_key);
+      if (isOptionalEnrichmentGap(sourceStep, gap.code)) continue;
       items.push({ code: gap.code || "", message: gap.message || "", stepKey: gap.step_key });
     }
     for (const step of detail?.steps || []) {
       for (const code of step.gap_codes || []) {
+        if (isOptionalEnrichmentGap(step, code)) continue;
         if (items.some((item) => item.code === code)) continue;
         items.push({ code, message: "", stepKey: step.step_key });
       }
@@ -262,7 +269,7 @@ export default function AgentWorkspacePage() {
     const raw = (citation.citation || {}) as Record<string, unknown>;
     setEvidenceCitation({
       ...(raw as unknown as KnowledgeCitation),
-      project_id: projectId ?? (raw.project_id as number | undefined),
+      project_id: detail?.task.project_id,
       document_id: citation.documentId ?? (raw.document_id as number | undefined),
       document_version_id: citation.documentVersionId ?? (raw.document_version_id as number | undefined),
       knowledge_unit_id: citation.knowledgeUnitId ?? (raw.knowledge_unit_id as number | undefined),
@@ -277,7 +284,6 @@ export default function AgentWorkspacePage() {
     <main>
       <WorkspaceHeader
         title="任务中心"
-        meta="找到任务 → 看懂结论 → 查看依据或产出 → 完成下一步处理"
         actions={
           <div className="flex items-center gap-2">
             <button className="button-secondary" disabled={tasks.isFetching} onClick={refresh} type="button">
@@ -302,6 +308,8 @@ export default function AgentWorkspacePage() {
               onScenarioChange={setScenarioKey}
               onSubmit={startTask}
               scenarioKey={scenarioKey}
+              open={createOpen}
+              onOpenChange={setCreateOpen}
             />
 
             <section aria-label="任务列表" className="panel">
@@ -324,12 +332,12 @@ export default function AgentWorkspacePage() {
                       {filter.label}（{counts[filter.key]}）
                     </button>
                   ))}
-                  <label className="ml-auto flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                  <label className="flex w-full min-w-0 items-center gap-1 rounded-lg border border-line bg-white px-2 py-1 sm:ml-auto sm:w-auto">
                     <Search aria-hidden className="text-slate-400" size={14} />
                     <span className="sr-only">搜索任务</span>
                     <input
                       aria-label="搜索任务"
-                      className="w-48 border-0 bg-transparent text-xs text-ink outline-none placeholder:text-slate-400"
+                      className="min-w-0 flex-1 border-0 bg-transparent text-xs text-ink outline-none placeholder:text-slate-400 sm:w-48"
                       onChange={(event) => navigate({ q: event.target.value, page: 1 }, "replace")}
                       placeholder="按任务名称、业务对象、结论搜索"
                       value={state.q}
@@ -352,7 +360,11 @@ export default function AgentWorkspacePage() {
               ) : null}
               {!tasks.isLoading && !tasks.isError && rows.length === 0 ? (
                 <div className="p-5">
-                  <EmptyBlock hint="展开上方“新建任务”，选择业务场景并填写目标即可开始。" title="这个项目还没有智能体任务" />
+                  <EmptyBlock hint={canRun ? "任务将使用当前项目已授权的资料。" : "当前账号只有查看权限。"}
+                    title="这个项目还没有智能体任务"
+                    action={canRun ? <button className="button-primary mt-1" type="button" onClick={() => setCreateOpen(true)}>
+                      <Plus aria-hidden size={15} />创建第一个任务
+                    </button> : undefined} />
                 </div>
               ) : null}
               {!tasks.isLoading && !tasks.isError && rows.length > 0 && visibleRows.length === 0 ? (
@@ -503,7 +515,7 @@ export default function AgentWorkspacePage() {
       <KnowledgeEvidenceDrawer
         citation={evidenceCitation}
         onClose={() => setEvidenceCitation(null)}
-        projectId={projectId ?? 0}
+        projectId={detail?.task.project_id ?? 0}
       />
     </main>
   );

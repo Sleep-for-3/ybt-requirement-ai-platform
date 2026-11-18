@@ -1,0 +1,45 @@
+{
+  "runtime_port": 18106,
+  "redis_database": 6,
+  "source_hash": "5195d99ecc99f9ba5a721afa6707141d4ba7351b7dcbd848bc760de17593977f",
+  "source_files_unchanged": true,
+  "source_hash_matches": true,
+  "new_real_model_requests": 0,
+  "readiness": {
+    "http_status": 200,
+    "status": "ready",
+    "checks": {
+      "application": "healthy",
+      "database": "healthy",
+      "alembic_revision": "healthy",
+      "storage": "healthy",
+      "redis": "healthy",
+      "task_queue": "healthy",
+      "vector_store": "healthy",
+      "llm_provider": "healthy",
+      "embedding_provider": "healthy",
+      "semantic_index": "healthy",
+      "disk_space": "healthy"
+    }
+  },
+  "api_version": {
+    "component": "api",
+    "app_commit": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.5195d99ecc99",
+    "build_time": "2026-11-15T15:04:46.129224+00:00",
+    "schema_head": "202611010014",
+    "image_digest": "unknown"
+  },
+  "login_http_status": 200,
+  "authorized_projects_count": 4,
+  "worker_task_id": "a472c8f1-198f-41e4-bd20-7deb02aa5abb",
+  "worker_version": {
+    "component": "worker",
+    "app_commit": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.5195d99ecc99",
+    "build_time": "2026-11-15T15:04:46.129224+00:00",
+    "schema_head": "202611010014",
+    "image_digest": "unknown"
+  },
+  "api_worker_identity_match": true,
+  "schema_match": true,
+  "passed": true
+}

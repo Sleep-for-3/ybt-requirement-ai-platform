@@ -9,6 +9,7 @@ export function askErrorMessage(error) {
   if (error?.status === 401) return "登录状态已失效，请重新登录。";
   if (error?.status === 403 || error?.status === 404) return "当前账号无权在此项目提问，请确认项目选择和访问权限。";
   if (error?.status === 0) return "网络连接失败，请检查连接后重试。";
+  if (error?.status === 409) return "回答期间引用资料状态发生变化，本次回答未返回。请重新提问。";
   if (error?.status === 400 || error?.status === 422) {
     // 业务规则拒绝（例如"该需求版本未固定任何制度版本，无法按冻结版本判定"）必须把
     // 服务端的中文原因原样交给用户，否则用户只看到"条件无效"而不知道下一步做什么。
@@ -37,7 +38,7 @@ export function answerStatusNotice(result) {
       ? "证据不足或尚未确认，请核验下方缺口。"
       : "已找到依据，请核验适用范围与引用。";
   if (!support || support.enabled === false) {
-    return { text: base, tone: status === "degraded" ? "danger" : "neutral",
+    return { text: `${base}本次未运行语义引用支撑校验。`, tone: status === "degraded" ? "danger" : "neutral",
       verification: null };
   }
   const verification = support.verification || "unknown";

@@ -167,16 +167,23 @@ def rerank_items(items, query, settings=None, *, document_text=None) -> RerankOu
     if len(scores) != len(head):
         reason = f"score_count_mismatch: expected {len(head)}, got {len(scores)}"
         return RerankOutcome(items=original, applied=False, reason=reason, degraded=True, **base)
+    if not all(math.isfinite(score) for score in scores):
+        return RerankOutcome(
+            items=original, applied=False, reason="non_finite_scores", degraded=True, **base)
 
     rescored = []
     for item, score in zip(head, scores):
         updated = dict(item)
+        updated["raw_rerank_score"] = score
         updated["rerank_score"] = round(sigmoid(score), 4)
         rescored.append(updated)
     # Keep normative authority ordering dominant; the cross encoder refines
     # ordering only inside one authority tier.
     rescored.sort(
-        key=lambda item: (item["authority_rank"], item["rerank_score"], -item["knowledge_unit_id"]),
+        key=lambda item: (
+            (item["rerank_score"], item["authority_rank"], -item["knowledge_unit_id"])
+            if getattr(settings, "reranker_order", "authority") == "relevance"
+            else (item["authority_rank"], item["rerank_score"], -item["knowledge_unit_id"])),
         reverse=True,
     )
     return RerankOutcome(

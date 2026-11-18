@@ -1,0 +1,57 @@
+{
+  "round": 44,
+  "date": "2026-11-17",
+  "goal_ids": ["G-P0-A", "G-P0-B"],
+  "evidence_tier": "exact_source_and_read_only_isolated_postgresql_reconciliation",
+  "source_sha256": "51228a75d5f22ed9a058c9a7c29834989ab56da95e35435164084c537b9ec311",
+  "code_identity": {
+    "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+    "relevant_file_sha256": {
+      "backend/scripts/rag_workbook_reconciliation.py": "b5d300968ceaa008d96a72cda71e7a7426b90fd4f74a5d15525c997bc4f55fd6",
+      "backend/app/services/knowledge_ingestion/parsers.py": "64858d30a8ce9c2196b0237647a90c422b5684aeae4f0a8becd7f4ef7aedb081",
+      "backend/app/services/parse_diagnostics.py": "6ce6e8146a5e5383f399be0fd715eebe743596adba1b085b4b02ec1053cb8ad2",
+      "backend/app/models/entities.py": "abbe2a9992fc1553fdfe448a9b20c6503f2dde4e05d4cb86bc867080bd1fab1d",
+      "backend/app/core/database.py": "9e5123645cbd6d2aa1b0898f1459463478c520a4abd9416110ad38f6e1bcb286"
+    }
+  },
+  "identity": {
+    "project_id": 1,
+    "document_id": 1,
+    "version_id": 1,
+    "database_file_hash_matches_source": true
+  },
+  "current_parser": {
+    "config_version": "xlsx-knowledge-config-v3",
+    "sheets_total": 9,
+    "sheets_parsed": 9,
+    "units": 5958,
+    "nonempty_source_cells_missing_from_parsed_output": 0
+  },
+  "stored_v1": {
+    "parse_config_version": "xlsx-knowledge-config-v1",
+    "units": 5922,
+    "historical_sheets_parsed": 7,
+    "parse_blocked": true,
+    "nonempty_source_cells_missing_from_stored_units": 708,
+    "missing_cells_in_skipped_sheet": 675,
+    "other_duplicate_feedback_cells_missing": 33,
+    "current_parsed_locations_missing_from_storage": 37,
+    "stored_locations_absent_from_current_parse": 1
+  },
+  "reconciliation_script": "backend/scripts/rag_workbook_reconciliation.py",
+  "privacy": "No workbook cell values are emitted; output contains counts, source coordinates and headers only.",
+  "validation": {
+    "test_command": "pytest tests/test_rag_workbook_reconciliation.py",
+    "passed": 2,
+    "failed": 0,
+    "py_compile": "passed",
+    "database_writes": 0,
+    "index_writes": 0,
+    "provider_requests": 0,
+    "tokens": 0,
+    "remote_writes": 0
+  },
+  "decision": "Current parser retains source nonempty values, but the frozen v1 corpus remains incomplete. Reimport as a new document version and build an independent index before claiming corpus repair. P0-A holdout/source gate remains open.",
+  "private_detailed_evidence": ".local-run/rag-long-run/round-20261117-44/evidence/workbook-reconciliation-identified.json",
+  "private_test_evidence": ".local-run/rag-long-run/round-20261117-44/reconciliation-tests-identified.junit.xml"
+}

@@ -1,0 +1,42 @@
+{
+  "round": 56,
+  "date": "2026-11-17",
+  "goal_ids": ["G-P0-B"],
+  "scope": "p0_deterministic_correctness_regression_recheck",
+  "git_branch": "dsh/handoff-20261025-round73",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "app_identity": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.87d4cd5f1390",
+  "source_hash": "87d4cd5f1390b0cd4079425435d8e0bcd0aef0071372d5ffe55f5b23e74af9f7",
+  "verification": {
+    "command": ".venv/Scripts/python.exe -m pytest tests/test_rag_upgrade_correctness.py tests/test_rag_authority_boundaries.py tests/test_rag_answer_conflict_scope.py tests/test_rag_workbook_reconciliation.py -q",
+    "tests_passed": 64,
+    "tests_failed": 0,
+    "duration_seconds": 30.4,
+    "junit": ".local-run/rag-long-run/round-20261117-55/p0-correctness-attempt1.junit.xml",
+    "provider_requests_delta": 0,
+    "provider_tokens_delta": 0,
+    "production_code_changes": 0
+  },
+  "coverage": [
+    "CJK code extraction and negative/year/table/rule identifier boundaries",
+    "deterministic blockers remain authoritative across judge off/pass/failure",
+    "cross-citation evidence isolation",
+    "version pins filter all query candidates before model context",
+    "withdrawn/disabled evidence during model execution blocks answer release",
+    "non-finite reranker scores preserve incoming order",
+    "authority provenance cannot be inflated by malformed values or citation metadata",
+    "workbook missing-cell summaries omit source values and evidence is not overwritten"
+  ],
+  "limitations": [
+    "unit and isolated fixture evidence only",
+    "original workbook reingestion and governed index verification remain untested",
+    "real model, independent business holdout, and public release are not covered"
+  ],
+  "goal_status": {
+    "G-P0-A": "blocked_external",
+    "G-P0-B": "in_progress",
+    "G-P0-C": "in_progress",
+    "P1_P2": "locked"
+  },
+  "report": "rounds/ROUND-20261117-56.md"
+}

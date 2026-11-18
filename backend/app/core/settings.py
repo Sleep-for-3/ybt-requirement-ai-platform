@@ -1,5 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+from pydantic import Field
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -159,6 +161,7 @@ class Settings(BaseSettings):
     # 相关性分数为主；``strict`` 保留旧的"权威度硬主键"行为，仅供 A/B 对照。
     retrieval_authority_mode: str = "boost"
     retrieval_authority_boost: float = 0.15
+    retrieval_sql_identifier_boost_enabled: bool = False
     query_expansion_enabled: bool = True
     query_expansion_max_variants: int = 3
     query_expansion_scenario_boost: float = 0.12
@@ -169,6 +172,13 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-base"
     reranker_top_k: int = 50
     reranker_cache_dir: str = ""
+    reranker_order: Literal["authority", "relevance"] = "authority"
+    rag_token_context_enabled: bool = False
+    rag_context_token_budget: int = Field(default=6000, ge=128, le=100000)
+    rag_recall_k: int = Field(default=50, ge=1, le=50)
+    rag_query_planning_enabled: bool = False
+    rag_query_planner_timeout_seconds: float = Field(default=10, gt=0, le=90)
+    rag_abstention_shadow_threshold: float | None = Field(default=None, ge=0, le=1)
     keyword_bm25_k1: float = 1.2
     keyword_bm25_b: float = 0.75
     fusion_strategy: str = "rrf"

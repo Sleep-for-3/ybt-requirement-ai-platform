@@ -1,0 +1,45 @@
+{
+  "round": 42,
+  "date": "2026-11-17",
+  "scope": "service-level revalidation when evidence governance changes during model execution",
+  "tests": {
+    "modules": [
+      "backend/tests/test_rag_upgrade_correctness.py",
+      "backend/tests/test_retrieval_eligibility_unified.py"
+    ],
+    "passed": 80,
+    "failed": 0,
+    "duration_seconds": 70.59,
+    "junit": ".local-run/rag-long-run/round-20261117-42-p0b-junit.xml",
+    "new_counterexamples": [
+      "knowledge version withdrawn during mocked model call",
+      "knowledge unit disabled during mocked model call"
+    ],
+    "real_model_calls": 0,
+    "provider_tokens": 0,
+    "production_logic_changed": false,
+    "overlaps_prior_test_batches": true
+  },
+  "budget": {
+    "provider_requests_cap": 800,
+    "provider_requests_used": 531,
+    "provider_requests_reserved": 0,
+    "tokens_cap": 8000000,
+    "tokens_used": 3608925,
+    "tokens_reserved": 0,
+    "unknown_usage_requests": 3,
+    "round_delta_requests": 0,
+    "round_delta_tokens": 0
+  },
+  "goal_ledger": {
+    "consistent": true,
+    "complete": false,
+    "verified": 2,
+    "in_progress": 9,
+    "pending": 7
+  },
+  "limitations": [
+    "isolated SQLite ORM and mocked retrieval/model only",
+    "no real PostgreSQL isolation, Milvus/Celery runtime, real-model, independent holdout, or public browser evidence"
+  ]
+}

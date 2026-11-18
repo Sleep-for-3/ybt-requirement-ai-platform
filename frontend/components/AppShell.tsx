@@ -276,7 +276,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-40 border-b border-line bg-white/95 backdrop-blur">
-          <div className="flex h-[70px] items-center gap-3 px-4 lg:px-6">
+          <div className="flex min-h-[70px] flex-wrap items-center gap-3 px-4 py-3 lg:px-6">
             <button aria-label="打开导航" className="button-ghost h-9 w-9 px-0 lg:hidden" onClick={() => setDrawerOpen(true)} type="button">
               <Menu size={18} />
             </button>

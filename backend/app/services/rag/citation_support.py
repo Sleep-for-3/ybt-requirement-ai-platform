@@ -95,15 +95,18 @@ CITATION_SUPPORT_SYSTEM_PROMPT = (
     "输入包含 answer、claims（claim_id 与原子断言）、citations（citation_id、引文、来源或版本）。"
     "请完成三件事："
     "1) 对每条引用判断它是否支持 claims 中至少一条原子断言：supported=至少蕴含一条；"
-    "unsupported=与断言矛盾或完全不涉及；unknown=证据不足、只有培训/PPT/二手转述、或无法判断。"
+    "unsupported=与断言矛盾或完全不涉及；unknown=文本缺少必要条件、引文截断缺关键部分或无法判断。"
     "2) 对每条原子断言判断所有引用合起来是否支持它，取值同上；断言只被覆盖了一部分条件时，"
     "该断言不得判 supported，应判 unsupported 或 unknown。"
     "3) 若两条及以上正式来源对同一主张给出互相矛盾的表述，必须列入 conflicts（citation_ids "
     "至少两条）并说明 conflict_type：version（版本差异）/ scope（适用范围差异）/ "
     "contradiction（真实矛盾）；禁止静默合并互相矛盾的结论。"
     "判定规则："
-    "1) 只有正式制度原文或正式条款可以判 supported；培训材料、PPT 转述、二手摘要、"
-    "未给原始出处的综述，即使内容看似吻合也一律判 unknown；"
+    "1) 先区分文本支撑和来源权威：只有正式制度原文或正式条款才可在权威来源维度判正式；"
+    "来源类别较弱本身不使文本蕴含变成unknown。正确归因的“机构建议某方案”、"
+    "“反馈同意该行建议”“流程仍处理中”可由该记录支持，文本完整时判supported；"
+    "若断言把机构建议、培训材料或二手摘要升级成已定案监管规则，判unsupported或unknown。"
+    "判定只承认断言实际声明的来源和范围，不授予来源额外权威；"
     "2) 引文的版本、生效日期、适用范围与结论不一致时判 unsupported；"
     "3) 引文与断言字面相近但口径范围不同（如表内/表外、含/不含）判 unsupported。"
     "只允许输出 JSON，格式为 "
@@ -168,6 +171,21 @@ def _raw_verdict_items(payload: Any) -> list[dict]:
     if not seen_containers:
         items.append(payload)
     return items
+
+
+def _has_valid_judgement(payload: Any) -> bool:
+    """Keep explicit unknown distinct from absent or invalid verdict labels."""
+    items = _raw_verdict_items(payload)
+    if not items:
+        return False
+    for item in items:
+        value = item.get("verdict") or item.get("label") or item.get("result")
+        if not isinstance(value, str):
+            return False
+        key = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if key not in VERDICT_ALIASES:
+            return False
+    return True
 
 
 def parse_judge_verdicts(payload: Any) -> list[dict]:
@@ -289,7 +307,9 @@ def split_claims_all(text: str) -> list[str]:
     """
     if not text:
         return []
-    parts = (part.strip() for part in re.split(r"(?<=[。；;])", str(text)))
+    # A semicolon inside a numeric code list is not a claim boundary.
+    parts = (part.strip() for part in re.split(
+        r"(?<=。)|(?<=[;；])(?!\d)|(?<=[;；])(?<!\d[;；])", str(text)))
     claims: list[str] = []
     for part in parts:
         if not part:
@@ -332,6 +352,14 @@ def citation_evidence(citations: Any) -> list[dict]:
             ("version", "version"),
             ("effective_date", "effective_date"),
             ("published_at", "published_at"),
+            ("knowledge_type", "knowledge_type"),
+            ("source_type", "source_type"),
+            ("source_category", "source_category"),
+            ("publisher", "publisher"),
+            ("lifecycle_status", "lifecycle_status"),
+            ("authority_rank", "authority_rank"),
+            ("project_id", "project_id"),
+            ("document_version_id", "document_version_id"),
         ):
             if target_key in entry:
                 continue
@@ -339,7 +367,10 @@ def citation_evidence(citations: Any) -> list[dict]:
             if isinstance(value, str):
                 value = value.strip()
             if value not in (None, ""):
-                entry[target_key] = str(value)[:MAX_PROVENANCE_CHARS]
+                entry[target_key] = (
+                    value if isinstance(value, (int, float, bool))
+                    else str(value)[:MAX_PROVENANCE_CHARS]
+                )
         if citation.get("knowledge_unit_id") is not None:
             entry["knowledge_unit_id"] = citation["knowledge_unit_id"]
         evidence.append(entry)
@@ -357,9 +388,9 @@ async def run_judge(
 ) -> tuple[list[dict], dict, str | None]:
     """Run one judge call through the LLM gateway.
 
-    Returns ``(verdicts, model_facts, error_type)``. ``error_type`` is ``None`` on a completed
-    call (even when the model returned nothing parseable) and otherwise carries the gateway's
-    error type so the caller can report a graceful degradation. This helper never raises and
+    Returns ``(verdicts, model_facts, error_type)``. ``error_type`` is ``None`` only for a
+    usable judgement; malformed responses and gateway failures have explicit error types
+    so the caller can report a graceful degradation. This helper never raises and
     never writes ModelCallLog rows or commits — judge results stay side-effect free.
     """
     verdicts, _conflicts, facts, error_type = await run_judge_with_conflicts(
@@ -404,6 +435,13 @@ async def run_judge_with_conflicts(
             project_id=project_id,
         )
         payload = await service.chat_json(system_prompt, guarded_input)
+        if not _has_valid_judgement(payload):
+            error_type = (
+                "invalid_judgement"
+                if prompt_key == FAITHFULNESS_PROMPT_KEY
+                else "invalid_model_response"
+            )
+            return [], [], facts, error_type
         return parse_judge_verdicts(payload), parse_judge_conflicts(payload), facts, None
     except prompt_runtime.LLMRuntimeError as exc:
         error_type = exc.error_type

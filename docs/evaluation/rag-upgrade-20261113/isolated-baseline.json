@@ -1,0 +1,563 @@
+{
+  "schema": "rag-results-v1",
+  "dataset_version": "37692325eb643758cd5fa7c90d505cb463ee1f2d2ccc21ee5a13170a1182d90b",
+  "corpus_hash": "aa5406b9fb92b5c704fc764211aa34a4fd683f01bf7024e62ec0634faeb9eafa",
+  "config_fingerprint": "0c0d65cb47187863804d03ea99817390027e4fb5a866209e7063763f2e45459b",
+  "evaluation_environment": "5d4716e40fcd7a5915ae1b09145f8c758162cfef8fd5ae7ab01dc79a9a06b051",
+  "evidence_tier": "sqlite_keyword",
+  "blockers": [
+    "business_labels_not_reviewed",
+    "corpus_anchors_not_resolved",
+    "missing_safety_measurements",
+    "no_assessed_citations",
+    "no_labeled_holdout",
+    "retrieval_only",
+    "unreviewed_or_unresolved_gold"
+  ],
+  "metrics": {
+    "hit5": null,
+    "hit5_samples": 0,
+    "mrr": null,
+    "mrr_samples": 0,
+    "ndcg5": null,
+    "ndcg5_samples": 0,
+    "citation_precision": null,
+    "citation_precision_samples": 0,
+    "role_context_rate": null,
+    "role_cited_rate": null,
+    "role_samples": 0,
+    "completeness": null,
+    "completeness_samples": 0,
+    "false_refusals": 0,
+    "missed_refusals": 0,
+    "refusal_samples": 0,
+    "latency_p95_ms": 14.338300010422245,
+    "latency_samples": 104,
+    "permission_leaks": null,
+    "version_leaks": null,
+    "critical_failures": null
+  },
+  "cases": [
+    {
+      "case_id": "01167997716439a1",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "02dc81ee70c8e016",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "04ebf6df890653a8",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "05b451c6bd7cd134",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "07608772b0571038",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "0bb2dc7b94a6a5a7",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "0e94b4485e59d86b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "16b7d24cfa01ae41",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "179ae2d7b40942fe",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "1e2416fdd236bce6",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "2000c9265e5dda84",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "261f529d91b86bce",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "280c97c6b073f257",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "2d6467a333ebb1a5",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "2fe5d39bf064daff",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "31a82daa7589ee6a",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "3347a89646e75270",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "338550d98939b2cd",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "3a3a43ed851651c5",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "3efb391d965ec66d",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4195b0ff845c4610",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "42571ad5b1821de0",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4304a54b3f7edd1e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "475f77c55ea0d67b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4d91dc1ab2726765",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4f49ae2664bc1f9d",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "51e10c75a425e175",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5305ade9d59a3a95",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "54205ddddc3bc29b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "55d102e61781358f",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "566a2f113e7771e0",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "573cb22b764fd5f7",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "593160f7d46eb0b4",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5a1d38618d9b3e94",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5c9e9f3834a3ae6b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5cca8fcababdcedd",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5ef6ed8e4972aa29",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "5f0c175822eb4fab",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5fbcfd7d007ee66b",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "6168002f9022b7c1",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "649a93f7174a808e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "65ea04a7193e8b19",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "68c211e41f99dd4e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "6b7ffff62ebb2d71",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "6d87d1c14a4d980b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "6de5458ca17bbad5",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "6f487dd186106f92",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "743f681f201ada7c",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "751daa5e522cc19d",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "78816588a6c5dfbc",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "78fd1a06fd69ecce",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "7f150aa1ee9d7b9e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "7f539317743bc7bb",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "7faccef929b833aa",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "80d8c1a5e04e8797",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "8436f62095274c09",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "85f78e2c96e87b44",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "87f49cbb31d4027f",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "8a92fa89c39cafc7",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "8d3ec8dd0ebafd05",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "9038e03d0409531d",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "92c0af77cc1b6d8f",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "96cf5656d5cbd8d5",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "96fb8a9c4dc62831",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "97be4d314af2c03f",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "98869678ef262d9e",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "99e3c3636385e80d",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "99f84950f38c34af",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a1b742047fd1a31e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a3acaa31b1e8c5a8",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a46710b8002306f4",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a9666b6395d5c459",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ac3a320626420848",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ac446afffb05079a",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "afba9649c833e05b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b151d2c1c212e03a",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b2640b419bc3242a",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b2fba2ff14c180f4",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b935a94d57555f7b",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "b95bbb7631f70d8c",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b96eabba5eab3c14",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b9f7a1fa78a79e8a",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "bba338a35384fba6",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "bcf7e8f5467b8012",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "be9292bb747280c2",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c0a1828d3bbfbfe1",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "c1a8e98aac40d4ed",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c4a26c94a7b9ae87",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c4f26a87f54ed683",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c5a912c29bda681b",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "d000bfbe95e0c4e6",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "d21a206e15475637",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "d6ed58f996f75296",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "d8b2f03c0e364ade",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "db5afc9bc2552b00",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "dc1908cb9672e0d8",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "e0b77537b9ce0310",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "e8ee013f75b013a2",
+      "status": "unreviewed",
+      "split": "holdout"
+    },
+    {
+      "case_id": "e9dcf654963ddc5e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ea6d41922be39cf7",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "edc6c8a376ffd54c",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ee927b14de6ba35e",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "f43d6a11b8ba4907",
+      "status": "unreviewed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "fda6d7c3b7fea5fa",
+      "status": "unreviewed",
+      "split": "tuning"
+    }
+  ],
+  "external_calls": 0
+}

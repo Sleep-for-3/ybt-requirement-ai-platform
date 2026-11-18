@@ -82,6 +82,14 @@ export function statusTone(status: string | null | undefined): StatusTone {
   return STEP_TONES[status] || TASK_TONES[status] || "neutral";
 }
 
+export type StatusIconKind = "working" | "success" | "danger" | "warning" | "info" | "neutral";
+
+/** Preserve a non-color cue for every status; active labels use a spinner. */
+export function statusIconKind(label: string, tone: StatusTone): StatusIconKind {
+  if (/执行中|处理中|规划中/.test(label)) return "working";
+  return tone;
+}
+
 export type AgentToolCall = {
   id: number;
   tool_key: string;
@@ -1058,6 +1066,12 @@ export function isHistoricalCaseStep(step: AgentStep | null | undefined): boolea
   return textValue(step?.tool_key) === CASE_MEMORY_TOOL_KEY;
 }
 
+/** Optional historical enrichment is informative but not a required answer basis. */
+export function isOptionalEnrichmentGap(step: AgentStep | null | undefined, code: string | null | undefined): boolean {
+  if (code === "optional_dependency_missing") return true;
+  return code === "no_historical_case" && isHistoricalCaseStep(step) && step?.required === false;
+}
+
 export function caseMemoryView(step: AgentStep | null | undefined): CaseMemoryView {
   const record = step || ({} as AgentStep);
   const summary = asRecord(record.summary);
@@ -1694,6 +1708,7 @@ export function stepBusinessLabel(step: AgentStep | null | undefined): string {
   const key = (step?.step_key || "").trim();
   if (PHASE_LABELS[key]) return PHASE_LABELS[key];
   const toolKey = (step?.tool_key || "").toLowerCase();
+  if (toolKey === CASE_MEMORY_TOOL_KEY) return "查找历史案例补充";
   if (toolKey.includes("sql")) return "读取当前实现";
   if (toolKey.includes("policy") || toolKey.includes("regulat")) return "查找监管依据";
   if (toolKey.includes("lineage") || toolKey.includes("impact")) return "评估影响范围";
@@ -1713,6 +1728,12 @@ export type ProcessPhaseView = {
 };
 
 function stepDetailText(step: AgentStep): string {
+  if (isHistoricalCaseStep(step)) {
+    const caseView = caseMemoryView(step);
+    if (caseView.gapMessage) return caseView.gapMessage;
+    if (caseView.caseCount > 0) return `找到 ${caseView.caseCount} 条历史人工决策，仅作经验参考，不能作为监管依据。`;
+    if (caseView.skipped) return "本次未找到可用的历史人工决策案例；这不影响基于当前资料形成结论。";
+  }
   const summary = asRecord(step.summary);
   const candidate = textValue(summary?.answer) || textValue(summary?.summary) || textValue(summary?.conclusion)
     || textValue(summary?.title) || textValue(summary?.rationale) || textValue(step.reason);

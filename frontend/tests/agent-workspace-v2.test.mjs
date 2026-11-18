@@ -11,6 +11,7 @@ import {
   caseMemoryView,
   classifyStepEvidence,
   isHistoricalCaseStep,
+  isOptionalEnrichmentGap,
   isStepDegraded,
   planSourceDegraded,
   planSourceLabel,
@@ -20,6 +21,7 @@ import {
   scenarioSourceLabel,
   sqlChangeView,
   stepDegradedCodes,
+  processPhaseViews,
   stepDisplayTone,
   stepStatusLabel,
   subjectChoicePayload,
@@ -528,6 +530,28 @@ test("被跳过的历史案例步骤显示缺口且不算已采纳", () => {
   assert.deepEqual(view.gapCodes, ["no_historical_case"]);
   assert.match(view.gapMessage, /没有找到/);
   assert.equal(view.sourceType, "historical_decision");
+});
+
+test("可选历史案例缺口只留在执行过程，不伪装成问答主体证据缺口", () => {
+  const step = {
+    step_key: "history",
+    tool_key: "search_decision_cases",
+    required: false,
+    status: "skipped",
+    gap_codes: ["no_historical_case", "optional_dependency_missing"],
+    summary: { case_count: 0, cases: [] }
+  };
+  assert.equal(isOptionalEnrichmentGap(step, "no_historical_case"), true);
+  assert.equal(isOptionalEnrichmentGap(step, "optional_dependency_missing"), true);
+  assert.equal(isOptionalEnrichmentGap({ ...step, required: true }, "no_historical_case"), false);
+  assert.equal(isOptionalEnrichmentGap({ ...step, tool_key: "answer_knowledge_question" }, "no_historical_case"), false);
+  assert.deepEqual(processPhaseViews({ steps: [step] }), [{
+    key: "history",
+    label: "查找历史案例补充",
+    stateLabel: "降级 · 已跳过",
+    tone: "warning",
+    detail: "没有找到与该主体/场景匹配的历史人工决策案例；不得以历史经验替代监管依据。"
+  }]);
 });
 
 test("后端若把案例标成监管依据，界面仍显示历史人工决策并给出冲突标记", () => {

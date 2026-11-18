@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-18",
+  "execution_stop": "用户要求Round65后停止长期开发，无自动下一动作；详见CURRENT-CHECKPOINT.md。",
+  "source_of_truth": "GOAL-MODE-PROMPT.md",
+  "status_values": [
+    "pending",
+    "in_progress",
+    "verified",
+    "blocked_external",
+    "awaiting_business"
+  ],
+  "goals": [
+    {
+      "id": "G-P0-A",
+      "status": "blocked_external",
+      "evidence": [
+        "../../evaluation/rag-upgrade-20261113/real-components/source-review-acceptance-20261115.md",
+        "delegated-business-review-20261116.json",
+        "delegated-answerable-review-20261116.json",
+        "delegated-workbook-review-20261116.json",
+        "delegated-sql-review-20261116.json",
+        "rounds/ROUND-20261116-21.md",
+        "rounds/ROUND-20261116-28.md",
+        "rounds/ROUND-20261116-29.md",
+        "rounds/ROUND-20261116-30.md",
+        "rounds/ROUND-20261117-43.md",
+        "rounds/ROUND-20261117-44.md",
+        "evidence/ROUND-20261117-44.json",
+        "rounds/ROUND-20261117-52.md"
+      ],
+      "note": "round52完成本机来源谱系/曝光/覆盖盘点。84份ETL SQL中56份原文SHA在项目9/11/12/14本地文件存储命中；其余候选也属于已用于评估/演示准备的来源包，无法证明家族未观测。104题、20 SQL及12多源题均已观察；合格的新独立来源包、授权用途及历史未曝光证明仍是外部输入。代理逐题审核授权继续有效，不需要用户逐题操作；新来源到位前不冻结holdout或调用真实模型。"
+    },
+    {
+      "id": "G-P0-B",
+      "status": "in_progress",
+      "evidence": [
+        "../../evaluation/rag-upgrade-20261113/real-components/source-review-acceptance-20261115.md",
+        "rounds/ROUND-20261115-01.md",
+        "evidence/ROUND-20261115-01.json",
+        "rounds/ROUND-20261115-05.md",
+        "rounds/ROUND-20261116-06.md",
+        "rounds/ROUND-20261116-07.md",
+        "rounds/ROUND-20261116-08.md",
+        "rounds/ROUND-20261116-14.md",
+        "rounds/ROUND-20261116-15.md",
+        "rounds/ROUND-20261116-16.md",
+        "rounds/ROUND-20261116-29.md",
+        "rounds/ROUND-20261116-33.md",
+        "rounds/ROUND-20261116-34.md",
+        "rounds/ROUND-20261116-35.md",
+        "rounds/ROUND-20261117-40.md",
+        "rounds/ROUND-20261117-41.md",
+        "rounds/ROUND-20261117-42.md",
+        "rounds/ROUND-20261117-44.md",
+        "evidence/ROUND-20261117-44.json",
+        "rounds/ROUND-20261117-48.md",
+        "evidence/ROUND-20261117-48.json",
+        "rounds/ROUND-20261117-51.md",
+        "evidence/ROUND-20261117-51.json",
+        "rounds/ROUND-20261117-53.md",
+        "evidence/ROUND-20261117-53.json",
+        "rounds/ROUND-20261117-54.md",
+        "evidence/ROUND-20261117-54.json",
+        "rounds/ROUND-20261117-55.md",
+        "evidence/ROUND-20261117-55.json",
+        "rounds/ROUND-20261117-56.md",
+        "evidence/ROUND-20261117-56.json",
+        "rounds/ROUND-20261117-57.md",
+        "evidence/ROUND-20261117-57.json",
+        "rounds/ROUND-20261117-58.md",
+        "evidence/ROUND-20261117-58.json",
+        "rounds/ROUND-20261117-59.md",
+        "evidence/ROUND-20261117-59.json",
+        "rounds/ROUND-20261118-60.md",
+        "evidence/ROUND-20261118-60.json",
+        "rounds/ROUND-20261118-63.md",
+        "evidence/ROUND-20261118-63.json",
+        "rounds/ROUND-20261118-64.md",
+        "evidence/ROUND-20261118-64.json"
+      ],
+      "note": "round34状态矩阵3 passed，round35版本二次过滤1 passed；round40共16模块258 passed，round41版本/权限/确定性支撑16 passed及重排器19 passed，round42正确性与检索资格80 passed并覆盖SQLite ORM调用中撤回/禁用后的拒绝；round44确认历史冻结v1为5922单元、7/9 sheet且有非空值漏失；round48 Mock planner schema与预算required守卫53 passed；round51修复外部OpenAI-compatible embedding预算漏计，67项定向回归通过；round53真实隔离PG/Redis/Celery/Milvus及BGE合成索引/直问答链路通过；round54规划约束定向回归40 passed；round55修后隔离知识问答必需回答步骤执行通过、待确认和引用原文字节验收通过；round56 P0确定性矩阵64 passed；round57精确原件在新隔离项目重入库，9/9 sheet、5958单元、103447非空单元无损，独立索引active 5958/5958且已观察样本检索命中；round58真实隔离组件9项及真实浏览器5项通过撤回/禁用/原文/跨项目/并发检索治理验收；round59真实隔离组件9项通过同文档版本激活、冻结revision、默认检索隔离和索引指针回退；round60受控Mock真实隔离组件时序4/4通过；round63 HTTP治理回归130/130、前端7/7、隔离ASGI 11/11；round64身份一致生产页面与独立Uvicorn真实隔离API浏览器47/47，回答期间撤回/禁用均409且无旧答案/引用，恢复与400对照通过。真实模型、独立业务留出和P0全链路仍未完成，P0-B保持in_progress。"
+    },
+    {
+      "id": "G-P0-C",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261118-63.md",
+        "evidence/ROUND-20261118-63.json",
+        "rounds/ROUND-20261118-62.md",
+        "evidence/ROUND-20261118-62.json",
+        "rounds/ROUND-20261118-64.md",
+        "evidence/ROUND-20261118-64.json",
+        "../../evaluation/rag-upgrade-20261113/real-components/source-review-acceptance-20261115.md",
+        "rounds/ROUND-20261116-10.md",
+        "rounds/ROUND-20261116-11.md",
+        "rounds/ROUND-20261116-13.md",
+        "rounds/ROUND-20261116-16.md",
+        "rounds/ROUND-20261116-17.md",
+        "rounds/ROUND-20261117-40.md",
+        "rounds/ROUND-20261117-45.md",
+        "rounds/ROUND-20261117-46.md",
+        "rounds/ROUND-20261117-47.md",
+        "evidence/ROUND-20261117-47.json",
+        "rounds/ROUND-20261117-48.md",
+        "evidence/ROUND-20261117-48.json",
+        "rounds/ROUND-20261117-49.md",
+        "evidence/ROUND-20261117-49.json",
+        "rounds/ROUND-20261117-50.md",
+        "evidence/ROUND-20261117-50.json",
+        "rounds/ROUND-20261117-53.md",
+        "evidence/ROUND-20261117-53.json",
+        "rounds/ROUND-20261117-54.md",
+        "evidence/ROUND-20261117-54.json",
+        "rounds/ROUND-20261117-55.md",
+        "evidence/ROUND-20261117-55.json",
+        "rounds/ROUND-20261117-58.md",
+        "evidence/ROUND-20261117-58.json",
+        "rounds/ROUND-20261117-59.md",
+        "evidence/ROUND-20261117-59.json"
+      ],
+      "note": "round46/53真实隔离PG/Redis/Celery/Milvus及本地BGE合成索引/直问答通过；round47原文SHA通过；round53修前浏览器发现知识问答可无答案步骤结束；round54修复后round55当前源码真实组件任务执行必需回答工具，Mock答案为needs_confirmation并有1条引用；round58真实组件撤回/禁用/跨项目拒绝及浏览器任务证据页面通过；round59真实浏览器登录、冻结V1问答、项目9/版本8原文预览和下载SHA通过；round63隔离ASGI治理HTTP契约11/11，round64独立Uvicorn及身份一致生产浏览器47/47完成撤回/禁用409和恢复问答。真实模型答案、独立业务留出及公网当前release链路未完成，P0-C仍in_progress。"
+    },
+    {
+      "id": "G-P1-A",
+      "status": "pending",
+      "evidence": [
+        "../../evaluation/rag-upgrade-20261113/real-components/source-review-failure-cases-20261115.md"
+      ],
+      "note": "仅缺陷关联的默认关闭诊断可先行；正式 A/B 等待 P0 硬阻断关闭。"
+    },
+    {
+      "id": "G-P1-B",
+      "status": "pending",
+      "evidence": [
+        "../../evaluation/rag-upgrade-20261113/README.md"
+      ],
+      "note": "部分既有实现尚需当前契约与端到端验证。"
+    },
+    {
+      "id": "G-P1-C",
+      "status": "pending",
+      "evidence": [
+        "../../evaluation/rag-upgrade-20261113/README.md"
+      ],
+      "note": "影子指标存在；校准、可比基线和独立留出未完成。"
+    },
+    {
+      "id": "G-P2-CHUNK",
+      "status": "pending",
+      "evidence": [],
+      "note": "需核验正式索引配置后再实验。"
+    },
+    {
+      "id": "G-P2-EMBED",
+      "status": "pending",
+      "evidence": [],
+      "note": "未完成单因素实验。"
+    },
+    {
+      "id": "G-P2-INDEX",
+      "status": "pending",
+      "evidence": [],
+      "note": "未完成单因素实验。"
+    },
+    {
+      "id": "G-UX-AUDIT",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261118-62.md",
+        "evidence/ROUND-20261118-62.json",
+        "rounds/ROUND-20261116-20.md",
+        "rounds/ROUND-20261118-61.md",
+        "evidence/ROUND-20261118-61.json"
+      ],
+      "note": "Round61复核旧交互并完善状态图标；Round62身份一致生产构建/真实隔离API只读浏览器12/12通过，桌面/390px截图抽查无重叠。覆盖completed详情、GET失败恢复、浏览器只读权限、原文抽屉Escape与焦点归还。完整键盘顺序及运行/失败/待处理状态待验，整体不关闭。"
+    },
+    {
+      "id": "G-UX-IMPLEMENT",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261116-20.md",
+        "rounds/ROUND-20261116-23.md",
+        "rounds/ROUND-20261116-31.md",
+        "rounds/ROUND-20261116-32.md",
+        "rounds/ROUND-20261118-61.md",
+        "evidence/ROUND-20261118-61.json"
+      ],
+      "note": "空态入口、原生单选、目标保留、短输入、窄屏搜索、可选历史说明、状态图标及页头文案修整已实施；Round61视图回归55/55、tsc、最终源码生产构建及合成API浏览器3/3通过。整体UX目标不关闭。"
+    },
+    {
+      "id": "G-UX-ACCEPT",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261118-65.md",
+        "evidence/ROUND-20261118-65.json",
+        "rounds/ROUND-20261118-62.md",
+        "evidence/ROUND-20261118-62.json",
+        "rounds/ROUND-20261116-20.md",
+        "rounds/ROUND-20261116-32.md",
+        "rounds/ROUND-20261117-40.md",
+        "rounds/ROUND-20261117-47.md",
+        "evidence/ROUND-20261117-47.json",
+        "rounds/ROUND-20261117-49.md",
+        "evidence/ROUND-20261117-49.json",
+        "rounds/ROUND-20261117-50.md",
+        "evidence/ROUND-20261117-50.json",
+        "rounds/ROUND-20261117-53.md",
+        "evidence/ROUND-20261117-53.json",
+        "rounds/ROUND-20261118-61.md",
+        "evidence/ROUND-20261118-61.json",
+        "rounds/ROUND-20261117-54.md",
+        "evidence/ROUND-20261117-54.json",
+        "rounds/ROUND-20261117-55.md",
+        "evidence/ROUND-20261117-55.json",
+        "rounds/ROUND-20261117-58.md",
+        "evidence/ROUND-20261117-58.json",
+        "rounds/ROUND-20261117-59.md",
+        "evidence/ROUND-20261117-59.json"
+      ],
+      "note": "round47真实组件原文下载SHA通过；round49补API层跨项目拒绝/原文不可用脱敏单测；round50生产构建+合成API治理页面通过；round53修前任务暴露无答案步骤缺口；round55修后浏览器任务详情/引用原文预览与下载SHA/跨项目上下文/桌面390px通过；round58真实组件撤回警告、原文SHA和项目切换后任务证据范围/390px浏览器验收通过；round59真实浏览器冻结版本引用、原文SHA和390px布局通过。真实模型页面、更多失败恢复状态及公网当前release链路仍未验收，整体UX目标不关闭。"
+    },
+    {
+      "id": "G-REMOTE-INVENTORY",
+      "status": "verified",
+      "evidence": [
+        "rounds/ROUND-20261116-22.md",
+        "rounds/ROUND-20261116-25.md",
+        "evidence/ROUND-20261116-24-inventory.json"
+      ],
+      "closure_record": "evidence/G-REMOTE-INVENTORY-closure.json",
+      "note": "更新凭据后主机公钥与首次一致，24+7项只读盘点完成；两套应用、依赖、数据路径和备份空间均已核验。保留旧认证失败，不含任何远端发布通过结论。"
+    },
+    {
+      "id": "G-REMOTE-BACKUP",
+      "status": "verified",
+      "evidence": [
+        "rounds/ROUND-20261116-25.md",
+        "evidence/ROUND-20261116-25-backup.json"
+      ],
+      "closure_record": "evidence/G-REMOTE-BACKUP-closure.json",
+      "note": "两库隔离恢复320表逐表行数匹配，4143普通文件SHA一致；Milvus/etcd/MinIO副本真实启动，7集合stats一致。旧容器/镜像/数据均保留，原服务无paused且live/version正常。"
+    },
+    {
+      "id": "G-REMOTE-DEPLOY",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261116-25.md",
+        "rounds/ROUND-20261116-28.md",
+        "rounds/ROUND-20261116-36.md",
+        "rounds/ROUND-20261116-37.md",
+        "rounds/ROUND-20261116-38.md",
+        "rounds/ROUND-20261117-40.md",
+        "rounds/ROUND-20261117-48.md"
+      ],
+      "note": "candidate37-attempt2已在保留candidate28和公网路由的前提下运行独立容器/DB/Redis/Milvus/etcd/MinIO/preview，真实浏览器登录成功。round48将budget-required fail-closed配置加入candidate37源码环境，但尚未重部署或运行确认；candidate模型路由未启用，round40中央relay仅health/401非分发探针通过，budget为0。公网切换未做。"
+    },
+    {
+      "id": "G-REMOTE-ACCEPT",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261116-28.md",
+        "rounds/ROUND-20261117-40.md"
+      ],
+      "note": "candidate37真实登录和Agent桌面/390px布局通过；隧道health 200、未认证请求401且中央账本增量0。真实candidate模型问答、业务语义/引用支持和浏览器证据原文链路尚未通过。"
+    },
+    {
+      "id": "G-REMOTE-ROLLBACK",
+      "status": "in_progress",
+      "evidence": [
+        "rounds/ROUND-20261116-28.md"
+      ],
+      "note": "隔离candidate28→26→28回退演练exit0，版本/健康、六表计数、task15、V1原文哈希、166文件哈希不变，恢复后浏览器通过。只覆盖schema/索引不变的应用与配置切换；原公网未切换，发布目标依赖未关闭。"
+    },
+    {
+      "id": "G-FINAL-DELIVERY",
+      "status": "pending",
+      "evidence": [],
+      "note": "全部目标交付包尚未完成。"
+    }
+  ]
+}

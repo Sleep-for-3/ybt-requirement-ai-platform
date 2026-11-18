@@ -19,6 +19,7 @@ drops the original query — the original is always the first variant.
 from __future__ import annotations
 
 import re
+from app.services.code_extraction import FIELD_CODE_RE
 
 #: Each group is (canonical term, aliases). A query that contains *any* member of
 #: a group gets the canonical term appended as an expansion variant, so units
@@ -35,7 +36,7 @@ SYNONYM_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 #: Field codes look like ``E010001``; the few non-numeric codes used by the
 #: survey template are listed explicitly so they are not lost.
-_FIELD_CODE_RE = re.compile(r"\b(?:E\d{6}|E\d{4}|SFJJGDM|SFJJSSBM)\b", re.IGNORECASE)
+_FIELD_CODE_RE = FIELD_CODE_RE
 
 #: Question words that carry no retrieval signal on their own.
 _STOP_PREFIXES = ("请问", "请说明", "帮我看看", "这个字段", "该字段", "字段")
@@ -64,7 +65,7 @@ _1104_TABLE_RE = re.compile(r"\bG\d{4}\b")
 #: Data-item codes carry the reporting field identity (F250007, E010008,
 #: G110001). The retriever can use them as structured signals instead of relying
 #: on BM25/vector similarity alone.
-_FIELD_CODE_RE = re.compile(r"\b(?:F\d{6}|E\d{6}|G\d{6})\b", re.IGNORECASE)
+_FIELD_CODE_RE = FIELD_CODE_RE
 
 #: Phrases that explicitly ask for an older version. They must switch retrieval
 #: to the historical branch and nudge superseded versions forward, otherwise a

@@ -161,9 +161,8 @@ def test_duplicate_and_merged_headers_stay_visible() -> None:
 
     units, warnings, report = parse_document_with_report("合并表头.xlsx", buffer.getvalue(), "regulatory_qa")
 
-    # 重复列名的覆盖行为本身是历史语义（后出现的列覆盖先出现的列），测试固定的是
-    # 「这次覆盖必须被计为 warning 并可定位」，而不是把覆盖结果当成正确解析。
-    assert [unit.content for unit in units] == ["字段代码：CUST_NO；字段名称：别名二"]
+    assert [unit.content for unit in units] == ["字段代码：CUST_NO；字段名称【B列】：客户号；字段名称【C列】：别名；字段名称【D列】：别名二"]
+    assert units[0].target_field_name is None
     assert report.merged_header_cells == 1
     # 三列同名（含合并展开出来的那一列），每个冲突都要能被指到具体列号。
     assert [item["name"] for item in report.duplicate_headers] == ["字段名称", "字段名称"]
@@ -171,6 +170,83 @@ def test_duplicate_and_merged_headers_stay_visible() -> None:
     assert {"duplicate_header", "merged_header"} <= {item.code for item in report.findings}
     assert not report.has_blocking
     assert any("重复列名" in item for item in warnings)
+
+
+def test_archive_question_headers_and_grouped_feedback_are_lossless():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "穿透层问答"
+    sheet.append(["机构问题", None, None, "牵头单位意见", "总局意见"])
+    sheet.merge_cells("A1:C1")
+    sheet.append(["具体问题描述", "数据项/指标编码", "解决方案或建议", "反馈意见", "反馈意见"])
+    sheet.append(["如何报送？", "F250007", "机构建议填02", "牵头意见填03", "总局明确填01"])
+    empty = workbook.create_sheet("记录校验问答")
+    empty.append(["校验规则编码", "修改建议", "反馈意见"])
+    empty.append(["", "", ""])
+    buffer = BytesIO()
+    workbook.save(buffer)
+
+    units, _, report = parse_document_with_report("原始答疑.xlsx", buffer.getvalue(), "regulatory_qa")
+
+    assert report.sheet_parsed == 2 and report.sheets_skipped == []
+    assert len(units) == 1
+    assert units[0].title == "如何报送？"
+    assert units[0].target_field_code == "F250007"
+    for text in ["问题：如何报送？", "解决方案或建议：机构建议填02",
+                 "反馈意见【牵头单位意见；D列】：牵头意见填03", "反馈意见【总局意见；E列】：总局明确填01"]:
+        assert text in units[0].content
+    assert "回复：机构建议" not in units[0].content
+    assert units[0].metadata["parse_config_version"] == "xlsx-knowledge-config-v3"
+
+
+def test_duplicate_question_and_answer_columns_preserve_both_without_guessing():
+    data = _base_xlsx([["问题", "问题", "回复", "回复"], ["问题甲", "问题乙", "答复甲", "答复乙"]])
+    units, _, report = parse_document_with_report("重复.xlsx", data, "regulatory_qa")
+    assert len(units) == 1 and not report.has_blocking
+    for text in ["问题【A列】：问题甲", "问题【B列】：问题乙", "回复【C列】：答复甲", "回复【D列】：答复乙"]:
+        assert text in units[0].content
+
+
+def test_semantic_duplicate_aliases_preserve_conflicting_question_and_answer_values():
+    data = _base_xlsx([
+        ["问题", "具体问题描述", "回复", "答疑结果"],
+        ["原始问题甲", "补充问题乙", "答复甲", "答复乙"],
+    ])
+
+    units, _, report = parse_document_with_report("同义重复列.xlsx", data, "regulatory_qa")
+
+    assert len(units) == 1 and units[0].title == "指标 第2行"
+    assert all(value in units[0].content for value in ["原始问题甲", "补充问题乙", "答复甲", "答复乙"])
+    assert units[0].source_cell_range == "A2:D2"
+    assert units[0].target_field_code is None
+    findings = [item for item in report.findings if item.code == "duplicate_semantic_column"]
+    assert [item.locator["cells"] for item in findings] == ["A2,B2", "C2,D2"]
+
+
+def test_semantic_duplicate_aliases_with_same_value_keep_structured_question():
+    data = _base_xlsx([
+        ["问题", "具体问题描述"],
+        ["相同问题", "相同问题"],
+    ])
+
+    units, _, report = parse_document_with_report("同义相同列.xlsx", data, "regulatory_qa")
+
+    assert len(units) == 1 and units[0].title == "相同问题"
+    assert not any(item.code == "duplicate_semantic_column" for item in report.findings)
+
+
+def test_archive_long_question_fits_database_title_and_keeps_full_evidence():
+    question = "多行原始问题" * 200
+    units, _, _ = parse_document_with_report("长问题.xlsx", _base_xlsx([
+        ["具体问题描述", "解决方案或建议"], [question, "待确认"]]), "regulatory_qa")
+    assert len(units[0].title) == 500
+    assert question in units[0].content
+
+
+def test_archive_space_only_placeholder_is_not_a_knowledge_unit():
+    units, _, report = parse_document_with_report("空模板.xlsx", _base_xlsx([
+        ["具体问题描述", "数据项编码"], [" ", "\t"]]), "regulatory_qa")
+    assert units == [] and report.row_skipped_blank == 1
 
 
 def test_unrecognisable_sheet_is_reported_as_blocking_sheet_loss() -> None:

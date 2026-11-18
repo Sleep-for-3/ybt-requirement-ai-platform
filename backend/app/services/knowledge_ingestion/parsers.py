@@ -23,21 +23,27 @@ from .ocr import IMAGE_SUFFIXES
 # the citation side will accept, and neither may drift.
 CLAUSE_NUMBER_PATTERN = re.compile(r"^(?:第[零一二三四五六七八九十百千\d]{1,12}条|\d+(?:\.\d+){1,4})(?![\d.])")
 CHAPTER_NUMBER_PATTERN = re.compile(r"^(第[零一二三四五六七八九十百千\d]{1,12}章)")
-QUESTION={"问题","答疑问题","监管问题","银行问题"};ANSWER={"回复","监管回复","答疑结果","处理意见"};SUGGESTION={"同业建议"};FIELD_CODE={"字段代码","数据项编码"};FIELD_NAME={"字段名称","字段中文名","数据项名称"};TABLE={"一表通表","表代码"};SCENARIO={"业务场景","产品场景","场景名称"};BUSINESS_SYSTEM={"来源系统","业务系统","系统名称"};SOURCE_TABLE={"来源表","来源表英文名","源表","源表英文名"};SOURCE_FIELD={"来源字段","来源字段英文名","源字段","源字段英文名"};MART_TABLE={"集市表","监管集市表"};MART_FIELD={"集市字段","监管集市字段"}
-HEADER_MARKERS=QUESTION|ANSWER|FIELD_CODE|FIELD_NAME
+QUESTION={"问题","答疑问题","监管问题","银行问题","具体问题描述"};ANSWER={"回复","监管回复","答疑结果","处理意见"};SUGGESTION={"同业建议"};FIELD_CODE={"字段代码","数据项编码","数据项/指标编码"};FIELD_NAME={"字段名称","字段中文名","数据项名称","数据项/指标名称"};TABLE={"一表通表","表代码","表号","表号（主）"};SCENARIO={"业务场景","产品场景","场景名称"};BUSINESS_SYSTEM={"来源系统","业务系统","系统名称"};SOURCE_TABLE={"来源表","来源表英文名","源表","源表英文名"};SOURCE_FIELD={"来源字段","来源字段英文名","源字段","源字段英文名"};MART_TABLE={"集市表","监管集市表"};MART_FIELD={"集市字段","监管集市字段"}
+SEMANTIC_COLUMN_GROUPS=(QUESTION,ANSWER,SUGGESTION,FIELD_CODE,FIELD_NAME,TABLE,SCENARIO,
+                        BUSINESS_SYSTEM,SOURCE_TABLE,SOURCE_FIELD,MART_TABLE,MART_FIELD)
+HEADER_MARKERS=QUESTION|ANSWER|FIELD_CODE|FIELD_NAME|{"校验规则编码"}
 ALL_ALIASES=(QUESTION|ANSWER|SUGGESTION|FIELD_CODE|FIELD_NAME|TABLE|SCENARIO|BUSINESS_SYSTEM
              |SOURCE_TABLE|SOURCE_FIELD|MART_TABLE|MART_FIELD)
 
 # Versioned parsing rules.  Changing any value here requires bumping the version:
 # a frozen requirement keeps pointing at the rules that produced its snapshot, and
 # a configuration upgrade must never rewrite facts that are already frozen.
-XLSX_PARSE_CONFIG_VERSION="xlsx-knowledge-config-v1"
+XLSX_PARSE_CONFIG_VERSION="xlsx-knowledge-config-v3"
 XLSX_PARSE_CONFIG={
     # Historical code scanned the first 50 rows only; a header on row 51 was an
     # invisible whole-sheet loss.  The window is a documented, versioned setting.
     "header_scan_rows":200,
     "legacy_header_scan_rows":50,
     "column_aliases":sorted(ALL_ALIASES),
+    "duplicate_columns":"preserve_group_and_column",
+    "structured_duplicates":"unique_nonblank_value_only",
+    "semantic_duplicates":"preserve_conflicts_and_only_map_unambiguous",
+    "title_max_chars":500,
 }
 
 def parse_document(file_name,content,knowledge_type):
@@ -103,7 +109,7 @@ def _cell_text(value):
 
 def _first_text(values,keys):
     """First mapped value that is actually present; ``0`` is a value, not absence."""
-    for key in keys:
+    for key in sorted(keys):
         if key not in values:continue
         text=_cell_text(values[key])
         if text:return text
@@ -119,7 +125,7 @@ def _record_header_findings(sheet,headers,header_row,report):
     for item in duplicates:
         report.duplicate_headers.append(item)
         report.add(ParseFinding("duplicate_header",SEVERITY_WARNING,
-                                f"{sheet.title} 第 {header_row} 行重复列名“{item['name']}”，后出现的列会覆盖先出现的列",
+                                f"{sheet.title} 第 {header_row} 行重复列名“{item['name']}”，已按原始分组和列号分别保留",
                                 locator={"sheet":sheet.title,"row":header_row,"column":get_column_letter(item["columns"][1])}))
     unmapped=sorted({name for name in headers.values() if name and name not in ALL_ALIASES})
     if unmapped:
@@ -170,6 +176,26 @@ def _excel(content,knowledge_type):
                                     f"{sheet.title} 表头在第 {header_row} 行，超出历史扫描范围（前 {XLSX_PARSE_CONFIG['legacy_header_scan_rows']} 行）",
                                     locator={"sheet":sheet.title,"row":header_row}))
         _record_header_findings(sheet,headers,header_row,report)
+        # A merged parent identifies who supplied a feedback column. Never infer
+        # authority from the duplicate column's position alone.
+        groups={column:next((_cell_text(matrix[parent-1][column-1])
+                            for parent in range(header_row-1,0,-1)
+                            if _cell_text(matrix[parent-1][column-1])), "") for column in headers}
+        counts={name:list(headers.values()).count(name) for name in headers.values() if name}
+        semantic_group_by_column={}
+        for column,name in headers.items():
+            for group_index,aliases in enumerate(SEMANTIC_COLUMN_GROUPS):
+                if name in aliases:
+                    semantic_group_by_column[column]=group_index
+                    break
+        semantic_group_counts={group_index:sum(
+            1 for column in headers if semantic_group_by_column.get(column)==group_index)
+            for group_index in set(semantic_group_by_column.values())}
+        labels={}
+        for column,name in headers.items():
+            duplicate_semantic=semantic_group_counts.get(semantic_group_by_column.get(column),0)>1
+            labels[column]=(f"{name}【{groups[column]+'；' if groups[column] else ''}{get_column_letter(column)}列】"
+                            if counts.get(name,0)>1 or duplicate_semantic else name)
         for (row_index,column_index),kind in kinds.items():
             if row_index==header_row and kind==CELL_FORMULA_UNCACHED:
                 report.add(ParseFinding("formula_in_header",SEVERITY_BLOCKING,
@@ -178,11 +204,34 @@ def _excel(content,knowledge_type):
         uncached_rows={}
         for (row_index,column_index),kind in kinds.items():
             if kind==CELL_FORMULA_UNCACHED:uncached_rows.setdefault(row_index,[]).append(column_index)
+        last_column=get_column_letter(sheet.max_column)
         for row in range(header_row+1,sheet.max_row+1):
             report.row_total+=1
-            values={headers[column]:matrix[row-1][column-1] for column in headers if headers[column]}
+            values={labels[column]:matrix[row-1][column-1] for column in headers if headers[column]}
+            structured={}
+            for name in counts:
+                candidates=list(dict.fromkeys(_cell_text(matrix[row-1][column-1]) for column in headers
+                                if headers[column]==name and _cell_text(matrix[row-1][column-1])))
+                if len(candidates)==1:structured[name]=candidates[0]
+            for group_index,aliases in enumerate(SEMANTIC_COLUMN_GROUPS):
+                columns=[column for column in headers
+                         if semantic_group_by_column.get(column)==group_index]
+                if len(columns)<2:continue
+                candidates=list(dict.fromkeys(_cell_text(matrix[row-1][column-1]) for column in columns
+                                if _cell_text(matrix[row-1][column-1])))
+                if len(candidates)==1:
+                    for column in columns:structured[headers[column]]=candidates[0]
+                elif len(candidates)>1:
+                    for alias in aliases:structured.pop(alias,None)
+                    cells=",".join(cell_reference(row,column) for column in columns)
+                    report.add(ParseFinding(
+                        "duplicate_semantic_column",SEVERITY_WARNING,
+                        f"{sheet.title} 第 {row} 行同一语义列组出现不同值，未自动选择结构化值，原列内容已分别保留",
+                        locator={"sheet":sheet.title,"row":row,"cells":cells},
+                        suggestion="请核对同一问题、回复或字段信息的重复别名列；确认后修正工作簿或显式整理口径。",
+                    ))
             missing_cells=uncached_rows.get(row,[])
-            if not any(value not in (None,"") for value in values.values()):
+            if not any(_cell_text(value) for value in values.values()):
                 report.row_skipped_blank+=1
                 if missing_cells:
                     report.add(ParseFinding("formula_cache_missing",SEVERITY_BLOCKING,
@@ -194,16 +243,19 @@ def _excel(content,knowledge_type):
                 report.add(ParseFinding("formula_cache_missing",SEVERITY_BLOCKING,
                                         f"{sheet.title} 第 {row} 行有 {len(missing)} 列是无缓存公式（{'、'.join(missing[:5])}），这些值未被解析",
                                         locator={"sheet":sheet.title,"row":row,"cells":",".join(cell_reference(row,column) for column in missing_cells[:5])}))
-            question=_first_text(values,QUESTION) or "";answer=_first_text(values,ANSWER) or "";suggestion=_first_text(values,SUGGESTION) or ""
-            field_code=_first_text(values,FIELD_CODE);field_name=_first_text(values,FIELD_NAME);table=_first_text(values,TABLE);scenario_name=_first_text(values,SCENARIO);business_system=_first_text(values,BUSINESS_SYSTEM);source_table=_first_text(values,SOURCE_TABLE);source_field=_first_text(values,SOURCE_FIELD);mart_table=_first_text(values,MART_TABLE);mart_field=_first_text(values,MART_FIELD)
+            question=_first_text(structured,QUESTION) or "";answer=_first_text(structured,ANSWER) or "";suggestion=_first_text(structured,SUGGESTION) or ""
+            field_code=_first_text(structured,FIELD_CODE);field_name=_first_text(structured,FIELD_NAME);table=_first_text(structured,TABLE);scenario_name=_first_text(structured,SCENARIO);business_system=_first_text(structured,BUSINESS_SYSTEM);source_table=_first_text(structured,SOURCE_TABLE);source_field=_first_text(structured,SOURCE_FIELD);mart_table=_first_text(structured,MART_TABLE);mart_field=_first_text(structured,MART_FIELD)
             content_text="\n".join(filter(None,[f"问题：{question}" if question else "",f"回复：{answer}" if answer else "",f"同业建议：{suggestion}" if suggestion else "", "；".join(f"{key}：{_cell_text(value)}" for key,value in values.items() if value not in (None,"") and key not in QUESTION|ANSWER|SUGGESTION)]))
             unit_type="qa" if question or knowledge_type=="regulatory_qa" else "field_mapping" if field_code else "table_row"
-            units.append(KnowledgeUnitDraft(unit_type,question or field_name or f"{sheet.title} 第{row}行",content_text,source_sheet_name=sheet.title,source_cell_range=f"A{row}:{get_column_letter(sheet.max_column)}{row}",target_table_code=table,target_field_code=field_code,target_field_name=field_name,scenario_name=scenario_name,source_table_name=source_table,source_field_name=source_field,metadata={"row":row,"scenario_name":scenario_name,"business_system_name":business_system,"mart_table_name":mart_table,"mart_field_name":mart_field}))
+            title=(question or field_name or f"{sheet.title} 第{row}行")[:XLSX_PARSE_CONFIG["title_max_chars"]]
+            units.append(KnowledgeUnitDraft(unit_type,title,content_text,source_sheet_name=sheet.title,source_cell_range=f"A{row}:{last_column}{row}",target_table_code=table,target_field_code=field_code,target_field_name=field_name,scenario_name=scenario_name,source_table_name=source_table,source_field_name=source_field,metadata={"row":row,"scenario_name":scenario_name,"business_system_name":business_system,"mart_table_name":mart_table,"mart_field_name":mart_field,"parse_config_version":XLSX_PARSE_CONFIG_VERSION,"column_provenance":[{"column":get_column_letter(column),"header":headers[column],"group":groups[column],"label":labels[column]} for column in headers if headers[column]]}))
     report.row_emitted=len(units)
     return units,report.warnings(),report
 
 def _expanded_matrix(sheet):
-    matrix=[[sheet.cell(row,column).value for column in range(1,sheet.max_column+1)] for row in range(1,sheet.max_row+1)]
+    # openpyxl computes these bounds by scanning populated cells.
+    max_row,max_column=sheet.max_row,sheet.max_column
+    matrix=[[sheet.cell(row,column).value for column in range(1,max_column+1)] for row in range(1,max_row+1)]
     for merged in sheet.merged_cells.ranges:
         value=matrix[merged.min_row-1][merged.min_col-1]
         for row in range(merged.min_row,merged.max_row+1):

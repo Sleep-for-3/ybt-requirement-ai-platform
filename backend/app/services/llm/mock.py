@@ -15,6 +15,20 @@ class MockLLMService(LLMService):
         )
 
     async def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        if system_prompt.startswith("[AGENT_PLANNER_V1]"):
+            return {
+                "objective": "Mock planner objective",
+                "scenario_key": None,
+                "subject": {},
+                "steps": [{
+                    "step_key": "s1",
+                    "tool_key": "summarize_evidence",
+                    "reason": "整理当前任务可用的证据",
+                    "depends_on": [],
+                    "required": True,
+                    "input": {},
+                }]
+            }
         if system_prompt.startswith("[AI_SKILL_FIELD_RERANK_V1]"):
             # Synthetic, whitelist-only ordering.  This proves the flow and the output
             # contract; it is not evidence of ranking quality in any way.

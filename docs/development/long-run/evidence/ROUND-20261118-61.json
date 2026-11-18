@@ -1,0 +1,48 @@
+{
+  "round": 61,
+  "date": "2026-11-18",
+  "goal_ids": [
+    "G-UX-AUDIT",
+    "G-UX-IMPLEMENT",
+    "G-UX-ACCEPT"
+  ],
+  "evidence_tier": {
+    "unit_and_view_tests": "55_passed",
+    "typescript": "exit_0",
+    "production_build": {
+      "dist_dir": ".next-round61-ux",
+      "exit": 0,
+      "agent_first_load_js_kb": 155
+    },
+    "browser": {
+      "api": "synthetic",
+      "checks": [
+        "task_statuses_include_text_color_and_icon",
+        "task_center_has_no_process_instruction_banner",
+        "desktop_and_390px_layout_have_no_horizontal_overflow"
+      ],
+      "passed": 3,
+      "failed": 0,
+      "result_path": ".local-run/rag-long-run/round-20261118-61/browser-attempt6/results.json"
+    }
+  },
+  "model_budget_delta": {
+    "provider_requests": 0,
+    "tokens": 0
+  },
+  "external_components_changed": false,
+  "remote_write": false,
+  "production_route_changed": false,
+  "limitations": [
+    "Browser used synthetic API data and did not test real login or backend behavior.",
+    "Build identity environment variables were not injected, so screenshots include the expected unknown identity notice.",
+    "Task detail states, keyboard order, error recovery, and evidence drawer were not re-exercised in this round."
+  ],
+  "source_files": [
+    "frontend/app/agent/business-ui.tsx",
+    "frontend/app/agent/view-model.ts",
+    "frontend/tests/agent-workspace.test.mjs",
+    "frontend/tests/agent-status-icons.browser.acceptance.mjs"
+  ],
+  "report": "rounds/ROUND-20261118-61.md"
+}

@@ -1,0 +1,22 @@
+{
+  "goal_id":"G-REMOTE-BACKUP",
+  "evidence_tier":"real_remote_backup_and_isolated_restore",
+  "source_hash":"b79678afafb515e56372476f047b3a72114549241fa79a072630083fe6922d90",
+  "backup_path":"/home/rag-long-run/backup-20261116-24",
+  "archive_sha256":"f5d49843879de2a745052a0246856a6d47f7e37fa101fd6369200419c903aeeb",
+  "databases":[
+    {"name":"ybt","restored_tables":160,"restored_rows":1280449,"all_table_row_counts_match":true,"pg_restore_exit_code":0},
+    {"name":"ybt_e2e","restored_tables":160,"restored_rows":1299284,"all_table_row_counts_match":true,"pg_restore_exit_code":0}
+  ],
+  "uploads_and_deployment_regular_files_sha256_verified":4143,
+  "included_deployment":"/opt/ybt and private container definitions",
+  "included_other_data":"Redis, etcd, Milvus and object storage mounted data",
+  "isolated_milvus_restore":{"engine_started":true,"private_network":"rag-restore-20261116-24","collections":7,"all_collection_stats_match":true},
+  "old_main_and_rag_live_and_version_statuses":[200,200,200,200],
+  "original_services_left_paused":0,
+  "original_data_overwritten":false,
+  "old_images_and_containers_preserved":true,
+  "failed_attempts_preserved":["restore_bind_source_not_created","probe_nonexistent_health_route_404"],
+  "private_raw_evidence":".local-run/rag-long-run/round-20261116-24/remote-backup, remote-restore-attempt2, remote-postbackup, remote-backup-final, remote-vector-restore",
+  "source_identity_scope":"Backup concerns the inventoried old releases, independent of later local application changes."
+}

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.models import KnowledgeUnit
+from app.models import KnowledgeUnit, KnowledgeDocument, KnowledgeDocumentVersion
 
 from .citation_support import (
     CITATION_SUPPORT_PROMPT_KEY,
@@ -40,12 +40,22 @@ UNKNOWN_VERIFICATION = "unknown"
 DEGRADED_VERIFICATION = "degraded"
 
 
+class CitationEvidenceChangedError(ValueError):
+    """Retrieved evidence no longer satisfies the request's citation snapshot."""
+
+
 def validate_citations(
     db: Session,
     citations: list[dict],
     *,
     project_id: int | None = None,
     institution_name: str | None = None,
+    check_governance: bool = False,
+    include_history: bool = False,
+    historical_as_of=None,
+    pinned_versions=None,
+    expected_content=None,
+    expected_unit_metadata=None,
 ) -> None:
     """Reject citations that do not resolve to visible, enabled knowledge units."""
     ids = {
@@ -58,18 +68,27 @@ def validate_citations(
     if not ids:
         return
 
+    error_type = (
+        CitationEvidenceChangedError
+        if check_governance and expected_content is not None and ids <= expected_content.keys()
+        else ValueError
+    )
     units = {
         unit.id: unit
         for unit in db.scalars(
             select(KnowledgeUnit).where(
                 KnowledgeUnit.id.in_(ids),
-                KnowledgeUnit.enabled.is_(True),
             )
+            .execution_options(populate_existing=True)
         ).all()
     }
     missing = ids - units.keys()
+    historical = bool(include_history or historical_as_of is not None)
+    historical_ids = ids if historical and check_governance else set()
+    missing |= {unit.id for unit in units.values()
+                if not unit.enabled and unit.id not in historical_ids}
     if missing:
-        raise ValueError(f"citation 对应的 KnowledgeUnit 不存在或已禁用: {sorted(missing)}")
+        raise error_type(f"citation 对应的 KnowledgeUnit 不存在或已禁用: {sorted(missing)}")
     if project_id is None:
         return
     invisible = [
@@ -81,7 +100,44 @@ def validate_citations(
         )
     ]
     if invisible:
-        raise ValueError(f"citation 对当前项目不可见: {sorted(invisible)}")
+        raise error_type(f"citation 对当前项目不可见: {sorted(invisible)}")
+    if check_governance:
+        from app.services.knowledge_eligibility import governed_document_visible
+        from app.services.knowledge_version_scope import matches_version_pins
+
+        rows = db.execute(select(KnowledgeUnit, KnowledgeDocument, KnowledgeDocumentVersion).join(
+            KnowledgeDocument, KnowledgeDocument.id == KnowledgeUnit.document_id).join(
+            KnowledgeDocumentVersion, KnowledgeDocumentVersion.id == KnowledgeUnit.document_version_id
+        ).where(KnowledgeUnit.id.in_(ids)).execution_options(populate_existing=True)).all()
+        current = {unit.id: (unit, document, version) for unit, document, version in rows}
+        for citation in citations:
+            row = current.get(citation["knowledge_unit_id"])
+            if row is None:
+                raise error_type("引用对应的文档或版本已不可用")
+            unit, document, version = row
+            if ((not unit.enabled and unit.id not in historical_ids)
+                    or document.document_status == "archived"
+                    or version.document_id != document.id
+                    or version.project_id != unit.project_id
+                    or document.project_id != unit.project_id
+                    or (historical and version.lifecycle_status not in {"active", "superseded"})
+                    or not governed_document_visible(
+                        document, version, project_id, institution_name,
+                        historical=historical,
+                        reference_time=historical_as_of)
+                    or not matches_version_pins(
+                        document.file_name, version.regulatory_version or version.internal_revision or str(version.version_no),
+                        pinned_versions)):
+                raise error_type("引用资料的版本、权限或有效状态已变化，请重新提问")
+            if any(citation.get(key) is not None and citation[key] != getattr(unit, key)
+                   for key in ("document_id", "document_version_id", "content_hash")):
+                raise error_type("引用资料在回答期间发生变化，请重新提问")
+            if expected_content is not None and expected_content.get(unit.id) != unit.content:
+                raise error_type("引用正文在回答期间发生变化，请重新提问")
+            if expected_unit_metadata is not None and any(
+                    value != getattr(unit, key)
+                    for key, value in expected_unit_metadata.get(unit.id, {}).items()):
+                raise error_type("引用资料的密级或可见范围已变化，请重新提问")
 
 
 def _base_support_result(check: str, enabled: bool) -> dict:
@@ -335,6 +391,14 @@ async def check_citation_support(
 
     result = _base_support_result(check, True)
     usable = [citation for citation in citations or [] if isinstance(citation, dict)]
+    if referenced_unit_ids is not None:
+        allowed_ids = {str(item) for item in [*referenced_unit_ids, *(conflict_unit_ids or [])]}
+        result["unreferenced_evidence_ids"] = [
+            citation.get("knowledge_unit_id") for citation in usable
+            if str(citation.get("knowledge_unit_id")) not in allowed_ids
+        ]
+        usable = [citation for citation in usable
+                  if str(citation.get("knowledge_unit_id")) in allowed_ids]
     result["citation_count"] = len(usable)
     if not usable:
         result["skip_reason"] = "no_citations"
@@ -360,15 +424,17 @@ async def check_citation_support(
     facts: dict = {}
     for index, batch in enumerate(batches):
         payloads = claim_payloads(batch)
-        # Claim ids are only unique inside one answer, so a batched call keeps its own numbering
-        # and its own `claims` list; citations are judged once, in the first batch, so a repeated
-        # citation verdict can never be double counted.
+        claim_offset = index * MAX_CLAIMS_PER_CALL
+        for batch_claim_index, payload in enumerate(payloads, start=1):
+            payload["claim_id"] = f"claim-{claim_offset + batch_claim_index}"
+        # Each batch needs evidence, while claim ids stay unique across the whole answer.
+        # Citation-level verdicts are collected once to avoid counting repeated evidence.
         request = {
             "answer": answer_text,
             "claims": payloads,
-            "citations": evidence if index == 0 else [],
+            "citations": evidence,
         }
-        if index == 0 and pinned_versions:
+        if pinned_versions:
             # 需求快照固定的版本随输入一起给出，让裁判知道“哪个版本才是本次交付依据”。
             request["pinned_versions"] = dict(pinned_versions)
         batch_count += 1
@@ -381,9 +447,20 @@ async def check_citation_support(
             project_id=project_id,
         )
         facts = batch_facts or facts
-        all_verdicts.extend(verdicts)
         if index == 0:
-            raw_conflicts.extend(conflicts)
+            all_verdicts.extend(verdicts)
+        else:
+            for verdict in verdicts:
+                if verdict.get("dimension") == "citation":
+                    continue
+                if verdict.get("dimension") == "pair":
+                    claim_verdict = dict(verdict)
+                    claim_verdict.pop("citation_id", None)
+                    claim_verdict["dimension"] = "claim"
+                    all_verdicts.append(claim_verdict)
+                else:
+                    all_verdicts.append(verdict)
+        raw_conflicts.extend(conflicts)
         batch_payloads.extend(payloads)
         if error_type:
             break
@@ -409,35 +486,6 @@ async def check_citation_support(
     result["duplicate_verdict_ids"] = duplicates
     result["dropped_verdict_ids"] = dropped
     result["unkeyed_verdict_count"] = citation_alignment["unkeyed_verdict_count"]
-    # 对齐之后再裁剪：裁判显式给过判定的引用、参与冲突的证据、以及答案实际引用的证据
-    # 一律保留；只有“未获得判定且与本次结论无关”的召回证据不计入分母。
-    if referenced_unit_ids is not None:
-        kept_ids = {int(item) for item in referenced_unit_ids}
-        kept_ids |= {int(item) for item in (conflict_unit_ids or [])}
-        verdict_unkeyed_ids = {
-            str(item.get("citation_id"))
-            for item in all_verdicts
-            if item.get("citation_id")
-        }
-        kept: list[dict] = []
-        dropped_units: list = []
-        for citation, verdict in zip(usable, result["verdicts"]):
-            unit_id = citation.get("knowledge_unit_id")
-            if (
-                unit_id in kept_ids
-                or str(verdict.get("citation_id")) in verdict_unkeyed_ids
-            ):
-                kept.append(verdict)
-            else:
-                dropped_units.append(unit_id)
-        result["verdicts"] = kept
-        # 分母必须同步到裁剪后的判定集，否则覆盖率会被无关召回证据稀释。
-        usable = [
-            citation for citation in usable
-            if citation.get("knowledge_unit_id") in (
-                {v.get("knowledge_unit_id") for v in kept} | kept_ids)
-        ]
-        result["unreferenced_evidence_ids"] = dropped_units
     result["judged_citation_count"] = len(result["verdicts"])
 
     # --- 确定性可信规则（不依赖模型判断，先于任何“可信度”结论生效）-------------------------

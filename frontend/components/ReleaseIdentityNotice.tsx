@@ -24,7 +24,7 @@ export function ReleaseIdentityNotice() {
   const mismatches = identityMismatches(frontendIdentity(), versionQuery.data);
   if (mismatches.length === 0) return null;
   return (
-    <p className="text-[11px] text-amber-700" role="status" data-testid="release-identity-mismatch">
+    <p className="order-last w-full min-w-0 break-words text-[11px] text-amber-700 lg:order-none lg:w-auto lg:max-w-64" role="status" data-testid="release-identity-mismatch">
       前后端发布标识不一致（{mismatches.join("；")}），请联系运维核对本次发布。
     </p>
   );

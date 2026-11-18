@@ -1,0 +1,72 @@
+{
+  "round_id": "ROUND-20261118-64",
+  "date": "2026-11-18",
+  "goal_ids": ["G-P0-B", "G-P0-C"],
+  "goal_status_changed": false,
+  "source": {
+    "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+    "code_hash": "3c31ce3f25b53b66ed59df6f6b6a553b104fb6d403a658f1ef9937d44e1da964",
+    "api_identity": {
+      "app_commit": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.3c31ce3f25b5",
+      "build_time": "2026-11-18T00:33:33.546643+00:00",
+      "schema_head": "202611010014"
+    },
+    "served_by": "independent_uvicorn_on_18140_and_next_production_build"
+  },
+  "fixture": {
+    "project_id": 18,
+    "version_id": 21,
+    "unit_id": 5978,
+    "source_is_synthetic": true,
+    "gold": false,
+    "holdout": false,
+    "existing_milvus_vectors_changed": false
+  },
+  "verification": {
+    "production_build": {
+      "exit_code": 0,
+      "next_version": "15.5.27",
+      "routes": 54,
+      "identity_bundle_matches_api": true,
+      "directory": "frontend/.next-round64-conflict-production"
+    },
+    "api": {
+      "port": 18140,
+      "pid": 1548,
+      "readiness": "ready"
+    },
+    "browser": {
+      "passed": 47,
+      "failed": 0,
+      "exit_code": 0,
+      "evidence_tier": "production_browser_independent_uvicorn_real_auth_postgresql_controlled_models",
+      "result": ".local-run/rag-long-run/round-20261118-64/browser-attempt2/results.json",
+      "intercepted_api_responses": 0,
+      "desktop_and_390px_no_overflow": true,
+      "console_or_page_errors": 0
+    },
+    "outcomes": {
+      "generation_withdrawn": 409,
+      "generation_disabled": 409,
+      "judge_withdrawn": 409,
+      "judge_disabled": 409,
+      "each_conflict_has_no_answer_or_citation": true,
+      "recovered_questions_return_200_and_cite_fixture": true,
+      "ordinary_invalid_input": 400
+    },
+    "external_provider_requests": 0,
+    "external_provider_tokens": 0,
+    "public_network_write": false,
+    "remote_write": false
+  },
+  "preserved_attempts": [
+    "runtime-startup-attempt1: validation harness expected a nonexistent Settings budget property; no fixture or process was started",
+    "browser-attempt1: product path passed baseline; repeated label lookup timed out; corrected selector and reran in browser-attempt2"
+  ],
+  "known_limitations": [
+    "controlled Mock generator/planner/judge; no real-model semantic acceptance",
+    "synthetic fixture; not gold or holdout",
+    "no public deployment or remote write",
+    "Agent task states and complete keyboard navigation remain open"
+  ]
+}

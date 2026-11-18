@@ -29,11 +29,18 @@
     }
   },
   "include": [
-    "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
+    ".next-dev/types/**/*.ts",
+    ".next-production-rag-20261116-23/types/**/*.ts",
+    ".next-round47-browser/types/**/*.ts",
+    ".next-verify-rag-18098/types/**/*.ts",
+    ".next-verify-rag-18099/types/**/*.ts",
+    ".next-verify-rag-18100/types/**/*.ts",
+    ".next-verify-rag-18102/types/**/*.ts",
+    ".next-verify-rag-18103/types/**/*.ts",
     ".next/types/**/*.ts",
-    ".next-dev/types/**/*.ts"
+    "next-env.d.ts"
   ],
   "exclude": [
     "node_modules"

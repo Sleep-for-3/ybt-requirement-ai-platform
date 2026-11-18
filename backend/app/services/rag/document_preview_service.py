@@ -52,6 +52,13 @@ def preview_document(db, doc, version):
         KnowledgeUnit.project_id == doc.project_id,
     ).order_by(KnowledgeUnit.id).limit(2001)).all()
     warnings = []
+    lifecycle = version.lifecycle_status
+    if lifecycle == "withdrawn":
+        warnings.append("该版本已撤回，仅供历史核验，不应作为现行依据。")
+    elif lifecycle == "superseded":
+        warnings.append("该版本已被替代，仅供历史核验，不应作为现行依据。")
+    elif lifecycle in {"draft", "pending_review", "approved"}:
+        warnings.append("该版本尚未生效，仅供材料核验，不应作为现行依据。")
     # Old versions have no persisted warning list: never borrow current warnings.
     if (version.warnings_json or (version.version_no == doc.current_version_no and doc.warnings_json)):
         warnings.append("文档解析存在警告，部分内容可能未提取。")
@@ -67,6 +74,7 @@ def preview_document(db, doc, version):
         "document_version_id": version.id, "version_no": version.version_no,
         "file_name": safe_filename(version.file_name), "file_type": file_type,
         "parse_status": version.parse_status, "warnings": warnings,
+        "lifecycle_status": lifecycle,
         "truncated": len(units) > 2000,
         "blocks": [{"block_id": f"knowledge-unit-{unit.id}", "block_type": unit.unit_type,
                     "knowledge_unit_id": unit.id, "text": unit.content, "locator": unit_locator(unit)}

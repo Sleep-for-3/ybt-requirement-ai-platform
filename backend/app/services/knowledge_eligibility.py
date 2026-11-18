@@ -58,6 +58,10 @@ def governed_unit_predicates(project_id, *, historical=False, historical_as_of=N
 
 
 def governed_document_visible(document, version, project_id, institution, historical=False, reference_time=None):
+    if document.document_status == "archived":
+        return False
+    if historical and version.lifecycle_status not in {"active", "superseded"}:
+        return False
     legacy_active = (document.current_version_id is None and document.current_version_no == version.version_no
                      and document.document_status in {"indexed", "partially_indexed", "parsed", "parsed_with_warnings", "active"})
     if not historical and not legacy_active and (document.current_version_id != version.id or version.lifecycle_status != "active"):

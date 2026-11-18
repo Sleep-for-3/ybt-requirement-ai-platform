@@ -46,6 +46,9 @@ jobs:
       - name: Backend full tests
         working-directory: backend
         run: python -m pytest -q
+      - name: RAG snapshot integrity
+        working-directory: backend
+        run: python scripts/rag_regression.py check ../docs/evaluation/rag-upgrade-20261113/dataset.json
 
   production-auth-isolation:
     runs-on: ubuntu-latest

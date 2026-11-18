@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-11-13T16:13:54.936956+00:00",
+  "mode": "read_only",
+  "frontend_api": {
+    "host": "127.0.0.1",
+    "port": 8011,
+    "listening": false
+  },
+  "database_config": {
+    "dialect": "postgresql",
+    "host": "127.0.0.1",
+    "port": 5432
+  },
+  "database_probes": [
+    {
+      "port": 5432,
+      "tcp_listening": false,
+      "database_query": "failed",
+      "error_type": "OperationalError"
+    },
+    {
+      "port": 5433,
+      "tcp_listening": true,
+      "database_query": "passed",
+      "revision": "202611010014"
+    }
+  ],
+  "historical_incident_attribution": "unproven_without_original_request_trace",
+  "confirmed_current_findings": [
+    "configured_frontend_api_not_running",
+    "dotenv_database_port_differs_from_working_wsl_postgres_port"
+  ]
+}

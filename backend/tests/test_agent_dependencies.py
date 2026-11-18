@@ -72,7 +72,13 @@ def test_optional_dependency_missing_still_executes_with_a_gap():
     assert evaluation.disposition == deps.EXECUTE
     assert evaluation.optional_missing == (("opt", sm.STEP_SKIPPED),)
     assert deps.OPTIONAL_DEPENDENCY_MISSING in evaluation.gap_codes
-    assert "opt" in deps.optional_gap_message(evaluation.optional_missing)
+    assert "可选补充资料未提供" in deps.optional_gap_message(evaluation.optional_missing)
+
+
+def test_optional_dependency_message_uses_business_label_not_internal_tool_name():
+    message = deps.optional_gap_message((("search_decision_cases", sm.STEP_SKIPPED),))
+    assert "历史案例补充" in message
+    assert "search_decision_cases" not in message
 
 
 def test_optional_dependency_waiting_human_still_pauses():

@@ -1,0 +1,1145 @@
+{
+  "checked_at": "2026-11-13T17:01:58.857166+00:00",
+  "evidence_tier": "real_components",
+  "postgresql": "16.15 (Debian 16.15-1.pgdg13+2)",
+  "alembic_revision": "202611010014",
+  "jobs": [
+    {
+      "id": 1,
+      "type": "knowledge_ingestion",
+      "status": "completed",
+      "celery_task_id": "ae96348d-1749-46eb-9910-9ee42064d32c",
+      "started_at": "2026-11-13 15:56:16.185380+00:00",
+      "finished_at": "2026-11-13 16:10:26.249602+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "document_id": 1
+      }
+    },
+    {
+      "id": 2,
+      "type": "knowledge_ingestion",
+      "status": "completed",
+      "celery_task_id": "2390eec9-56d8-440e-8cfc-3248f622ce59",
+      "started_at": "2026-11-13 16:10:27.362555+00:00",
+      "finished_at": "2026-11-13 16:10:27.502648+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "document_id": 2
+      }
+    },
+    {
+      "id": 3,
+      "type": "knowledge_embedding_reindex",
+      "status": "completed",
+      "celery_task_id": "6e0654dd-c9f4-4850-82a8-97ae6c71f09e",
+      "started_at": "2026-11-13 16:10:28.750346+00:00",
+      "finished_at": "2026-11-13 16:10:43.340971+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "index_version_id": 1,
+        "embedding_provider": "local_vllm",
+        "embedding_model": "BAAI/bge-small-zh-v1.5",
+        "vector_dimension": 512,
+        "document_count": 1,
+        "chunk_count": 1,
+        "record_count": 1,
+        "chunk_strategy_version": "existing-knowledge-unit-v1",
+        "indexed_count": 1,
+        "collection": "rag_p0_20261113_p2_v1_901a207e1369_d512",
+        "validation": {
+          "actual_count": 1,
+          "sample_search_hit_count": 1,
+          "valid": true
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "agent_task_run",
+      "status": "completed",
+      "celery_task_id": "e8343744-e013-4417-ae8b-4914fbf0c75b",
+      "started_at": "2026-11-13 16:10:44.377171+00:00",
+      "finished_at": "2026-11-13 16:10:45.141837+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "task_status": "completed",
+        "steps_executed": 2,
+        "paused": false
+      }
+    },
+    {
+      "id": 5,
+      "type": "knowledge_embedding_reindex",
+      "status": "completed",
+      "celery_task_id": "440f79d5-3352-4639-9990-11fcbbe1677e",
+      "started_at": "2026-11-13 16:10:46.073830+00:00",
+      "finished_at": "2026-11-13 16:39:26.226365+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "index_version_id": 2,
+        "embedding_provider": "local_vllm",
+        "embedding_model": "BAAI/bge-small-zh-v1.5",
+        "vector_dimension": 512,
+        "document_count": 1,
+        "chunk_count": 5922,
+        "record_count": 5922,
+        "chunk_strategy_version": "existing-knowledge-unit-v1",
+        "indexed_count": 5922,
+        "collection": "rag_p0_20261113_p1_v2_901a207e1369_d512",
+        "validation": {
+          "actual_count": 5922,
+          "sample_search_hit_count": 1,
+          "valid": true
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "knowledge_ingestion",
+      "status": "completed",
+      "celery_task_id": "b18db056-5a04-48df-a5b1-7e0f846b0229",
+      "started_at": "2026-11-13 16:39:26.357737+00:00",
+      "finished_at": "2026-11-13 16:39:26.531641+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "document_id": 2
+      }
+    },
+    {
+      "id": 7,
+      "type": "knowledge_ingestion",
+      "status": "completed",
+      "celery_task_id": "47bc75bb-b016-499d-9c86-aba27d813576",
+      "started_at": "2026-11-13 16:43:00.665042+00:00",
+      "finished_at": "2026-11-13 16:47:12.205310+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "document_id": 1
+      }
+    },
+    {
+      "id": 8,
+      "type": "knowledge_embedding_reindex",
+      "status": "completed",
+      "celery_task_id": "1e1f7db6-10a5-4df2-bf67-eca8d14eca23",
+      "started_at": "2026-11-13 16:48:22.419274+00:00",
+      "finished_at": "2026-11-13 16:48:30.036699+00:00",
+      "result": {
+        "success_count": 1,
+        "failed_count": 0,
+        "index_version_id": 3,
+        "embedding_provider": "local_vllm",
+        "embedding_model": "BAAI/bge-small-zh-v1.5",
+        "vector_dimension": 512,
+        "document_count": 1,
+        "chunk_count": 1,
+        "record_count": 1,
+        "chunk_strategy_version": "existing-knowledge-unit-v1",
+        "indexed_count": 1,
+        "collection": "rag_p0_20261113_p2_v3_901a207e1369_d512",
+        "validation": {
+          "actual_count": 1,
+          "sample_search_hit_count": 1,
+          "valid": true
+        }
+      }
+    }
+  ],
+  "indexes": [
+    {
+      "project_id": 2,
+      "collection": "rag_p0_20261113_p2_v1_901a207e1369_d512",
+      "status": "superseded",
+      "indexed_count": 1,
+      "dimension": 512,
+      "model": "BAAI/bge-small-zh-v1.5",
+      "validation": {
+        "valid": true,
+        "expected_count": 1,
+        "actual_count": 1,
+        "expected_dimension": 512,
+        "dimension_valid": true,
+        "collection": "rag_p0_20261113_p2_v1_901a207e1369_d512",
+        "sample_search_hit_count": 1
+      }
+    },
+    {
+      "project_id": 2,
+      "collection": "rag_p0_20261113_p2_v3_901a207e1369_d512",
+      "status": "active",
+      "indexed_count": 1,
+      "dimension": 512,
+      "model": "BAAI/bge-small-zh-v1.5",
+      "validation": {
+        "valid": true,
+        "expected_count": 1,
+        "actual_count": 1,
+        "expected_dimension": 512,
+        "dimension_valid": true,
+        "collection": "rag_p0_20261113_p2_v3_901a207e1369_d512",
+        "sample_search_hit_count": 1
+      }
+    },
+    {
+      "project_id": 1,
+      "collection": "rag_p0_20261113_p1_v2_901a207e1369_d512",
+      "status": "active",
+      "indexed_count": 5922,
+      "dimension": 512,
+      "model": "BAAI/bge-small-zh-v1.5",
+      "validation": {
+        "valid": true,
+        "expected_count": 5922,
+        "actual_count": 5922,
+        "expected_dimension": 512,
+        "dimension_valid": true,
+        "collection": "rag_p0_20261113_p1_v2_901a207e1369_d512",
+        "sample_search_hit_count": 1
+      }
+    }
+  ],
+  "corpus_units": {
+    "frozen_version_id": 1,
+    "enabled": 5922,
+    "retained_duplicate_candidates": [
+      4
+    ]
+  },
+  "original_corpus_file": {
+    "file_hash_in_database": "51228a75d5f22ed9a058c9a7c29834989ab56da95e35435164084c537b9ec311",
+    "actual_sha256": "51228a75d5f22ed9a058c9a7c29834989ab56da95e35435164084c537b9ec311",
+    "matches_uploaded_source": true,
+    "parse_summary": {
+      "unit_count": 5922,
+      "version_no": 1,
+      "semantic_index_status": "pending_reindex",
+      "parse_report": {
+        "strategy_version": "xlsx-parse-diagnostics-v1",
+        "config_version": "xlsx-knowledge-config-v1",
+        "reader": "knowledge-ingestion",
+        "file_suffix": ".xlsx",
+        "sheet_total": 9,
+        "sheet_parsed": 7,
+        "sheets_skipped": [
+          {
+            "sheet": "记录校验问答",
+            "row_total": 102
+          },
+          {
+            "sheet": "穿透层问答",
+            "row_total": 39
+          }
+        ],
+        "row_total": 6122,
+        "row_emitted": 5922,
+        "row_skipped_blank": 200,
+        "row_skipped_duplicate": 0,
+        "columns_unrecognized": [
+          {
+            "sheet": "一表通制度问答",
+            "row": 2,
+            "columns": [
+              "具体问题描述",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈意见",
+              "填报机构",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "数据主题名称",
+              "是否变更制度",
+              "流程状态",
+              "表号（主）",
+              "表号（副）",
+              "表名（主）",
+              "表名（副）",
+              "解决方案或建议",
+              "问题类型",
+              "问题编号"
+            ]
+          },
+          {
+            "sheet": "四性校验问答",
+            "row": 2,
+            "columns": [
+              "修改建议",
+              "公式说明",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈意见",
+              "填报机构",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "校验大类",
+              "校验小类",
+              "校验性质",
+              "校验范围",
+              "校验表名",
+              "校验规则编码",
+              "治理规则版本",
+              "流程状态",
+              "缺失率阈值(单日）",
+              "缺失率阈值(滚动1个月平均）",
+              "问题编号"
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "columns": [
+              "ABCDE的关系",
+              "修改建议",
+              "公式说明",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈意见",
+              "填报机构",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "校验大类",
+              "校验小类",
+              "校验性质",
+              "校验范围",
+              "校验表名",
+              "校验规则编码",
+              "治理规则版本",
+              "流程状态",
+              "问题编号"
+            ]
+          },
+          {
+            "sheet": "转EAST问答",
+            "row": 2,
+            "columns": [
+              "EAST主题名称",
+              "EAST字段名",
+              "EAST表名",
+              "业务规则版本",
+              "具体问题描述",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈单位",
+              "反馈意见",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "提出机构",
+              "数据主题名称",
+              "是否变更制度",
+              "是否变更转EAST映射规则",
+              "是否变更转EAST脚本",
+              "流程状态",
+              "脚本程序版本",
+              "表号（主）",
+              "表号（副）",
+              "表名（主）",
+              "表名（副）",
+              "解决方案或建议",
+              "转换工作阶段",
+              "转换问题类型",
+              "问题编号"
+            ]
+          },
+          {
+            "sheet": "转1104问答",
+            "row": 2,
+            "columns": [
+              "1104指标",
+              "1104表号",
+              "1104表名",
+              "业务规则版本",
+              "具体问题描述",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈单位",
+              "反馈意见",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "提出机构",
+              "数据主题名称",
+              "是否变更制度",
+              "是否变更转1104映射规则",
+              "是否变更转1104脚本",
+              "流程状态",
+              "脚本程序版本",
+              "表号（主）",
+              "表号（副）",
+              "表名（主）",
+              "表名（副）",
+              "解决方案或建议",
+              "转换工作阶段",
+              "转换问题类型",
+              "问题编号"
+            ]
+          },
+          {
+            "sheet": "重点指标问答",
+            "row": 2,
+            "columns": [
+              "业务规则版本",
+              "具体问题描述",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈单位",
+              "反馈意见",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "提出机构",
+              "数据主题名称",
+              "是否变更制度",
+              "是否变更重点指标映射规则",
+              "是否变更重点指标脚本",
+              "流程状态",
+              "脚本程序版本",
+              "表号（主）",
+              "表号（副）",
+              "表名（主）",
+              "表名（副）",
+              "解决方案或建议",
+              "转换工作阶段",
+              "转换问题类型",
+              "重点指标名称",
+              "重点指标序号",
+              "问题编号"
+            ]
+          },
+          {
+            "sheet": "转客户风险问答",
+            "row": 2,
+            "columns": [
+              "业务规则版本",
+              "具体问题描述",
+              "反馈人",
+              "反馈人联系方式",
+              "反馈单位",
+              "反馈意见",
+              "客户风险字段名",
+              "客户风险表名",
+              "提出人",
+              "提出人联系方式",
+              "提出时间",
+              "提出机构",
+              "数据主题名称",
+              "是否变更制度",
+              "是否变更转客户风险映射规则",
+              "是否变更转客户风险脚本",
+              "流程状态",
+              "脚本程序版本",
+              "表号（主）",
+              "表号（副）",
+              "表名（主）",
+              "表名（副）",
+              "解决方案或建议",
+              "转换工作阶段",
+              "转换问题类型",
+              "问题编号"
+            ]
+          }
+        ],
+        "columns_critical_missing": [],
+        "duplicate_headers": [
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "校验表名",
+            "columns": [
+              5,
+              8
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项编码",
+            "columns": [
+              6,
+              9
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项名称",
+            "columns": [
+              7,
+              10
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "校验表名",
+            "columns": [
+              5,
+              11
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项编码",
+            "columns": [
+              6,
+              12
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项名称",
+            "columns": [
+              7,
+              13
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "校验表名",
+            "columns": [
+              5,
+              14
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项编码",
+            "columns": [
+              6,
+              15
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项名称",
+            "columns": [
+              7,
+              16
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "校验表名",
+            "columns": [
+              5,
+              17
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项编码",
+            "columns": [
+              6,
+              18
+            ]
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3,
+            "name": "数据项名称",
+            "columns": [
+              7,
+              19
+            ]
+          },
+          {
+            "sheet": "转EAST问答",
+            "row": 2,
+            "name": "反馈意见",
+            "columns": [
+              23,
+              27
+            ]
+          },
+          {
+            "sheet": "转EAST问答",
+            "row": 2,
+            "name": "反馈人",
+            "columns": [
+              25,
+              28
+            ]
+          },
+          {
+            "sheet": "转EAST问答",
+            "row": 2,
+            "name": "反馈人联系方式",
+            "columns": [
+              26,
+              29
+            ]
+          },
+          {
+            "sheet": "转1104问答",
+            "row": 2,
+            "name": "反馈意见",
+            "columns": [
+              23,
+              27
+            ]
+          },
+          {
+            "sheet": "转1104问答",
+            "row": 2,
+            "name": "反馈人",
+            "columns": [
+              25,
+              28
+            ]
+          },
+          {
+            "sheet": "转1104问答",
+            "row": 2,
+            "name": "反馈人联系方式",
+            "columns": [
+              26,
+              29
+            ]
+          },
+          {
+            "sheet": "重点指标问答",
+            "row": 2,
+            "name": "反馈意见",
+            "columns": [
+              22,
+              26
+            ]
+          },
+          {
+            "sheet": "重点指标问答",
+            "row": 2,
+            "name": "反馈人",
+            "columns": [
+              24,
+              27
+            ]
+          },
+          {
+            "sheet": "重点指标问答",
+            "row": 2,
+            "name": "反馈人联系方式",
+            "columns": [
+              25,
+              28
+            ]
+          },
+          {
+            "sheet": "转客户风险问答",
+            "row": 2,
+            "name": "反馈意见",
+            "columns": [
+              22,
+              26
+            ]
+          },
+          {
+            "sheet": "转客户风险问答",
+            "row": 2,
+            "name": "反馈人",
+            "columns": [
+              24,
+              27
+            ]
+          },
+          {
+            "sheet": "转客户风险问答",
+            "row": 2,
+            "name": "反馈人联系方式",
+            "columns": [
+              25,
+              28
+            ]
+          }
+        ],
+        "formula_total": 0,
+        "formula_cached": 0,
+        "formula_uncached": 0,
+        "formula_cells": [],
+        "formula_cells_truncated": false,
+        "header_rows": [
+          {
+            "sheet": "一表通制度问答",
+            "row": 2
+          },
+          {
+            "sheet": "四性校验问答",
+            "row": 2
+          },
+          {
+            "sheet": "一致性校验问答",
+            "row": 3
+          },
+          {
+            "sheet": "转EAST问答",
+            "row": 2
+          },
+          {
+            "sheet": "转1104问答",
+            "row": 2
+          },
+          {
+            "sheet": "重点指标问答",
+            "row": 2
+          },
+          {
+            "sheet": "转客户风险问答",
+            "row": 2
+          }
+        ],
+        "merged_header_cells": 0,
+        "findings": [
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "一表通制度问答 有 18 个未映射列：具体问题描述、反馈人、反馈人联系方式、反馈意见、填报机构、提出人、提出人联系方式、提出时间、数据主题名称、是否变更制度",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一表通制度问答",
+              "row": 2
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "四性校验问答 有 20 个未映射列：修改建议、公式说明、反馈人、反馈人联系方式、反馈意见、填报机构、提出人、提出人联系方式、提出时间、校验大类",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "四性校验问答",
+              "row": 2
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“校验表名”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "H"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项编码”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "I"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项名称”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "J"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“校验表名”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "K"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项编码”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "L"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项名称”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "M"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“校验表名”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "N"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项编码”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "O"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项名称”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "P"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“校验表名”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "Q"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项编码”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "R"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "一致性校验问答 第 3 行重复列名“数据项名称”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3,
+              "column": "S"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "一致性校验问答 有 19 个未映射列：ABCDE的关系、修改建议、公式说明、反馈人、反馈人联系方式、反馈意见、填报机构、提出人、提出人联系方式、提出时间",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "一致性校验问答",
+              "row": 3
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "sheet_skipped",
+            "severity": "blocking",
+            "message": "记录校验问答 未识别表头，整张 sheet 未导入",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "记录校验问答",
+              "scanned_rows": 102
+            },
+            "suggestion": "整张 sheet 未识别到表头，其数据未被导入。请确认表头名称在支持的别名内，或调整解析配置后重新上传。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转EAST问答 第 2 行重复列名“反馈意见”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转EAST问答",
+              "row": 2,
+              "column": "AA"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转EAST问答 第 2 行重复列名“反馈人”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转EAST问答",
+              "row": 2,
+              "column": "AB"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转EAST问答 第 2 行重复列名“反馈人联系方式”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转EAST问答",
+              "row": 2,
+              "column": "AC"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "转EAST问答 有 27 个未映射列：EAST主题名称、EAST字段名、EAST表名、业务规则版本、具体问题描述、反馈人、反馈人联系方式、反馈单位、反馈意见、提出人",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转EAST问答",
+              "row": 2
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转1104问答 第 2 行重复列名“反馈意见”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转1104问答",
+              "row": 2,
+              "column": "AA"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转1104问答 第 2 行重复列名“反馈人”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转1104问答",
+              "row": 2,
+              "column": "AB"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转1104问答 第 2 行重复列名“反馈人联系方式”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转1104问答",
+              "row": 2,
+              "column": "AC"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "转1104问答 有 27 个未映射列：1104指标、1104表号、1104表名、业务规则版本、具体问题描述、反馈人、反馈人联系方式、反馈单位、反馈意见、提出人",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转1104问答",
+              "row": 2
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "重点指标问答 第 2 行重复列名“反馈意见”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "重点指标问答",
+              "row": 2,
+              "column": "Z"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "重点指标问答 第 2 行重复列名“反馈人”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "重点指标问答",
+              "row": 2,
+              "column": "AA"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "重点指标问答 第 2 行重复列名“反馈人联系方式”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "重点指标问答",
+              "row": 2,
+              "column": "AB"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "重点指标问答 有 26 个未映射列：业务规则版本、具体问题描述、反馈人、反馈人联系方式、反馈单位、反馈意见、提出人、提出人联系方式、提出时间、提出机构",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "重点指标问答",
+              "row": 2
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转客户风险问答 第 2 行重复列名“反馈意见”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转客户风险问答",
+              "row": 2,
+              "column": "Z"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转客户风险问答 第 2 行重复列名“反馈人”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转客户风险问答",
+              "row": 2,
+              "column": "AA"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "duplicate_header",
+            "severity": "warning",
+            "message": "转客户风险问答 第 2 行重复列名“反馈人联系方式”，后出现的列会覆盖先出现的列",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转客户风险问答",
+              "row": 2,
+              "column": "AB"
+            },
+            "suggestion": "同一行存在重复列名，后出现的列会覆盖先出现的列并丢失数据。请给重复列改用不同名称。"
+          },
+          {
+            "code": "unrecognized_column",
+            "severity": "info",
+            "message": "转客户风险问答 有 26 个未映射列：业务规则版本、具体问题描述、反馈人、反馈人联系方式、反馈单位、反馈意见、客户风险字段名、客户风险表名、提出人、提出人联系方式",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "转客户风险问答",
+              "row": 2
+            },
+            "suggestion": "列内容仍写入单元文本，但不作为结构化字段；如需纳入口径请补齐列别名。"
+          },
+          {
+            "code": "sheet_skipped",
+            "severity": "blocking",
+            "message": "穿透层问答 未识别表头，整张 sheet 未导入",
+            "category": "parse_loss",
+            "locator": {
+              "sheet": "穿透层问答",
+              "scanned_rows": 39
+            },
+            "suggestion": "整张 sheet 未识别到表头，其数据未被导入。请确认表头名称在支持的别名内，或调整解析配置后重新上传。"
+          }
+        ],
+        "blocking_count": 2,
+        "complete": false
+      },
+      "parse_blocked": true
+    }
+  },
+  "redis": {
+    "ping": true,
+    "version": "7.4.11"
+  },
+  "milvus": {
+    "server_version": "pkg/v2.5.4",
+    "acceptance_collections": [
+      "rag_p0_20261113_p2_v1_901a207e1369_d512",
+      "rag_p0_20261113_p1_v2_901a207e1369_d512",
+      "rag_p0_20261113_p2_v3_901a207e1369_d512"
+    ],
+    "actual_rows": {
+      "rag_p0_20261113_p2_v1_901a207e1369_d512": 1,
+      "rag_p0_20261113_p1_v2_901a207e1369_d512": 5922,
+      "rag_p0_20261113_p2_v3_901a207e1369_d512": 1
+    }
+  },
+  "embedding": {
+    "model": "BAAI/bge-small-zh-v1.5",
+    "vectors": 2,
+    "dimensions": [
+      512,
+      512
+    ],
+    "finite": true
+  },
+  "readiness": {
+    "status_code": 200,
+    "status": "ready",
+    "checks": {
+      "application": "healthy",
+      "database": "healthy",
+      "alembic_revision": "healthy",
+      "storage": "healthy",
+      "redis": "healthy",
+      "task_queue": "healthy",
+      "vector_store": "healthy",
+      "llm_provider": "mock",
+      "embedding_provider": "healthy",
+      "semantic_index": "healthy",
+      "disk_space": "healthy"
+    }
+  }
+}

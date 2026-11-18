@@ -1,7 +1,9 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
+from app.services.agent.planner import PlanDraft
 from app.services.llm.factory import get_llm_service
 
 
@@ -44,3 +46,31 @@ async def test_mock_lineage_explanation_uses_structured_payload_not_editable_pro
     assert response["business_summary"]
     assert response["regulatory_status"] == "missing_basis"
     assert response["plain_language_steps"]
+
+
+@pytest.mark.asyncio
+async def test_mock_agent_planner_returns_schema_valid_plan_only_for_planner_marker():
+    service = get_llm_service(provider="mock")
+
+    response = await service.chat_structured(
+        system_prompt="[AGENT_PLANNER_V1] 受约束规划器",
+        user_prompt="规划一个证据摘要任务",
+        response_schema=PlanDraft,
+    )
+
+    assert len(response.steps) == 1
+    assert response.steps[0].tool_key == "summarize_evidence"
+    assert response.objective == "Mock planner objective"
+    assert response.scenario_key is None
+
+
+@pytest.mark.asyncio
+async def test_mock_non_planner_structured_response_keeps_existing_contract():
+    service = get_llm_service(provider="mock")
+
+    with pytest.raises(ValidationError):
+        await service.chat_structured(
+            system_prompt="普通结构化请求，不是 planner",
+            user_prompt="普通业务问题",
+            response_schema=PlanDraft,
+        )

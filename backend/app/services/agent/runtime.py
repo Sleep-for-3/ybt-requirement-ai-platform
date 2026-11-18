@@ -1278,7 +1278,19 @@ def _record_success(db, task: AgentTask, step: AgentStep, call: AgentToolCall, r
         call.provider_type = str(metadata.get("provider") or metadata.get("provider_type") or "")[:50] or None
         usage = metadata.get("token_usage") or metadata.get("usage")
         if isinstance(usage, dict):
-            call.token_usage_json = redact_summary(usage)
+            call.token_usage_json = _safe_token_usage(usage)
+
+
+def _safe_token_usage(usage: dict) -> dict:
+    # Audit redaction removes keys containing "token". Only numeric usage counters
+    # may bypass that rule; credential-shaped strings and unknown keys never do.
+    counters = {"prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
+                "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "reasoning_tokens"}
+    safe = {key: value for key, value in usage.items()
+            if key in counters and type(value) is int and value >= 0}
+    if type(usage.get("usage_available")) is bool:
+        safe["usage_available"] = usage["usage_available"]
+    return safe
 
 
 def _apply_result(db, task: AgentTask, project: Project, step: AgentStep, call: AgentToolCall,

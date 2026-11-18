@@ -1,0 +1,53 @@
+{
+  "round": 51,
+  "date": "2026-11-17",
+  "goal_ids": ["G-P0-B"],
+  "scope": "shared_budget_accounting_for_external_embeddings",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "changed_files": {
+    "backend/app/services/embeddings/openai_compatible.py": "724b8b2ab9232537631d370f02c900ef10a76c8d87cec48bf0adc6ba54dbefe9",
+    "backend/tests/test_embedding_provider.py": "feba0dc5035e63f4980748a03ac60d4e15dfaace4985dcfc994af0cafed52521"
+  },
+  "finding": "External OpenAI-compatible embedding HTTP requests bypassed the shared provider budget used by chat completions.",
+  "change": "Non-local embedding batches and retries now reserve and settle against the shared budget; required missing budget fails before HTTP; local and Mock embedding calls are excluded.",
+  "verification": {
+    "command": ".venv/Scripts/python.exe -m pytest tests/test_embedding_provider.py tests/test_llm_provider_budget.py tests/test_embedding_runtime.py tests/test_llm_runtime.py -q --junitxml=../.local-run/rag-long-run/round-20261117-51-budget-embedding-attempt3.junit.xml",
+    "result": "67 passed in 45.99s",
+    "py_compile": "passed",
+    "git_diff_check": "passed",
+    "failed_attempts": [
+      "attempt1: 3 fixture failures and 63 passed; external-provider test URL used a forbidden .local hostname and one assertion read env outside the patch scope",
+      "attempt2: 66 passed before adding the final cap-before-retry test"
+    ],
+    "final_attempt": "attempt3"
+  },
+  "runtime_evidence": {
+    "mock_transport_external_provider_requests": 0,
+    "real_provider_requests": 0,
+    "global_budget": {
+      "requests_used": 531,
+      "requests_cap": 800,
+      "tokens_used": 3608925,
+      "tokens_cap": 8000000,
+      "requests_reserved": 0,
+      "unknown_usage_requests": 3
+    },
+    "round46_milvus_read_only_inventory": {
+      "collections": 1,
+      "formal_collection_entities": 1,
+      "writes": 0
+    },
+    "round46_api_current_source_match": false,
+    "database_index_remote_public_mutations": 0
+  },
+  "goal_check": {
+    "consistent": true,
+    "complete": false,
+    "errors": [],
+    "counts": {
+      "verified": 2,
+      "in_progress": 9,
+      "pending": 7
+    }
+  }
+}

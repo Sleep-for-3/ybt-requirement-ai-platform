@@ -1,0 +1,54 @@
+{
+  "round": 41,
+  "date": "2026-11-17",
+  "scope": "P0-B pinned version, retrieval security, deterministic citation support, and non-finite reranker regression",
+  "tests": {
+    "pinned_version_security_support": {
+      "modules": [
+        "backend/tests/test_vnext2_pinned_versions.py",
+        "backend/tests/test_semantic_retrieval_security.py",
+        "backend/tests/test_rag_deterministic_support.py"
+      ],
+      "passed": 16,
+      "failed": 0,
+      "duration_seconds": 137.86,
+      "junit": ".local-run/rag-long-run/round-20261117-41-p0b-junit.xml",
+      "real_model_calls": 0
+    },
+    "reranker": {
+      "modules": ["backend/tests/test_retrieval_reranker.py"],
+      "passed": 19,
+      "failed": 0,
+      "duration_seconds": 7.79,
+      "new_counterexamples": ["NaN", "+Inf", "-Inf"],
+      "expected_degradation_reason": "non_finite_scores",
+      "junit": ".local-run/rag-long-run/round-20261117-41-reranker-junit.xml",
+      "real_model_calls": 0
+    },
+    "total_passed": 35,
+    "total_failed": 0,
+    "real_model_calls": 0,
+    "provider_tokens": 0
+  },
+  "production_logic_changed": false,
+  "budget": {
+    "provider_requests_cap": 800,
+    "provider_requests_used": 531,
+    "provider_requests_reserved": 0,
+    "tokens_cap": 8000000,
+    "tokens_used": 3608925,
+    "tokens_reserved": 0,
+    "unknown_usage_requests": 3
+  },
+  "goal_ledger": {
+    "consistent": true,
+    "complete": false,
+    "verified": 2,
+    "in_progress": 9,
+    "pending": 7
+  },
+  "limitations": [
+    "isolated SQLite/Mock and fake-reranker tests only",
+    "no independent holdout, real-model semantic evaluation, live PostgreSQL/Milvus governance validation, or public candidate Q&A"
+  ]
+}

@@ -12,6 +12,7 @@ from app.services.auth.dependencies import CurrentPrincipal, RealPrincipal
 from app.services.retrieval.planned_search import PlannedSearchRequest, planned_search
 from app.services.auth.permission_service import PermissionService
 from app.services.rag import grounded_answer
+from app.services.rag.citation_validator import CitationEvidenceChangedError
 from app.services.requirement_pins import pinned_versions_for_revision
 from app.services.knowledge_evidence import mode_knowledge_types
 from app.services.rag.data_field_answer_service import data_field_answer, project_entity
@@ -72,7 +73,17 @@ def ingestion_in_progress_message(job_ids: list[int]) -> str:
 
 
 class SearchRequest(BaseModel):query:str;target_field_id:int|None=None;scenario_id:int|None=None;knowledge_types:list[str]=Field(default_factory=list);top_k:int=Field(20,ge=1,le=50);retrieval_mode:str="hybrid";include_history:bool=False;historical_as_of:datetime|None=None
+from app.services.rag.query_understanding import HistoryMessage, validate_history
+from pydantic import field_validator
+
+
 class AskRequest(SearchRequest):
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=12)
+
+    @field_validator("history")
+    @classmethod
+    def valid_history(cls, value):
+        return validate_history(value)
     answer_mode: Literal["regulatory", "data_field"] | None = None
     # C10: 可选地以“冻结需求版本”为判定基准，引用裁判据此钉扎制度版本。
     requirement_id: int | None = None
@@ -305,11 +316,19 @@ async def ask(project_id:int,payload:AskRequest,principal:CurrentPrincipal,db:Se
                  knowledge_types=mode_knowledge_types(payload.answer_mode,payload.knowledge_types) if payload.answer_mode else payload.knowledge_types,
                  top_k=payload.top_k,retrieval_mode=payload.retrieval_mode,
                  include_history=payload.include_history,historical_as_of=payload.historical_as_of)
+    if payload.answer_mode != "data_field":
+        filters["principal"] = principal
     if pinned_versions:
         filters["pinned_versions"]=pinned_versions
+    if payload.history:
+        if payload.answer_mode == "data_field":
+            raise HTTPException(400, "数据字段模式暂不支持历史对话")
+        filters["history"] = payload.history
     try:
         service=data_field_answer if payload.answer_mode=="data_field" else grounded_answer
         result=await service(db,project_id,payload.query,**filters)
+    except CitationEvidenceChangedError as exc:
+        raise HTTPException(409,"回答期间引用资料状态发生变化，本次回答未返回。请重新提问。") from exc
     except ValueError as exc:
         raise HTTPException(400,str(exc)) from exc
     result["answer_mode"]=payload.answer_mode

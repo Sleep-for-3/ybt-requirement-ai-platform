@@ -1,0 +1,8 @@
+{
+  "command": "backend/.venv/Scripts/python.exe -m unittest discover -s tests -p test_llm_provider_budget.py -v",
+  "exit_code": 1,
+  "result": "ImportError: no app.services.llm.provider_budget module before implementation",
+  "evidence_level": "L2 isolated; import failure only, not behavioral red assertions",
+  "provider_requests": 0,
+  "total_tokens": 0
+}

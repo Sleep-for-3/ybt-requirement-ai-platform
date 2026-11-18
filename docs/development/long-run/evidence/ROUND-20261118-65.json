@@ -1,0 +1,17 @@
+{
+  "round": 65,
+  "date": "2026-11-18",
+  "status": "incomplete",
+  "stop": "user_requested_no_automatic_next_action",
+  "evidence_tier": "production_browser_independent_isolated_api_synthetic_tasks",
+  "project_id": 18,
+  "gold": false,
+  "holdout": false,
+  "attempt6": {"passed": 15, "outcome": "timeout"},
+  "attempt7": {"passed": 15, "failed": 1, "outcome": "failed_step_text_assertion"},
+  "attempt8": {"passed": 12, "failed": 1, "outcome": "detail_keyboard_focus_unidentified"},
+  "raw_results": ".local-run/rag-long-run/round-20261118-65/",
+  "external_provider_requests": 0,
+  "external_provider_tokens": 0,
+  "unverified": ["running_and_waiting_details", "return_filter", "detail_mobile_layout", "complete_keyboard_interactions", "actual_retry"]
+}

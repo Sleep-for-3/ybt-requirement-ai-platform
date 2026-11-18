@@ -1,0 +1,4065 @@
+{
+  "schema": "rag-regression-v1",
+  "sources": [
+    {
+      "name": "cases.json",
+      "sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+      "count": 22
+    },
+    {
+      "name": "case-manifest.json",
+      "sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+      "count": 50
+    },
+    {
+      "name": "v3-case-manifest.json",
+      "sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+      "count": 21
+    },
+    {
+      "name": "v4-case-manifest.json",
+      "sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+      "count": 13
+    },
+    {
+      "name": "c-case-manifest.json",
+      "sha256": "8a5f2f6661fc6aea71f4fe055cad9b4f63db27a478b55367815ac6be7e727a7b",
+      "count": 4
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "01167997716439a1",
+      "query": "关于利率类型，一笔利率互换业务既有固定利率端，又有浮动利率端，利率类型如何报送？（资金营运部 侯亚博 010-86437967）",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A19",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E010014",
+            "table_code": "5.1",
+            "required_units": [
+              40
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "02dc81ee70c8e016",
+      "query": "代销互认基金，发行机构填产品提供方还是内地代理人？",
+      "families": [
+        "natural_phrasing"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H03",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F190008",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5911
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "答成其他机构字段"
+          },
+          "evidence_anchor": "一表通制度问答!A485:W485",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "04ebf6df890653a8",
+      "query": "不良 ABS 的产品类型是 2801 发行债券吗？",
+      "families": [
+        "natural"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M06",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E010007",
+            "table_code": "5.1",
+            "required_units": [
+              3904
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "04ebf6df890653a8",
+      "split": "holdout"
+    },
+    {
+      "case_id": "05b451c6bd7cd134",
+      "query": "关于客户身份证;客户护照号;客户其他证件号码，因历史原因导致未通过校验规则需要报备的情况。",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A01",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "B050005;B050006;B050008",
+            "table_code": null,
+            "required_units": [
+              8
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "07608772b0571038",
+      "query": "商业单据金额应该报含税金额还是不含税金额？",
+      "families": [
+        "natural"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M03",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": "9.4",
+            "required_units": [
+              5526
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "04ebf6df890653a8",
+      "split": "holdout"
+    },
+    {
+      "case_id": "0bb2dc7b94a6a5a7",
+      "query": "保险机构销户以后还有退保交易，清算账号能空着不填吗？",
+      "families": [
+        "natural_phrasing"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C06",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "G110019",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5916
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "答成其他账号字段"
+          },
+          "evidence_anchor": "一表通制度问答!A2900:W2900",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "0e94b4485e59d86b",
+      "query": "EAST 员工表联系电话用手机号码还是办公电话？",
+      "families": [
+        "single_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M09",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": "1.3",
+            "required_units": [
+              5523
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "16b7d24cfa01ae41",
+      "query": "6.25 表的个人征信评级分区代码是什么？",
+      "families": [
+        "should_refuse",
+        "refuse"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C09",
+          "original_split": "dev"
+        },
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M17",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [],
+            "required_units": [],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": true,
+            "reject_if": "编造码值或拿无关单元作答"
+          },
+          "evidence_anchor": "无（语料不含该字段）",
+          "annotator": "engineering"
+        },
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "179ae2d7b40942fe",
+      "query": "员工不是柜员时，柜员类型应该怎么报？",
+      "families": [
+        "single_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M10",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": "1.3",
+            "required_units": [
+              5522
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "1e2416fdd236bce6",
+      "query": "隔壁项目的行业类型资料怎么说？",
+      "families": [
+        "unauthorized"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V18",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "2000c9265e5dda84",
+      "query": "合作方式码值规则在一表通答疑和转1104答疑里分别怎么说？",
+      "families": [
+        "cross_sheet"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H05",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt",
+              "1104"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答",
+              "转1104问答"
+            ],
+            "required_units": [
+              5914,
+              5925
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "只答一边"
+          },
+          "evidence_anchor": "一表通制度问答!A2106 + 转1104问答!A237",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "261f529d91b86bce",
+      "query": "9.3 抵质押物报送范围一表通和 EAST 差在哪里？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M02",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": "9.3",
+            "required_units": [
+              5524
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "280c97c6b073f257",
+      "query": "1104 当年累计发放贷款额怎么处理冲正金额？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M14",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "G020012",
+            "table_code": "S72",
+            "required_units": [
+              5680
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "2d6467a333ebb1a5",
+      "query": "行业类型按贷款投向划分，境外贷款怎么填？",
+      "families": [
+        "swap_rule_probe"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V14",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "F270023",
+            "table_code": "6.27",
+            "required_units": [
+              5828
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "2d6467a333ebb1a5",
+      "split": "tuning"
+    },
+    {
+      "case_id": "2fe5d39bf064daff",
+      "query": "关于绿色融资类型，该表“绿色融资类型”报送要求为与非现场监管报表《S68绿色融资情况统计表》保持一致报送，但目前1104报送监管总局要求按",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A09",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F270040",
+            "table_code": "6.27",
+            "required_units": [
+              25
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "31a82daa7589ee6a",
+      "query": "绿色融资类型按 2025 新版码值报，一表通和 1104 的口径一致吗？",
+      "families": [
+        "multi_evidence_version"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N01",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt",
+              "1104"
+            ],
+            "required_units": [
+              25,
+              238
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "31a82daa7589ee6a",
+      "split": "tuning"
+    },
+    {
+      "case_id": "3347a89646e75270",
+      "query": "互联网贷款合作机构类型有哪些？",
+      "families": [
+        "classification_missing"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H09",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5919
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "把合作方式码值当合作机构类型分类"
+          },
+          "evidence_anchor": "一表通制度问答!A4209:W4209",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "338550d98939b2cd",
+      "query": "客户其他证件类型的 EAST 阈值和一表通映射规则一致吗？",
+      "families": [
+        "multi_evidence_cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N09",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "required_units": [
+              5593,
+              187
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "338550d98939b2cd",
+      "split": "tuning"
+    },
+    {
+      "case_id": "3a3a43ed851651c5",
+      "query": "1104 的 S72 表信用贷款当年累计发放包含票据贴现吗？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M16",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "F270025",
+            "table_code": "S72",
+            "required_units": [
+              5689
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "3efb391d965ec66d",
+      "query": "6.99 表的合作方式怎么填？",
+      "families": [
+        "should_refuse",
+        "refuse"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H06",
+          "original_split": "holdout"
+        },
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M18",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [],
+            "required_units": [],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": true,
+            "reject_if": "把 6.25 的合作方式规则套到不存在的表"
+          },
+          "evidence_anchor": "无（6.99 表不存在）",
+          "annotator": "engineering"
+        },
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4195b0ff845c4610",
+      "query": "EAST 报文格式校验规则第 3.2 条说什么？",
+      "families": [
+        "should_refuse",
+        "refuse"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C10",
+          "original_split": "dev"
+        },
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M20",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [],
+            "required_units": [],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": true,
+            "reject_if": "拿合作方式答疑冒充报文格式规则"
+          },
+          "evidence_anchor": "无（语料只有转换问答，没有报文格式规范）",
+          "annotator": "engineering"
+        },
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "42571ad5b1821de0",
+      "query": "产品类别能不能用分号填多个代码？值域校验允许吗？",
+      "families": [
+        "multi_evidence_excel_enum"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N03",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "required_units": [
+              2093,
+              3988
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "42571ad5b1821de0",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4304a54b3f7edd1e",
+      "query": "2.4 表同一客户 ID 出现两条不同经营户类型，S72 的普惠统计会错吗？",
+      "families": [
+        "cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "c-case-manifest.json",
+          "source_sha256": "8a5f2f6661fc6aea71f4fe055cad9b4f63db27a478b55367815ac6be7e727a7b",
+          "original_id": "C01",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5738,
+              5775
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一必需证据未命中即失败",
+            "note": "客户 ID 重复 + 第三方授信占用，两条都指向统计口径"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "475f77c55ea0d67b",
+      "query": "1104 的 G0902 和 EAST 对合作方式码值的要求有什么不同？",
+      "families": [
+        "cross_system_interference"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H01",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104",
+              "east"
+            ],
+            "field_code": "F250007",
+            "table_code": "G0902",
+            "document_family": [
+              "转1104问答",
+              "转EAST问答"
+            ],
+            "required_units": [
+              5925,
+              5922
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "只给单边或两体系结论互换"
+          },
+          "evidence_anchor": "转1104问答!A237 + 转EAST问答!A108",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4d91dc1ab2726765",
+      "query": "关于发行机构评级，若为债券分销业务，发行机构评级是否即为所分销债券的债券发行人评级。（资金营运部 陈星 010-86437901）",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A22",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F190008",
+            "table_code": "6.19",
+            "required_units": [
+              45
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "4f49ae2664bc1f9d",
+      "query": "经营户客户类型出现两条重复数据时怎么处理？",
+      "families": [
+        "swap_rule_probe"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V15",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "B040021",
+            "table_code": "2.4",
+            "required_units": [
+              5737
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "2d6467a333ebb1a5",
+      "split": "tuning"
+    },
+    {
+      "case_id": "51e10c75a425e175",
+      "query": "关于首次授信日期，1、我行历史上向同业客户授信，但额度已到期或者失效的，这类同业客户在授信到期或失效后，是否仍旧需要报送？",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A10",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "B030033",
+            "table_code": null,
+            "required_units": [
+              27
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5305ade9d59a3a95",
+      "query": "五级分类调整日期需要限制在当月吗？",
+      "families": [
+        "implicit_system"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V01",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": "8.12",
+            "required_units": [
+              5571
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "5305ade9d59a3a95",
+      "split": "tuning"
+    },
+    {
+      "case_id": "54205ddddc3bc29b",
+      "query": "委托托收、出口托收、进口代收分别选什么产品类别？",
+      "families": [
+        "multi_evidence"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M07",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E010007",
+            "table_code": "5.1",
+            "required_units": [
+              2027
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "55d102e61781358f",
+      "query": "关于对方账号;对方户名;对方账号行号;对方行，贷款结息、本息调整、核销等交易，无实际交易对手",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A13",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "G020017;G020018;G020019;G020020",
+            "table_code": "7.2",
+            "required_units": [
+              30
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "566a2f113e7771e0",
+      "query": "客户其他证件类型的映射规则和 EAST 规范阈值差多少？",
+      "families": [
+        "tuning"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "T02",
+          "original_split": "tuning"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "B050007",
+            "table_code": "2.5",
+            "required_units": [
+              5593
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "566a2f113e7771e0",
+      "split": "tuning"
+    },
+    {
+      "case_id": "573cb22b764fd5f7",
+      "query": "EAST 转换脚本里 F250007 的主键重复问题怎么解决？",
+      "families": [
+        "single_system"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H02",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "转EAST问答"
+            ],
+            "required_units": [
+              5921
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "答成 1104 的数据项缺失"
+          },
+          "evidence_anchor": "转EAST问答!A107:AF107",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "593160f7d46eb0b4",
+      "query": "关于投融资标的利率类型，对于发行以LPR为基准利率的浮息债，是否应填01 LPR（资金营运部 陈星 010-86437901）",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A23",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J020017",
+            "table_code": "9.2",
+            "required_units": [
+              46
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5a1d38618d9b3e94",
+      "query": "关于本期还款期数;计划还款期数;本期计划还款，由于本表填报我行的股东贷款，该笔股东贷款何时进行还款，还款金额及还息金额并不固定。因按股东贷款协议为基金何时账面有资金时",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A30",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "H150006;H150007;H150008;H150009;H150010;H150019;H150021;H150022",
+            "table_code": "8.15",
+            "required_units": [
+              66
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5c9e9f3834a3ae6b",
+      "query": "关于交易类型，填报说明中明确互换中按固定利率支付利息报送05自营，那么利率互换中按固定利率收取利息按哪个分类报送？（资金营运部 侯亚博",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A18",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "G050006",
+            "table_code": "7.5",
+            "required_units": [
+              39
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5cca8fcababdcedd",
+      "query": "关于融资人行业类型，根据核验规则，【6.19代理协议】.【融资人行业类型】非空时，其值域须按照需按照《国民经济行业分类》（GB/T4754-",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A14",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F190011",
+            "table_code": "6.19",
+            "required_units": [
+              31
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5ef6ed8e4972aa29",
+      "query": "EAST 转换时 7.11 代理代销产品交易和 6.19 代理协议怎么关联？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M01",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": "7.11",
+            "required_units": [
+              5525
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "5f0c175822eb4fab",
+      "query": "岗位编号映射需要关联岗位信息表吗？",
+      "families": [
+        "implicit_system"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V02",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "A030016",
+            "table_code": "1.3",
+            "required_units": [
+              5603
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "5305ade9d59a3a95",
+      "split": "tuning"
+    },
+    {
+      "case_id": "5fbcfd7d007ee66b",
+      "query": "1104 计算境内贷款余额合计时剔除了哪些业务？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M15",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "F270025",
+            "table_code": "S6401",
+            "required_units": [
+              5681
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "6168002f9022b7c1",
+      "query": "1104 的 S70 专精特新中小企业包含小巨人企业吗？",
+      "families": [
+        "explicit_system_similar"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V06",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "B010061",
+            "table_code": "2.1",
+            "required_units": [
+              5694
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "6168002f9022b7c1",
+      "split": "holdout"
+    },
+    {
+      "case_id": "649a93f7174a808e",
+      "query": "个性化分期标识和提前结清标识分别怎么限制？",
+      "families": [
+        "cross_table",
+        "multi_evidence_cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V12",
+          "original_split": "holdout"
+        },
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "V12",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "H050016;H050017",
+            "table_code": "8.5",
+            "required_units": [
+              5691
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        },
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5691,
+              3091
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "65ea04a7193e8b19",
+      "query": "1104 报送首贷户时，企业规模按什么时点判断？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M12",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": null,
+            "table_code": "S6401",
+            "required_units": [
+              5678
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "68c211e41f99dd4e",
+      "query": "关于协议ID，触发特殊字符效验的协议ID号符合业务实际，为900扣费报文自动生成的扣手人民币自动购汇交费业务，业务编号来自于报文标识号",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A07",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "H060003",
+            "table_code": "8.6",
+            "required_units": [
+              21
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "6b7ffff62ebb2d71",
+      "query": "1104 的 G01 表和一表通的报送口径有什么差异？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M11",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": null,
+            "table_code": "G01",
+            "required_units": [
+              5677
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "6d87d1c14a4d980b",
+      "query": "经营户客户类型怎么算个体工商户？",
+      "families": [
+        "tuning"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "T03",
+          "original_split": "tuning"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "B040021",
+            "table_code": "2.4",
+            "required_units": [
+              5737
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "566a2f113e7771e0",
+      "split": "tuning"
+    },
+    {
+      "case_id": "6de5458ca17bbad5",
+      "query": "1104 的 G0902 表里 F250007 合作方式缺哪些码值？",
+      "families": [
+        "single_system_structured"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C03",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "F250007",
+            "table_code": "G0902",
+            "document_family": [
+              "转1104问答"
+            ],
+            "required_units": [
+              5925
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "命中 EAST 的 5921/5922"
+          },
+          "evidence_anchor": "转1104问答!A237:AF237",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "6f487dd186106f92",
+      "query": "其他项目的产品 ID 定义是什么？",
+      "families": [
+        "forbidden_units"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N11",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [],
+            "required_units": [],
+            "optional_units": [],
+            "forbidden_units": [
+              6839,
+              6840
+            ],
+            "must_refuse": true,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "6f487dd186106f92",
+      "split": "holdout"
+    },
+    {
+      "case_id": "743f681f201ada7c",
+      "query": "F010007 分户账号转 EAST 有什么转换问题？",
+      "families": [
+        "single_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M08",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "F010007",
+            "table_code": "6.1",
+            "required_units": [
+              5519
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "751daa5e522cc19d",
+      "query": "一表通 8.13 的单户授信总额和表外用信余额分别怎么填？",
+      "families": [
+        "multi_evidence_excel_enum"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N02",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "required_units": [
+              449,
+              3201
+            ],
+            "optional_units": [
+              314,
+              92,
+              1225,
+              332,
+              96
+            ],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "42571ad5b1821de0",
+      "split": "tuning"
+    },
+    {
+      "case_id": "78816588a6c5dfbc",
+      "query": "关于融资人名称，代理产品ID，已取消长度限制，一个协议ID对应多个产品ID，多个代理产品ID用英文半角分号\";\"隔开。目前融资人名称超过",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A15",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F190010",
+            "table_code": "6.19",
+            "required_units": [
+              32
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "78fd1a06fd69ecce",
+      "query": "EAST 里其他自定义的合作方式转成一表通会变成什么？",
+      "families": [
+        "single_system"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C02",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "转EAST问答"
+            ],
+            "required_units": [
+              5922
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "把 1104 的码值差异当答案"
+          },
+          "evidence_anchor": "转EAST问答!A108:AF108",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "7f150aa1ee9d7b9e",
+      "query": "关于担保人担保能力上限，一表通规范中对担保协议表的说明中提及“当担保类型为抵质押时，担保人即为《抵质押品》表中抵质押物所有权人”，我行小微企业转",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A24",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F080027",
+            "table_code": "6.8",
+            "required_units": [
+              50
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "7f539317743bc7bb",
+      "query": "关于到期日期，该表中的到期日期解释填交易日期，想询问可以填9999-12-31吗？（提出人：投资管理部-刘禹辰010-63693349",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A27",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J020016",
+            "table_code": "9.2",
+            "required_units": [
+              63
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "7faccef929b833aa",
+      "query": "柜员类型的其他自定义怎么转换？",
+      "families": [
+        "tuning"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "T01",
+          "original_split": "tuning"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "A030024",
+            "table_code": "1.3",
+            "required_units": [
+              5604
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "566a2f113e7771e0",
+      "split": "tuning"
+    },
+    {
+      "case_id": "80d8c1a5e04e8797",
+      "query": "2026 年新增的 EAST 6.0 表有哪些？",
+      "families": [
+        "should_refuse"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V17",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "8436f62095274c09",
+      "query": "EAST 合作方式转换时，主键重复和其他自定义码值分别怎么处理？",
+      "families": [
+        "excel_adjacent_rows"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C07",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "转EAST问答"
+            ],
+            "required_units": [
+              5921,
+              5922
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "只答一条"
+          },
+          "evidence_anchor": "转EAST问答!A107:AF107 + A108:AF108（相邻行）",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "85f78e2c96e87b44",
+      "query": "关于基础资产名称，掉期（互换）交易填报买方向卖方交付的资产名称。利率互换的买方为收取浮动利率，支付固定利率方向，买方向卖方交付的资产为固定",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A17",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "H060006",
+            "table_code": "8.6",
+            "required_units": [
+              38
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "87f49cbb31d4027f",
+      "query": "其他项目的合作方式资料怎么说？",
+      "families": [
+        "should_refuse",
+        "unauthorized"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H11",
+          "original_split": "holdout"
+        },
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M19",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [],
+            "required_units": [],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": true,
+            "reject_if": "返回本项目资料冒充其他项目"
+          },
+          "evidence_anchor": "无（跨项目越权）",
+          "annotator": "engineering"
+        },
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "8a92fa89c39cafc7",
+      "query": "关于MAC地址，目前我行正在推进小程序内线上支付，但是遇到MAC地址无法采集问题：",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A16",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "G040027",
+            "table_code": null,
+            "required_units": [
+              34
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "8d3ec8dd0ebafd05",
+      "query": "S7101 和 8.13 的单户授信总额是否一致？",
+      "families": [
+        "cross_table",
+        "multi_evidence_cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V11",
+          "original_split": "holdout"
+        },
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "V11",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": null,
+            "table_code": "8.13",
+            "required_units": [
+              5888
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        },
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5888,
+              5684
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "9038e03d0409531d",
+      "query": "关于信贷交易类型，我行将结息、结息摊销等利息交易和贷款核销本金的交易场景映射报送为【05-其他】的交易类型，根据“JYJL-G02-4_S",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A11",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "G020012",
+            "table_code": "7.2",
+            "required_units": [
+              28
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "92c0af77cc1b6d8f",
+      "query": "还款状态表的还本方式和还息方式口径怎么区分？",
+      "families": [
+        "excel_enum"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V10",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": null,
+            "table_code": "8.15",
+            "required_units": [
+              5747
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "92c0af77cc1b6d8f",
+      "split": "holdout"
+    },
+    {
+      "case_id": "96cf5656d5cbd8d5",
+      "query": "关于投资标的ID，“投资标的ID”为能唯一识别一个投资标的编号，关于票据回购的投资标的如何界定，是单张票据票号，还是单笔业务的批次号",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A04",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "H070016",
+            "table_code": "8.7",
+            "required_units": [
+              18
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "96fb8a9c4dc62831",
+      "query": "关于可回购标识，对于标准化债券，可回购是指投资者回售权吗？（资金营运部 孟诗棋 010-86437968）",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A20",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E030014",
+            "table_code": "5.3",
+            "required_units": [
+              42
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "97be4d314af2c03f",
+      "query": "分期业务类型的其他-XX应该怎么报？",
+      "families": [
+        "implicit_system"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V05",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "H050006",
+            "table_code": "8.5",
+            "required_units": [
+              5565
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "5305ade9d59a3a95",
+      "split": "tuning"
+    },
+    {
+      "case_id": "98869678ef262d9e",
+      "query": "借记卡产品该选哪个产品类别？",
+      "families": [
+        "natural"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M05",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E010007",
+            "table_code": "5.1",
+            "required_units": [
+              3675
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "04ebf6df890653a8",
+      "split": "holdout"
+    },
+    {
+      "case_id": "99e3c3636385e80d",
+      "query": "开证金额按什么汇率折算成合同金额？",
+      "families": [
+        "implicit_system"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V04",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "F110009",
+            "table_code": "6.11",
+            "required_units": [
+              5618
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "5305ade9d59a3a95",
+      "split": "tuning"
+    },
+    {
+      "case_id": "99f84950f38c34af",
+      "query": "已核销的贷款当年还要报吗？已处置不良贷款的采集日期怎么限制？",
+      "families": [
+        "cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "c-case-manifest.json",
+          "source_sha256": "8a5f2f6661fc6aea71f4fe055cad9b4f63db27a478b55367815ac6be7e727a7b",
+          "original_id": "C03",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5778,
+              5789
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一必需证据未命中即失败",
+            "note": "核销贷款继续报送 + 7.8 已处置不良采集日期"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a1b742047fd1a31e",
+      "query": "电话1和电话2哪个才是主要联系电话？",
+      "families": [
+        "implicit_system"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V03",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "B050015",
+            "table_code": "2.5",
+            "required_units": [
+              5655
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "5305ade9d59a3a95",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a3acaa31b1e8c5a8",
+      "query": "关于发行价格;发行规模;发行机构名称;发行机，发行这个概念主要为公墓基金，我行所填报的主要我我行参控股的私募基金，建议置空，如不置空请教老师怎么填，统一将发行机构填我",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A28",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J020004;J020005;J020006;J020007;J020008;J020107;J020009",
+            "table_code": "9.2",
+            "required_units": [
+              64
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a46710b8002306f4",
+      "query": "分期余额 8.4 和 8.5 两个字段是什么关系？",
+      "families": [
+        "multi_evidence_cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N05",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "required_units": [
+              418,
+              3233
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "a9666b6395d5c459",
+      "query": "发行机构评级在互认基金场景下填什么？",
+      "families": [
+        "deep_rank_evidence"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H10",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F190008",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5911
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "未命中 5911"
+          },
+          "evidence_anchor": "一表通制度问答!A485:W485",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ac3a320626420848",
+      "query": "关于产品持有底层资产折算人民币金额;理财产品，本表填报的投资标的为我行的参控股基金（私募股权投资基金），只有股权投资余额，想请问该些字段填股权投资余额可以吗？或者置空",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A29",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J010006;J010007;J010008;J010009",
+            "table_code": "9.1",
+            "required_units": [
+              65
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ac446afffb05079a",
+      "query": "关于股东/关联企业类别，部分字段与监管出入较大，涉及改造及历史数据映射（映射难度较大），如对公客户股东\\关联企业类别：我行仅收集“法人、非法人、",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A05",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "C010010",
+            "table_code": "3.1",
+            "required_units": [
+              19
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "afba9649c833e05b",
+      "query": "关于更新信息日期，填报说明中要求，任职/成为重要关联方后，重要身份证件信息发生变更的，填报信息变更日期。但未具体说明重要身份证件信息包括哪",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A06",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "C020012",
+            "table_code": "3.2",
+            "required_units": [
+              20
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b151d2c1c212e03a",
+      "query": "关于产品ID，对于债券借贷融出业务，既涉及融出券，又涉及质押券，请问在该表中的产品ID是融出券的债券代码还是质押券的债券代码？（资金营",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A21",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E030001",
+            "table_code": "5.3",
+            "required_units": [
+              43
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b2640b419bc3242a",
+      "query": "当前生效的合作方式码值规则是什么？",
+      "families": [
+        "current_version"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H12",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5925
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "返回历史版本 5910 或把两版混为一谈"
+          },
+          "evidence_anchor": "转1104问答!A237:AF237（当前版本）",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b2fba2ff14c180f4",
+      "query": "上一版合作方式码值规则是什么？",
+      "families": [
+        "similar_old_version"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C08",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5910
+            ],
+            "allowed_alternatives": [],
+            "version": "historical",
+            "must_refuse": false,
+            "reject_if": "返回当前版本 5925 或把两版混为一谈"
+          },
+          "evidence_anchor": "一表通制度问答!A237:AF237（版本 1）",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b935a94d57555f7b",
+      "query": "信用卡逾期金额按欠本金额还是欠款统计？和逾期天数口径有差异吗？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "c-case-manifest.json",
+          "source_sha256": "8a5f2f6661fc6aea71f4fe055cad9b4f63db27a478b55367815ac6be7e727a7b",
+          "original_id": "C02",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5720,
+              5711
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一必需证据未命中即失败",
+            "note": "信用卡逾期金额口径 + 逾期天数计算差异"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "b95bbb7631f70d8c",
+      "query": "信用卡逾期金额在 8.5 和 G0102 里分别怎么算？",
+      "families": [
+        "multi_evidence_cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N04",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              3232,
+              5720
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "338550d98939b2cd",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b96eabba5eab3c14",
+      "query": "关于当前本币授信额度;当前外币授信额度，当银行给客户的信用卡授信额度仅为本币额度，但可以在境外使用时，那么信用卡的外币授信额度应为0还是应将本币折外币统计？",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A02",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "H040005;H040006",
+            "table_code": "8.4",
+            "required_units": [
+              10
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "b9f7a1fa78a79e8a",
+      "query": "S7103 新增 10 万以上普惠型消费贷款统计后，6.27 的标识和一表通口径怎么对齐？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "c-case-manifest.json",
+          "source_sha256": "8a5f2f6661fc6aea71f4fe055cad9b4f63db27a478b55367815ac6be7e727a7b",
+          "original_id": "C04",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5750,
+              5775
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一必需证据未命中即失败",
+            "note": "S7103 修订要求 + 8.13 普惠指标口径"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "bba338a35384fba6",
+      "query": "1104 的担保方式口径和一表通转换脚本有什么差异？",
+      "families": [
+        "cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M13",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "F270021",
+            "table_code": "S72",
+            "required_units": [
+              5679
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "261f529d91b86bce",
+      "split": "holdout"
+    },
+    {
+      "case_id": "bcf7e8f5467b8012",
+      "query": "EAST 自营资金业务里普通股、优先股怎么对应融资工具类型？",
+      "families": [
+        "explicit_system_similar"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V08",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "H090003",
+            "table_code": "8.9",
+            "required_units": [
+              5600
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "6168002f9022b7c1",
+      "split": "holdout"
+    },
+    {
+      "case_id": "be9292bb747280c2",
+      "query": "关于抵质押率，抵质押率报送规范：填报该宗押品在银行的实际抵质押率。根据《商业银行押品管理指引》规定：抵质押率＝押品担保本金余额÷押品估",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A08",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J030021",
+            "table_code": "9.3",
+            "required_units": [
+              24
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c0a1828d3bbfbfe1",
+      "query": "EAST5.0 对客户其他证件类型的阈值和映射规则一致吗？",
+      "families": [
+        "explicit_system_similar"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V07",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east"
+            ],
+            "field_code": "B050007",
+            "table_code": "2.5",
+            "required_units": [
+              5593
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "6168002f9022b7c1",
+      "split": "holdout"
+    },
+    {
+      "case_id": "c1a8e98aac40d4ed",
+      "query": "产品类别能不能一次填多个代码？",
+      "families": [
+        "code_value"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "M04",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "E010007",
+            "table_code": "5.1",
+            "required_units": [
+              1659
+            ],
+            "must_refuse": false,
+            "reject_if": "命中错误体系/码值/越权即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "manual"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "c1a8e98aac40d4ed",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c4a26c94a7b9ae87",
+      "query": "信用卡逾期金额按欠本金额还是欠款统计？",
+      "families": [
+        "cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V13",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": null,
+            "table_code": "8.15",
+            "required_units": [
+              5720
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c4f26a87f54ed683",
+      "query": "关于被担保业务类型，我行与商业银行开展小微企业转贷款，根据《关于规范开展小微企业转贷款业务的通知》（银保监办发[2022]68号），该业务为",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A25",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F080006",
+            "table_code": "6.8",
+            "required_units": [
+              51
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "c5a912c29bda681b",
+      "query": "保险业务的协议 ID 填保单号还是总对总协议？",
+      "families": [
+        "natural_phrasing"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H04",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "G110001",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5913
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "答成清算账号"
+          },
+          "evidence_anchor": "一表通制度问答!A1989:W1989",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "d000bfbe95e0c4e6",
+      "query": "提前结清的订单要报多久？转 1104 时怎么筛？",
+      "families": [
+        "multi_evidence_cross_table"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N06",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              3091,
+              5691
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "4304a54b3f7edd1e",
+      "split": "tuning"
+    },
+    {
+      "case_id": "d21a206e15475637",
+      "query": "一表通 8.1 贷款借据和 1104 G01 对贷款余额的口径有什么差异？",
+      "families": [
+        "multi_evidence_cross_system"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N08",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "required_units": [
+              5677,
+              501
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "338550d98939b2cd",
+      "split": "tuning"
+    },
+    {
+      "case_id": "d6ed58f996f75296",
+      "query": "按现行版本，产品类别值域是多少？",
+      "families": [
+        "forbidden_units"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N10",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "required_units": [
+              2093,
+              2196
+            ],
+            "optional_units": [],
+            "forbidden_units": [
+              6839,
+              6840
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "6f487dd186106f92",
+      "split": "holdout"
+    },
+    {
+      "case_id": "d8b2f03c0e364ade",
+      "query": "一表通里协议 ID、清算账号、自营标识分别怎么填？",
+      "families": [
+        "multi_evidence"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H07",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5913,
+              5916,
+              5920
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "漏答其中任一字段"
+          },
+          "evidence_anchor": "一表通制度问答!A1989 + A2900 + A4705",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "db5afc9bc2552b00",
+      "query": "F250007 和 F090006 都涉及合作机构，字段规则一样吗？",
+      "families": [
+        "same_field_different_table"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "H08",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": null,
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5914,
+              5917
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "把两个字段的规则混成一条"
+          },
+          "evidence_anchor": "一表通制度问答!A2106 + A3083",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "dc1908cb9672e0d8",
+      "query": "产品类别多个代码的填报说明和值域校验冲突吗？",
+      "families": [
+        "multi_evidence_excel_enum"
+      ],
+      "provenance": [
+        {
+          "source": "v4-case-manifest.json",
+          "source_sha256": "8e334c6f5ce7d6167e5e1062f4f3a96cb00e1ab4556f1ec6ed9acb69937d2f05",
+          "original_id": "N07",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "required_units": [
+              2196,
+              1659
+            ],
+            "optional_units": [],
+            "forbidden_units": [],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "任一项必需证据未命中、或禁用证据进入上下文/引用即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "42571ad5b1821de0",
+      "split": "tuning"
+    },
+    {
+      "case_id": "e0b77537b9ce0310",
+      "query": "合作方要按几种方式报？",
+      "families": [
+        "natural_phrasing"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C05",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "一表通制度问答"
+            ],
+            "required_units": [
+              5914
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "答成合作机构类型"
+          },
+          "evidence_anchor": "一表通制度问答!A2106:W2106",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "e8ee013f75b013a2",
+      "query": "S6303 已处置的不良贷款金额包含哪些处置方式？",
+      "families": [
+        "excel_enum"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V09",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "G080007",
+            "table_code": "7.8",
+            "required_units": [
+              5714
+            ],
+            "must_refuse": false,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "92c0af77cc1b6d8f",
+      "split": "holdout"
+    },
+    {
+      "case_id": "e9dcf654963ddc5e",
+      "query": "G0901 表里投资标的类别码值缺什么？",
+      "families": [
+        "single_system_table_code"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C04",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "1104"
+            ],
+            "field_code": "J020021",
+            "table_code": "G0901",
+            "document_family": [
+              "转1104问答"
+            ],
+            "required_units": [
+              5924
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "命中 J020021 的一表通单元 5915"
+          },
+          "evidence_anchor": "转1104问答!A221:AF221",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ea6d41922be39cf7",
+      "query": "关于被持有股权企业客户ID，根据该字段解释，我理解为填报产品ID或客户ID即可（我部的参控股基金的产品ID和客户ID相同），请老师确认。（提出人：投",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A26",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J020111",
+            "table_code": "9.2",
+            "required_units": [
+              62
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "edc6c8a376ffd54c",
+      "query": "关于投融资标的类别，本数据为发行普通股。“投融资标的类别”0440 上市股票（剔除长期股权投资），制度中“指填报机构持有的在公开市场流通的股",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A03",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "J020021",
+            "table_code": "9.2",
+            "required_units": [
+              16
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "ee927b14de6ba35e",
+      "query": "关于授信到期日期，我行某些低信用风险业务中银票贴现反向生成额度信息，该额度长期有效，报表授信到期日为99991231，触发“JYH13-7",
+      "families": [
+        "auto_from_corpus"
+      ],
+      "provenance": [
+        {
+          "source": "case-manifest.json",
+          "source_sha256": "34bde4c180e4c4e72dc79edf7f7b55a5b15826239847253f5ab5f52e970edadb",
+          "original_id": "A12",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "ybt"
+            ],
+            "field_code": "H130012",
+            "table_code": "8.13",
+            "required_units": [
+              29
+            ],
+            "must_refuse": false,
+            "reject_if": "未命中指定单元即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "auto"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "01167997716439a1",
+      "split": "tuning"
+    },
+    {
+      "case_id": "f43d6a11b8ba4907",
+      "query": "10.1 公共代码表的最新证件类型代码清单是什么？",
+      "families": [
+        "should_refuse"
+      ],
+      "provenance": [
+        {
+          "source": "v3-case-manifest.json",
+          "source_sha256": "65b04b3e88eb8ba3c60e07bf346f7c4e289e2d01c9df8aa52f99d31ec05b1be5",
+          "original_id": "V16",
+          "original_split": "holdout"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [],
+            "field_code": null,
+            "table_code": null,
+            "required_units": [],
+            "must_refuse": true,
+            "version": "current",
+            "reject_if": "未命中指定证据或把无依据内容标为确定结论即失败"
+          },
+          "evidence_anchor": null,
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "16b7d24cfa01ae41",
+      "split": "tuning"
+    },
+    {
+      "case_id": "fda6d7c3b7fea5fa",
+      "query": "合作方式的码值在 EAST 转换和 1104 转换中分别缺哪些？",
+      "families": [
+        "cross_system_interference"
+      ],
+      "provenance": [
+        {
+          "source": "cases.json",
+          "source_sha256": "137e470b421e9b593119b8b4b808e86fc232d85d7a686e3bef61f2c710302bf6",
+          "original_id": "C01",
+          "original_split": "dev"
+        }
+      ],
+      "annotations": [
+        {
+          "expected": {
+            "systems": [
+              "east",
+              "1104"
+            ],
+            "field_code": "F250007",
+            "table_code": null,
+            "document_family": [
+              "转EAST问答",
+              "转1104问答"
+            ],
+            "required_units": [
+              5922,
+              5925
+            ],
+            "allowed_alternatives": [],
+            "version": "current",
+            "must_refuse": false,
+            "reject_if": "只命中单边、或用一边顶替另一边"
+          },
+          "evidence_anchor": "转EAST问答!A108 + 转1104问答!A237",
+          "annotator": "engineering"
+        }
+      ],
+      "review_status": "needs_business_review",
+      "group_id": "02dc81ee70c8e016",
+      "split": "tuning"
+    }
+  ],
+  "deduplicated_count": 104,
+  "group_count": 16,
+  "blockers": [
+    "business_labels_not_reviewed",
+    "corpus_anchors_not_resolved"
+  ],
+  "dataset_version": "37692325eb643758cd5fa7c90d505cb463ee1f2d2ccc21ee5a13170a1182d90b"
+}

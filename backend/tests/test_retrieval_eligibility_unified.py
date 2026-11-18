@@ -106,6 +106,23 @@ def _search(db, project_id, *, mode="hybrid", include_history=False, historical_
     )
 
 
+@pytest.mark.parametrize("mode", MODES)
+def test_frozen_pin_is_applied_before_returning_candidates(db_session, monkeypatch, mode):
+    project, document, version, unit = _seed(db_session)
+    document.file_name = "制度A"
+    version.regulatory_version = "2026-v2"
+    db_session.commit()
+    _mock_vector(monkeypatch, unit.id)
+    _, items = HybridRetriever(db_session).search(
+        project.id, "合作方式码值", retrieval_mode=mode,
+        pinned_versions={"制度A": "2026-v1"}, commit=False)
+    assert items == []
+    _, items = HybridRetriever(db_session).search(
+        project.id, "合作方式码值", retrieval_mode=mode,
+        pinned_versions={"制度A": "2026-v2"}, commit=False)
+    assert [row["knowledge_unit_id"] for row in items] == [unit.id]
+
+
 # --------------------------------------------------------- activation window
 
 
@@ -187,6 +204,25 @@ def test_disabled_unit_is_hidden(db_session, monkeypatch, mode):
     assert items == []
 
 
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("history", [False, True])
+def test_archived_document_is_hidden_even_with_stale_vector_candidate(db_session, monkeypatch, mode, history):
+    project, document, _, unit = _seed(db_session)
+    document.document_status = "archived"
+    db_session.commit()
+    _mock_vector(monkeypatch, unit.id)
+    _, items = _search(db_session, project.id, mode=mode, include_history=history)
+    assert items == []
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_history_cannot_expose_draft_from_a_stale_vector_candidate(db_session, monkeypatch, mode):
+    project, _, _, unit = _seed(db_session, lifecycle_status="draft")
+    _mock_vector(monkeypatch, unit.id)
+    _, items = _search(db_session, project.id, mode=mode, include_history=True)
+    assert items == []
+
+
 def test_cross_project_unit_is_hidden(db_session, monkeypatch):
     _, _, _, unit = _seed(db_session)
     other = Project(name="其他项目", bank_name="模拟机构")
@@ -256,3 +292,48 @@ def test_log_records_candidate_and_eligible_counts(db_session, monkeypatch):
     assert items == []
     assert log.filters_json["candidate_count"] >= 1
     assert log.filters_json["eligible_count"] == 0
+
+
+@pytest.mark.parametrize("change", ["withdrawn", "disabled", "archived", "content", "scope", "version"])
+def test_citation_recheck_blocks_changes_after_retrieval(db_session, change):
+    from app.services.rag.citation_validator import validate_citations
+    project, document, version, unit = _seed(db_session)
+    document.file_name = "制度A"
+    version.regulatory_version = "2026-v1"
+    db_session.commit()
+    citation = {"knowledge_unit_id": unit.id, "document_id": document.id,
+                "document_version_id": version.id, "content_hash": unit.content_hash}
+    options = dict(project_id=project.id, institution_name=project.bank_name,
+                   check_governance=True, expected_content={unit.id: unit.content},
+                   pinned_versions={"制度A": "2026-v1"})
+    validate_citations(db_session, [citation], **options)
+    if change == "withdrawn":
+        version.lifecycle_status = "withdrawn"
+    elif change == "disabled":
+        unit.enabled = False
+    elif change == "archived":
+        document.document_status = "archived"
+    elif change == "content":
+        unit.content = "silently changed"
+    elif change == "scope":
+        document.applicable_project_ids_json = [project.id + 100]
+    else:
+        version.regulatory_version = "2026-v2"
+    db_session.commit()
+    with pytest.raises(ValueError):
+        validate_citations(db_session, [citation], **options)
+
+
+def test_history_requires_request_authorization_and_valid_lifecycle(db_session):
+    from app.services.rag.citation_validator import validate_citations
+    project, _, version, unit = _seed(db_session, lifecycle_status="superseded", enabled=False)
+    citation = {"knowledge_unit_id": unit.id, "historical": True}
+    options = dict(project_id=project.id, institution_name=project.bank_name,
+                   check_governance=True)
+    with pytest.raises(ValueError):
+        validate_citations(db_session, [citation], **options)
+    validate_citations(db_session, [citation], include_history=True, **options)
+    version.lifecycle_status = "draft"
+    db_session.commit()
+    with pytest.raises(ValueError):
+        validate_citations(db_session, [citation], include_history=True, **options)

@@ -1,0 +1,18 @@
+{
+  "goal_id":"G-REMOTE-INVENTORY",
+  "evidence_tier":"authenticated_read_only_remote_test_host",
+  "source_hash":"5e5cbbf9defe81221db907e6106536444ce569f25fc70653b617ced7b9233cae",
+  "host_key_sha256":"SHA256:f7NnYxMA4aCVYpUKmiXCY7VWoAV4nKtg8eM5wGv5hMU",
+  "matches_first_attempt_host_key":true,
+  "authenticated":true,
+  "initial_inventory_commands":24,
+  "additional_read_only_commands":7,
+  "remote_mutations_during_inventory":0,
+  "services":["old_main_api_frontend_worker_beat","old_rag_api_frontend_worker","postgresql16","redis7","milvus2.5.4","etcd3.5.18","minio","local_embedding","nginx"],
+  "data_locations":["postgres_named_volume:source_postgres_data","uploads_named_volume:source_backend_storage","uploads_named_volume:rag-e2e_rag_e2e_storage","etcd_named_volume:source_etcd_data","redis_named_volume:source_redis_data","bind:/data/ybt/milvus","bind:/data/ybt/milvus-minio","bind:/data/ybt/object-storage","deployment:/opt/ybt"],
+  "databases":[{"name":"ybt","bytes":327842839},{"name":"ybt_e2e","bytes":351403031}],
+  "backup_filesystem":"/home",
+  "backup_available_gib_at_inventory":9.3,
+  "private_raw_evidence":".local-run/rag-long-run/round-20261116-24/inventory-attempt2 and remote-detail",
+  "credentials_in_public_artifact":false
+}

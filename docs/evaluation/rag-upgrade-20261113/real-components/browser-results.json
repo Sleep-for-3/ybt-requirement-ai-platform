@@ -1,0 +1,23 @@
+{
+  "evidence_tier": "browser_real_components_mock_generation",
+  "results": [
+    "wrong_credentials_401",
+    "form_login_200",
+    "ask_and_unverified_trust_ceiling",
+    "history_sent_as_complete_pair",
+    "clear_history",
+    "cross_project_task_uses_owner_and_frozen_original",
+    "download_bytes_match_answer_version_sha256",
+    "mobile_no_horizontal_overflow"
+  ],
+  "evidenceRequests": [
+    {
+      "url": "http://127.0.0.1:18095/api/knowledge/documents/2/preview?project_id=2&version_id=2",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18095/api/knowledge/documents/2/content?project_id=2&version_id=2",
+      "status": 200
+    }
+  ]
+}

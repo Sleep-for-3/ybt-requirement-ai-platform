@@ -1,0 +1,175 @@
+{
+  "evidence_tier": "real_components",
+  "generation_provider": "mock",
+  "external_model_calls": 0,
+  "results": [
+    {
+      "name": "keyword_only_current_excludes_stale_v1",
+      "passed": true,
+      "returned_ids": [
+        5924
+      ]
+    },
+    {
+      "name": "keyword_only_frozen_v1_no_version_leak",
+      "passed": true,
+      "retrieved": 1,
+      "outcome": "matching_evidence"
+    },
+    {
+      "name": "keyword_only_missing_freeze_fails_closed",
+      "passed": true
+    },
+    {
+      "name": "vector_only_current_excludes_stale_v1",
+      "passed": true,
+      "returned_ids": [
+        5924
+      ]
+    },
+    {
+      "name": "vector_only_frozen_v1_no_version_leak",
+      "passed": true,
+      "retrieved": 0,
+      "outcome": "no_eligible_evidence"
+    },
+    {
+      "name": "vector_only_missing_freeze_fails_closed",
+      "passed": true
+    },
+    {
+      "name": "hybrid_current_excludes_stale_v1",
+      "passed": true,
+      "returned_ids": [
+        5924
+      ]
+    },
+    {
+      "name": "hybrid_frozen_v1_no_version_leak",
+      "passed": true,
+      "retrieved": 1,
+      "outcome": "matching_evidence"
+    },
+    {
+      "name": "hybrid_missing_freeze_fails_closed",
+      "passed": true
+    },
+    {
+      "name": "keyword_only_historical_as_of_no_version_leak",
+      "passed": true,
+      "retrieved": 1,
+      "outcome": "matching_evidence"
+    },
+    {
+      "name": "vector_only_historical_as_of_no_version_leak",
+      "passed": true,
+      "retrieved": 0,
+      "outcome": "no_eligible_evidence"
+    },
+    {
+      "name": "hybrid_historical_as_of_no_version_leak",
+      "passed": true,
+      "retrieved": 1,
+      "outcome": "matching_evidence"
+    },
+    {
+      "name": "disabled_unit_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "disabled_unit_not_in_context",
+      "passed": true
+    },
+    {
+      "name": "withdrawn_version_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "withdrawn_version_not_in_context",
+      "passed": true
+    },
+    {
+      "name": "archived_document_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "archived_document_not_in_context",
+      "passed": true
+    },
+    {
+      "name": "changed_project_scope_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "changed_project_scope_not_in_context",
+      "passed": true
+    },
+    {
+      "name": "future_effective_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "future_effective_not_in_context",
+      "passed": true
+    },
+    {
+      "name": "expired_version_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "expired_version_not_in_context",
+      "passed": true
+    },
+    {
+      "name": "content_changed_during_request_citation_rejected",
+      "passed": true
+    },
+    {
+      "name": "withdrawn_historical_source_rejected",
+      "passed": true
+    },
+    {
+      "name": "document_wrong_project_not_visible",
+      "passed": true,
+      "status": 404
+    },
+    {
+      "name": "answer_version_original_bytes",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "name": "limited_user_cannot_knowledge_ask",
+      "passed": true,
+      "status": 404
+    },
+    {
+      "name": "limited_user_cannot_knowledge_hybrid-search",
+      "passed": true,
+      "status": 404
+    },
+    {
+      "name": "natural_history_request",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "name": "frozen_answer_request",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "name": "frozen_answer_excludes_v2",
+      "passed": true
+    },
+    {
+      "name": "missing_pin_returns_pending_low",
+      "passed": true
+    },
+    {
+      "name": "readiness_after_index",
+      "passed": true,
+      "status": 200
+    }
+  ]
+}

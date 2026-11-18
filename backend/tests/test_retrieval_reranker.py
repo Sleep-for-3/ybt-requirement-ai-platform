@@ -218,6 +218,29 @@ def test_score_count_mismatch_degrades_to_the_input_order(monkeypatch):
     assert outcome.reason == "score_count_mismatch: expected 2, got 1"
 
 
+@pytest.mark.parametrize(
+    "scores",
+    [
+        [float("nan"), 1.0],
+        [float("inf"), 1.0],
+        [float("-inf"), 1.0],
+    ],
+    ids=["nan", "positive-infinity", "negative-infinity"],
+)
+def test_non_finite_scores_degrade_without_changing_candidate_order(monkeypatch, scores):
+    model = FakeCrossEncoder(scores=scores)
+    monkeypatch.setattr(reranker, "load_cross_encoder", lambda *args, **kwargs: (model, None))
+    items = [_item(1), _item(2)]
+
+    outcome = reranker.rerank_items(items, "查询", SimpleNamespace(reranker_enabled=True))
+
+    assert outcome.items == items
+    assert outcome.items[0] is items[0]
+    assert outcome.items[1] is items[1]
+    assert (outcome.applied, outcome.degraded) == (False, True)
+    assert outcome.reason == "non_finite_scores"
+
+
 def test_load_failure_is_cached_so_it_is_not_retried_on_every_query(monkeypatch):
     attempts = []
 

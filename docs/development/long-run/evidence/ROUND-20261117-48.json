@@ -1,0 +1,49 @@
+{
+  "round": 48,
+  "date": "2026-11-17",
+  "scope": "mock_planner_schema_and_budget_fail_closed",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "worktree_dirty_before_and_after": true,
+  "changes": [
+    "backend/app/services/llm/mock.py",
+    "backend/app/services/llm/provider_budget.py",
+    "backend/tests/test_llm_gateway.py",
+    "backend/tests/test_llm_provider_budget.py",
+    "backend/scripts/rag_review_environment.py",
+    "backend/tests/test_rag_review_runtime.py",
+    "backend/tests/rag_remote_candidate37_release.py"
+  ],
+  "targeted_tests": {
+    "command": ".venv/Scripts/python.exe -m pytest tests/test_llm_gateway.py tests/test_agent_planner_validation.py tests/test_llm_provider_budget.py tests/test_rag_review_runtime.py tests/test_rag_remote_candidate37_budget_route.py -q",
+    "result": "53 passed",
+    "initial_attempts": [
+      "1 failed, 51 passed; exposed missing PlanDraft fields in Mock response; retained and corrected",
+      "1 failed, 52 passed; test stub signature mismatch exposed guard ordering; moved guard before Redis probe"
+    ]
+  },
+  "static_checks": {
+    "py_compile": "passed",
+    "git_diff_check": "passed_with_existing_line_ending_warnings"
+  },
+  "budget_snapshot": {
+    "sqlite_matches_json": true,
+    "provider_requests_used": 531,
+    "provider_requests_cap": 800,
+    "total_tokens_used": 3608925,
+    "total_tokens_cap": 8000000,
+    "provider_requests_reserved": 0,
+    "total_tokens_reserved": 0,
+    "unknown_usage_requests": 3
+  },
+  "external_provider_requests": 0,
+  "runtime_or_remote_mutations": 0,
+  "old_isolation_credentials_read": false,
+  "active_process_environment_verified": false,
+  "goal_check": {
+    "consistent": true,
+    "complete": false,
+    "verified": 2,
+    "in_progress": 9,
+    "pending": 7
+  }
+}

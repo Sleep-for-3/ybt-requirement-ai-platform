@@ -1,0 +1,46 @@
+{
+  "schema": "rag-delegated-sql-source-review-v1",
+  "review_kind": "user_delegated_agent_review",
+  "reviewer": "Codex under explicit user delegation",
+  "approved_object": "archived_sql_evaluation_expectations",
+  "human_business_approved": false,
+  "generated_answer_release_approved": false,
+  "regulatory_authority_conferred": false,
+  "observed_before_review": true,
+  "evaluation_use": "regression_only",
+  "original_dataset_version": "9e80a8bbd0ff36e8feef43e0cd228f58bf0132f14cc39240d5ab1f8260c2585f",
+  "corpus_hash": "28627e12ed7b3ebf914b3cf1f60123c025eca57f97c5f820db754e4aead702d7",
+  "source_content_hashes": {
+    "18025": "e99950a08a6a8943c428e2c45b5673d566611be8283086ce7231e8d0820758d6",
+    "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303",
+    "18028": "fee97a8cb19e6d7fd0f2aade583e9ab6ff1d9fc9490952ed523e5cd28a55a98f",
+    "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+  },
+  "source_file_hashes": {
+    "18027": "fa8f8b782c1611309933beccd45a5d85da3f7f5bf5253ac205aa5592920a2e7a",
+    "18030": "46ebdde956197b5ccd67b5ec99ed7ee98a97f2ac9521241ef72ced487f1615a8"
+  },
+  "binding_correction_reason": "Original gold selected sql_summary by shortest locator interval; the reviewed CASE logic exists in sql_text in the same frozen document and version. Preserve original gold and failures. This correction cannot establish successful retrieval or citation.",
+  "cases": [
+    {"case_id":"SQL-I01","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T5.H040037 = '01' THEN '正常'","T1.F090029 = '06' THEN '销户'"],"reason":"CASE首匹配优先，指定组合为正常；不能先应用后续销户分支。"},
+    {"case_id":"SQL-I02","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090029 = '03' THEN '其他-止付'","T1.F090029 = '05' THEN '未激活'","T1.F090029 = '06' THEN '注销'"],"reason":"卡片状态与账户状态分别核对，三项预期准确。"},
+    {"case_id":"SQL-I03","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090013 = '1' AND (COALESCE(T6.CPMC,'') NOT LIKE '%附属卡')"],"reason":"同时满足附属卡标志与名称无该后缀才追加，保留COALESCE判断。"},
+    {"case_id":"SQL-I04","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090010 = '1' THEN '个人卡'","T1.F090010 = '0' THEN '单位卡'"],"reason":"个人和单位码值在可执行CASE中均有直接支撑。"},
+    {"case_id":"SQL-I05","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090008 = '04' THEN '手机终端（银行APP）'","T1.F090008 = '05' THEN '合作发卡'","T1.F090008 = '06' THEN '第三方机构引流'"],"reason":"发卡渠道04/05/06及ELSE其他均核对。"},
+    {"case_id":"SQL-I06","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090017 = '01' THEN '质押'","T1.F090017 = '04' THEN '信用'","T1.F090017 = '00' THEN '其他'"],"reason":"01为质押、02才是抵押，旧预期准确。"},
+    {"case_id":"SQL-I07","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090030 = '01' THEN '盗刷'","T1.F090030 = '04' THEN '流向房地产'","T1.F090030 = '05' THEN '用于生产经营'","AS YCBS"],"reason":"三码及ELSE空字符串已核对，不增补未知默认其他。"},
+    {"case_id":"SQL-I08","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T1.F090031 = '02' THEN '降额'","T1.F090031 = '03' THEN '止付'","T1.F090031 = '04' THEN '提前还款'","AS XZCS"],"reason":"02/03/04和ELSE空字符串准确，05显式其他不等于未知默认其他。"},
+    {"case_id":"SQL-I09","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T6.LMKBS = '1' THEN '是'","T6.LMKBS = '1' THEN T6.CPMC"],"reason":"标志和名称使用同一条件，非联名卡名称为空字符串。"},
+    {"case_id":"SQL-I10","old_unit_ids":[18025],"required_unit_ids":[18027],"decision":"answerable","anchors":["T7.DQBBSXED - T7.YSYBBSXED","T7.DQWBSXED - T7.YSYWBSXED"],"reason":"本外币均以当前额度减已使用额度，不能直接取额度。"},
+    {"case_id":"SQL-T01","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["T1.G040009 = '01' THEN '消费交易'","T1.G040009 = '05' THEN '其他'"],"reason":"01至05五项顺序逐项核对。"},
+    {"case_id":"SQL-T02","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["T1.G040021 = '01' THEN '借'","T1.G040021 = '02' THEN '贷'"],"reason":"借贷方向两项与原文一致。"},
+    {"case_id":"SQL-T03","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["T1.G040024 = '01' THEN '线上'","T1.G040024 = '02' THEN '线下'"],"reason":"字段G040024及线上线下码值已核对。"},
+    {"case_id":"SQL-T04","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["T1.G040016","AS SXFBZ","T1.G040014","AS SXFJE"],"reason":"手续费币种及金额与原SQL别名对应，区分交易币种与金额。"},
+    {"case_id":"SQL-T05","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["CASE WHEN T1.G040025 IS NULL THEN '否'","ELSE '是' END"],"reason":"IS NULL分支而非01枚举，非空均是。"},
+    {"case_id":"SQL-T06","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["CASE WHEN T6.H050017 = '01' THEN '是'","ELSE '否' END"],"reason":"来源为T6.H050017，条件及ELSE准确。"},
+    {"case_id":"SQL-T07","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["CASE WHEN TT.KPJYLX = '还款交易' THEN NULL","AS JYZDRQ","AS ZCHKRQ"],"reason":"两CASE首分支均NULL，不应套用其他分支99991231。"},
+    {"case_id":"SQL-T08","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["T1.G040030 = '05' THEN '网银'","T1.G040030 = '06' THEN '手机银行'","T1.G040030 = '07' THEN '第三方支付'","T1.G040030 = '08' THEN '银联交易'","T1.G040030 = '00' THEN '其他'"],"reason":"五渠道逐项核对，未用常识改写。"},
+    {"case_id":"SQL-T09","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["CASE WHEN T5.F090025 IN ('11','29','31') THEN '99991231'"],"reason":"辅助日期直接取哨兵值，和后续外层CASE区分。"},
+    {"case_id":"SQL-T10","old_unit_ids":[18028],"required_unit_ids":[18030],"decision":"answerable","anchors":["ROW_NUMBER() OVER(PARTITION BY SUBSTR(T1.G040001,12) ORDER BY T1.G040033)","WHERE TT.RN = 1","WHERE T1.G040033 BETWEEN"],"reason":"去前11字符分组、默认升序、仅RN1及当月截至业务日过滤均核对。"}
+  ]
+}

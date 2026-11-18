@@ -1,0 +1,62 @@
+{
+  "round": 43,
+  "date": "2026-11-17",
+  "scope": "preserve conflicting workbook columns that use different aliases for the same semantic field",
+  "counterexample": {
+    "id": "P0-XLSX-SEMANTIC-DUPLICATE-ALIASES-ROUND43",
+    "fixture": "synthetic xlsx with 问题/具体问题描述 and 回复/答疑结果 columns",
+    "before": {
+      "failed": 1,
+      "missing_values": ["原始问题甲", "答复乙"],
+      "junit": ".local-run/rag-long-run/round-20261117-43-red-junit.xml"
+    },
+    "after": {
+      "passed": 1,
+      "behavior": "preserve conflicting raw values and locations; do not guess canonical field",
+      "diagnostic": "duplicate_semantic_column"
+    }
+  },
+  "implementation": {
+    "parser_config_version": "xlsx-knowledge-config-v3",
+    "production_logic_changed": true,
+    "files": [
+      "backend/app/services/knowledge_ingestion/parsers.py",
+      "backend/tests/test_xlsx_parse_diagnostics.py"
+    ]
+  },
+  "verification": {
+    "parser_and_ingestion_integration_passed": 23,
+    "failed": 0,
+    "warnings": 1,
+    "warning": "Starlette TestClient emits httpx deprecation warning",
+    "junit": ".local-run/rag-long-run/round-20261117-43-acceptance-junit.xml",
+    "py_compile": "passed",
+    "real_model_calls": 0,
+    "provider_tokens": 0
+  },
+  "budget": {
+    "provider_requests_cap": 800,
+    "provider_requests_used": 531,
+    "provider_requests_reserved": 0,
+    "tokens_cap": 8000000,
+    "tokens_used": 3608925,
+    "tokens_reserved": 0,
+    "unknown_usage_requests": 3
+  },
+  "source_workbook_audit": {
+    "sha256": "51228a75d5f22ed9a058c9a7c29834989ab56da95e35435164084c537b9ec311",
+    "identity_record": "docs/evaluation/rag-upgrade-20261113/real-components/component-inventory.json",
+    "identity_record_says_matches_uploaded_source": true,
+    "matching_original_file_found_in": [],
+    "searched_locations": ["../_assessment_work", "../assessment-results"],
+    "status": "awaiting_original_upload_or_verified_backup_bytes"
+  },
+  "goal_ledger": {
+    "consistent": true,
+    "complete": false
+  },
+  "limitations": [
+    "synthetic workbook only; no byte-level reconciliation of the original workbook and ingested corpus",
+    "no independent holdout, real-model evaluation, or remote acceptance"
+  ]
+}

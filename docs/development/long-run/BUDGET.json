@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "scope": "long-run-development-starting-20261115",
+  "approval": "User explicitly approved 800 provider requests and 8000000 total tokens on 2026-11-16. Generation, planning, judges, format repair and retries count together. Stop at either cap; no recharge or new paid services.",
+  "approved_on": "2026-11-16",
+  "max_new_provider_requests": 800,
+  "max_new_total_tokens": 8000000,
+  "provider_requests_used": 531,
+  "provider_requests_reserved": 0,
+  "total_tokens_reserved": 0,
+  "total_tokens_used": 3608925,
+  "unknown_usage_requests": 3,
+  "historical_runs_excluded_from_new_budget": [
+    {
+      "run": "rag-source-review-20261115",
+      "generation_requests_reported": 119,
+      "judge_requests": 383,
+      "judge_requests_cap": 496,
+      "reported_judge_tokens": 1691777,
+      "note": "Historical evidence only; does not grant a new budget or permit reusing the old allocation."
+    }
+  ],
+  "note": "New authorization is cumulative across the current P0-P2 development, A/B evaluations and browser acceptance. Historical usage remains excluded. Before dispatch, persist a conservative input-plus-output reservation for every actual provider attempt; unknown usage consumes its reservation. A crashed reservation remains charged until reconciled. No real calls until the shared guard is tested and enabled for every evaluation runtime.",
+  "updated_at": "2026-11-17T01:10:43.336612+00:00"
+}

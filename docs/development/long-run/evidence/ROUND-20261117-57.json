@@ -1,0 +1,92 @@
+{
+  "round": 57,
+  "goal": "G-P0-B",
+  "evidence_tier": "real_isolated_components_local_embedding_deterministic_retrieval",
+  "source": {
+    "sha256": "51228a75d5f22ed9a058c9a7c29834989ab56da95e35435164084c537b9ec311",
+    "bytes": 1666351,
+    "used_as": "historical regression corpus only"
+  },
+  "code": {
+    "app_commit": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.87d4cd5f1390",
+    "schema_head": "202611010014"
+  },
+  "isolation": {
+    "runtime": "rag-p0-r53",
+    "postgres_port": 15442,
+    "redis_port": 16392,
+    "redis_broker_db": 6,
+    "redis_result_db": 7,
+    "api_port": 18137,
+    "milvus_port": 19533,
+    "project_id": 3,
+    "document_id": 2,
+    "document_version_id": 2,
+    "old_historical_database_written": false,
+    "public_environment_written": false
+  },
+  "providers": {
+    "llm": "mock",
+    "embedding": "local_vllm:BAAI/bge-small-zh-v1.5",
+    "embedding_dimension": 512,
+    "external_provider_requests": 0,
+    "external_provider_tokens": 0,
+    "budget_requests_used": 531,
+    "budget_requests_max": 800,
+    "budget_tokens_used": 3608925,
+    "budget_tokens_max": 8000000,
+    "budget_reserved_requests": 0,
+    "budget_reserved_tokens": 0,
+    "budget_unknown_usage_requests": 3
+  },
+  "ingestion": {
+    "job_id": 5,
+    "status": "completed",
+    "version_status": "active",
+    "parse_config_version": "xlsx-knowledge-config-v3",
+    "sheet_total": 9,
+    "sheet_parsed": 9,
+    "sheets_skipped": 0,
+    "blocking_findings": 0,
+    "unit_count": 5958,
+    "unit_locations_match": true,
+    "units_with_locator": 5958,
+    "source_nonempty_cells": 103447,
+    "source_cells_missing_from_current_parse": 0,
+    "source_cells_missing_from_new_version": 0
+  },
+  "index": {
+    "job_id": 7,
+    "index_version_id": 3,
+    "status": "active",
+    "chunks": 5958,
+    "indexed_count": 5958,
+    "active_embedding_records": 5958,
+    "failed_batches": 0,
+    "index_attempt_1_status": "failed",
+    "index_attempt_1_failed_batch": 30
+  },
+  "retrieval_smoke": {
+    "method": "hybrid-search",
+    "top_k": 5,
+    "result_count": 5,
+    "previously_observed_unit_hit": true,
+    "gold_or_holdout": false
+  },
+  "scope": {
+    "old_frozen_version_modified": false,
+    "production_code_changed": false,
+    "real_llm_or_judge_run": false,
+    "p0_b_subitem_complete": true,
+    "overall_p0_complete": false,
+    "p1_p2_released": false,
+    "public_traffic_switched": false
+  },
+  "full_machine_evidence": ".local-run/rag-long-run/round-20261117-57/evidence-attempt4.json",
+  "attempts": [
+    "attempt1 index job failed with bounded local embedding network error",
+    "attempt2 created a separate API and worker queue with 180-second embedding timeout",
+    "attempt3 poll authorization expired while the same job remained running; no duplicate job was submitted",
+    "attempt4 resumed the existing job and passed indexing, reconciliation and retrieval smoke"
+  ]
+}

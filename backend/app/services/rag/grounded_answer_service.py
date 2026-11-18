@@ -1,4 +1,7 @@
+import json
+import math
 import re
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -13,10 +16,15 @@ from app.services.llm.execution_metadata import build_execution_metadata, determ
 from app.services.llm.base import LLMRuntimeError
 from app.services.llm.structured_outputs import RegulatoryFieldExplanationOutput
 from app.services.retrieval import HybridRetriever
+from app.services.retrieval.query_expansion import detect_history_intent
 from app.services.semantic_index.reindex import build_corpus_snapshot
 from app.services.semantic_index.versioning import get_active_index_version
 
 from .citation_support import split_claims_all
+from .context_assembly import assemble_context, LEGACY_CONTEXT_ITEMS, MAX_CONTEXT_ITEMS
+from .query_understanding import plan_query, merge_role_results
+from app.services.code_extraction import extract_code_values, extract_field_codes
+from app.services.knowledge_version_scope import matches_version_pins
 from .citation_validator import (
     DEGRADED_VERIFICATION,
     VERIFIED,
@@ -27,7 +35,7 @@ from .citation_validator import (
 from app.services.knowledge_evidence import document_citation, evidence_runtime
 
 # 送模证据窗口：多证据题常在第 10-12 位命中第二条件证，10 条会把它们裁掉。
-_EVIDENCE_WINDOW = 12
+_EVIDENCE_WINDOW = MAX_CONTEXT_ITEMS
 
 # 「答案明确否定结论」+「承认缺少原文/条文」同时成立时，不能标 grounded。
 # 单看一个「无法确认」会把正常答案误降级；单看 open_questions 也不行，因为每条
@@ -68,8 +76,50 @@ def _answer_denies_conclusion(answer: str, open_questions) -> bool:
 DEGRADED_ANSWER_TEXT = "模型生成暂时不可用，以下为检索到的证据，结论待确认。"
 
 
+def _evidence_line(item: dict) -> str:
+    provenance = {
+        "source_category": item.get("source_category") or "unknown",
+        "knowledge_type": item.get("knowledge_type") or "unknown",
+        "publisher": item.get("publisher"),
+        "authority_rank": item.get("authority_rank"),
+        "source_name": item.get("document_title") or item.get("source_name") or item.get("title"),
+        "source_sheet_name": item.get("source_sheet_name"),
+        "source_cell_range": item.get("source_cell_range"),
+        "source_page_no": item.get("source_page_no"),
+        "source_heading": item.get("source_heading"),
+        "document_version_id": item.get("document_version_id"),
+        "version": item.get("regulatory_version") or item.get("internal_revision") or item.get("version"),
+        "lifecycle_status": item.get("lifecycle_status"),
+    }
+    bounded = {}
+    for key, value in provenance.items():
+        if isinstance(value, str):
+            if value.strip():
+                bounded[key] = value.strip()[:500]
+        elif type(value) is int:
+            bounded[key] = value
+    payload = {"provenance": bounded, "content": item["content"]}
+    return f"[{item['knowledge_unit_id']}] " + json.dumps(payload, ensure_ascii=False)
+
+
 async def grounded_answer(db, project_id, query, *, interactive: bool = True, commit: bool = True,
                           include_items: bool = False, **filters):
+    # The original request grants history access to both retrieval and rechecks.
+    filters["include_history"] = bool(filters.get("include_history") or detect_history_intent(query))
+    pin_filters = {"pinned_versions": filters["pinned_versions"]} if filters.get("pinned_versions") else {}
+    settings = get_settings()
+    token_context = settings.rag_token_context_enabled
+    def authorize():
+        if filters.get("principal") is not None:
+            from app.services.auth.permission_service import PermissionService
+            PermissionService(db, filters["principal"]).require_project_permission(
+                project_id, "knowledge.search")
+    authorize()
+    plan = await plan_query(
+        db, project_id, query, filters.get("history"), settings,
+        model_profile_id=filters.get("model_profile_id"))
+    authorize()
+    reference_time = filters.get("historical_as_of") or datetime.now(timezone.utc)
     retrieval_log, items = HybridRetriever(db).search(
         project_id,
         query,
@@ -77,23 +127,77 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         filters.get("scenario_id"),
         filters.get("knowledge_types"),
         # 至少取满送模窗口：多证据题的第二条件证常落在第 10-12 位，按 10 取会被截断。
-        filters.get("top_k", _EVIDENCE_WINDOW),
+        max(filters.get("top_k", LEGACY_CONTEXT_ITEMS), settings.rag_recall_k)
+        if token_context else filters.get("top_k", LEGACY_CONTEXT_ITEMS),
         retrieval_mode=filters.get("retrieval_mode", "hybrid"),
         include_history=filters.get("include_history", False),
         historical_as_of=filters.get("historical_as_of"),
         # Callers inside an agent step own their transaction; committing here would split it.
-        commit=commit,
+        commit=commit and len(plan["queries"]) == 1,
+        reference_time=reference_time,
+        **pin_filters,
     )
+    if len(plan["queries"]) > 1:
+        rounds = [("original", items)]
+        child_ids = []
+        for child in plan["queries"][1:]:
+            authorize()
+            child_log, child_items = HybridRetriever(db).search(
+                project_id, child["query"], filters.get("target_field_id"),
+                filters.get("scenario_id"), filters.get("knowledge_types"),
+                settings.rag_recall_k,
+                retrieval_mode=filters.get("retrieval_mode", "hybrid"),
+                include_history=filters.get("include_history", False),
+                historical_as_of=filters.get("historical_as_of"),
+                commit=False, reference_time=reference_time, **pin_filters)
+            child_ids.append(child_log.id)
+            rounds.append((child["role"], child_items))
+        items = merge_role_results(rounds)
+        filters["evidence_roles"] = [child["role"] for child in plan["queries"][1:]]
+        retrieval_log.filters_json = {
+            **(getattr(retrieval_log, "filters_json", None) or {}),
+            "query_plan": plan, "child_log_ids": child_ids,
+        }
+    if plan.get("clarification_question"):
+        items = []
+    # This independent boundary also protects callers using alternate retrievers.
+    if pin_filters:
+        items = [item for item in items if matches_version_pins(
+            item.get("document_title") or item.get("source_name") or item.get("title"),
+            item.get("regulatory_version") or item.get("internal_revision") or item.get("version"),
+            pin_filters["pinned_versions"])]
+    retrieval_items = list(items)
+    assembly = None
+    if token_context or filters.get("evidence_roles"):
+        items, assembly = assemble_context(
+            items, budget=settings.rag_context_token_budget,
+            roles=filters.get("evidence_roles") or [])
+    else:
+        items = items[:LEGACY_CONTEXT_ITEMS]
+    retrieval_log.filters_json = {
+        **(getattr(retrieval_log, "filters_json", None) or {}),
+        "query_plan": plan, "context_assembly": assembly,
+        "context_ids": [item["knowledge_unit_id"] for item in items],
+        "context_roles": sorted({role for item in items for role in item.get("evidence_roles", [])}),
+    }
     if not items:
+        if commit:
+            db.commit()
         return {
-            "answer": "现有知识库没有足够证据，结论待确认。",
+            "answer": plan.get("clarification_question") or "现有知识库没有足够证据，结论待确认。",
             "confidence_level": "low",
             "citations": [],
             "supported_claims": [],
             "unsupported_claims": [],
-            "open_questions": ["请补充监管答疑、历史口径或人工确认记录。"],
+            "open_questions": [plan.get("clarification_question") or "请补充监管答疑、历史口径或人工确认记录。"],
             "retrieval_log_id": retrieval_log.id,
             "answer_status": "needs_confirmation",
+            "cannot_answer_reason": "no_eligible_evidence",
+            "verification_status": "not_run",
+            "pinned_versions": dict(filters.get("pinned_versions") or {}),
+            "context_assembly": assembly,
+            "query_plan": plan,
+            "clarification_question": plan.get("clarification_question"),
             "trustworthiness": _empty_trust(),
             "index_freshness": _index_freshness(db, project_id, filters.get("retrieval_mode", "hybrid")),
             "conflicts": [],
@@ -104,11 +208,23 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         }
 
     citations = [document_citation(item, project_id) for item in items[:_EVIDENCE_WINDOW]]
+    cited_content = {item["knowledge_unit_id"]: item["content"] for item in items[:_EVIDENCE_WINDOW]}
     conflicts = _evidence_conflicts(items[:_EVIDENCE_WINDOW])
     index_freshness = _index_freshness(db, project_id, filters.get("retrieval_mode", "hybrid"))
-    validate_citations(db, citations, project_id=project_id)
+    project = db.get(Project, project_id)
+    validation_options = dict(
+        project_id=project_id, institution_name=project.bank_name if project else None,
+        check_governance=True, historical_as_of=filters.get("historical_as_of"),
+        include_history=filters.get("include_history", False),
+        pinned_versions=filters.get("pinned_versions"),
+        expected_content={item["knowledge_unit_id"]: item["content"] for item in items},
+        expected_unit_metadata={item["knowledge_unit_id"]: {
+            key: item[key] for key in ("confidentiality_level", "knowledge_scope", "project_id")
+            if key in item} for item in items})
+    validate_citations(db, citations, **validation_options)
+    authorize()
     evidence = "\n".join(
-        f"[{item['knowledge_unit_id']}] {item['content']}" for item in items[:_EVIDENCE_WINDOW]
+        _evidence_line(item) for item in items[:_EVIDENCE_WINDOW]
     )
     # 证据编号本来就在 prompt 里，但旧 prompt 只要求"不许新增来源"，没要求模型把编号
     # 写回结论。结果同一题三次运行里，有时每条结论都带 [N]，有时整篇一个编号都没有，
@@ -119,11 +235,36 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         "输出要求：\n"
         "1. answer 里每一条业务结论（码值、口径、适用范围、适用条件）末尾都必须标注"
         "它所依据的知识单元编号，格式为半角方括号加数字，例如 [123]；\n"
-        "2. 无法由上述证据确认的内容不要标编号，写入 unsupported_claims；\n"
+        "2. 本轮问题必需、但无法由上述证据确认的内容不要标编号，写入 unsupported_claims；"
+        "只列实际回答所缺的要点，不主动扩展用户未问的其他业务或其他可能取值；\n"
         "3. supported_claims 里每条结论也要带同样的编号标注；\n"
         "4. 证据不足以回答时，answer 直接说明缺什么，不要编造码值或条款；\n"
-        "5. 如果无法给出完整确定的监管结论（例如缺少条文原文、缺分类口径、缺少现行版本），"
-        "必须在 cannot_answer_reason 里写清楚缺什么；能完整回答时留空。"
+        "5. 以本轮问题的适用范围判定是否完整。问题明确要求现行监管结论时，"
+        "缺少条文原文、分类口径或现行版本，必须在 cannot_answer_reason 写清楚缺什么；"
+        "若问题仅询问归档记录中的明确取值或已办结答复，且证据逐项覆盖，"
+        "则不能因为未说明其他业务、其他可选值或制度修订情况而判成无法完整回答。"
+        "能完整回答时 cannot_answer_reason 留空且 unsupported_claims 留空。\n"
+        "6. 严格遵守 provenance：source_category=business_material 或 technical_evidence 的内容只能作为参考，"
+        "不得改写成正式监管规则；机构建议、处理中意见和未定案口径必须明确标为建议或待确认。\n"
+        "7. 归档答疑应逐行区分问题、机构建议、牵头意见、反馈意见及流程状态，"
+        "不能因整个文件标为regulatory_qa就把所有建议当定案。"
+        "只有建议或仍处理中的行，必须注明提出者和未定案范围；"
+        "若该行反馈明确同意机构建议且处理已办结，可准确转述该记录已同意的具体口径，"
+        "不要仅因列名含“建议”就说原文没有答复，也不得扩大成现行通用规则。\n"
+        "同一行问题明确并列多个业务对象，建议给出共同处理方式且反馈明确同意时，"
+        "在该行没有分别限定或例外的前提下，该共同答复覆盖原问题列出的业务对象；"
+        "不要求每个对象在反馈列重复出现。仅有字段相同、来自不同问题或不同范围时不能这样合并。\n"
+        "8. 码值是字符串，保留原始位数和前导零；0000等全零码值以及“不适用”仍是明确取值，"
+        "不得误当作空白或缺少码值。按原文适用的业务逐项回答，不推断未记录的对应关系。\n"
+        "9. 一表通、转1104、转EAST等体系分别依据provenance中的工作表和正文适用范围；"
+        "问题同时涉及多个体系时逐项引用各自证据，缺少某体系证据就说明该部分缺口，"
+        "不得借另一体系的意见替代，字段名称相同也不能自行合并。\n"
+        "10. 适用范围说明用中性措辞附在 answer 中，例如“上述为该归档记录的答复”；"
+        "用户未询问、答案也未作出的扩展主张，不得虚构为 unsupported_claims 或缺证据原因。"
+        "真实未定案建议、问题内缺口、冲突或版本不明仍必须明确待确认，不可为了完整而补造结论。"
+        "\n11. 逐条保留反馈意见的语气强度：原文为“建议按业务实质分类填报”时，"
+        "只能转述为该记录建议如此，不得改成“反馈要求”“必须”或已实施的正式规则。"
+        "即使记录已办结，答复中的建议也不能被改写成强制要求。"
     )
     # C06: the caller's selected profile must reach the runtime; otherwise the recorded model and the
     # executed model disagree (and an evaluation could grade a different model than it names).
@@ -151,6 +292,10 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             interactive=interactive,
         )
     except LLMRuntimeError as exc:
+        validate_citations(db, citations, **validation_options)
+        authorize()
+        if commit:
+            db.commit()
         return _degraded_answer(
             citations,
             retrieval_log.id,
@@ -161,6 +306,10 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             getattr(exc, "execution_metadata", None),
         )
     except Exception as exc:
+        validate_citations(db, citations, **validation_options)
+        authorize()
+        if commit:
+            db.commit()
         execution_metadata = getattr(exc, "execution_metadata", None) or build_execution_metadata(
             runtime,
             execution_kind="degraded",
@@ -171,6 +320,8 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             "supported_claims": [], "unsupported_claims": [],
             "open_questions": ["模型生成不可用或数据分类策略禁止外发，请人工核验证据。"],
             "retrieval_log_id": retrieval_log.id, "answer_status": "degraded",
+            "verification_status": "not_run",
+            "degraded_reason": getattr(exc, "error_type", type(exc).__name__),
             "trustworthiness": _trust(items, citations, conflicts, index_freshness, "degraded"),
             "index_freshness": index_freshness, "conflicts": conflicts,
             "execution_metadata": execution_metadata,
@@ -198,41 +349,40 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         answer = "模型引用编号未通过证据校验，结论待确认。"
         open_questions.append("请依据下方已校验的文档引用重新核实结论。")
 
-    # Judge 关闭时，合法编号只证明"引用可解析"，不证明"内容支撑断言"。这里做
+    # 合法编号只证明"引用可解析"，不证明"内容支撑断言"。这里做
     # 确定性检查：断言里出现的字段码（F/E/G + 6 位）必须能在**被引用单元**的原文
     # 里找到；找不到就不能把结论展示成已获支持的确定结论。
     deterministic_gap: list[str] = []
-    if get_settings().citation_support_check != "judge" and not invalid_output and referenced:
-        cited_unit_ids = {int(ref) for ref in referenced if str(ref).isdigit()}
-        cited_text = "\n".join(
-            str(citation.get("quoted_content") or "")
+    identifier_diagnostics = {"answer_gaps": [], "declared_claim_gaps": []}
+    if not invalid_output and referenced:
+        identifier_citations = [
+            {**citation, "quoted_content": cited_content.get(citation.get("knowledge_unit_id"), "")}
             for citation in citations
-            if citation.get("knowledge_unit_id") in cited_unit_ids
-        )
-        signals = set(re.findall(r"\b(?:F\d{6}|E\d{6}|G\d{6})\b", answer, re.IGNORECASE))
-        deterministic_gap = sorted(
-            signal for signal in signals if signal.lower() not in cited_text.lower()
-        )
-        # 码值级检查：答案里"码值/填报/可选/值域"上下文中的两位数字必须出现在
-        # 被引用原文的码值集合里，否则「原文只允许 01、答案说可以填 99」会被当成
-        # 确定结论。
-        cited_code_values = set(re.findall(r"\b\d{2}\b", cited_text))
-        answer_code_values = _answer_code_values(answer)
-        missing_codes = sorted(answer_code_values - cited_code_values)
-        deterministic_gap = sorted({*deterministic_gap, *missing_codes})
+        ]
+        identifier_diagnostics = {
+            "answer_gaps": _identifier_gaps(answer, [], identifier_citations),
+            "declared_claim_gaps": _identifier_gaps("", supported_claims, identifier_citations),
+        }
+        deterministic_gap = sorted(set(identifier_diagnostics["answer_gaps"])
+                                   | set(identifier_diagnostics["declared_claim_gaps"]))
         if deterministic_gap:
             unsupported_claims.extend(
                 f"断言提到的标识未在被引用原文出现：{signal}" for signal in deterministic_gap
             )
             open_questions.append("请核对引用原文是否覆盖该标识所指的口径。")
 
-    project = db.get(Project, project_id)
-    validate_citations(
-        db,
-        citations,
-        project_id=project_id,
-        institution_name=project.bank_name if project else None,
+    candidate_conflict_count = len(conflicts)
+    conflicts = _evidence_conflicts(
+        items[:_EVIDENCE_WINDOW],
+        relevant_items=[item for item in items[:_EVIDENCE_WINDOW]
+                        if str(item["knowledge_unit_id"]) in referenced],
+        query=query,
     )
+    conflict_diagnostics = {"candidate_conflict_count": candidate_conflict_count,
+                            "out_of_scope_count": candidate_conflict_count - len(conflicts)}
+
+    validate_citations(db, citations, **validation_options)
+    authorize()
     # ⑤: opt-in entailment check. The switch defaults to "off", in which case nothing is added
     # and the returned payload stays byte-for-byte the pre-existing shape.
     #
@@ -240,7 +390,8 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
     # 支撑了结论；因此主张级判定必须参与 answer_status / confidence_level / supported_claims /
     # trustworthiness。注意这里**不新增** answer_status 取值：可精细语义放在
     # citation_support.verification 中，状态机仍为 grounded / needs_confirmation / degraded。
-    claim_list = [*supported_claims, *unsupported_claims] or split_claims_all(answer)
+    # Model-declared summaries cannot exclude claims made in the displayed answer.
+    claim_list = _judge_claims(answer, [*supported_claims, *unsupported_claims])
     citation_support = None
     claim_support = None
     if get_settings().citation_support_check == "judge":
@@ -251,8 +402,7 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             citations,
             answer=answer,
             claims=claim_list,
-            referenced_unit_ids=(
-                sorted(int(item) for item in referenced) if referenced else None),
+            referenced_unit_ids=sorted(int(item) for item in referenced),
             # 已检测到冲突的证据也必须参与判定：冲突不得因“未被本轮答案引用”而静默归隐。
             conflict_unit_ids=sorted({
                 int(item["knowledge_unit_id"])
@@ -267,6 +417,8 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
             pinned_versions=filters.get("pinned_versions") or None,
         )
         claim_support = claim_support_summary(citation_support)
+    validate_citations(db, citations, **validation_options)
+    authorize()
     if commit:
         db.commit()
     base_confidence = output.get("confidence_level") or (
@@ -293,11 +445,12 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         # 引用了相关材料、但答案自己写明"不能据此推定"且承认缺原文/条文时，
         # 这是"有引用无依据"，不能算 grounded。
         denies_conclusion=_answer_denies_conclusion(answer, open_questions),
-        declared_unanswerable=bool(cannot_answer_reason))
+        declared_unanswerable=bool(cannot_answer_reason or conflicts or unsupported_claims
+                                  or (assembly or {}).get("missing_roles")))
     confidence_level = _confidence_level(
         invalid_output=invalid_output,
         claim_support=claim_support,
-        generated=base_confidence,
+        generated=base_confidence if answer_status == "grounded" else "low",
     )
     result = {
         "answer": answer,
@@ -310,21 +463,27 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         # The historical ``[answer]`` fallback survives only for the switch-off / no-judgement
         # path; otherwise a citation-level or all-unknown judgement would reintroduce the very
         # claim (the whole answer) that the judge never confirmed.
-        "supported_claims": [] if invalid_output else (
+        "supported_claims": [] if invalid_output or deterministic_gap else (
             supported_claims if claim_support is not None else (supported_claims or [answer])),
         "unsupported_claims": unsupported_claims,
         "open_questions": open_questions
         or ["来源字段和适用场景仍需业务与科技人员确认。"],
         "retrieval_log_id": retrieval_log.id,
         "answer_status": answer_status,
+        "cannot_answer_reason": cannot_answer_reason,
+        "verification_status": (claim_support or {}).get("verification") or "not_run",
+        "context_assembly": assembly,
+        "query_plan": plan,
         "trustworthiness": _trust(
             items, citations, conflicts, index_freshness,
-            "normal" if not invalid_output else "needs_confirmation",
+            "normal" if answer_status == "grounded" else answer_status,
             claim_support=claim_support,
         ),
         "index_freshness": index_freshness,
         "conflicts": conflicts,
-        "execution_metadata": execution_metadata,
+        "conflict_diagnostics": conflict_diagnostics,
+        "identifier_diagnostics": identifier_diagnostics,
+            "execution_metadata": execution_metadata,
     }
     if claim_support is not None:
         result["unverified_claims"] = _merge_unique(
@@ -337,7 +496,7 @@ async def grounded_answer(db, project_id, query, *, interactive: bool = True, co
         result["pinned_versions"] = pins
     if include_items:
         # 只给调用方（智能体工具）用于区分“实际支撑答案的引用”和“检索到但未被引用的候选材料”。
-        result["retrieval_items"] = [_compact_retrieval_item(item) for item in items[:25]]
+        result["retrieval_items"] = [_compact_retrieval_item(item) for item in retrieval_items[:25]]
     return result
 
 
@@ -376,6 +535,21 @@ def _compact_retrieval_item(item: dict) -> dict:
     }
 
 
+def _judge_claims(answer: str, declared: list[str]) -> list[str]:
+    def key(text):
+        without_refs = re.sub(r"[\[【]\d+[\]】]", "", str(text))
+        return re.sub(r"\s+", "", without_refs).rstrip("。；;.!！?？")
+
+    declared_by_key = {key(text): text for text in reversed(declared) if key(text)}
+    claims, seen = [], set()
+    for text in [*split_claims_all(answer), *declared]:
+        identity = key(text)
+        if identity and identity not in seen:
+            claims.append(declared_by_key.get(identity, text))
+            seen.add(identity)
+    return claims
+
+
 def _merge_unique(*groups) -> list[str]:
     """稳定去重合并，保留首次出现顺序（断言顺序对页面展示有意义）。"""
     merged: list[str] = []
@@ -408,14 +582,14 @@ def _answer_status(*, invalid_output: bool, claim_support, cited: bool,
     ``cannot_answer_reason``：比措辞推断稳定，同一道题换一种说法也不会漂回
     grounded。
     """
-    if invalid_output:
+    if invalid_output or deterministic_gap or denies_conclusion or declared_unanswerable:
         return "needs_confirmation"
     if claim_support is None:
         if deterministic_gap or denies_conclusion or declared_unanswerable:
             return "needs_confirmation"
         return "grounded" if cited else "needs_confirmation"
     verification = claim_support.get("verification")
-    if verification == VERIFIED:
+    if verification == VERIFIED and cited:
         return "grounded"
     if verification == DEGRADED_VERIFICATION and not cited:
         return "degraded"
@@ -470,6 +644,7 @@ def _degraded_answer(
         "retrieval_log_id": retrieval_log_id,
         "answer_status": "degraded",
         "degraded_reason": exc.error_type,
+        "verification_status": "not_run",
         "trustworthiness": _trust(items or [], citations, conflicts or [], index_freshness or {}, "degraded"),
         "index_freshness": index_freshness or {},
         "conflicts": conflicts or [],
@@ -498,7 +673,7 @@ def _code_set(content: str) -> set[str]:
     """从原文里抽取两位码值（如 01 营销获客、值域（00,01,02））。"""
 
     text = str(content or "")
-    return set(re.findall(r"(?<![\dA-Za-z])(\d{2})(?=\s*[\u4e00-\u9fa5A-Za-z]|[\s,，、;；)）])", text))
+    return extract_code_values(text, affirmative_only=True)
 
 
 def _conflict_key(item: dict) -> str | None:
@@ -517,13 +692,19 @@ def _conflict_key(item: dict) -> str | None:
     return f"{match.group(1)}@{table.group(1)}" if table else match.group(1)
 
 
-def _evidence_conflicts(items):
+def _evidence_conflicts(items, *, relevant_items=None, query=""):
     groups = {}
     for item in items:
         key = _conflict_key(item)
         if key and item.get("authority_rank", 0) >= 2:
             groups.setdefault(str(key), []).append(item)
     conflicts = []
+    relevant_keys = {_conflict_key(item) for item in (relevant_items or [])}
+    unclear_scope = None in relevant_keys
+    relevant_keys.discard(None)
+    relevant_fields = extract_field_codes(query)
+    for key in relevant_keys:
+        relevant_fields.update(extract_field_codes(key))
     for key, rows in groups.items():
         if len(rows) < 2:
             continue
@@ -532,6 +713,17 @@ def _evidence_conflicts(items):
         # 避免把同一数据项的不同问答误判成冲突。
         code_sets = {frozenset(_code_set(row.get("content"))) for row in rows if _code_set(row.get("content"))}
         explicit = any((row.get("metadata_json") or {}).get("conflict_key") for row in rows)
+        queried_name = any(
+            match.group(1).strip() in query
+            for row in rows
+            for match in re.finditer(r"数据项名称[：:]\s*([^\s；;，,。]{2,30})", str(row.get("content") or ""))
+        )
+        # A recalled conflict in another field cannot invalidate this answer.
+        # Keep explicit flags, unclear scope and uncited peers of a used field.
+        if (relevant_items is not None and not unclear_scope and (relevant_keys or relevant_fields)
+                and not explicit and not queried_name):
+            if key not in relevant_keys and not (extract_field_codes(key) & relevant_fields):
+                continue
         high_authority = any(row.get("authority_rank", 0) >= 4 for row in rows)
         signatures = {row.get("content_hash") or str(row.get("content") or "") for row in rows}
         conflict = (len(code_sets) > 1) or (explicit and high_authority and len(signatures) > 1)
@@ -542,7 +734,28 @@ def _evidence_conflicts(items):
 
 
 def _trust(items, citations, conflicts, index_freshness, model_status, claim_support=None):
-    rank = max((item.get("authority_rank", 0) for item in items), default=0)
+    # Authority is a property of evidence actually used in the answer, not of every
+    # candidate returned by retrieval. An uncited high-authority row must not inflate
+    # the trust grade of an answer supported by a lower-authority citation.
+    cited_ids = {
+        str(citation.get("knowledge_unit_id"))
+        for citation in citations or []
+        if citation.get("knowledge_unit_id") is not None
+    }
+    cited_items = [
+        item for item in items or []
+        if str(item.get("knowledge_unit_id")) in cited_ids
+    ]
+    authority_values = []
+    for citation in citations or []:
+        matching = [item for item in cited_items
+                    if str(item.get("knowledge_unit_id")) == str(citation.get("knowledge_unit_id"))]
+        inherited = matching[0] if matching else {}
+        merged = {**inherited, **{key: value for key, value in citation.items() if value is not None}}
+        ranks = [_effective_authority_rank(merged), *[_effective_authority_rank(item) for item in matching]]
+        authority_values.append(min(ranks))
+    # The grade describes the whole answer, including its weakest cited source.
+    rank = min(authority_values, default=0)
     located = bool(citations) and all((citation.get("locator") or {}).get("block_id") for citation in citations)
     formal_index_state = index_freshness.get("formal_index_current")
     index_current = formal_index_state is True
@@ -551,7 +764,7 @@ def _trust(items, citations, conflicts, index_freshness, model_status, claim_sup
     support_status = _support_model_status(claim_support)
     if model_status == "degraded" or support_status in {"degraded", "unsupported_claims"} or conflicts or any(item.get("historical") for item in items):
         grade = "D"
-    elif support_status == "partial_support":
+    elif support_status == "partial_support" or model_status != "normal" or claim_support is None:
         grade = "C" if citations else "D"
     elif rank >= 6 and located and index_current:
         grade = "A"
@@ -578,13 +791,45 @@ def _trust(items, citations, conflicts, index_freshness, model_status, claim_sup
             "label": _VERIFICATION_LABELS.get(
                 str(verification), "引用支撑校验未完成，结论无法验证"),
         }
+    else:
+        dimensions["support_verification"] = {
+            "ok": False, "label": "未运行语义引用支撑校验",
+        }
     return {"grade": grade, "reason": labels[grade], "dimensions": dimensions}
+
+
+_SOURCE_AUTHORITY_CAPS = {
+    "regulatory_formal": 6,
+    "regulatory_qa": 5,
+    "internal_policy": 4,
+    "internal_interpretation": 3,
+    "business_material": 2,
+    "technical_evidence": 1,
+}
+
+
+def _effective_authority_rank(item: dict) -> int:
+    """Derive a fail-closed authority rank from governed source metadata.
+
+    The numeric rank is diagnostic input, not permission to promote a weaker source.
+    A declared unknown category cannot grant authority. Legacy rows without category
+    metadata retain a bounded numeric diagnostic for compatibility.
+    """
+    raw_rank = item.get("authority_rank")
+    valid = type(raw_rank) in (int, float) and raw_rank >= 0
+    if type(raw_rank) is float:
+        valid = valid and math.isfinite(raw_rank)
+    rank = min(raw_rank, 6) if valid else 0
+    category = str(item.get("source_category") or "").strip().lower()
+    cap = _SOURCE_AUTHORITY_CAPS.get(category, 0 if category else 6)
+    return int(min(rank, cap))
 
 def _empty_trust():
     return {"grade": "D", "reason": "证据不足，需要人工确认", "dimensions": {
         "authority": {"level": 0, "label": "无有效资料"}, "version_validity": {"ok": False, "label": "无有效版本"},
         "evidence_location": {"ok": False, "label": "无证据定位"}, "consistency": {"ok": True, "label": "无可比较证据"},
-        "index_freshness": {"ok": False, "label": "无可用索引证据"}, "model_status": {"ok": False, "label": "未调用模型"}}}
+        "index_freshness": {"ok": False, "label": "无可用索引证据"}, "model_status": {"ok": False, "label": "未调用模型"},
+        "support_verification": {"ok": False, "label": "未运行语义引用支撑校验"}}}
 
 
 _VERIFICATION_LABELS = {
@@ -611,12 +856,45 @@ def _answer_code_values(answer: str) -> set[str]:
     in the sentence are not mistaken for code values.
     """
 
-    values: set[str] = set()
-    text = answer or ""
-    for match in _CODE_VALUE_CONTEXT.finditer(text):
-        window = text[match.start():match.start() + 80]
-        values.update(re.findall(r"\b\d{2}\b", window))
-    return values
+    return extract_code_values(answer, affirmative_only=True, require_context=True)
+
+
+def _identifier_claims(text):
+    # A trailing citation can cover a semicolon list in its sentence. Keep
+    # explicit local citations, and never borrow across sentence boundaries.
+    local_text = re.sub(r"([。！？])([ \t]*(?:(?:\[\d+\]|【\d+】)[ \t]*)+)",
+                        r"\2\1", str(text or ""))
+    for sentence in re.split(r"(?<=[。！？\n])", local_text):
+        sentence = re.sub(r"(?<=\d)[;；](?=\d)", ",", sentence)
+        clauses = re.split(r"(?<!\d)[;；]|[;；](?!\d)", sentence)
+        following_refs = set()
+        bound = []
+        for clause in reversed(clauses):
+            explicit = set(re.findall(r"[\[【](\d+)[\]】]", clause))
+            if explicit:
+                following_refs = explicit
+            for claim in split_claims_all(clause):
+                own = set(re.findall(r"[\[【](\d+)[\]】]", claim))
+                bound.append((claim, own or following_refs))
+        yield from reversed(bound)
+
+
+def _identifier_gaps(answer, supported_claims, citations):
+    by_id = {str(item.get("knowledge_unit_id")): str(item.get("quoted_content") or "")
+             for item in citations}
+    gaps = set()
+    for text in [answer, *supported_claims]:
+        for claim, refs in _identifier_claims(text):
+            evidence = "\n".join(by_id[ref] for ref in refs if ref in by_id)
+            fields = extract_field_codes(claim)
+            codes = _answer_code_values(claim)
+            prohibited = extract_code_values(claim, prohibited_only=True, require_context=True)
+            if not fields and not codes and not prohibited:
+                continue
+            gaps.update(fields - extract_field_codes(evidence))
+            gaps.update(codes - extract_code_values(evidence, affirmative_only=True))
+            gaps.update(prohibited - extract_code_values(evidence, prohibited_only=True))
+    return sorted(gaps)
 
 
 def _invented_qualified_identifiers(answer: str, evidence: str) -> list[str]:

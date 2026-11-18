@@ -1,0 +1,72 @@
+{
+  "round": 40,
+  "date": "2026-11-17",
+  "scope": "candidate37 budget bridge audit and zero-budget preflight correction",
+  "candidate_browser_evidence": ".local-run/rag-long-run/round-20261116-39/candidate37-browser-auth3/results.json",
+  "central_budget": {
+    "provider_requests_cap": 800,
+    "provider_requests_used": 531,
+    "provider_requests_reserved": 0,
+    "provider_requests_remaining": 269,
+    "tokens_cap": 8000000,
+    "tokens_used": 3608925,
+    "tokens_reserved": 0,
+    "tokens_remaining": 4391075,
+    "unknown_usage_requests": 3,
+    "json_sqlite_consistent": true
+  },
+  "bridge_probe": {
+    "health_status": 200,
+    "health_budget_marker": "central-local-ledger",
+    "unauthenticated_completion_status": 401,
+    "provider_request_delta": 0,
+    "token_delta": 0
+  },
+  "candidate_budget": {
+    "summary_request_cap": 0,
+    "summary_token_cap": 0,
+    "attempt_count": 0,
+    "pending_count": 0,
+    "sqlite_limits_row": null
+  },
+  "candidate_route_enable": {
+    "status": "stopped_at_preflight",
+    "reason": "candidate zero-budget SQLite limits row was not initialized",
+    "remote_service_or_relay_configuration_changed": false,
+    "authenticated_model_request": false
+  },
+  "local_validation": {
+    "files": [
+      "backend/tests/rag_remote_candidate37_budget_route.py",
+      "backend/tests/test_rag_remote_candidate37_budget_route.py",
+      "backend/tests/rag_remote_budget_bridge.py",
+      "backend/tests/test_rag_remote_budget_bridge.py"
+    ],
+    "pytest_passed": 25,
+    "p0b_regression_modules": 12,
+    "p0b_regression_passed": 212,
+    "p0b_regression_subtests_passed": 6,
+    "p0b_regression_warnings": 1,
+    "p0b_warning": "Starlette TestClient integration emits httpx deprecation warning",
+    "p0b_additional_modules": 4,
+    "p0b_additional_passed": 46,
+    "p0b_distinct_modules_total": 16,
+    "p0b_passed_total": 258,
+    "py_compile": "passed",
+    "git_diff_check": "passed",
+    "real_model_requests": 0
+  },
+  "goal_ledger": {
+    "consistent": true,
+    "complete": false,
+    "verified": 2,
+    "in_progress": 9,
+    "pending": 7
+  },
+  "credential_handling": {
+    "new_ephemeral_relay_credential_was_created_and_uploaded_before_latest_stop_boundary": true,
+    "value_recorded": false,
+    "used_for_authenticated_request": false,
+    "rotated_after_stop_boundary": false
+  }
+}

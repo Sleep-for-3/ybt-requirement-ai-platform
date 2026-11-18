@@ -1,0 +1,57 @@
+{
+  "round_id": "ROUND-20261118-63",
+  "date": "2026-11-18",
+  "goal_ids": ["G-P0-B", "G-P0-C"],
+  "goal_status_changed": false,
+  "scope": "http_conflict_mapping_and_question_error_message",
+  "source": {
+    "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+    "code_hash": "3c31ce3f25b53b66ed59df6f6b6a553b104fb6d403a658f1ef9937d44e1da964",
+    "served_by": "in_process_asgi_current_application",
+    "production_files": {
+      "backend/app/services/rag/citation_validator.py": "904d64d4741500959ae6fcbc28be0238172e6d85d368632ff545a3322901dac3",
+      "backend/app/api/knowledge_rag.py": "67fa582bdecb9c7e34a81b9937648b181ff92f41bdfea80372db6e1545270eb7",
+      "frontend/lib/knowledge-contract.mjs": "123bcf9a50f469e2383c0b610a5745c106939dd9e61dfa68246d31613be2c3e2"
+    }
+  },
+  "verification": {
+    "unit_api_regression": {
+      "passed": 130, "failed": 0, "exit_code": 0,
+      "new_contract_tests": 28,
+      "junit": ".local-run/rag-long-run/round-20261118-63/green.junit.xml"
+    },
+    "frontend_contract": {"passed": 7, "failed": 0, "exit_code": 0},
+    "isolated_postgresql_asgi": {
+      "passed": 11, "failed": 0, "exit_code": 0,
+      "project_id": 17, "version_id": 20, "unit_id": 5977,
+      "generator": "controlled_mock", "planner": "controlled_mock", "judge": "controlled_mock",
+      "retrieval_mode": "keyword_only",
+      "path": ".local-run/rag-long-run/round-20261118-63/component-attempt5/results.json"
+    },
+    "browser": {
+      "passed": 4, "failed": 0, "exit_code": 0,
+      "evidence_tier": "next_dev_browser_with_intercepted_synthetic_api",
+      "path": ".local-run/rag-long-run/round-20261118-63/browser-attempt3/results.json",
+      "mobile_width": 390, "screenshots_reviewed": true
+    },
+    "py_compile": {"exit_code": 0},
+    "diff_check": {"exit_code": 0}
+  },
+  "source_is_synthetic": true,
+  "gold": false,
+  "holdout": false,
+  "external_provider_requests": 0,
+  "external_provider_tokens": 0,
+  "shared_vectors_changed": false,
+  "old_frozen_data_changed": false,
+  "remote_write": false,
+  "deployment_changed": false,
+  "temporary_frontend_port": 18139,
+  "temporary_frontend_stopped": true,
+  "remaining": [
+    "independent_held_out_source_package",
+    "current_deployed_api_and_production_browser_contract",
+    "real_model_business_acceptance",
+    "agent_task_states_and_full_keyboard_acceptance"
+  ]
+}

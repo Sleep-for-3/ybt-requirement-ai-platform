@@ -1,0 +1,86 @@
+{
+  "round": 53,
+  "date": "2026-11-17",
+  "goal_ids": ["G-P0-B", "G-P0-C", "G-UX-ACCEPT"],
+  "scope": "current_worktree_isolated_real_components_and_browser_degradation_state",
+  "git_branch": "dsh/handoff-20261025-round73",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "app_identity": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.c7df8b72bd80",
+  "source": {
+    "synthetic": true,
+    "holdout": false,
+    "sha256": "863f2b4feb253a02eaac8209ff6f0c1d87d60e7f1729537c20d3d649a2862938"
+  },
+  "components": {
+    "postgres_port": 15442,
+    "redis_port": 16392,
+    "milvus_port": 19533,
+    "api_port": 18130,
+    "formal_api_port": 18132,
+    "browser_api_port": 18134,
+    "embedding_port": 18131,
+    "frontend_port": 18133,
+    "database_migrations": "passed",
+    "milvus_index": {
+      "status": "active",
+      "documents": 1,
+      "chunks": 1,
+      "sample_search_hit_count": 1
+    },
+    "direct_qa": {
+      "answer_status": "needs_confirmation",
+      "confidence": "low",
+      "citation_count": 1,
+      "original_content_http_status": 200,
+      "original_content_hash_matches": true
+    },
+    "runtime_guard_tests": {
+      "junit": ".local-run/rag-long-run/round-20261117-53/runtime-guard-attempt4.junit.xml",
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "browser_attempt6": {
+    "checks": [
+      "browser_cors_and_current_api_identity",
+      "completed_without_conclusion_state_and_cross_project_context"
+    ],
+    "task_status": "completed",
+    "incomplete": false,
+    "citation_count": 0,
+    "original_content_request_count": 0,
+    "desktop_mobile_horizontal_overflow": false,
+    "failure": null
+  },
+  "evidence_limitations": [
+    "llm_provider_is_mock",
+    "source_is_synthetic",
+    "no_business_holdout",
+    "browser_task_has_no_conclusion_or_citation",
+    "browser_original_content_view_not_exercised"
+  ],
+  "budget": {
+    "provider_requests_delta": 0,
+    "tokens_delta": 0,
+    "requests_used": 531,
+    "requests_cap": 800,
+    "tokens_used": 3608925,
+    "tokens_cap": 8000000,
+    "requests_reserved": 0,
+    "tokens_reserved": 0,
+    "unknown_usage_requests": 3
+  },
+  "mutations": {
+    "existing_runtime_mutations": 0,
+    "public_route_changes": 0,
+    "remote_writes": 0,
+    "existing_milvus_mutations": 0
+  },
+  "attempts": {
+    "browser_attempt2": "failed: preflight CORS response was not captured by the browser response observer",
+    "browser_attempt3": "failed: same CORS observation assertion",
+    "browser_attempt5": "failed: test expected an original-content button for a task with no citations",
+    "browser_attempt6": "passed within stated scope"
+  },
+  "report": "rounds/ROUND-20261117-53.md"
+}

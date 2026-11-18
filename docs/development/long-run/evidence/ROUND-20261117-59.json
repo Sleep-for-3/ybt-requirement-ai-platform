@@ -1,0 +1,108 @@
+{
+  "round": 59,
+  "date": "2026-11-18",
+  "goals": ["G-P0-B", "G-P0-C", "G-UX-ACCEPT"],
+  "source": {
+    "app_commit": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.87d4cd5f1390",
+    "code_hash": "87d4cd5f1390b0cd4079425435d8e0bcd0aef0071372d5ffe55f5b23e74af9f7",
+    "schema_head": "202611010014"
+  },
+  "evidence_tier": {
+    "components": "real_isolated_postgresql_redis_celery_milvus_local_embedding",
+    "browser": "real_browser_real_isolated_api",
+    "llm": "mock"
+  },
+  "runtime": {
+    "name": "rag-p0-r53",
+    "postgres_port": 15442,
+    "redis_port": 16392,
+    "milvus_port": 19533,
+    "embedding_port": 18131,
+    "browser_api_port": 18135,
+    "frontend_port": 18136
+  },
+  "fixture": {
+    "kind": "synthetic_version_rollback",
+    "gold": false,
+    "holdout": false,
+    "project_id": 9,
+    "document_id": 8,
+    "v1_version_id": 8,
+    "v2_version_id": 9,
+    "frozen_requirement_id": 2,
+    "v1_source_sha256": "91520852c37e6056f045167ad84628ac1468e93db45d8554d508dfa8d60f96d6",
+    "v2_source_sha256": "2f27518035de0beeb69c24de6ecf957daf87625783a2d4dd0d44a4b88cdf4a7d"
+  },
+  "api_checks": {
+    "passed": 9,
+    "failed": 0,
+    "default_search_excludes_old_version": true,
+    "authorized_history_returns_old_version": true,
+    "frozen_revision_returns_only_v1": true,
+    "unmatched_pin_fails_closed": true,
+    "index_pointer_rollback": {
+      "before": 10,
+      "temporary": 11,
+      "restored": 10,
+      "vector_mutation": false
+    },
+    "original_versions_byte_auditable": true
+  },
+  "browser_checks": {
+    "passed": 4,
+    "failed": 0,
+    "real_login": true,
+    "frozen_answer_uses_v1": true,
+    "downloaded_v1_sha_matches": true,
+    "mobile_viewport": "390x844",
+    "horizontal_overflow": false,
+    "ask_request": {
+      "path": "/api/projects/9/knowledge/ask",
+      "status": 200
+    },
+    "evidence_requests": [
+      {
+        "path": "/api/knowledge/documents/8/preview",
+        "project_id": "9",
+        "version_id": "8",
+        "status": 200
+      },
+      {
+        "path": "/api/knowledge/documents/8/content",
+        "project_id": "9",
+        "version_id": "8",
+        "status": 200
+      }
+    ]
+  },
+  "providers": {
+    "llm": "mock",
+    "external_requests_delta": 0,
+    "external_tokens_delta": 0,
+    "cumulative_requests": 531,
+    "request_limit": 800,
+    "cumulative_tokens": 3608925,
+    "token_limit": 8000000,
+    "reserved_requests": 0,
+    "reserved_tokens": 0,
+    "unknown_usage_requests": 3
+  },
+  "production_code_changed": false,
+  "public_traffic_switched": false,
+  "overall_p0_complete": false,
+  "p1_p2_released": false,
+  "attempts": {
+    "api_final": ".local-run/rag-long-run/round-20261117-59-attempt2/results.json",
+    "browser_final": ".local-run/rag-long-run/round-20261117-59-browser-attempt5/results.json",
+    "browser_failures": [
+      ".local-run/rag-long-run/round-20261117-59-browser-attempt1/results.json",
+      ".local-run/rag-long-run/round-20261117-59-browser-attempt2/results.json",
+      ".local-run/rag-long-run/round-20261117-59-browser-attempt3/results.json",
+      ".local-run/rag-long-run/round-20261117-59-browser-attempt4/results.json"
+    ]
+  },
+  "limitations": [
+    "Synthetic fixture and Mock LLM do not establish business-quality or real-model acceptance.",
+    "P0-A remains blocked on an authorized, traceable, sufficiently sized source pack with evidence of non-exposure."
+  ]
+}

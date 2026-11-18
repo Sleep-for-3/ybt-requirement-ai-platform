@@ -47,9 +47,12 @@ def normalize_version(value: Any) -> tuple[str, ...] | None:
     if year:
         tokens.append(year.group(1))
         remainder = f"{text[: year.start()]} {text[year.end():]}".strip()
-    core = _VERSION_CORE.search(remainder) or re.search(r"(?i)(?:v\s*)?(\d+(?:\.\d+)*)", remainder)
-    if core:
-        tokens.extend(core.group(1).split("."))
+    revisions = re.findall(r"\d+(?:\.\d+)*", remainder)
+    if revisions:
+        # Preserve every revision component: P0-V1 and P0-V2 must not both
+        # collapse to the first numeric prefix (0).
+        for revision in revisions:
+            tokens.extend(revision.split("."))
     elif not tokens:
         # 形如 "第 2 版" 的写法
         embedded = re.search(r"(\d+(?:\.\d+)*)\s*版", text)

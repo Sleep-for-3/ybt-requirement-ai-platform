@@ -1,0 +1,62 @@
+{
+  "round": 47,
+  "date": "2026-11-17",
+  "evidence_tier": "current_frontend_real_round46_components_no_external_model",
+  "source_is_synthetic": true,
+  "holdout": false,
+  "frontend": "http://127.0.0.1:18128",
+  "temporary_api": "http://127.0.0.1:18129",
+  "formal_api": "http://127.0.0.1:18126",
+  "api_identity": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.a17bdedabe3f",
+  "isolated_components": {
+    "postgres_port": 15441,
+    "redis_port": 16391,
+    "celery_worker": true,
+    "milvus_port": 19531,
+    "embedding": "local_fastembed_cpu:BAAI/bge-small-zh-v1.5",
+    "llm": "mock"
+  },
+  "project_id": 1,
+  "task_id": 1,
+  "task_status": "completed",
+  "checks": [
+    "login_rejects_bad_password_then_recovers",
+    "real_project_task_list_desktop_keyboard_mobile",
+    "task_form_validation_prevents_invalid_submission",
+    "task_evidence_opens_original_version_and_matches_hash",
+    "evidence_drawer_mobile_and_escape_close"
+  ],
+  "original_version": {
+    "project_id": 1,
+    "document_id": 1,
+    "version_id": 1,
+    "http_status": 200,
+    "sha256": "863f2b4feb253a02eaac8209ff6f0c1d87d60e7f1729537c20d3d649a2862938",
+    "hash_matches_registered_source": true
+  },
+  "external_provider_requests": 0,
+  "new_tasks_created": 0,
+  "source_mutations": 0,
+  "temporary_services_after_acceptance": "stopped_api_18129_and_frontend_18128; preserved_round46_api_18125_formal_api_18126_embedding_18127_and_isolated_components",
+  "goal_check": {
+    "consistent": true,
+    "complete": false,
+    "verified": 2,
+    "in_progress": 9,
+    "pending": 7
+  },
+  "attempts": {
+    "frontend_start_attempt1": "failed_cli_path_quoting",
+    "browser_attempt1": "failed_empty_fetch_response_body_hash",
+    "browser_attempt2": "failed_same_body_capture_assumption",
+    "browser_attempt3": "passed"
+  },
+  "result_path": ".local-run/rag-long-run/round-20261117-47/browser-attempt3/results.json",
+  "screenshots": [
+    ".local-run/rag-long-run/round-20261117-47/browser-attempt3/tasks-desktop.png",
+    ".local-run/rag-long-run/round-20261117-47/browser-attempt3/tasks-mobile.png",
+    ".local-run/rag-long-run/round-20261117-47/browser-attempt3/task-detail-desktop.png",
+    ".local-run/rag-long-run/round-20261117-47/browser-attempt3/evidence-mobile.png"
+  ],
+  "secrets_recorded": false
+}

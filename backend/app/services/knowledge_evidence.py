@@ -71,6 +71,8 @@ def document_citation(item, project_id):
         "source_type": item.get("knowledge_type"),
         "project_id": item.get("project_id", project_id),
         "label": item.get("title") or item.get("source_file_name") or "文档证据",
+        "source_name": item.get("document_title") or item.get("source_name") or item.get("title"),
+        "version": item.get("regulatory_version") or item.get("internal_revision") or item.get("version"),
         "quoted_content": item["content"][:1500],
         "href": f"/knowledge/documents/{item['document_id']}/preview?project_id={project_id}&version_id={item['document_version_id']}",
         "locator": item.get("locator") or {

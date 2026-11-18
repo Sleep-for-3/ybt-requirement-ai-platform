@@ -24,6 +24,16 @@ if os.environ.get("VNEXT_ALLOW_REAL_RUNTIME") != "1":
         "EMBEDDING_API_KEY_ENV_NAME": "",
         "VECTOR_STORE_PROVIDER": "mock",
         "MILVUS_URI": "",
+        # API fixtures create an isolated SQLite database and do not carry a
+        # login token.  Keep the deployment's required-auth setting from
+        # leaking into unit tests; auth-specific tests opt in explicitly.
+        "AUTH_MODE": "optional",
+        # API tests use the in-process queue; never inherit a developer's
+        # Celery/Redis deployment endpoints from backend/.env.
+        "TASK_QUEUE_PROVIDER": "inline",
+        "REDIS_URL": "redis://127.0.0.1:6379/0",
+        "CELERY_BROKER_URL": "redis://127.0.0.1:6379/0",
+        "CELERY_RESULT_BACKEND": "redis://127.0.0.1:6379/1",
     }.items():
         os.environ[_name] = _value
 

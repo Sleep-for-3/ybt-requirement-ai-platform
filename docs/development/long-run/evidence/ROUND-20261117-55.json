@@ -1,0 +1,88 @@
+{
+  "round": 55,
+  "date": "2026-11-17",
+  "goal_ids": ["G-P0-B", "G-P0-C", "G-UX-ACCEPT"],
+  "scope": "post_round54_real_component_and_browser_acceptance",
+  "git_branch": "dsh/handoff-20261025-round73",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "app_identity": "206d4313a5805613f5bf7e0b5db41390ab92d31f+worktree.87d4cd5f1390",
+  "source_hash": "87d4cd5f1390b0cd4079425435d8e0bcd0aef0071372d5ffe55f5b23e74af9f7",
+  "source_file_count": 777,
+  "runtime": {
+    "browser_api_attempt": 2,
+    "api_port": 18135,
+    "frontend_port": 18136,
+    "postgres_port": 15442,
+    "redis_port": 16392,
+    "redis_broker_db": 4,
+    "redis_result_db": 5,
+    "milvus_port": 19533,
+    "embedding_port": 18131,
+    "llm_provider": "mock",
+    "embedding_provider": "local_vllm",
+    "shared_budget_required": true,
+    "readiness": "ready"
+  },
+  "task": {
+    "task_id": 2,
+    "status": "completed",
+    "scenario_key": "knowledge_question",
+    "required_answer_tool": "answer_knowledge_question",
+    "required_answer_step_status": "completed",
+    "required_answer_tool_call_status": "completed",
+    "answer_status": "needs_confirmation",
+    "answer_chars": 46,
+    "citation_count": 1,
+    "citation_ids": ["knowledge-unit-1"],
+    "answer_evidence_count": 2
+  },
+  "original_content": {
+    "document_id": 1,
+    "project_id": 1,
+    "version_id": 1,
+    "preview_http_status": 200,
+    "content_http_status": 200,
+    "source_sha256": "863f2b4feb253a02eaac8209ff6f0c1d87d60e7f1729537c20d3d649a2862938",
+    "downloaded_sha256": "863f2b4feb253a02eaac8209ff6f0c1d87d60e7f1729537c20d3d649a2862938",
+    "hash_matches": true,
+    "source_is_synthetic": true,
+    "holdout": false
+  },
+  "browser": {
+    "frontend_build": ".next-round55-production",
+    "checks": [
+      "browser_cors_and_current_api_identity",
+      "task_answer_source_version_and_cross_project_context"
+    ],
+    "desktop_no_horizontal_overflow": true,
+    "viewport_390_no_horizontal_overflow": true,
+    "evidence": ".local-run/rag-long-run/round-20261117-55/browser-attempt4/results.json"
+  },
+  "verification": {
+    "runtime_launcher_test_command": ".venv/Scripts/python.exe -m pytest tests/test_rag_round46_runtime.py -q",
+    "runtime_launcher_tests_passed": 8,
+    "browser_script_node_check": "passed",
+    "git_diff_check": "passed",
+    "frontend_build": "passed",
+    "frontend_routes": 54
+  },
+  "budget": {
+    "provider_requests_delta": 0,
+    "tokens_delta": 0,
+    "requests_used": 531,
+    "requests_cap": 800,
+    "tokens_used": 3608925,
+    "tokens_cap": 8000000,
+    "requests_reserved": 0,
+    "tokens_reserved": 0,
+    "unknown_usage_requests": 3
+  },
+  "goal_status": {
+    "G-P0-A": "blocked_external",
+    "G-P0-B": "in_progress",
+    "G-P0-C": "in_progress",
+    "G-UX-ACCEPT": "in_progress",
+    "P1_P2": "locked"
+  },
+  "report": "rounds/ROUND-20261117-55.md"
+}

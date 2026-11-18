@@ -136,6 +136,45 @@ def test_payload_shapes_are_parsed():
     assert parse_judge_verdicts(None) == []
 
 
+@pytest.mark.parametrize("payload", [
+    {}, [], {"verdicts": []}, {"message": "no structured answer"},
+    {"claims": [{"claim_id": "claim-1"}]},
+    {"verdicts": [{"citation_id": "knowledge-unit-1", "verdict": "unrecognized-label"}]},
+    "not json at all",
+])
+def test_malformed_judge_payload_is_explicitly_degraded(db, monkeypatch, payload):
+    monkeypatch.setattr(get_settings(), "citation_support_check", "judge", raising=False)
+    _install_gateway(monkeypatch, lambda: _VerdictService(payload))
+    result = asyncio.run(
+        check_citation_support(db, [_citation(1)], answer="余额以合同为准。", project_id=1)
+    )
+    assert result["degraded"] is True
+    assert result["degraded_reason"] == "invalid_model_response"
+    assert result["verification"] == "degraded"
+    assert result["judged"] is False
+    assert result["claims_judged"] == 0
+    assert result["supported_count"] == 0
+    assert result["claims_unjudged"] == 1
+    assert CALL_COUNT["value"] == 1
+
+
+def test_explicit_unknown_judgement_is_not_a_format_failure(db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "citation_support_check", "judge", raising=False)
+    _install_gateway(monkeypatch, lambda: _VerdictService({
+        "verdicts": [{"citation_id": "knowledge-unit-1", "verdict": "unknown", "reason": "证据不足"}],
+        "claims": [{"claim_id": "claim-1", "verdict": "unknown", "reason": "证据不足"}],
+    }))
+    result = asyncio.run(
+        check_citation_support(db, [_citation(1)], answer="余额以合同为准。", project_id=1)
+    )
+    assert result["degraded"] is False
+    assert result["judged"] is True
+    assert result["claims_judged"] == 1
+    assert result["claims_unknown"] == 1
+    assert result["supported_count"] == 0
+    assert result["verification"] != "verified"
+
+
 # --------------------------------------------------------------------------- switch off
 
 
@@ -250,7 +289,7 @@ def test_unsupported_citation_downgrades_the_answer_instead_of_staying_grounded(
     monkeypatch.setattr(grounded, "prepare_model_input", lambda *a, **k: "synthetic evidence")
 
     async def answer(*_args, **_kwargs):
-        return {"answer": "结论", "confidence_level": "high", "supported_claims": []}, {}
+        return {"answer": "结论 [1]", "confidence_level": "high", "supported_claims": []}, {}
 
     monkeypatch.setattr(grounded, "execute_runtime_chat_with_metadata", answer)
     result = asyncio.run(grounded.grounded_answer(db, 1, "question"))
@@ -287,9 +326,11 @@ def test_empty_and_unparseable_judge_replies_do_not_raise(db, monkeypatch):
     monkeypatch.setattr(settings, "citation_support_check", "judge", raising=False)
     _install_gateway(monkeypatch, lambda: _VerdictService({}))
     result = asyncio.run(check_citation_support(db, [_citation(1)], answer="结论", project_id=1))
-    # The judge answered, but nothing was parseable: unknown, no crash, no degradation flag.
+    # A successful transport does not make an empty judgement usable.
     assert result["verdicts"][0]["verdict"] == "unknown"
-    assert result["judged"] is True
+    assert result["judged"] is False
+    assert result["degraded"] is True
+    assert result["degraded_reason"] == "invalid_model_response"
 
 
 # --------------------------------------------------------------------------- boundaries

@@ -1,0 +1,14 @@
+{
+  "schema": "rag-holdout-source-binding-correction-v1",
+  "parent_dataset_version": "9e80a8bbd0ff36e8feef43e0cd228f58bf0132f14cc39240d5ab1f8260c2585f",
+  "reason": "The first binder selected a derived SQL summary with a whole-file locator. Only raw paragraph units with paragraph_index and actual source text can support the fixed source lines.",
+  "annotation_changes_only": true,
+  "queries_expected_answers_and_source_lines_changed": false,
+  "generation_replayed": false,
+  "mapping": [
+    {"case_prefix": "SQL-I", "old_relevant_unit_id": 18025, "corrected_relevant_unit_id": 18027, "source_file": "t_east_ybt_xykxxb_00000.sql", "source_sha256": "fa8f8b782c1611309933beccd45a5d85da3f7f5bf5253ac205aa5592920a2e7a"},
+    {"case_prefix": "SQL-T", "old_relevant_unit_id": 18028, "corrected_relevant_unit_id": 18030, "source_file": "t_east_ybt_xykjymxb_00000.sql", "source_sha256": "46ebdde956197b5ccd67b5ec99ed7ee98a97f2ac9521241ef72ced487f1615a8"}
+  ],
+  "review_kind": "agent_source_review",
+  "human_business_approved": false
+}

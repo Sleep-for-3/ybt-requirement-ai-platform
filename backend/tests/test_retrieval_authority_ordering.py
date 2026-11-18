@@ -7,7 +7,15 @@
 
 from __future__ import annotations
 
-from app.services.retrieval.hybrid_retriever import _order_items
+from types import SimpleNamespace
+
+from app.services.retrieval.hybrid_retriever import (
+    _content_identifier_matches,
+    _order_items,
+    _query_sql_identifiers,
+)
+from app.services.code_extraction import extract_sql_identifiers
+from app.core.settings import Settings
 
 
 def _item(unit_id: int, authority_rank: int) -> dict:
@@ -48,3 +56,49 @@ def test_unknown_mode_falls_back_to_boost() -> None:
     ordered = _order_items(items, ranking, "")
 
     assert [item["knowledge_unit_id"] for item in ordered] == [2, 1]
+
+
+def test_explicit_field_codes_match_only_complete_identifiers() -> None:
+    matches = _content_identifier_matches(
+        "CASE WHEN F090029 = '06' AND H040037 = '01' THEN 1 END F0900290",
+        {"F090029", "H040037"},
+    )
+    assert matches == {"F090029", "H040037"}
+
+
+def test_explicit_sql_identifiers_are_extracted_with_complete_boundaries() -> None:
+    query = "HYF_BK_TERMINAL_INFO中DEV_EXT和DEV_STATUS如何判断，DEV_STATUS2不参与"
+    assert extract_sql_identifiers(query) == {
+        "HYF_BK_TERMINAL_INFO", "DEV_EXT", "DEV_STATUS", "DEV_STATUS2"
+    }
+
+
+def test_sql_identifier_body_match_does_not_accept_prefix_or_substring() -> None:
+    matches = _content_identifier_matches(
+        "CASE WHEN DEV_STATUS2 = '0' THEN END; START_DT",
+        {"DEV_STATUS", "START_DT"},
+    )
+    assert matches == {"START_DT"}
+
+
+def test_sql_identifier_ranking_experiment_is_disabled_by_default() -> None:
+    assert Settings(_env_file=None).retrieval_sql_identifier_boost_enabled is False
+
+
+def test_sql_identifier_experiment_is_independent_of_query_expansion() -> None:
+    query = "HYF_BK_TERMINAL_INFO 的 DEV_STATUS 如何判断"
+    settings = SimpleNamespace(
+        query_expansion_enabled=False,
+        retrieval_sql_identifier_boost_enabled=True,
+    )
+    assert _query_sql_identifiers(query, settings) == {
+        "HYF_BK_TERMINAL_INFO", "DEV_STATUS"
+    }
+
+
+def test_sql_identifier_experiment_remains_opt_in() -> None:
+    settings = SimpleNamespace(
+        query_expansion_enabled=True,
+        retrieval_sql_identifier_boost_enabled=False,
+    )
+    assert _query_sql_identifiers("DEV_STATUS", settings) == set()

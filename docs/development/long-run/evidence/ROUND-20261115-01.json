@@ -1,0 +1,23 @@
+{
+  "round_id": "ROUND-20261115-01",
+  "verified_at": "2026-11-15T22:53:26+08:00",
+  "scope": "P0-D03-BATCH-CLAIM-ID-EVIDENCE",
+  "evidence_level": "L2 SQLite/Mock",
+  "git_head": "206d4313a5805613f5bf7e0b5db41390ab92d31f",
+  "dirty_worktree": true,
+  "code_sha256": {
+    "backend/app/services/rag/citation_validator.py": "aaa3739c42a23841574b7e25ce70eeba83bee50963b73430bd064623eb9758ae",
+    "backend/tests/test_overnight_citation_status.py": "8e1c754f781eeddf0755762d21f81e9866a95e9ff549cf4cdbE44dd329e1672a"
+  },
+  "red": {"tests": 1, "failures": 1, "exit_code": 1, "seconds": 96.12, "junit": ".local-run/rag-long-run/round-20261115-01-red.junit.xml"},
+  "initial_green": {"tests": 1, "failures": 0, "exit_code": 0, "seconds": 71.29, "junit": ".local-run/rag-long-run/round-20261115-01-green.junit.xml"},
+  "regression": {"tests": 34, "failures": 0, "errors": 0, "skipped": 0, "exit_code": 0, "seconds": 613.92, "junit": ".local-run/rag-long-run/round-20261115-01-regression.junit.xml"},
+  "py_compile_exit_code": 0,
+  "git_diff_check_exit_code": 0,
+  "new_real_model_requests": 0,
+  "new_real_model_tokens": 0,
+  "remote_access": false,
+  "schema_changed": false,
+  "index_changed": false,
+  "entire_p0_closed": false
+}

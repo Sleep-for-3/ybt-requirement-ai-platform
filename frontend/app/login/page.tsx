@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { apiPost, saveSession } from "@/lib/api";
+import { loginErrorMessage } from "@/lib/login-contract.mjs";
 
 const HIGHLIGHTS = [
   { icon: BrainCircuit, title: "AI 口径起草", text: "结合知识库与元数据，自动生成字段级业务口径草稿" },
@@ -29,8 +30,8 @@ export default function LoginPage() {
       });
       saveSession(session.access_token, session.refresh_token);
       router.replace("/projects");
-    } catch {
-      setMessage("用户名或密码错误");
+    } catch (error) {
+      setMessage(loginErrorMessage(error));
       setBusy(false);
     }
   }

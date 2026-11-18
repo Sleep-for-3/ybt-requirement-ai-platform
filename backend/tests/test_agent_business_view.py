@@ -17,7 +17,9 @@ from app.api.agent import (
     _pending_action,
     _result_brief,
     _task_row,
+    get_agent_task,
     get_agent_task_diagnostics,
+    list_agent_tasks,
 )
 from app.models import (
     AgentArtifact,
@@ -249,3 +251,30 @@ def test_diagnostics_requires_audit_permission(scope):
     with pytest.raises(HTTPException) as denied:
         get_agent_task_diagnostics(task.id, scope["analyst"], db)
     assert denied.value.status_code == 403
+
+
+def test_agent_task_detail_and_list_are_scoped_to_the_callers_project(scope):
+    db, project = scope["db"], scope["project"]
+    task = _task(db, project, status="completed")
+    outsider = User(username="other_project_manager", display_name="其他项目管理员", status="active")
+    db.add(outsider)
+    db.flush()
+    other_project = Project(
+        name="无权访问的项目", institution_id=project.institution_id, project_status="active",
+    )
+    db.add(other_project)
+    db.flush()
+    db.add(ProjectMembership(
+        project_id=other_project.id, user_id=outsider.id,
+        project_role="project_manager", status="active",
+    ))
+    db.commit()
+    outsider_principal = Principal(outsider.id, outsider.username, outsider.display_name)
+
+    with pytest.raises(HTTPException) as detail_denied:
+        get_agent_task(task.id, outsider_principal, db)
+    assert detail_denied.value.status_code == 404
+
+    with pytest.raises(HTTPException) as list_denied:
+        list_agent_tasks(project.id, outsider_principal, db)
+    assert list_denied.value.status_code == 404

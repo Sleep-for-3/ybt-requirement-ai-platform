@@ -282,7 +282,21 @@ def test_knowledge_versions_hybrid_search_grounded_answer_and_evaluation(tmp_pat
         units=_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}");assert len(units)==1;unit=units[0];assert unit["unit_type"]=="qa";assert unit["source_sheet_name"]=="答疑";assert unit["source_cell_range"]=="A2:F2"
         search=_post(client,f"/api/projects/{project['id']}/knowledge/hybrid-search",{"query":"客户证件类型 CERT_TYPE","knowledge_types":["regulatory_qa"],"top_k":5});assert search["items"][0]["knowledge_unit_id"]==unit["id"];assert search["items"][0]["source_cell_range"]=="A2:F2"
         answer=_post(client,f"/api/projects/{project['id']}/knowledge/ask",{"query":"客户证件类型取哪个字段","top_k":5});assert answer["citations"][0]["knowledge_unit_id"]==unit["id"]
-        case=_post(client,f"/api/projects/{project['id']}/evaluations/cases",{"case_name":"证件类型召回","query_text":"客户证件类型 CERT_TYPE","expected_knowledge_unit_ids_json":[unit["id"]],"expected_source_system":"ECIF","expected_table_name":"ECIF_CUSTOMER","expected_field_name":"CERT_TYPE","expected_answer_keywords_json":["CERT_TYPE"]});run=_post(client,f"/api/projects/{project['id']}/evaluations/runs",{"run_name":"回归"});metrics=run["summary_metrics_json"];assert metrics["recall_at_5"]==1;assert metrics["recall_at_10"]==1;assert metrics["mrr"]==1;assert metrics["source_hit_rate"]==1;assert metrics["table_hit_rate"]==1;assert metrics["field_hit_rate"]==1;assert metrics["citation_coverage"]==1;assert metrics["keyword_coverage"]==1
+        _post(client, f"/api/projects/{project['id']}/evaluations/cases", {
+            "case_name": "证件类型召回", "query_text": "客户证件类型 CERT_TYPE",
+            "expected_knowledge_unit_ids_json": [unit["id"]], "expected_source_system": "ECIF",
+            "expected_table_name": "ECIF_CUSTOMER", "expected_field_name": "CERT_TYPE",
+            "expected_answer_keywords_json": ["CERT_TYPE"]})
+        run = _post(client, f"/api/projects/{project['id']}/evaluations/runs", {"run_name": "回归"})
+        metrics = run["summary_metrics_json"]
+        for key in ("recall_at_5", "recall_at_10", "mrr", "source_hit_rate",
+                    "table_hit_rate", "field_hit_rate", "citation_coverage"):
+            assert metrics[key] == 1
+        # The mock answer has no bracketed citation; retrieval success is not
+        # verified answer quality and must not create a successful denominator.
+        assert answer["answer_status"] == "needs_confirmation"
+        assert metrics["keyword_coverage"] == 0
+        assert metrics["answer_correctness_denominator"] == 0
         feedback=_post(client,f"/api/projects/{project['id']}/feedback",{"feedback_type":"retrieval","target_type":"knowledge_unit","target_id":unit["id"],"rating":"correct","comment":"引用准确"});assert feedback["rating"]=="correct"
         changed=_upload(client,project["id"],"监管答疑.xlsx",_qa_excel("更新答疑：优先取 ECIF_CUSTOMER.CERT_TYPE"),"regulatory_qa","institution","甲银行");assert changed["id"]==document["id"];assert len(_get(client,f"/api/knowledge/documents/{document['id']}/versions?project_id={project['id']}"))==2;assert len(_get(client,f"/api/projects/{project['id']}/knowledge/units?document_id={document['id']}"))==1
         other=_post(client,"/api/projects",{"name":"隔离项目","bank_name":"乙银行"});isolated=_post(client,f"/api/projects/{other['id']}/knowledge/hybrid-search",{"query":"CERT_TYPE","top_k":5});assert isolated["items"]==[]

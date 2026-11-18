@@ -1,0 +1,12 @@
+{
+  "passed": false,
+  "reasons": [
+    "blocked_evaluation",
+    "missing:citation_precision",
+    "missing:hit5",
+    "missing:mrr",
+    "missing_denominator:citation_precision",
+    "missing_denominator:hit5",
+    "missing_denominator:mrr"
+  ]
+}

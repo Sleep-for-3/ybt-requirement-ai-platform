@@ -16,6 +16,7 @@ import {
   nextActionableStep,
   planStepFor,
   statusTone,
+  statusIconKind,
   stepInputJson,
   summarizeToolCalls
 } from "../app/agent/view-model.ts";
@@ -93,6 +94,15 @@ test("每种状态都映射到可渲染的语义色板，未知状态回退中�
   assert.equal(statusTone("cancelled"), "neutral");
   assert.equal(statusTone(null), "neutral");
   assert.equal(statusTone("no_such_status"), "neutral");
+});
+
+test("状态徽标除颜色外还提供稳定的语义图标类型", () => {
+  assert.equal(statusIconKind("执行中", "info"), "working");
+  assert.equal(statusIconKind("处理中…", "info"), "working");
+  assert.equal(statusIconKind("已完成", "success"), "success");
+  assert.equal(statusIconKind("等待人工确认", "warning"), "warning");
+  assert.equal(statusIconKind("处理失败", "danger"), "danger");
+  assert.equal(statusIconKind("自定义状态", "neutral"), "neutral");
 });
 
 test("缺口按 code 分组并按出现次数倒序", () => {

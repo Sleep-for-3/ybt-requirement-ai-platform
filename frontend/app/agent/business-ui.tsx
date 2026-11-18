@@ -1,14 +1,14 @@
 "use client";
 
 import {
-  ArrowRight, BookOpen, Check, ChevronDown, ClipboardCheck, Clock3, ExternalLink, FileText, ListChecks,
-  Play, RefreshCw, ShieldAlert, X,
+  ArrowRight, BookOpen, Check, CheckCircle2, ChevronDown, Circle, ClipboardCheck, Clock3, ExternalLink,
+  FileText, Info, ListChecks, LoaderCircle, Play, RefreshCw, ShieldAlert, X,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import {
-  decisionPayload, subjectChoicePayload,
+  decisionPayload, statusIconKind, subjectChoicePayload,
   type ArtifactView, type BasisKind, type CitationView, type ConclusionView, type ProcessPhaseView,
   type StatusTone, type TaskDetailView, type TaskRowView, type WaitingGateView,
 } from "@/app/agent/view-model";
@@ -28,7 +28,21 @@ export const TONE_CLASS: Record<StatusTone, string> = {
 };
 
 export function ToneBadge({ tone, label, ariaLabel }: { tone: StatusTone; label: string; ariaLabel?: string }) {
-  return <span aria-label={ariaLabel || `状态：${label}`} className={TONE_CLASS[tone]}>{label}</span>;
+  const kind = statusIconKind(label, tone);
+  const StatusIcon = {
+    working: LoaderCircle,
+    success: CheckCircle2,
+    danger: ShieldAlert,
+    warning: Clock3,
+    info: Info,
+    neutral: Circle,
+  }[kind];
+  return (
+    <span aria-label={ariaLabel || `状态：${label}`} className={TONE_CLASS[tone]}>
+      <StatusIcon aria-hidden className={kind === "working" ? "animate-spin" : undefined} size={12} />
+      {label}
+    </span>
+  );
 }
 
 export function LoadingBlock({ text }: { text: string }) {
@@ -560,9 +574,9 @@ export const TASK_SCENARIOS: ScenarioCard[] = [
   },
 ];
 
-/** 新建任务：先讲业务场景与预期产出，技术配置收在“高级设置”里。 */
+/** 新建任务：场景选择、业务目标和提交。 */
 export function CreateTaskPanel({
-  objective, onObjectiveChange, onSubmit, busy, scenarioKey, onScenarioChange, canRun,
+  objective, onObjectiveChange, onSubmit, busy, scenarioKey, onScenarioChange, canRun, open, onOpenChange,
 }: {
   objective: string;
   onObjectiveChange: (value: string) => void;
@@ -571,12 +585,19 @@ export function CreateTaskPanel({
   scenarioKey: string;
   onScenarioChange: (value: string) => void;
   canRun: boolean;
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const id = useId();
+  const objectiveInput = useRef<HTMLTextAreaElement>(null);
+  const tooShort = objective.trim().length > 0 && objective.trim().length < 4;
+  useEffect(() => {
+    if (open) objectiveInput.current?.focus();
+  }, [open]);
   return (
     <section aria-label="新建任务" className="panel">
-      <button aria-expanded={open} className="panel-header flex w-full items-center justify-between gap-2 text-left"
-        onClick={() => setOpen((value) => !value)} type="button">
+      <button aria-expanded={open} aria-controls={`${id}-body`} className="panel-header flex w-full items-center justify-between gap-2 text-left"
+        onClick={() => onOpenChange(!open)} type="button">
         <span className="text-sm font-semibold text-ink">新建任务</span>
         <span className="inline-flex items-center gap-1 text-xs text-slate-500">
           {open ? "收起" : "展开填写业务目标"}
@@ -584,41 +605,41 @@ export function CreateTaskPanel({
         </span>
       </button>
       {open ? (
-        <div className="panel-body space-y-3">
-          <p className="text-xs text-slate-500">选一个业务场景作为起点，再补充具体对象。提交后立即返回，规划与执行在后台进行。</p>
-          <div className="grid gap-2 sm:grid-cols-2">
+        <div aria-busy={busy} className="panel-body space-y-3" id={`${id}-body`}>
+          <fieldset disabled={busy}>
+          <legend className="mb-2 text-xs font-medium text-slate-600">业务场景</legend>
+          <div className="grid sm:grid-cols-2">
             {TASK_SCENARIOS.map((scenario) => (
-              <button className={`rounded-lg border px-3 py-2 text-left ${
-                scenarioKey === scenario.key ? "border-pine-300 bg-pine-50" : "border-line bg-white hover:bg-mist/70"}`}
-                key={scenario.key} onClick={() => {
-                  onScenarioChange(scenario.key);
-                  if (!objective.trim()) onObjectiveChange(scenario.example);
-                }} type="button">
+              <label className={`flex cursor-pointer items-start gap-3 border-b border-line px-3 py-3 focus-within:outline focus-within:outline-2 focus-within:outline-pine-600 ${
+                scenarioKey === scenario.key ? "bg-pine-50" : "bg-white hover:bg-mist/70"}`}
+                key={scenario.key}>
+                <input className="mt-1 shrink-0 accent-pine-700" type="radio" name={`${id}-scenario`}
+                  value={scenario.key} checked={scenarioKey === scenario.key}
+                  onChange={() => {
+                    const previousExample = TASK_SCENARIOS.find((item) => item.key === scenarioKey)?.example;
+                    onScenarioChange(scenario.key);
+                    if (!objective.trim() || objective === previousExample) onObjectiveChange(scenario.example);
+                  }} />
+                <span className="min-w-0">
                 <span className="block text-sm font-medium text-ink">{scenario.title}</span>
                 <span className="mt-0.5 block text-xs text-slate-600">{scenario.description}</span>
                 <span className="mt-1 block text-[11px] text-slate-500">预期产出：{scenario.output}</span>
                 <span className="block text-[11px] text-slate-500">{scenario.needsHuman}</span>
-              </button>
+                </span>
+              </label>
             ))}
           </div>
+          </fieldset>
           <label className="block">
             <span className="text-xs font-medium text-slate-500">业务目标（必填，至少 4 个字）</span>
-            <textarea className="control mt-1 min-h-20" onChange={(event) => onObjectiveChange(event.target.value)}
+            <textarea aria-invalid={tooShort} aria-describedby={tooShort ? `${id}-error` : undefined}
+              ref={objectiveInput} className="control mt-1 min-h-20" disabled={busy}
+              onChange={(event) => onObjectiveChange(event.target.value)}
               placeholder="例如：互联网贷款合作机构信息表都有哪些字段？" value={objective} />
           </label>
-          {canRun ? (
-            <details className="rounded-lg border border-line bg-mist/40 px-3 py-2">
-              <summary className="cursor-pointer text-xs font-medium text-slate-600">高级设置（技术选项，一般不用改）</summary>
-              <ul className="mt-2 space-y-1 text-[11px] text-slate-500">
-                <li>执行方式：创建后在后台规划并执行，可在详情页查看进度。</li>
-                <li>规划失败时：自动回退到固定执行计划，不会中断任务。</li>
-                <li>失败重试：最多 3 次；仍失败会标记为“处理失败”并给出原因。</li>
-              </ul>
-              <p className="mt-2 text-[11px] text-slate-400">以上由平台统一配置，需要调整请联系平台管理员。</p>
-            </details>
-          ) : null}
+          {tooShort ? <p className="text-xs text-coral-700" id={`${id}-error`} role="status">请至少填写 4 个字的业务目标。</p> : null}
           <div className="flex flex-wrap items-center gap-2">
-            <button className="button-primary" disabled={busy || !canRun} onClick={onSubmit} type="button">
+            <button className="button-primary" disabled={busy || !canRun || objective.trim().length < 4} onClick={onSubmit} type="button">
               <Play size={15} />{busy ? "正在创建…" : "创建并执行任务"}
             </button>
             <span className="text-xs text-slate-500">只读问答直接给结论；生成交付物的环节会停下来等人工确认。</span>

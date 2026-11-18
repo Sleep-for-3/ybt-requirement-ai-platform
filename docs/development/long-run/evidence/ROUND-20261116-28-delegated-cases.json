@@ -1,0 +1,1746 @@
+{
+  "schema": "rag-delegated-case-audit-v1",
+  "dataset_version": "b614c7b8df2b970695096dce0531c351116beef3af507a281adef81116287a44",
+  "corpus_hash": "28627e12ed7b3ebf914b3cf1f60123c025eca57f97c5f820db754e4aead702d7",
+  "code_hash": "d181c0a380835b86fc7a05dae9a3711d0078440090857d825780c1c1903f50f7",
+  "human_business_approved": false,
+  "generated_answer_release_approved": false,
+  "cases": [
+    {
+      "case_id": "01167997716439a1",
+      "decision": "pending",
+      "required_ids": [
+        12100
+      ],
+      "evidence_hashes": {
+        "12100": "0e60365d4ca2ba6c03bf1ac0e1e6091e37b8e8ed482c20f26fb02014787accbb"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "fb00bf1d79021ce775a797f5ce0d00e67443e365e5770fae66436e42cf20a0c1",
+      "previous_gold_hash": "c53d44005c521f1cbc52e0dc94dda6696caa26a02b184ec6e270887ce64880f9",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "02dc81ee70c8e016",
+      "decision": "answerable",
+      "required_ids": [
+        12549
+      ],
+      "evidence_hashes": {
+        "12549": "d509e4c1b1d2d2a7afcf49b531bc8d8030a0642466bd0822cfa0bb73cb29b3d0"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "67f9aa3f102c8b046c3a694e6ed0c66f07c7b20890211ce74a380e786aae8bc3",
+      "previous_gold_hash": "d1f4d2e15cad0fa4ff40b9fe3dbb2a2d2968b7bbe87b39876bfc6f2b07b32754",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "04ebf6df890653a8",
+      "decision": "partial",
+      "required_ids": [
+        15964
+      ],
+      "evidence_hashes": {
+        "15964": "51b134d41cf37c4bfa5d3e5fd97cb8770e94621f4ce220d4e6982f70e05263bb"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "dc97ce035a5286c0753e510d87c9a34e4c2dbe57f0a1b9fb0b12bca36cc49583",
+      "previous_gold_hash": "b412b3553dd7f451433cccee1b8e7cb6f6649687d3bbe5b432dfb09e3c22a73f",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "05b451c6bd7cd134",
+      "decision": "pending",
+      "required_ids": [
+        12068
+      ],
+      "evidence_hashes": {
+        "12068": "afd524f0f866f24eb43200cf2b19fa1d1452fca5142582f8e85e72a7939c627a"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "07f1aae3a24d018246f52e1f0af7362ec3b3fa3b17682b16ca3cdaae631e01be",
+      "previous_gold_hash": "2bad42d2823906ff9bf4d6e2e5173f2cd9f69c84eae40b4c300104d5a17f639d",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "07608772b0571038",
+      "decision": "pending",
+      "required_ids": [
+        17586
+      ],
+      "evidence_hashes": {
+        "17586": "287e7615f928aff21b78261ec64418b84696183a349f4947e30a03dca274e509"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "4589b5f6c511c90fffdcf50f8fe73d984299953d4775bc3327d178086820666e",
+      "previous_gold_hash": "2ccdd2f515cedb1d6d2d66520aaedc62a2a500dc467fe92e18775eb2980d80ed",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "0bb2dc7b94a6a5a7",
+      "decision": "answerable",
+      "required_ids": [
+        14964
+      ],
+      "evidence_hashes": {
+        "14964": "a0acde49f32829ff94cc82dae0b02ea089d8f95059a9056c9c5971b312fd2637"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1394700977e0f1cc491135fea0e10ec87fe9e6a6a9ca102b26bfe9888358c7f4",
+      "previous_gold_hash": "38594a8f38ef28f56650d21b1852c884c351b5d19213535bd0614435e4d7eba1",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "0e94b4485e59d86b",
+      "decision": "pending",
+      "required_ids": [
+        17583
+      ],
+      "evidence_hashes": {
+        "17583": "90be9929becf5a9e2a1f79138cc20d36df0831f26e60a217d7bf62fd8deb7b1b"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "2f0beb34581e49f11f46345fe05e51a8d4c746c352082621fe4fbdf433bced3e",
+      "previous_gold_hash": "3f82516efabd5b87b05a217e138a8504254bd703f5d465a81c4a895884b36335",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "16b7d24cfa01ae41",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "a8d26f7e56ed0576f5b2534cd70765f0747636b21ef576b47d63707db85a3608",
+      "previous_gold_hash": "a2616727fd1dc76c99359a97fe91ad1297535ff10a70975a481e29ade7b89163",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "179ae2d7b40942fe",
+      "decision": "pending",
+      "required_ids": [
+        17582
+      ],
+      "evidence_hashes": {
+        "17582": "0d6516853be5d0d3fac9f88d07b9290523f37273b1b1c14c710ed0434c0cb239"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "05b9266d42b5345f5c9cba133324db700a090014cb007adfd02e2a5f52a37192",
+      "previous_gold_hash": "f1036deb9cf63a232861cd8974ec7973def85813e028b812d6b2aee1e2c56aa4",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "1e2416fdd236bce6",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "53b60565f567222e46f6e8aabf8d69ce023982c5e9cbc9b8e4c4be723b8c6b49",
+      "previous_gold_hash": "82fd02a4b0b70807780cfb797b8976dbdcdf09b80eebf43d9d5ec593ee0d4a98",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "2000c9265e5dda84",
+      "decision": "partial",
+      "required_ids": [
+        14170,
+        17970
+      ],
+      "evidence_hashes": {
+        "14170": "fba799335eb3aa33e0c947ec197a484f7bedbbdcdebee446598b458d28b41535",
+        "17970": "1a2c54893f33447ac47ea3e0f0ca0d94ca125d12aa33c4d6e986775e5633908f"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "693485643484bfacc0fbfb1c59b2607c04d142ef75863fdc6a4eca529ba98f63",
+      "previous_gold_hash": "23af26d68ec91559e4ca50f0c50b3927a05e7c86814849eedf4b048da662513d",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "261f529d91b86bce",
+      "decision": "pending",
+      "required_ids": [
+        17584
+      ],
+      "evidence_hashes": {
+        "17584": "50326452f6cef684273930dcfc433442279df46899f4645ea5ed9ead8c2000cf"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "8e2b1a6447006e1fb9a4b0edd4b1a9e8d9c7c1e81cd9664f5430639bf7a0cc4f",
+      "previous_gold_hash": "a20a578397b9e1cfc92c71a54be3d8e70f4cb2271d6b5d9e0f265cf09bd3f111",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "280c97c6b073f257",
+      "decision": "pending",
+      "required_ids": [
+        17740
+      ],
+      "evidence_hashes": {
+        "17740": "7e687d71f683f7e53bc8f69483cc81036a729f71b0d8bed42878af2f2dd3cce9"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "04a2e4bd6c25882ac862acc578dd3fa3102b614a09cecc2f0ead13592f8a1c13",
+      "previous_gold_hash": "aa175b1e5491f37a3f55a1a51672a7d73e4501378fbb53f55b999ef1c8e70ebe",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "2d6467a333ebb1a5",
+      "decision": "pending",
+      "required_ids": [
+        17888
+      ],
+      "evidence_hashes": {
+        "17888": "fd1f618d3e6506dde1acad23719b09562eee6c92f261f8ec2575afc9c98d4fce"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "64fc75d3e7a1bf7479d4954cf56e83fecf8ed2202e04a6b2d0b995c228d566dd",
+      "previous_gold_hash": "8be1aff873058c2a5bb60ca4a20f0621455f5b870796d9e4c675c26e0d96e73f",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "2fe5d39bf064daff",
+      "decision": "pending",
+      "required_ids": [
+        12085
+      ],
+      "evidence_hashes": {
+        "12085": "93ff949ab3460d919d02c302a113e4fb5714a2080b0bfa307facb6c41407f3b3"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "9a2d4e3e0ed3544eeb7d9e6daed1193208feab86df8c1ca937a140d7e25a96e9",
+      "previous_gold_hash": "936e9a1be43aefff325183b387bdb55e9a8d8d8ae8c9311c30a31e56cd665c3e",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "31a82daa7589ee6a",
+      "decision": "pending",
+      "required_ids": [
+        12085,
+        12298
+      ],
+      "evidence_hashes": {
+        "12085": "93ff949ab3460d919d02c302a113e4fb5714a2080b0bfa307facb6c41407f3b3",
+        "12298": "7a678f0831790f75e2f628f140e1bfe6724da3b070b233a3c9fa1e19651f0e2e"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "7fd8154cf289f234d53dbc849451669b07966d2e09f574ef94d6e719f1c1504c",
+      "previous_gold_hash": "bea5b2b97e39cf584c6de8ebdcb21131ed4f03e50fca6ebfca1445cdd2d10da2",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "3347a89646e75270",
+      "decision": "insufficient",
+      "required_ids": [
+        16273
+      ],
+      "evidence_hashes": {
+        "16273": "ee9ae97b322c9b3da0612652933cc1eb2c2b49864c52b893698cdcad17cfae41"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "fae06b5c89380290078d1a1da2d9fb44662a6b23f7f9e41ac0c126df70d26c70",
+      "previous_gold_hash": "d3188a57922220261a4dd351a68f31a6f550a7305166747ff1d69a177207c6e4",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "338550d98939b2cd",
+      "decision": "answerable",
+      "required_ids": [
+        17653
+      ],
+      "evidence_hashes": {
+        "17653": "cb56ec9196279069ac4c2abe5e6067fd2c3ba1b9fe63794b0a156230921308ff"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "c81f0ee8f03c682464f80f12a11635aa1a071d620391065e3f31d1ef746a6737",
+      "previous_gold_hash": "02fbe9ff9d5362e9db706dd7ab8732fc6f1b4130f5381a8c938fa44a9d21d274",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "3a3a43ed851651c5",
+      "decision": "pending",
+      "required_ids": [
+        17749
+      ],
+      "evidence_hashes": {
+        "17749": "f92953b4377ced9af02a1dbda951cef895791c1061e049636694c9f722c51ac8"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "676ac21224ff9ce57631ca81bc72e0e52b3332b48d067197166ebd137362fb84",
+      "previous_gold_hash": "d86ac19be30bbf25bfe351fdad8028d83125479303fe3517ff9075e42f3980b7",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "3efb391d965ec66d",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "78a94791f4cc6de8873c61a0b6430b49d4f614daf6f56782385566e5ab3504b5",
+      "previous_gold_hash": "5de16d52e4f7d6f032dd8abac711c8681114b52c219978ee85e002e13f690090",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "4195b0ff845c4610",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "15bedb6c3c8fe3176c857c14798aadc031409248b0d2826c7bd7919b522aa98c",
+      "previous_gold_hash": "c64f63e96719aab45c8fc9f5df7cf6df5afeaeab03f3ca632545b1b51cc13d28",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "42571ad5b1821de0",
+      "decision": "answerable",
+      "required_ids": [
+        14153,
+        16048
+      ],
+      "evidence_hashes": {
+        "16048": "13694a74d28230389e6788c22a4fae2cb8531f804040c46d4b1fba365f314b42",
+        "14153": "9f1422b40fa58b26aeb90feb92b28424f61ea502df8b6e7d754ab5dcfbf15068"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "7fb3e77a023ac0716fe66c357bf441bb65ac24c28a517913fc85980b2acc4e16",
+      "previous_gold_hash": "9a0f936776c6e922db908f69c31ea0187ce2f1b6a53e91ec7824376c5a875275",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "4304a54b3f7edd1e",
+      "decision": "pending",
+      "required_ids": [
+        17798
+      ],
+      "evidence_hashes": {
+        "17798": "988491389f5c2f015d70b2bbae3e52ca6f9850424fc4751c4f173192adb90356"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "02059b3e6a1a688454ed1ddb1226c19b1816a0f141fdb59a0254e8b8334ad9ff",
+      "previous_gold_hash": "dc3c2706633bbd5cbfce0c56bb81a89733605e3660b72ccc5b3de9a7d703e644",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "475f77c55ea0d67b",
+      "decision": "partial",
+      "required_ids": [
+        17684,
+        17970
+      ],
+      "evidence_hashes": {
+        "17684": "0aba3ad1d33dc72563f6ce36246f5348505d1b1cbd7de9ac580ccbe42ee52f08",
+        "17970": "1a2c54893f33447ac47ea3e0f0ca0d94ca125d12aa33c4d6e986775e5633908f"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "76caaaa1edc37ed6372843683d657fcf73d075d665e84a82dae351bfd2e474ce",
+      "previous_gold_hash": "2b5975e0c3646fede57a401e9fcf814631a82f689dd93a6519e8a91f05c34c54",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "4d91dc1ab2726765",
+      "decision": "pending",
+      "required_ids": [
+        12105
+      ],
+      "evidence_hashes": {
+        "12105": "a8e315250c0f018e0ef58a35cbef4055996a2d77b0e2cc77318bffa8da5680a4"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "802ecb23194e2fbd68d82113163eb7930db0a486d9ed6144cdbd521551f3c103",
+      "previous_gold_hash": "c0b905ff35f8e2bd1ad5239b098bc2298ac5066173b81f6f1310409ed056b8d6",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "4f49ae2664bc1f9d",
+      "decision": "pending",
+      "required_ids": [
+        17797
+      ],
+      "evidence_hashes": {
+        "17797": "d9ce0069afdb9407517df2af32fc5110d3fd68fdec554f543422f252c3ffeac7"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "036899fa69034d156dd118091ac9b5daf1aa3415bdabd281f23a9461207d4a82",
+      "previous_gold_hash": "38f98791a342f1d673f2d29cafb540f4cec727c1640f549576167ac4dbb61e3e",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "51e10c75a425e175",
+      "decision": "pending",
+      "required_ids": [
+        12087
+      ],
+      "evidence_hashes": {
+        "12087": "97439b67ce06f21dd52c8bfcfee4feba2990a6b041d7ed7317f2dcb1175fd56a"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1f455787cbe300bb3c15740c648b1cb8f2161647f10602a100b45b466187ad09",
+      "previous_gold_hash": "76c245726e9fa2b1371874024c5e668bce4c4cb2acdda11ed2a3a7bc82f8922a",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5305ade9d59a3a95",
+      "decision": "pending",
+      "required_ids": [
+        17631
+      ],
+      "evidence_hashes": {
+        "17631": "c94b8c0f12a4babe3f442f6f09a755c278cb08b74e24cb8db77d25a15a46a984"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1431e39de155272722733fe1c6aa32601dd05830af29fdcb5f6cb44278dda1ef",
+      "previous_gold_hash": "52fafeac088a3ae4854af9a700ba160b84739bec5b6f8a9634a3cf78cc43f155",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "54205ddddc3bc29b",
+      "decision": "answerable",
+      "required_ids": [
+        14087
+      ],
+      "evidence_hashes": {
+        "14087": "405fe50a95d4ae86b40c7a40ec1a478785b8ff436242020b4d9654bafb224974"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "a72e9f4686a5f333cb4d80100a07b549fa7cea62548feb9650acd7ec2f65ebdc",
+      "previous_gold_hash": "75b19ee92fd5514435b8e9d8c1f99866bc8037fb7f7e000cb09fc862c0d95c73",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "55d102e61781358f",
+      "decision": "pending",
+      "required_ids": [
+        12090
+      ],
+      "evidence_hashes": {
+        "12090": "1047bf22bf90f740d50768223999440314650290733c68106c88a677957cc8ec"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "e9f7c64ee5607d6a52d7fb17ed8e9e9cfab002b036c26533be73aa53eb0ab52d",
+      "previous_gold_hash": "f263f79eb16c05547e8b1c18e45692ae2c599d4909a62b9fc29d5bfd8d40f7a9",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "566a2f113e7771e0",
+      "decision": "partial",
+      "required_ids": [
+        17653
+      ],
+      "evidence_hashes": {
+        "17653": "cb56ec9196279069ac4c2abe5e6067fd2c3ba1b9fe63794b0a156230921308ff"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "43701c009b22554bb88e5f162c585adba15b1a4476c23655b0cc8d6ef5b4c79c",
+      "previous_gold_hash": "6e2b96991596bac157b68c69c3d3ff65ad359a4880de75484c2eae06f5392f7b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "573cb22b764fd5f7",
+      "decision": "answerable",
+      "required_ids": [
+        17683
+      ],
+      "evidence_hashes": {
+        "17683": "6ed046b0c2b2bd969faa021624c5f7784ff06c8f04ffd6e1fe9976b6d33e4658"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "57c3312ceb2901fa2d187bf7f97c4b0594dabc925ff71ce18b0cd6b89c6490e8",
+      "previous_gold_hash": "f03b685d1ef8ea87e9f1e522b29c38f8455db9511502049c620f5d3a0dd3ef01",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "593160f7d46eb0b4",
+      "decision": "pending",
+      "required_ids": [
+        12106
+      ],
+      "evidence_hashes": {
+        "12106": "761f5217c9e666afb15b09a5bbd9f23bedc74a6876e956b7d20529a5bc898880"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "59edd2fa848935f7e426dec9411b2cc48aa128dbe48639dd5e99c1703bd40786",
+      "previous_gold_hash": "615407dff1292e35d519b7079d3d86e06243f5af3ff458c02818c0e81f3bf9c5",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5a1d38618d9b3e94",
+      "decision": "pending",
+      "required_ids": [
+        12126
+      ],
+      "evidence_hashes": {
+        "12126": "cd537663734a9700b87c6a0e37934e5c61a43b38875b867a075aca8f1d3ca7e3"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "20d5f8f453d23c6cac6f4fc2d1540a78d251142e61115af14af9a4e194cceb8f",
+      "previous_gold_hash": "10a83c82a6579eff87d69ad6c94c691fdfc6989f158822dddd043fc1099db435",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5c9e9f3834a3ae6b",
+      "decision": "pending",
+      "required_ids": [
+        12099
+      ],
+      "evidence_hashes": {
+        "12099": "e46577dfe00890104f68955927019d4a60b8b3b34008a4c2a2e50bdf3bea878b"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "b7c44229a1ef25225dc780cadcb54d0ba723febe7cc8dc1182ff4b3b9c120f17",
+      "previous_gold_hash": "48990523d0d9678f8d178da760f87eb75f9451c9a705968c2c895e80bcfb5187",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5cca8fcababdcedd",
+      "decision": "pending",
+      "required_ids": [
+        12091
+      ],
+      "evidence_hashes": {
+        "12091": "7b8eceb62733d742ba4443553c3e0e6ef96097f9a589be132d6d3a9a8b35f83b"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "91f9b3b11133e58217c79bed3fbe1225c62a257530aa7dcc8513eb996fde4e4e",
+      "previous_gold_hash": "0055d0873ef5ad0dabfb4edffcffac6c5580326720650d96975f40648399b1b6",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5ef6ed8e4972aa29",
+      "decision": "pending",
+      "required_ids": [
+        17585
+      ],
+      "evidence_hashes": {
+        "17585": "531e743d24e5d821bb5503fce31cbafcfe18c4567c73a68b7dbe0428d6d2ecd4"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "2b7878bd6ae3403f3c891c5d4cd34ef88d0a5c4e55fa58f7de3a310b7ca6b606",
+      "previous_gold_hash": "3dd67341f46e85a162f210a7194bf8e91c26c78db67df6182d42e5ea94fc76a1",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5f0c175822eb4fab",
+      "decision": "answerable",
+      "required_ids": [
+        17663
+      ],
+      "evidence_hashes": {
+        "17663": "e629a6a9e809cb8966b64b57b86667206ae4d67cf8586ef4fa8c012383f8a084"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "16daaf27434166f7e41066850db03ff378cc750d1d951d99733cb3d8709d7ac4",
+      "previous_gold_hash": "3004fba6ecb45a787111b83919b8b5837467cc14e3cd5b80491f6238b8ebc85c",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "5fbcfd7d007ee66b",
+      "decision": "pending",
+      "required_ids": [
+        17741
+      ],
+      "evidence_hashes": {
+        "17741": "3c9199edb0764204631526a43b73d689708e2ad2e5f476d3c8f36ebae14f08a4"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1253a09b1f15e9861d8c746057788d670ebc2b4ae8f69c2d2f9ebfc3cd3ccc08",
+      "previous_gold_hash": "751c15675deabeae61a904b70af6adae14979e991a442d1dcb22994d60029311",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "6168002f9022b7c1",
+      "decision": "pending",
+      "required_ids": [
+        17754
+      ],
+      "evidence_hashes": {
+        "17754": "248845e83cb3de60646f24517fa1e0065a155580c9e37252e169922dd2f25121"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "32bd6de87d2c980128be37d0e472ef6c453e7e9233402f67d9be85104af3b5ea",
+      "previous_gold_hash": "36be867b3822fc83fe78e5be3483afae9a368e00ea1677b8b59ddcd86e042e92",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "649a93f7174a808e",
+      "decision": "pending",
+      "required_ids": [
+        17751
+      ],
+      "evidence_hashes": {
+        "17751": "dc9c73dfa189d44b41f3d3d9fa5e65ba35cd2e463d2f662dc299b478744ab8e5"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "ee540f5c3497c52e2a1c918c2de5b159e58847182f3a7d690360680634db8c8d",
+      "previous_gold_hash": "c2bb2113b0fd573ca8b81e9987b525496cdd73fe5a45410a573c1652f57a4227",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "65ea04a7193e8b19",
+      "decision": "pending",
+      "required_ids": [
+        17738
+      ],
+      "evidence_hashes": {
+        "17738": "6e95aed29019657875d46653bf3a6cd2bbfdb3e0e11703a715ff271016529bdc"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "3abe21675b7cce8b8b6d6c7e3629e94b7c4a212b9a7d27a6dd15577561bc0fff",
+      "previous_gold_hash": "c8717011cb535f84ce0786cbc10d98cf1cca1baed3bd03ec505b3092666f574e",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "68c211e41f99dd4e",
+      "decision": "pending",
+      "required_ids": [
+        12081
+      ],
+      "evidence_hashes": {
+        "12081": "0c6b1c0cc626e9d8d44917427184ec5f1efcf47a8de37367d41f0ea7cad1bfcc"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "73ae5fd805a8b7758d45655f1ed6d87f5b0ee207f33bf92511581254d7d5dd1e",
+      "previous_gold_hash": "5fcc4a04fe64d3f3fae860a40133326cba6bddc0e8f44acaa701ebeba6d5c3a3",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "6b7ffff62ebb2d71",
+      "decision": "pending",
+      "required_ids": [
+        17737
+      ],
+      "evidence_hashes": {
+        "17737": "5e7bc3c26782301ab216a46cdad2f87dbeb2d32c5a5a5e4bc0b9692aba773e62"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "90ed8494cb6e534b749d44e20577aa3e50acea7331e24950ca5e0c25e8adf8d4",
+      "previous_gold_hash": "f01af54295e73fcda25cfc0d78c142a952c2ee0577bc2de7ba2799c09029d8e1",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "6d87d1c14a4d980b",
+      "decision": "pending",
+      "required_ids": [
+        17797
+      ],
+      "evidence_hashes": {
+        "17797": "d9ce0069afdb9407517df2af32fc5110d3fd68fdec554f543422f252c3ffeac7"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "630e4e1062e2106dc891f76b3cedba4fa3e1f731af3417d1a4dc03f5fbc97e49",
+      "previous_gold_hash": "678d3d7af0538e5ad88f26cc9b55231599701405da1a00fa36e6669febf4573c",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "6de5458ca17bbad5",
+      "decision": "answerable",
+      "required_ids": [
+        17970
+      ],
+      "evidence_hashes": {
+        "17970": "1a2c54893f33447ac47ea3e0f0ca0d94ca125d12aa33c4d6e986775e5633908f"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "f95904fd140fa81d2b3b7933c6d67dd17e6fabecf984c87f97876061a195ec1e",
+      "previous_gold_hash": "8b70a3bdcedad0cb39ff643b9fa5f5a19e085d2fbf3aaa99f3f1f39770164a48",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "6f487dd186106f92",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "80c30930cb43951d32566d4eff3899058e1f3da36dfce8d81cbdce8b1c78465f",
+      "previous_gold_hash": "be654c80ddd99bf0d0bca8ea1fe05e4f8e2afd8ca403cd206056d4ebf39a3d6d",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "743f681f201ada7c",
+      "decision": "pending",
+      "required_ids": [
+        17579
+      ],
+      "evidence_hashes": {
+        "17579": "e2132359dcfc5a14cc3d2ef798a6ad5f8c8fbf3928c63df60cf85e5aae37090f"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "bdefa48d3536fd06ec85243674590aff1b9c7cf59f20b89810c67ab5e87ab4b1",
+      "previous_gold_hash": "197ad0cd76ea5ebf357835bc3a03c11f56c1976e4df8bc9a83e0397f46bcb534",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "751daa5e522cc19d",
+      "decision": "partial",
+      "required_ids": [
+        12509,
+        15261
+      ],
+      "evidence_hashes": {
+        "12509": "df0cc6a2143c3378c4f5923b2f6224d405180fb743e9317eca913981a990b662",
+        "15261": "de0cfbc14d287914e5b4d277e3dd44de1167e64e494e7a845bbde9c803968fd5"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "b727c01f74368207387d5fa7eeee96870497ba2ed845e57c31112bca41e5166f",
+      "previous_gold_hash": "a6be0c4c9f6831e8cb202c283ad551406f9765df7e57762d83d002b224236fcf",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "78816588a6c5dfbc",
+      "decision": "pending",
+      "required_ids": [
+        12092
+      ],
+      "evidence_hashes": {
+        "12092": "5a61d931b3c0ff60da645a62fe092b240256dc1bc867ce1895cfe17da705961d"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "12545ee7d202340e7e59f8dc956154e2f7f90f758ec9e62aa8bec4218b285aef",
+      "previous_gold_hash": "1e0bd39691523e443abc4b78cac058e1b33b25b60a8efc416e8ec7220a652522",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "78fd1a06fd69ecce",
+      "decision": "partial",
+      "required_ids": [
+        17684
+      ],
+      "evidence_hashes": {
+        "17684": "0aba3ad1d33dc72563f6ce36246f5348505d1b1cbd7de9ac580ccbe42ee52f08"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "b21cd0ddc89c2bafda42eef4266c79b09889749279349e12a12ee2f97d96de08",
+      "previous_gold_hash": "864ac417909d23d95f2b272c2c6e81c25dcda004e4c0365483ea03ea6602e41a",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "7f150aa1ee9d7b9e",
+      "decision": "pending",
+      "required_ids": [
+        12110
+      ],
+      "evidence_hashes": {
+        "12110": "9e4551ee7f08c3b93c99a9686ac4b38a2eecf68236bd440187474249fda81c13"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "6412b9fd1af0cfbea7aa13a93a58e4e5b12c8c8cd44b74b5e366120475913426",
+      "previous_gold_hash": "7f6819cbaaffdf17e9c47a5ce3992b83088a5106a2709581aa415734c51570f9",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "7f539317743bc7bb",
+      "decision": "pending",
+      "required_ids": [
+        12123
+      ],
+      "evidence_hashes": {
+        "12123": "095dbd1221bb23632df97b26882c166e247865c15bc8928f00de2d07126943a9"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "93067db4aab3de53f4087921a9ab48347ca0b6da54b5ee4718a87f192176a12c",
+      "previous_gold_hash": "8ef4dc848c77dd17991666d0a14229af4c4ddb9e9f2573b27c4cbcab8e383f63",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "7faccef929b833aa",
+      "decision": "partial",
+      "required_ids": [
+        17664
+      ],
+      "evidence_hashes": {
+        "17664": "c4454eb59a8843fb34b8f42e946e992ec8af3b26d6ac0902e83e35f14206ac35"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "9f5a733e884cc5dc983774f45c77ba847ecfd8f13942b589ef18814606dd4b14",
+      "previous_gold_hash": "a3463e10942ae9e34d5e63de3e72aeeb7d207fd93d4d4008b834e5f6430d039d",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "80d8c1a5e04e8797",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "2c9e3755ca939172b0406e3c1fab93480d74d8eb39179a4695c5fb3f8c977d94",
+      "previous_gold_hash": "5f70b6f0b266837e18c504986e667aea8ff227d5ad6309ce217be9744c2b8392",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "8436f62095274c09",
+      "decision": "partial",
+      "required_ids": [
+        17683,
+        17684
+      ],
+      "evidence_hashes": {
+        "17683": "6ed046b0c2b2bd969faa021624c5f7784ff06c8f04ffd6e1fe9976b6d33e4658",
+        "17684": "0aba3ad1d33dc72563f6ce36246f5348505d1b1cbd7de9ac580ccbe42ee52f08"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "e19029f5a58f95434ec7d6b96997c8e70b7e1d59fe415b05b851c18d594e95ab",
+      "previous_gold_hash": "969f5e33241bf4cf8745eab9e02382510abf52f915ff454daf4ef105867daf97",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "85f78e2c96e87b44",
+      "decision": "pending",
+      "required_ids": [
+        12098
+      ],
+      "evidence_hashes": {
+        "12098": "989061ed50bd49dee1afbdd488edfa9bc81accf74a4d983155b72def355a8a27"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "02b729bb5ee4001b19703b1b7886cd4e82cd6f4e2d95715254cf5bea9bb8366c",
+      "previous_gold_hash": "a4b1852b35c086440668e83022a9d66a439fb76dd1d42b8f6b9a8bb7a167f400",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "87f49cbb31d4027f",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "5f8796545e721506b4ebb1ecfefe02af81075b3e86b9a2686be349e19866baf1",
+      "previous_gold_hash": "8a7616ad2f2cb90e44c91191e2d14eb8604cc64d1cbcbc55f47765b63ed593c8",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "8a92fa89c39cafc7",
+      "decision": "pending",
+      "required_ids": [
+        12094
+      ],
+      "evidence_hashes": {
+        "12094": "7f4b320ff34d70dde88e010ae70f19ec87a22bf5c79b4ec36604e651c0a69f58"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "db9e04a5b6f86288205b752258c53b6ca361a3887d701b82a6f2682dcedafb28",
+      "previous_gold_hash": "3f8964204d431435129dbb9425bfa729e3d64df98ebd20ee2ecdff52c64656ca",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "8d3ec8dd0ebafd05",
+      "decision": "partial",
+      "required_ids": [
+        17948
+      ],
+      "evidence_hashes": {
+        "17948": "2a0dc79074a23acc1f7926b5f1a7315941d126e6adbb4b28bc075edec211745f"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "45f676e1cc742a64eeac405eb48fe75a6c3836af78dcab32e052bb569c9b3cb5",
+      "previous_gold_hash": "47118b17c92d706b7374998b68ef343b3df14f0f812b0a9e854e9ca6e263d053",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "9038e03d0409531d",
+      "decision": "pending",
+      "required_ids": [
+        12088
+      ],
+      "evidence_hashes": {
+        "12088": "6d7a723a73541841988793660c4a9f80a9c8db738de453849598a7bf4a634323"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "3caaa051851a5a0d089fffc479fd9a2d7f8ba8af8e8d67e16312272c382c86bb",
+      "previous_gold_hash": "c561a92f4e39a0a82d90a354d804ef339b6ab2875ec5d663e177c8852c66e862",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "92c0af77cc1b6d8f",
+      "decision": "insufficient",
+      "required_ids": [
+        17807
+      ],
+      "evidence_hashes": {
+        "17807": "6fd196137e97108b0d3ce3c0810d43c1551964e85746dbcdb97b476bd299d75c"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "eaa9ca7840d54435ef9f8c0ef5fa244cf4c0a4e0d8ee5500be108bdf82271f87",
+      "previous_gold_hash": "4906c1ffbdc5dbbac6431d7d36c9e12a384c36220190630186ab88c8a0360226",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "96cf5656d5cbd8d5",
+      "decision": "pending",
+      "required_ids": [
+        12078
+      ],
+      "evidence_hashes": {
+        "12078": "ec6c85ff9c5bf02a2b1a7701a56c6d24eec014f80f31208524ea01b3676e6e40"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "e2dc070e5efd40b081d3a4b967e6f4a85bf3b71da1afb040777648f9b4f1c5dc",
+      "previous_gold_hash": "84498ec49eaa50631aa78816003ed4191c198964649d04a2273eea12db952078",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "96fb8a9c4dc62831",
+      "decision": "pending",
+      "required_ids": [
+        12102
+      ],
+      "evidence_hashes": {
+        "12102": "a794eb87995e337694ce21c06bfe3a7f4b882faad92f069bb219f330c9ac9a4b"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "35f4b47257cbeb33f1dddd9772d016b9a6ecc785f828fe34a3bd29fd4658684f",
+      "previous_gold_hash": "860692d1b5ddea91a509a0b8416bced041fed1acbd98e9f5947b9931fb7a863b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "97be4d314af2c03f",
+      "decision": "pending",
+      "required_ids": [
+        17625
+      ],
+      "evidence_hashes": {
+        "17625": "425a297d47310b7270d3c1bd088582e7c8c3c0c3e2bcf2b3c6b481b2dfa52b89"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "26b1066b53dc0eb090fd4e8395e1992172c496786e522c53507f43281f4a8b9e",
+      "previous_gold_hash": "e32b9da7d4ab08bd9c43ea64cd0290a1a1a29cf7aaf6f1373a464880656a477d",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "98869678ef262d9e",
+      "decision": "answerable",
+      "required_ids": [
+        15735
+      ],
+      "evidence_hashes": {
+        "15735": "dd04985d2a6bca4e369d58e79f4c80ecf4c7bfff95d60c16a2881be4b2da9a10"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "4432ed2a15cf18bb5f8604d2fefa4804c6be1c99150b85e7131c0d85bf63e5d5",
+      "previous_gold_hash": "a48c367ad6f5beae51ace0d1e4d34b76167082c5a999f001d69bc648d83f3e4c",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "99e3c3636385e80d",
+      "decision": "partial",
+      "required_ids": [
+        17678
+      ],
+      "evidence_hashes": {
+        "17678": "2077323009ee651a654c477ccf464277ba65f0c8755a2a9776642c865f195c8d"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "a807cd691b350394fb702afbbeedc8fdb181e07713fb7ccef76a2b323a7f0bb9",
+      "previous_gold_hash": "d1fb7d40b44a2545aadf9e0e90cebca3c851342e8bb9db3f67b926c7816536c8",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "99f84950f38c34af",
+      "decision": "pending",
+      "required_ids": [
+        17838,
+        17849
+      ],
+      "evidence_hashes": {
+        "17838": "61f587449ecf36ca4a3968c94d603230ee12fc0a5331e17809b8e18531288745",
+        "17849": "95b6d7e21fa04c83c1bf6b67005147989fc6658bda735a5a778e41eba26fb673"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "3564c6718aa006353a83fb72d27a4bab89723167411fa43d56d04d6cccc07a06",
+      "previous_gold_hash": "7ac4546df4dd92db0139818bcbef625fcfa2f53c67df74ed4a95793a588b6a6a",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "a1b742047fd1a31e",
+      "decision": "answerable",
+      "required_ids": [
+        17715
+      ],
+      "evidence_hashes": {
+        "17715": "924adcc445bf221413fb840145512d860f12f6bdcf72ae8711c3f3fdd5251d5d"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "5391db8659ef458606a92bd704e386e3f548a26ed9a8389134043b3dd6b059a9",
+      "previous_gold_hash": "31003cee10919510241854737439edc55021906b91de358c458571c8b9723b58",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "a3acaa31b1e8c5a8",
+      "decision": "pending",
+      "required_ids": [
+        12124
+      ],
+      "evidence_hashes": {
+        "12124": "108541e68c105ce45f648219c7cf9402ac22ac98214e370bc74b2f2532972a29"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "59a53a41d0738a0ee195b2a87233921e522fcda9a55bf56e9a4907724a815fa8",
+      "previous_gold_hash": "88310580d306d9629dce7ee99239d6573f52fb376505e6ec4c6eb2259b7dcfc7",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "a46710b8002306f4",
+      "decision": "pending",
+      "required_ids": [
+        12478
+      ],
+      "evidence_hashes": {
+        "12478": "eaec0bbf8ed374fc244c6689f928687b866e525a8306597b7b7a65770f6392f4"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "96a63ee3b61141f3f82b34049c0793654910bbd96141f79c9206e1d23ccea8eb",
+      "previous_gold_hash": "6ff7dd2dc28d3b34bb00de405be157902b34ba874aee2eb0160ba5df6b0e0c1b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "a9666b6395d5c459",
+      "decision": "insufficient",
+      "required_ids": [
+        12549
+      ],
+      "evidence_hashes": {
+        "12549": "d509e4c1b1d2d2a7afcf49b531bc8d8030a0642466bd0822cfa0bb73cb29b3d0"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "fbe5601dfbf960dc6185ee8851c6ae9a1a09ebbdb2aa2fc3aa16be039b705565",
+      "previous_gold_hash": "e882b8c986ae2577753f53f7a0aad438659da20f6be4d96d5782672b41fff60b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "ac3a320626420848",
+      "decision": "pending",
+      "required_ids": [
+        12125
+      ],
+      "evidence_hashes": {
+        "12125": "deabb0e94adc4c1d310385b964fe127368566d53ca3c5a868212d59c3fd29e1c"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "6198bbc4a7e2f0ed2dfbb748a8ca824e8e147f4b5bd4966fc8676eea63a7b56f",
+      "previous_gold_hash": "cf6fe1291c2ef42ee26302899b1af1bc382d30d91b6dd803739a41cdfd011ca5",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "ac446afffb05079a",
+      "decision": "pending",
+      "required_ids": [
+        12079
+      ],
+      "evidence_hashes": {
+        "12079": "97e96fe6d86ec3681cd1708a2d43635d04ab453be82423cf9001606caebdb39d"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "b0acabdb462eb035413d697198ae4d0bba965b1742866414e803a00dfaaab306",
+      "previous_gold_hash": "49f4fe7a2020f4ad056a9094d403ded617909eaa19514d5f63e52e9474ff4521",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "afba9649c833e05b",
+      "decision": "pending",
+      "required_ids": [
+        12080
+      ],
+      "evidence_hashes": {
+        "12080": "55ffb58d382b65e6ddcdf5ca9fa3f409480de44d09054582497442d5bb5e5c06"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "207755f9f32f09e2c117a7b7a30ddc87cb268c93356936a8309dcfeb0d89109e",
+      "previous_gold_hash": "c2d7af51a1346b4c1844ab61f7026bbe0098cc587839b1f26c721f58021da863",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b151d2c1c212e03a",
+      "decision": "pending",
+      "required_ids": [
+        12103
+      ],
+      "evidence_hashes": {
+        "12103": "ecba89e99134b892d3a2f7449d6ef83a5d12b41e7ae59339383b0be5abd49737"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "6fb3dc1af88d2bdb7a0cd2756d64c96d96896c52da55c45306a1c17ba737da2a",
+      "previous_gold_hash": "24aa9bd74ca2a1654d3070df38cbbc0030927249d35a2c3582ee934787960a7b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b2640b419bc3242a",
+      "decision": "insufficient",
+      "required_ids": [
+        14170,
+        17970
+      ],
+      "evidence_hashes": {
+        "17970": "1a2c54893f33447ac47ea3e0f0ca0d94ca125d12aa33c4d6e986775e5633908f",
+        "14170": "fba799335eb3aa33e0c947ec197a484f7bedbbdcdebee446598b458d28b41535"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "b69cb61f3bf5b450053605dd42ca17ccc4d4853350831daf9b99d57f4b6f94c4",
+      "previous_gold_hash": "cf6806a7e33d9ae0f93b0de5677135079013529c419994d2a163d80092ac65a6",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b2fba2ff14c180f4",
+      "decision": "insufficient",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "5a401344a93f840f78a174bf5082277577f0bdcb71abead5cc5bfad731a3ae85",
+      "previous_gold_hash": "666a71c950a5a0ce5e83aec181ba3f4049d08e12c1b91ab90ca0aab4e703d3ba",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b935a94d57555f7b",
+      "decision": "pending",
+      "required_ids": [
+        17771,
+        17780
+      ],
+      "evidence_hashes": {
+        "17771": "9ea76bb93f07f4d9340f32d431c597a14dec59cdace51cae88a300a3b5a675d8",
+        "17780": "6b38bb38e2f5421ccaa8196d61929fb5a62ddfe2b59e9fb953e187ed98062d59"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "ccd0866ce1c9540b592329afd8016e175b2aab6f818dee00e5878aa8c3a9cfe1",
+      "previous_gold_hash": "f3eacb259c476a64952c2cbbfe1270474e0de187e7527a07df582fd43139c707",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b95bbb7631f70d8c",
+      "decision": "partial",
+      "required_ids": [
+        15292,
+        17780
+      ],
+      "evidence_hashes": {
+        "15292": "433e64ba195b655bf85970f69968cdebffba6df06f7ab31083c8ac6747fdd0da",
+        "17780": "6b38bb38e2f5421ccaa8196d61929fb5a62ddfe2b59e9fb953e187ed98062d59"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1c7e12c92aa23739f811f23322921868547d6aee9392d99b3b16e9890299a52e",
+      "previous_gold_hash": "b6dd6053d1c57ed1a79158f4354128fca74ada1b202eb4ffacf857503fddc15f",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b96eabba5eab3c14",
+      "decision": "pending",
+      "required_ids": [
+        12070
+      ],
+      "evidence_hashes": {
+        "12070": "697fca51af4971a9f1d515ba49df32e42319da333dfe716c91c3d66ae1b514ff"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "7021592a7284d2eaa9fda8150a8e9597d255a143e4ef2aaf043e82700aff06b4",
+      "previous_gold_hash": "131bf6872c344929712d455edaae42f19e14ce0ccb9493d077886709ce7ca3fe",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "b9f7a1fa78a79e8a",
+      "decision": "pending",
+      "required_ids": [
+        17810
+      ],
+      "evidence_hashes": {
+        "17810": "05ffefe44af9c44727122596d058612c3e956c0862da60f1c97f5bb0b7ab7310"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "298b2abed872937fdc966e95659f3cbb576d8b0f08cf1dacbded13e8b9be9a60",
+      "previous_gold_hash": "7ea24d75deb37a4aab6889630ba85df8a47df0f71d405a0a55852b4433f9a445",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "bba338a35384fba6",
+      "decision": "pending",
+      "required_ids": [
+        17739
+      ],
+      "evidence_hashes": {
+        "17739": "f3676edbaa38f1a7d75e41d8ef84b1a4ed37376436fdf89fc3b1838d89c3d9d0"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1f3cc81b3e3a453018b1b499483942289dd749ceb7dabefcba3ac120b2741c5b",
+      "previous_gold_hash": "54f950fa9df8ad5b41e6553868fb2d73065ed59e74cd651efd9e7ad3e91206ba",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "bcf7e8f5467b8012",
+      "decision": "pending",
+      "required_ids": [
+        17660
+      ],
+      "evidence_hashes": {
+        "17660": "cd57877498ff25e4c83952849cfce6e3a8e035f4fe23e454a1892aa8c258aa42"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "7ad9327d5a4a3afd9d43781b65edeecdf80431add2a78d5dc53b155efc1a7517",
+      "previous_gold_hash": "5844c2cc78602d29be59d7c9dbb775c8fca16e1f684dbff8dbaef23128fe0909",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "be9292bb747280c2",
+      "decision": "pending",
+      "required_ids": [
+        12084
+      ],
+      "evidence_hashes": {
+        "12084": "9e6270e482a36ab78d0b8d17ac93ada403a4460e001acfa89671959d43dfa0e7"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "d1bc6fcf6e12e2ffaf092550e60941f3b144bf28338c872327052962d1780aef",
+      "previous_gold_hash": "736089b761fd60471f343ab003886f70d30225d969b1fc7957f518cba23b3404",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "c0a1828d3bbfbfe1",
+      "decision": "answerable",
+      "required_ids": [
+        17653
+      ],
+      "evidence_hashes": {
+        "17653": "cb56ec9196279069ac4c2abe5e6067fd2c3ba1b9fe63794b0a156230921308ff"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "31bdc7d1d1b72182b3cc1d9eb193fb0184e1d838c2c030be52f59e15ef037711",
+      "previous_gold_hash": "867783f81ea84bb613bb448e48f5e73e75613d9dba3f5efbc611c4bdc4ece2ef",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "c1a8e98aac40d4ed",
+      "decision": "answerable",
+      "required_ids": [
+        16048
+      ],
+      "evidence_hashes": {
+        "16048": "13694a74d28230389e6788c22a4fae2cb8531f804040c46d4b1fba365f314b42"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "460eca30f867dd1d371462aa4abc09966e74625b1dbb4ccded752167653ec242",
+      "previous_gold_hash": "82ea3113d3c024617b1787216a8926b53f7562bacbc666e553e204437f0cfa8b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "c4a26c94a7b9ae87",
+      "decision": "pending",
+      "required_ids": [
+        17780
+      ],
+      "evidence_hashes": {
+        "17780": "6b38bb38e2f5421ccaa8196d61929fb5a62ddfe2b59e9fb953e187ed98062d59"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "f579c84280e848ee5b5b43e4cc0dcf14a4937b110297149db33fc0f2803649c0",
+      "previous_gold_hash": "a256d922e42b69b63ba7fd59f0730c16a0bd65c36b9aad94b16d8e6fa7d05140",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "c4f26a87f54ed683",
+      "decision": "pending",
+      "required_ids": [
+        12111
+      ],
+      "evidence_hashes": {
+        "12111": "f55fbeb27be4400ce0f70ae6ae9515f6523bdd1994826a943409e232a21ac396"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "42a7e443f758c75e0a19069a9cde4e107098827d0bacc2d226e19eb0da9ac1d7",
+      "previous_gold_hash": "075033c7d0d47dee86a2a93aa85ff5643ce202ce5d9e4c785833a7850a2738dc",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "c5a912c29bda681b",
+      "decision": "answerable",
+      "required_ids": [
+        14053
+      ],
+      "evidence_hashes": {
+        "14053": "a6c895a841be458b8f79712b000c562f2608f0fe624adf5ceaf1f0f874e40a8b"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "e68314c106aeca1dcb66f92418889031df67d6414df760f1b5bce81f70367235",
+      "previous_gold_hash": "78f306a702da9769cd593baa27af5ad546c4ada32a48d83b200b3717922646cb",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "d000bfbe95e0c4e6",
+      "decision": "partial",
+      "required_ids": [
+        15151,
+        17751
+      ],
+      "evidence_hashes": {
+        "15151": "7d09f9a5dce5b1f2f69021878f76ede989eba1a8e36b386f4d95e5d24c86d688",
+        "17751": "dc9c73dfa189d44b41f3d3d9fa5e65ba35cd2e463d2f662dc299b478744ab8e5"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1db6a298fb15a7ed3fe7dd67019d776d60894375872588a1dc9ad0f76d40889a",
+      "previous_gold_hash": "e2b1fc534228259c477a4b2310d67eb49366da906a213b393eb786188cc472cc",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "d21a206e15475637",
+      "decision": "partial",
+      "required_ids": [
+        12561,
+        17737
+      ],
+      "evidence_hashes": {
+        "12561": "00f434a03074897a1954eace5852252d4f4824fb6e03a3d8f7d5d917b3d83faf",
+        "17737": "5e7bc3c26782301ab216a46cdad2f87dbeb2d32c5a5a5e4bc0b9692aba773e62"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "9324371df6201f2a3156e388d5b77e63542c27fd80f22c881a77dcc50aec6865",
+      "previous_gold_hash": "fa7e1ce34b2d8956e3aea5e9eacc698e12e1e35e90b68b62e607e46a3b31e991",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "d6ed58f996f75296",
+      "decision": "insufficient",
+      "required_ids": [
+        14153,
+        14256
+      ],
+      "evidence_hashes": {
+        "14153": "9f1422b40fa58b26aeb90feb92b28424f61ea502df8b6e7d754ab5dcfbf15068",
+        "14256": "9440726034d73d823bbe782b8ddc20a880c0ed831cc2a29ebbfecf002476523a"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "d4a874f63841681641157746b1fc2c782e898bf7651310b47e6aac135ca9dac3",
+      "previous_gold_hash": "da043345fc7b578600d8bf0804dbbb06bdc541ffa80f82a8b72212d03be1f2c1",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "d8b2f03c0e364ade",
+      "decision": "partial",
+      "required_ids": [
+        14053,
+        14964,
+        16769
+      ],
+      "evidence_hashes": {
+        "14053": "a6c895a841be458b8f79712b000c562f2608f0fe624adf5ceaf1f0f874e40a8b",
+        "14964": "a0acde49f32829ff94cc82dae0b02ea089d8f95059a9056c9c5971b312fd2637",
+        "16769": "ab4661afe429873573b3fe6a17775b51300e9ab86a367b050c161763928da413"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "13532f24ba180272cb0d101856d336b53ec17e7957b2b659a3af51a7c4f55f6c",
+      "previous_gold_hash": "2b1bb296ed98f75ff010f452adeb221ea6a9a78f4578dddf670ec30e9248f69d",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "db5afc9bc2552b00",
+      "decision": "partial",
+      "required_ids": [
+        14170,
+        15147
+      ],
+      "evidence_hashes": {
+        "14170": "fba799335eb3aa33e0c947ec197a484f7bedbbdcdebee446598b458d28b41535",
+        "15147": "10b7dfd9b710f0e8ff2a70de7f6b017cee95dbf96a6b749c6240ea9143614438"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "907d3ec027f15efdc27b4724660596b43caacac1ad4002d3a12224b12a962a3b",
+      "previous_gold_hash": "91f0b4f24d563794f4c2d4c2c27c9ed5727d4bb1953842e80bf4cc4229c9a2a6",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "dc1908cb9672e0d8",
+      "decision": "answerable",
+      "required_ids": [
+        14153,
+        16048
+      ],
+      "evidence_hashes": {
+        "16048": "13694a74d28230389e6788c22a4fae2cb8531f804040c46d4b1fba365f314b42",
+        "14153": "9f1422b40fa58b26aeb90feb92b28424f61ea502df8b6e7d754ab5dcfbf15068"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "462e2433dc25576325d95cb2cbc0ed800dcdf079afaf0584eeb7d0fe2aed294a",
+      "previous_gold_hash": "540e2151af525003c99bfca48c65f1f8874785ba6ce052eec9bfe2040cffa047",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "e0b77537b9ce0310",
+      "decision": "insufficient",
+      "required_ids": [
+        14170
+      ],
+      "evidence_hashes": {
+        "14170": "fba799335eb3aa33e0c947ec197a484f7bedbbdcdebee446598b458d28b41535"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "9f0666a9209298322522dd972b05603e826b26618b0ac7242ca831094481ce11",
+      "previous_gold_hash": "fff0c97c03eef3fde0d5c735ddacab77b444560b854bd21bfcf371635a886082",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "e8ee013f75b013a2",
+      "decision": "pending",
+      "required_ids": [
+        17774
+      ],
+      "evidence_hashes": {
+        "17774": "624dd3aa505109d90f2e86b5011b76b955fe25b741bf0f754667ee2b55a036b8"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "9567c64520af5cd20c4b75814aa4e47045dcc077bd48635b62b1e329f8e1f8ba",
+      "previous_gold_hash": "e7e3030569a6f2a79356ca9653e9425ae0f3d7162f60dec1549c10f07f8ae469",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "e9dcf654963ddc5e",
+      "decision": "partial",
+      "required_ids": [
+        17954
+      ],
+      "evidence_hashes": {
+        "17954": "1c214c4a63ee2707a26e67ff162a41bd636ec33e2eadaeb26670b0691c3cb1fe"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "182f58c2b5042da0dcade0ce9a43d04f83289eb47daa184e01c69b30e2398454",
+      "previous_gold_hash": "5c3f04718d8925afb35add69715eda75a2364797ed6d14d54d5578e84ea31ff1",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "ea6d41922be39cf7",
+      "decision": "pending",
+      "required_ids": [
+        12122
+      ],
+      "evidence_hashes": {
+        "12122": "4d5b4d4f49bb773be11781b45b0e236adfa6637c2c921ca329c3d4061253c33b"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "ed15f25779217e4b8e14df156eed742938ca833c9b288c8df694d8ba69ab1fbe",
+      "previous_gold_hash": "4aec93a36307a52e6fd95a954fbe5b1d39429c603ce0d36dbba27d46aab1d0f8",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "edc6c8a376ffd54c",
+      "decision": "pending",
+      "required_ids": [
+        12076
+      ],
+      "evidence_hashes": {
+        "12076": "e23b15957814f2c58aab14c513e564c1bcabc289538f3007650a76f121788885"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "51f23b7978dbf3393d69b5858f5aa4168aa01b22f5c546f4971dc14405e94274",
+      "previous_gold_hash": "bd517c0cafbcaaf31c60374a829227064af5977509b4a7d9ba105f7818a17def",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "ee927b14de6ba35e",
+      "decision": "pending",
+      "required_ids": [
+        12089
+      ],
+      "evidence_hashes": {
+        "12089": "e392247811553b98a8072bb7d63226a3c0d719e27e44d7b2e79f0b3080818a82"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "2283c2a171b5d48021c193c2062fccaa447b6bca32778ba1ea6071f68fed7a95",
+      "previous_gold_hash": "b26d88026da4045d02e6cea7b7cfadf150f0c63aa93fac7c6b015ef81c866575",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "f43d6a11b8ba4907",
+      "decision": "refuse",
+      "required_ids": [],
+      "evidence_hashes": {},
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "333176e987391b0c3d62c8575f5cfa5cac058db6fc217b0f5de5e75b6bc25fa1",
+      "previous_gold_hash": "1aa79ac2b56fa29865a5f294edac15bf30ffb5d5f25c297b474a673e4d2fd858",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "fda6d7c3b7fea5fa",
+      "decision": "partial",
+      "required_ids": [
+        17684,
+        17970
+      ],
+      "evidence_hashes": {
+        "17684": "0aba3ad1d33dc72563f6ce36246f5348505d1b1cbd7de9ac580ccbe42ee52f08",
+        "17970": "1a2c54893f33447ac47ea3e0f0ca0d94ca125d12aa33c4d6e986775e5633908f"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "91a441eb84c30a1aa90f2e6da0c0ecf88ceb4802edfebd06490d4608317829d2",
+      "previous_gold_hash": "fcc838bee2cc41d444b19a8ae34df6f9cbe2922659b719b17822d600f0493ed8",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I01",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "0935cea6bb3469107a9d59d95eda9a39a9c16855ead1d273ee64b1c4475326d6",
+      "previous_gold_hash": "d2ebb949c93afc05d1bfedfa7134326837a9767082a05028d1d8b5fa0023f139",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I02",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "c7c6ab6a097caee49bf1d3d24f7841145239c86d91d860336207462d420878cf",
+      "previous_gold_hash": "c2543ac0352c8bc25b119f78d7329ea0ed4c18a5794676b8bc55b5b3d7b0bd05",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I03",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "b0ce4aa61d8f9a6ca0fe2ace6265b9108cb082350732fcd0203cf87d628f3c64",
+      "previous_gold_hash": "235fd4300cd8d65be627afa17a27cee14b7b9643c98061d074cdaa97cd436d93",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I04",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "8b62bd7061cbd7f159ef7c6df1b84f0b795a0b0f710050e9c567ce0d9849dfc3",
+      "previous_gold_hash": "e04f88d045238b3ecf9b933e97449426e2dfbd1b5fbe36c511e6e7a92a431a97",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I05",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "d5547292cb07683388cb92b7fa7017202c42b9f8bc78cc64b2f4dc8d2de76554",
+      "previous_gold_hash": "1064fc4c75e395e48e6470e2943c642b9da6ee1f94023da9bef302bc03b9820e",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I06",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "ecd460ae0bdc773bab84c4427b1961b6f355d7ac6434c075c24396930bfb750f",
+      "previous_gold_hash": "f9bef104b853e0aad2a2fae7715b4c183e2b711839102b71143240a8fad22070",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I07",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "1b29196423f73a3d64bc1ecbda08315fcee78cb90e97a75dd23ebd88b05d4c67",
+      "previous_gold_hash": "00bb7f7ad4ecd50d733ccd1ffa857d0a484331b183d3de29def132eee60854c5",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I08",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "798c8c66b2907bb1b9d7c63b47e5b1e53eca48f78d1974e91e94802c5645c9bd",
+      "previous_gold_hash": "0b50cb45446874989a230441a5aa94e222ded9b7176c4b39af4482673572bf6a",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I09",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "758d68101415a3c1ed3cde93eeb15a20412705d72c8b2d1a8fcf9b041f9302a6",
+      "previous_gold_hash": "c18571f812f11770febbd73f710bcb03aad0cab606b00335c80d6e4423ac6ff8",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-I10",
+      "decision": "answerable",
+      "required_ids": [
+        18027
+      ],
+      "evidence_hashes": {
+        "18027": "fd196a5d6a0e6a4806c1034a1a47f2c049386513b21aef523048d8a2ea791303"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "26e77f816e5d386ec998ae30429212ab15265bb710e41fb6aeebae7872a5e480",
+      "previous_gold_hash": "751154342a4a39403a987f0ecfb925e9f235f1ce859900badca4eb654c37c317",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T01",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "221fdeaa72d907a84e43f9f3745f777d506ed5c256d1d53f4e0ce8e8ae120310",
+      "previous_gold_hash": "e448538bce0fa5605ee360b2124c9e8c64b1ff83348aaaeaa15aded5c126ae85",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T02",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "3fda7fd3490e114fafd148764822438dae5300ba2ab311d3ac3fc652738c1d49",
+      "previous_gold_hash": "f07e52a805a40a2cc17e1f9c4f4670b07ab6abd600ee050e6f8a293627a13109",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T03",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "bcd1985a2dcbff66282151d86e514bf7beb89b9cc38185fb63730ea5f9ccb8a0",
+      "previous_gold_hash": "7218c8fca0ed74f15fbf72f5f8d5729528f825100e9c11d9e25ec7b28a0788a2",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T04",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "d93d6cb394f9c4009ef7a6d6fd3934a6502faf431cf82ec8a76e36c99930893c",
+      "previous_gold_hash": "2a472854dbcfafd9f3e3959877f92a5923b30e38da1489df52de7d055db336c3",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T05",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "16bcfa9ba1ddeb7ab88fe34a4667ca7fd57243187bc916ef6c85418ef39c15b2",
+      "previous_gold_hash": "b2064aedbf133ce75cf5d3f0ea528536e14e0be73e447e317317a915654ce801",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T06",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "75c9d91245f0e9e4e6f376239b0f665a16efa1219c4c0c2f6b7da27cbc87544c",
+      "previous_gold_hash": "b905edb7a58ba2d6e75691c64db9893a15c3b16d4d312b81679b616639aee7b5",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T07",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "48d0276b0efa5e32de5a009082ef538ac074d3a65c1cdb254a472f552e0ae6e3",
+      "previous_gold_hash": "d9248f3284e7bd0ca007b7fb32c32843e249292e941af84e0ce442407c1ebf09",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T08",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "6787135a84e09670217d0d312a3d0d6b19a0a880f858b31e1ccf969273684ee7",
+      "previous_gold_hash": "726449e157c21b359c2909c5b841352ebcad957c9da07b05dd290ff06bf08299",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T09",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "86315b359c979944c6271e1ea8a1c75409d572e0a2f929b91ad302f2637f8a54",
+      "previous_gold_hash": "b344e9c62b2e723d898c2551c647940ff02211bc3fd0abfaf2bfe4c503cfb04b",
+      "observed_before_run": true
+    },
+    {
+      "case_id": "SQL-T10",
+      "decision": "answerable",
+      "required_ids": [
+        18030
+      ],
+      "evidence_hashes": {
+        "18030": "c90c6942977d5177dffdb639f2d9ae85fc2cc45665ddbb81763716eac5a585db"
+      },
+      "review_kind": "user_delegated_agent_review",
+      "expectation_hash": "83bfa2e7765462556b8c4c4a7dabd8353e4b14f6658b515fa3f16519685a6878",
+      "previous_gold_hash": "bcf5fc4cb019bf1b6f8a9d53949cd035017e5668577e5ed01a97a84bbd95e706",
+      "observed_before_run": true
+    }
+  ]
+}

@@ -159,7 +159,8 @@ def _items(*unit_ids):
     ]
 
 
-def _run_grounded(db, monkeypatch, *, answer, supported_claims, judge, unit_ids=(1,)):
+def _run_grounded(db, monkeypatch, *, answer, supported_claims, judge, unit_ids=(1,),
+                  cannot_answer_reason=None):
     """只替换模型边界与检索边界；判定/组装逻辑走真实代码。"""
 
     citations = {unit_id: _citation(unit_id) for unit_id in unit_ids}
@@ -181,11 +182,14 @@ def _run_grounded(db, monkeypatch, *, answer, supported_claims, judge, unit_ids=
     async def execute(*_args, **_kwargs):
         return (
             {
-                "answer": answer,
+                # These tests exercise verdict handling with an actual citation;
+                # no-reference behavior has its own scope regression.
+                "answer": answer if "[" in answer or "【" in answer else answer + f" [{unit_ids[0]}]",
                 "confidence_level": "high",
                 "supported_claims": list(supported_claims),
                 "unsupported_claims": [],
                 "open_questions": [],
+                "cannot_answer_reason": cannot_answer_reason,
             },
             {},
         )
@@ -249,18 +253,42 @@ def test_full_support_with_full_coverage_stays_grounded(db, monkeypatch):
     result = _run_grounded(
         db,
         monkeypatch,
-        answer=FULL_ANSWER,
+        answer=FULL_ANSWER + " [1]",
         supported_claims=[SUPPORTED_ANSWER, UNSUPPORTED_ANSWER],
         judge=judge,
     )
     support = result["citation_support"]
     assert support["verification"] == "verified"
+    assert result["verification_status"] == "verified"
     assert support["claim_coverage"] == 1.0
     assert support["claims_unjudged"] == 0
     assert result["answer_status"] == "grounded"
     assert result["confidence_level"] == "high"
     assert result["trustworthiness"]["grade"] in {"A", "B"}
     assert result["supported_claims"] == [SUPPORTED_ANSWER, UNSUPPORTED_ANSWER]
+
+
+@pytest.mark.parametrize("judge_mode", ["off", "pass", "failure"])
+def test_declared_incomplete_answer_cannot_be_upgraded_by_judge(db, monkeypatch, judge_mode):
+    settings = get_settings()
+    check = "off" if judge_mode == "off" else "judge"
+    monkeypatch.setattr(settings, "citation_support_check", check, raising=False)
+    judge = _FailingJudge() if judge_mode == "failure" else _EchoJudge()
+
+    result = _run_grounded(
+        db,
+        monkeypatch,
+        answer=FULL_ANSWER + " [1]",
+        supported_claims=[SUPPORTED_ANSWER, UNSUPPORTED_ANSWER],
+        judge=judge,
+        cannot_answer_reason="缺少适用条件，不能完整回答。",
+    )
+
+    assert result["cannot_answer_reason"] == "缺少适用条件，不能完整回答。"
+    assert result["answer_status"] == "needs_confirmation"
+    assert result["confidence_level"] == "low"
+    assert result["trustworthiness"]["grade"] not in {"A", "B"}
+    assert ("citation_support" in result) is (judge_mode != "off")
 
 
 def test_unknown_claim_is_reported_as_partial_support_not_verified(db, monkeypatch):
@@ -328,7 +356,8 @@ def test_unparseable_judgement_is_unknown_not_a_clean_pass(db, monkeypatch):
         judge=_ScriptedJudge("not json at all"),
     )
     support = result["citation_support"]
-    assert support["verification"] == "unknown"
+    assert support["verification"] == "degraded"
+    assert support["degraded_reason"] == "invalid_model_response"
     assert support["claims_judged"] == 0
     assert support["claims_unjudged"] == 2
     assert support["unknown_count"] == 1  # 引用拿不到 verdict → unknown，而不是 supported
@@ -411,8 +440,100 @@ def test_claims_beyond_one_call_are_batched_with_bounded_calls(db, monkeypatch):
     assert support["coverage_truncated"] is False
     assert support["batch_count"] == 2
     assert CALL_COUNT["value"] == 2
-    # 第二批不再重复送引用，避免重复计分。
-    assert judge.calls[1]["citations"] == []
+    # 后续批也需要引文，结果汇总时再去除重复的引用级判定。
+    assert judge.calls[1]["citations"] == judge.calls[0]["citations"]
+    assert judge.calls[1]["claims"][0]["claim_id"] == "claim-21"
+    assert support["judged_citation_count"] == 1
+    assert support["duplicate_verdict_ids"] == []
+
+
+@pytest.mark.parametrize("claim_dimension", ["claim", "pair"])
+def test_claim_batches_keep_global_ids_and_evidence_without_double_counting_citations(
+    db, monkeypatch, claim_dimension
+):
+    monkeypatch.setattr(get_settings(), "citation_support_check", "judge", raising=False)
+
+    class _BatchAwareJudge:
+        last_call = ModelCallMetadata(provider="mock", model="judge-model")
+
+        def __init__(self):
+            self.calls = []
+
+        async def chat_json(self, system_prompt, user_prompt):
+            payload = json.loads(user_prompt)
+            self.calls.append(payload)
+            claim_verdicts = [
+                {
+                    "claim_id": item["claim_id"],
+                    "verdict": "unsupported" if item["claim"] == "合成结论21。" else "supported",
+                    "reason": "批次反例",
+                }
+                for item in payload["claims"]
+            ]
+            if claim_dimension == "pair":
+                for verdict in claim_verdicts:
+                    verdict["citation_id"] = payload["citations"][0]["citation_id"]
+            citation_verdicts = [
+                {"citation_id": item["citation_id"], "verdict": "supported", "reason": "引文支持"}
+                for item in payload.get("citations") or []
+            ]
+            return {"claims": claim_verdicts, "verdicts": citation_verdicts}
+
+        async def embed_texts(self, texts):
+            return [[0.0] for _ in texts]
+
+    judge = _BatchAwareJudge()
+    _install_gateway(monkeypatch, judge)
+    support = asyncio.run(
+        check_citation_support(
+            db,
+            [_citation(1)],
+            answer=_claims_answer(21),
+            project_id=1,
+            pinned_versions={"原始制度": "v1"},
+        )
+    )
+
+    assert support["batch_count"] == 2
+    assert all(call["citations"] == judge.calls[0]["citations"] for call in judge.calls)
+    assert all(call["pinned_versions"] == {"原始制度": "v1"} for call in judge.calls)
+    assert [claim["claim_id"] for call in judge.calls for claim in call["claims"]] == [
+        f"claim-{index}" for index in range(1, 22)
+    ]
+    assert support["claims_judged"] == 21
+    assert support["claims_supported"] == 20
+    assert support["claims_unsupported"] == 1
+    assert support["claims"][-1]["claim_id"] == "claim-21"
+    assert support["claims"][-1]["verdict"] == "unsupported"
+    assert len(support["verdicts"]) == 1
+
+
+def test_later_claim_batch_failure_does_not_inherit_first_batch_support(db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "citation_support_check", "judge", raising=False)
+
+    class _LaterFailingJudge(_EchoJudge):
+        async def chat_json(self, system_prompt, user_prompt):
+            if self.calls:
+                CALL_COUNT["value"] += 1
+                self.calls.append(json.loads(user_prompt))
+                raise LLMProviderError("second batch unavailable", error_type="timeout")
+            return await super().chat_json(system_prompt, user_prompt)
+
+    judge = _LaterFailingJudge()
+    _install_gateway(monkeypatch, judge)
+    support = asyncio.run(
+        check_citation_support(db, [_citation(1)], answer=_claims_answer(21), project_id=1)
+    )
+
+    assert support["batch_count"] == 2
+    assert support["claims_total"] == 21
+    assert support["claims_judged"] == 20
+    assert support["claims_unjudged"] == 1
+    assert support["claims_supported"] == 20
+    assert support["claims"][-1]["claim_id"] == "claim-21"
+    assert support["claims"][-1]["judged"] is False
+    assert support["claims"][-1]["verdict"] == "unknown"
+    assert support["verification"] == "degraded"
 
 
 def test_claims_beyond_the_batch_budget_are_explicitly_uncovered(db, monkeypatch):
@@ -437,7 +558,7 @@ def test_claims_beyond_the_batch_budget_are_explicitly_uncovered(db, monkeypatch
 # --------------------------------------------------------------------- 开关关闭：逐字兼容
 
 
-def test_switch_off_adds_nothing_and_keeps_the_original_status(db, monkeypatch):
+def test_switch_off_keeps_cited_answer_but_exposes_unverified_trust_ceiling(db, monkeypatch):
     def explode(*_args, **_kwargs):  # pragma: no cover - 关闭时绝不允许调用裁判
         raise AssertionError("citation_support_check=off 时不得调用裁判")
 
@@ -445,7 +566,7 @@ def test_switch_off_adds_nothing_and_keeps_the_original_status(db, monkeypatch):
     result = _run_grounded(
         db,
         monkeypatch,
-        answer=FULL_ANSWER,
+        answer=FULL_ANSWER + " [1]",
         supported_claims=[SUPPORTED_ANSWER, UNSUPPORTED_ANSWER],
         judge=SimpleNamespace(),
     )
@@ -453,8 +574,9 @@ def test_switch_off_adds_nothing_and_keeps_the_original_status(db, monkeypatch):
     assert "unverified_claims" not in result
     assert result["answer_status"] == "grounded"
     assert result["confidence_level"] == "high"
-    # 关闭时不得新增“已通过语义验证”的承诺，也不得凭空降低可信性。
-    assert "support_verification" not in result["trustworthiness"]["dimensions"]
+    assert result["trustworthiness"]["grade"] == "C"
+    assert result["verification_status"] == "not_run"
+    assert result["trustworthiness"]["dimensions"]["support_verification"]["ok"] is False
     assert CALL_COUNT["value"] == 0
 
 

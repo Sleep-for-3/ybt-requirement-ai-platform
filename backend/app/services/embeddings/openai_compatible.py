@@ -6,6 +6,7 @@ import httpx
 
 from app.services.llm.base import LLMProviderError, LLMResponseError, ModelCallMetadata
 from app.services.llm.openai_compatible import RETRYABLE_STATUS_CODES, _http_error, _usage
+from app.services.llm.provider_budget import ProviderBudget, reservation_tokens
 from app.services.llm.providers import (
     ProviderRuntimeConfig,
     is_local_provider,
@@ -149,6 +150,13 @@ class OpenAICompatibleEmbeddingService:
             headers["X-YBT-Embedding-Input-Type"] = input_type
         attempts = 0
         while True:
+            budget = None if self.local_only else ProviderBudget.from_environment()
+            reservation = (
+                budget.reserve(reservation_tokens(payload), self.model)
+                if budget is not None
+                else None
+            )
+            response = None
             try:
                 if self.transport is None:
                     # 复用 Client：新建 Client 会重新解析代理环境并构建连接/SSL 上下文，
@@ -187,6 +195,13 @@ class OpenAICompatibleEmbeddingService:
                     "Embedding provider network request failed after bounded retries",
                     error_type="network_error",
                 ) from exc
+            finally:
+                if budget is not None and reservation is not None:
+                    usage = _usage(response) if response is not None else None
+                    budget.finish(
+                        reservation,
+                        usage if usage and usage.get("usage_available") else None,
+                    )
 
     def embed_query(self, text: str) -> list[float]:
         return self._embed([text], input_type="query").vectors[0]

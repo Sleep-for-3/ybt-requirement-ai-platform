@@ -1,0 +1,46 @@
+{
+  "schema": "rag-delegated-business-review-v1",
+  "authorization": "User explicitly authorized agent business approval on 2026-11-16",
+  "review_kind": "user_delegated_agent_review",
+  "reviewer": "Codex acting under user delegation",
+  "approved_object": "source_backed_evaluation_expectation",
+  "human_business_approved": false,
+  "regulatory_authority_conferred": false,
+  "corpus_hash": "28627e12ed7b3ebf914b3cf1f60123c025eca57f97c5f820db754e4aead702d7",
+  "cases": [
+    {
+      "case_id": "54205ddddc3bc29b",
+      "delegated_business_approved": true,
+      "source_unit_ids": [14087],
+      "source_content_hashes": ["405fe50a95d4ae86b40c7a40ec1a478785b8ff436242020b4d9654bafb224974"],
+      "source_locators": ["一表通制度问答:A2023:W2023"],
+      "scope": "归档已办结答疑所述三种托收代收业务的产品类别",
+      "reason": "建议为0000-不适用，反馈同意机构意见且已办结；允许准确转述，不宣称现行制度已修订。",
+      "generated_answer_release_approved": false,
+      "remaining_issue": "正文正确但answer_status被时间误抽取造成的伪冲突降为待确认"
+    },
+    {
+      "case_id": "4f49ae2664bc1f9d",
+      "delegated_business_approved": true,
+      "source_unit_ids": [17797],
+      "source_content_hashes": ["d9ce0069afdb9407517df2af32fc5110d3fd68fdec554f543422f252c3ffeac7"],
+      "source_locators": ["转1104问答:A64:AF64"],
+      "scope": "重复客户不同经营户类型导致个体工商户贷款混算的机构建议及处理状态",
+      "reason": "原文处理中；可以批准标注机构建议的转述，不能批准为统一已定案转换口径。",
+      "generated_answer_release_approved": false,
+      "remaining_issue": "真实回答已遵守建议边界，但确定性引用绑定仍有误报，最终修改方案仍待源文件定案"
+    },
+    {
+      "case_id": "2000c9265e5dda84",
+      "delegated_business_approved": true,
+      "source_unit_ids": [14170, 17970],
+      "source_content_hashes": ["fba799335eb3aa33e0c947ec197a484f7bedbbdcdebee446598b458d28b41535", "1a2c54893f33447ac47ea3e0f0ca0d94ca125d12aa33c4d6e986775e5633908f"],
+      "source_locators": ["一表通制度问答:A2106:W2106", "转1104问答:A237:AF237"],
+      "scope": "分别说明一表通校验更新和转1104建议码表，保留各自体系与版本边界",
+      "reason": "一表通行反馈最新版校验规则已更新；1104行含建议修改及后续考虑事项，不能合并为同版通用规则。",
+      "generated_answer_release_approved": false,
+      "remaining_issue": "本次上下文缺少一表通独立角色，完整性未通过；码表引用绑定误报待修"
+    }
+  ],
+  "note": "Only these explicitly reviewed expectations are approved. No bulk approval of remaining cases, no human impersonation, no production database write."
+}
