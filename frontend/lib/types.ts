@@ -374,6 +374,11 @@ export type BackgroundJobSummary = {
   retry_count?:number;
   max_retries?:number;
   items?:BackgroundJobItemSummary[];
+  agent_task_id?:number;
+  execution_attempts?:Array<{
+    id:number; tool_key:string; step_key:string; attempt:number; batch:number; status:string;
+    started_at:string; updated_at:string; duration_ms:number|null; evidence_count:number; failure_code?:string|null;
+  }>;
 };
 export type BackgroundJobItemSummary = {
   id:number;

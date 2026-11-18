@@ -1421,6 +1421,7 @@ export function taskRowView(row: AgentTaskRow): TaskRowView {
 }
 
 export const TASK_FILTERS = [
+  { key: "attention", label: "需要跟进" },
   { key: "all", label: "全部任务" },
   { key: "mine", label: "待我处理" },
   { key: "active", label: "进行中" },
@@ -1435,6 +1436,7 @@ export type TaskFilter = { key: TaskFilterKey; keyword?: string };
 function matchesFilter(row: AgentTaskRow, view: TaskRowView, key: TaskFilterKey): boolean {
   const status = row.status || "";
   if (key === "all") return true;
+  if (key === "attention") return view.mine || matchesFilter(row, view, "active") || matchesFilter(row, view, "issue");
   if (key === "mine") return view.mine;
   if (key === "active") return ["created", "planning", "running", "waiting_human", "blocked"].includes(status);
   if (key === "done") return status === "completed";
@@ -1458,6 +1460,7 @@ export function taskFilterCounts(rows: AgentTaskRow[] | null | undefined): Recor
   const list = rows || [];
   return {
     all: list.length,
+    attention: list.filter((row) => matchesFilter(row, taskRowView(row), "attention")).length,
     mine: list.filter((row) => taskRowView(row).mine).length,
     active: list.filter((row) => matchesFilter(row, taskRowView(row), "active")).length,
     done: list.filter((row) => matchesFilter(row, taskRowView(row), "done")).length,

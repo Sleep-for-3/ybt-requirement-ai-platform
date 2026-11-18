@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Ban, MoreHorizontal, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Ban, ListChecks, MoreHorizontal, RefreshCw, RotateCcw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ArtifactSection, ConclusionCard, CreateTaskPanel, EmptyBlock, ErrorBlock, EvidenceSection,
@@ -20,6 +20,7 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import { apiGet, apiPost } from "@/lib/api";
 import { useProjectPermissions } from "@/lib/project-permissions";
 import { describeError } from "@/lib/user-message.mjs";
+import { jobDetailsHref } from "@/lib/job-links.mjs";
 
 const PAGE_SIZE = 8;
 const RUN_ACTIONS = ["retry", "replan", "cancel", "resume"] as const;
@@ -27,14 +28,14 @@ type RunAction = (typeof RUN_ACTIONS)[number];
 
 type QueryState = { taskId: number | null; filter: TaskFilterKey; q: string; page: number };
 
-const DEFAULT_QUERY: QueryState = { taskId: null, filter: "all", q: "", page: 1 };
+const DEFAULT_QUERY: QueryState = { taskId: null, filter: "attention", q: "", page: 1 };
 
 /** 读 URL：刷新、直链、浏览器后退都必须还原同一屏内容。 */
 function readQuery(): QueryState {
   if (typeof window === "undefined") return DEFAULT_QUERY;
   const params = new URLSearchParams(window.location.search);
   const taskId = Number(params.get("taskId"));
-  const filter = TASK_FILTERS.find((item) => item.key === params.get("status"))?.key ?? "all";
+  const filter = TASK_FILTERS.find((item) => item.key === params.get("status"))?.key ?? DEFAULT_QUERY.filter;
   const page = Math.max(1, Number(params.get("page")) || 1);
   return {
     taskId: Number.isSafeInteger(taskId) && taskId > 0 ? taskId : null,
@@ -46,8 +47,10 @@ function readQuery(): QueryState {
 
 function writeQuery(next: QueryState, mode: "push" | "replace") {
   const params = new URLSearchParams();
+  const project = new URLSearchParams(window.location.search).get("projectId");
+  if (project) params.set("projectId", project);
   if (next.taskId) params.set("taskId", String(next.taskId));
-  if (next.filter !== "all") params.set("status", next.filter);
+  if (next.filter !== DEFAULT_QUERY.filter) params.set("status", next.filter);
   if (next.q) params.set("q", next.q);
   if (next.page > 1) params.set("page", String(next.page));
   const search = params.toString();
@@ -59,7 +62,7 @@ function taskHref(state: QueryState, taskId: number): string {
   const params = new URLSearchParams();
   params.set("taskId", String(taskId));
   // 带上列表上下文（筛选/搜索/页码），返回时才能回到用户原来的位置。
-  if (state.filter !== "all") params.set("status", state.filter);
+  if (state.filter !== DEFAULT_QUERY.filter) params.set("status", state.filter);
   if (state.q) params.set("q", state.q);
   if (state.page > 1) params.set("page", String(state.page));
   return `/agent?${params.toString()}`;
@@ -68,7 +71,7 @@ function taskHref(state: QueryState, taskId: number): string {
 /** 列表页地址（不含 taskId），用于“返回任务中心”链接与刷新。 */
 function listHref(state: QueryState): string {
   const params = new URLSearchParams();
-  if (state.filter !== "all") params.set("status", state.filter);
+  if (state.filter !== DEFAULT_QUERY.filter) params.set("status", state.filter);
   if (state.q) params.set("q", state.q);
   if (state.page > 1) params.set("page", String(state.page));
   const search = params.toString();
@@ -81,20 +84,22 @@ function scrollToSection(id: string) {
 }
 
 export default function AgentWorkspacePage() {
-  const { projectId } = useProjectWorkspace();
-  const { can } = useProjectPermissions(projectId);
+  const { projectId, selectedProject, selectProject } = useProjectWorkspace();
+  const { can, ready: permissionsReady } = useProjectPermissions(projectId);
   const queryClient = useQueryClient();
-  const [state, setState] = useState<QueryState>(readQuery);
+  const [state, setState] = useState<QueryState>(DEFAULT_QUERY);
   const [notice, setNotice] = useState("");
   const [objective, setObjective] = useState("");
   const [scenarioKey, setScenarioKey] = useState("knowledge_question");
-  const [createOpen, setCreateOpen] = useState(false);
+  const submitting = useRef(false);
+  const listPosition = useRef<{ taskId: number; y: number } | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
   const [fullTextOpen, setFullTextOpen] = useState(false);
   const [evidenceCitation, setEvidenceCitation] = useState<KnowledgeCitation | null>(null);
 
   useEffect(() => {
     const onPop = () => setState(readQuery());
+    onPop();
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -139,13 +144,19 @@ export default function AgentWorkspacePage() {
         auto_start: true,
       }),
     onSuccess: (data) => {
+      if (data?.task?.project_id) {
+        selectProject(data.task.project_id);
+        const url = new URL(window.location.href);
+        url.searchParams.set("projectId", String(data.task.project_id));
+        window.history.replaceState(null, "", url);
+      }
       setObjective("");
-      setCreateOpen(false);
       setNotice("任务已创建。规划与执行在后台进行，页面会自动刷新。");
       refresh();
       if (data?.task?.id) navigate({ taskId: data.task.id }, "push");
     },
     onError: (error) => setNotice(describeError(error, "任务创建失败，请检查权限后重试。")),
+    onSettled: () => { submitting.current = false; },
   });
 
   const runAction = useMutation({
@@ -180,9 +191,18 @@ export default function AgentWorkspacePage() {
 
   const detail = snapshot.data;
   const view = useMemo(() => (detail ? taskDetailView(detail) : null), [detail]);
-  const canRun = can("task.manage");
-  const canDecide = can("final.review");
-  const canAudit = can("audit.read");
+  const detailPermissions = useProjectPermissions(detail?.task.project_id ?? null);
+  const canRun = activeTaskId ? detailPermissions.can("task.manage") : can("task.manage");
+  const canDecide = detailPermissions.can("final.review");
+  const canAudit = detailPermissions.can("audit.read");
+
+  useEffect(() => {
+    const position = listPosition.current;
+    if (activeTaskId || !position || tasks.isLoading) return;
+    listPosition.current = null;
+    document.querySelector<HTMLElement>(`[data-task-action="${position.taskId}"]`)?.focus({ preventScroll: true });
+    window.scrollTo(0, position.y);
+  }, [activeTaskId, tasks.isLoading]);
 
   const evidenceCount = Number(detail?.task?.counts?.evidence ?? 0);
   const gaps = useMemo(() => {
@@ -205,14 +225,17 @@ export default function AgentWorkspacePage() {
   }, [detail]);
 
   function startTask() {
+    if (submitting.current || !canRun) return;
     const text = objective.trim();
     if (!projectId) return setNotice("请先在右上角选择项目。");
     if (text.length < 4) return setNotice("业务目标至少需要 4 个字，请描述清楚要达成的监管目标。");
     setNotice("");
+    submitting.current = true;
     create.mutate(text);
   }
 
   function openTask(taskId: number) {
+    if (!activeTaskId) listPosition.current = { taskId, y: window.scrollY };
     setProcessOpen(false);
     setFullTextOpen(false);
     navigate({ taskId }, "push");
@@ -303,13 +326,13 @@ export default function AgentWorkspacePage() {
             <CreateTaskPanel
               busy={create.isPending}
               canRun={canRun}
+              permissionPending={!permissionsReady}
               objective={objective}
               onObjectiveChange={setObjective}
               onScenarioChange={setScenarioKey}
               onSubmit={startTask}
               scenarioKey={scenarioKey}
-              open={createOpen}
-              onOpenChange={setCreateOpen}
+              projectName={selectedProject?.name || String(projectId)}
             />
 
             <section aria-label="任务列表" className="panel">
@@ -361,22 +384,19 @@ export default function AgentWorkspacePage() {
               {!tasks.isLoading && !tasks.isError && rows.length === 0 ? (
                 <div className="p-5">
                   <EmptyBlock hint={canRun ? "任务将使用当前项目已授权的资料。" : "当前账号只有查看权限。"}
-                    title="这个项目还没有智能体任务"
-                    action={canRun ? <button className="button-primary mt-1" type="button" onClick={() => setCreateOpen(true)}>
-                      <Plus aria-hidden size={15} />创建第一个任务
-                    </button> : undefined} />
+                    title="这个项目还没有智能体任务" />
                 </div>
               ) : null}
               {!tasks.isLoading && !tasks.isError && rows.length > 0 && visibleRows.length === 0 ? (
                 <div className="p-5">
                   <EmptyBlock
                     action={(
-                      <button className="button-secondary mt-1" onClick={() => navigate({ filter: "all", q: "", page: 1 }, "replace")} type="button">
+                      <button className="button-secondary mt-1" onClick={() => navigate({ filter: DEFAULT_QUERY.filter, q: "", page: 1 }, "replace")} type="button">
                         清除筛选条件
                       </button>
                     )}
-                    hint="换个关键词，或切回“全部任务”再看看。"
-                    title="没有匹配的任务"
+                    hint={state.filter === "attention" && !state.q ? "已完成的任务可在历史筛选中查看。" : "换个关键词或切换任务状态。"}
+                    title={state.filter === "attention" && !state.q ? "暂无需要跟进的任务" : "没有匹配的任务"}
                   />
                 </div>
               ) : null}
@@ -391,7 +411,7 @@ export default function AgentWorkspacePage() {
                         // 只接管左键单击；中键/Ctrl 仍然走原生链接（新标签打开）。
                         if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
                         event.preventDefault();
-                        navigate({ taskId: row.id }, "push");
+                        openTask(row.id);
                       }}
                       view={taskRowView(row)}
                     />
@@ -413,7 +433,7 @@ export default function AgentWorkspacePage() {
           </>
         ) : null}
 
-        {projectId && activeTaskId ? (
+        {activeTaskId ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <a className="button-secondary" href={listHref(state)}
@@ -440,6 +460,12 @@ export default function AgentWorkspacePage() {
 
             {view && detail ? (
               <>
+                {detail.task.objective ? (
+                  <section className="border-b border-line pb-3">
+                    <h2 className="text-xs font-medium text-slate-500">业务目标</h2>
+                    <p className="mt-1 break-words text-sm text-ink">{detail.task.objective}</p>
+                  </section>
+                ) : null}
                 <ConclusionCard
                   busy={busy}
                   detail={view}
@@ -450,33 +476,28 @@ export default function AgentWorkspacePage() {
                         <MoreHorizontal aria-hidden size={14} />更多操作
                       </summary>
                       <div className="absolute right-0 z-10 mt-1 w-56 space-y-1 rounded-lg border border-line bg-white p-2 shadow-card">
-                        <button className="button-ghost h-8 w-full justify-start px-2 text-xs" disabled={busy || !canRun}
+                        {canRun && !isTaskTerminal(detail.task.status) && <button className="button-ghost h-8 w-full justify-start px-2 text-xs" disabled={busy}
                           onClick={() => runAction.mutate({ taskId: detail.task.id, kind: "retry" })} type="button">
                           <RotateCcw size={13} />重新运行
-                        </button>
-                        <button className="button-ghost h-8 w-full justify-start px-2 text-xs" disabled={busy || !canRun}
+                        </button>}
+                        {canRun && !isTaskTerminal(detail.task.status) && Number(detail.task.replanning_count || 0) < 3 && <button className="button-ghost h-8 w-full justify-start px-2 text-xs" disabled={busy}
                           onClick={() => runAction.mutate({ taskId: detail.task.id, kind: "replan" })} type="button">
                           <RefreshCw size={13} />重新规划
-                        </button>
-                        <button className="button-ghost h-8 w-full justify-start px-2 text-xs text-coral-700" disabled={busy || !canRun}
+                        </button>}
+                        {canRun && !isTaskTerminal(detail.task.status) && <button className="button-ghost h-8 w-full justify-start px-2 text-xs text-coral-700" disabled={busy}
                           onClick={() => runAction.mutate({ taskId: detail.task.id, kind: "cancel" })} type="button">
                           <Ban size={13} />取消任务
-                        </button>
+                        </button>}
+                        {canRun && isTaskTerminal(detail.task.status) ? <p className="px-2 py-1 text-xs text-slate-500">该任务已结束。</p> : null}
                         {canRun ? null : <p className="px-2 py-1 text-[11px] text-slate-500">当前账号没有任务管理权限。</p>}
                       </div>
                     </details>
                   )}
                   onAction={handleConclusionAction}
                   canHandle={canDecide}
+                  canRun={canRun}
                   onToggleFullText={() => setFullTextOpen((value) => !value)}
                 />
-
-                {detail.task.objective && detail.task.objective.length > 28 ? (
-                  <details className="px-1 text-xs text-slate-500">
-                    <summary className="cursor-pointer">原始业务目标：{detail.task.objective.slice(0, 40)}…</summary>
-                    <p className="mt-1 text-sm text-slate-700">{detail.task.objective}</p>
-                  </details>
-                ) : null}
 
                 {view.waiting && waitingStep ? (
                   <WaitingGateCard
@@ -506,6 +527,11 @@ export default function AgentWorkspacePage() {
                   open={processOpen}
                   phases={view.phases}
                 />
+                {detail.task.background_job_id ? (
+                  <a className="button-secondary" href={jobDetailsHref(detail.task.background_job_id)}>
+                    <ListChecks size={15} />后台执行记录
+                  </a>
+                ) : null}
                 <DiagnosticsPanel canRead={canAudit} taskId={detail.task.id} />
               </>
             ) : null}

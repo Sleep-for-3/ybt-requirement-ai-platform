@@ -2,40 +2,39 @@
 
 import { ArrowUpRight, Clock3, Search } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ModalDialog } from "@/components/feedback/ModalDialog";
 import { apiGet } from "@/lib/api";
 
-type SearchItem = {
-  category: string;
-  entity_type: string;
-  entity_id: number;
-  title: string;
-  subtitle?: string | null;
-  href: string;
-};
-
-type SearchResponse = {
-  query: string;
-  items: SearchItem[];
-  category_counts: Record<string, number>;
-};
-
-type SearchState = "idle" | "loading" | "ready" | "error";
+type SearchItem = { category: string; entity_type: string; entity_id: number; title: string; subtitle?: string | null; href: string };
+type Recent = { query: string; type: string; id: number };
+type Results = { query: string; items: SearchItem[] | null };
+const TITLE = "搜索当前项目资产";
 
 export function GlobalSearch({ projectId }: { projectId: number | null }) {
+  return <ProjectAssetSearch key={projectId} projectId={projectId} />;
+}
+
+function search(projectId: number, query: string, signal: AbortSignal) {
+  return apiGet<{ items: SearchItem[] }>(`/projects/${projectId}/global-search?q=${encodeURIComponent(query)}&limit=40`, { signal });
+}
+
+function ProjectAssetSearch({ projectId }: { projectId: number | null }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [items, setItems] = useState<SearchItem[]>([]);
+  const [results, setResults] = useState<Results | null>(null);
   const [recent, setRecent] = useState<SearchItem[]>([]);
-  const [state, setState] = useState<SearchState>("idle");
+  const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const key = `ybt:recent-project-search:${projectId}`;
+  const normalized = query.trim();
 
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if (projectId && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (projectId) setOpen(true);
+        setOpen(true);
       }
     }
     document.addEventListener("keydown", shortcut);
@@ -43,82 +42,88 @@ export function GlobalSearch({ projectId }: { projectId: number | null }) {
   }, [projectId]);
 
   useEffect(() => {
-    setItems([]);
-    setQuery("");
-    setState("idle");
-    if (!projectId) { setRecent([]); return; }
-    try {
-      const parsed = JSON.parse(localStorage.getItem(recentKey(projectId)) || "[]");
-      setRecent(Array.isArray(parsed) ? parsed.filter(isSafeItem).slice(0, 6) : []);
-    } catch {
-      setRecent([]);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    const normalized = query.trim();
-    if (!open || !projectId || normalized.length < 2) {
-      setItems([]);
-      setState("idle");
-      return;
-    }
+    if (!open || !projectId || normalized.length < 2) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setState("loading");
-      void apiGet<SearchResponse>(`/projects/${projectId}/global-search?q=${encodeURIComponent(normalized)}&limit=40`, { signal: controller.signal })
-        .then((result) => {
-          if (controller.signal.aborted) return;
-          setItems(result.items.filter(isSafeItem));
-          setState("ready");
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) { setItems([]); setState("error"); }
-        });
+      void search(projectId, normalized, controller.signal).then(({ items }) => {
+        if (!controller.signal.aborted) setResults({ query: normalized, items: items.filter(isAssetLink) });
+      }).catch(() => {
+        if (!controller.signal.aborted) setResults({ query: normalized, items: null });
+      });
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [open, projectId, query]);
+  }, [open, projectId, normalized]);
 
+  useEffect(() => {
+    if (!open || !projectId || normalized) return;
+    const controller = new AbortController();
+    let saved: Recent[];
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(key) || "[]");
+      saved = Array.isArray(value) ? value.filter((row): row is Recent => row && typeof row.query === "string" && row.query.length >= 2 && row.query.length <= 100 && typeof row.type === "string" && Number.isInteger(row.id)).slice(0, 6) : [];
+    } catch { saved = []; }
+    const queries = new Map(Array.from(new Set(saved.map(row => row.query)), value => [value, search(projectId, value, controller.signal).catch(() => ({ items: [] }))] as const));
+    void Promise.all(saved.map(async row => (await queries.get(row.query))?.items.find(item => item.entity_type === row.type && item.entity_id === row.id))).then(items => {
+      if (!controller.signal.aborted) setRecent(items.filter(isAssetLink));
+    });
+    return () => controller.abort();
+  }, [open, projectId, key, normalized]);
+
+  function close() { setOpen(false); setQuery(""); setResults(null); setRecent([]); }
   function remember(item: SearchItem) {
-    if (!projectId || !isSafeItem(item)) return;
-    const next = [item, ...recent.filter((candidate) => candidate.entity_type !== item.entity_type || candidate.entity_id !== item.entity_id)].slice(0, 6);
-    setRecent(next);
-    localStorage.setItem(recentKey(projectId), JSON.stringify(next));
-    setOpen(false);
+    if (normalized.length >= 2) {
+      try {
+        const saved: Recent[] = JSON.parse(localStorage.getItem(key) || "[]");
+        localStorage.setItem(key, JSON.stringify([{ query: normalized, type: item.entity_type, id: item.entity_id }, ...(Array.isArray(saved) ? saved.filter(row => row && (row.type !== item.entity_type || row.id !== item.entity_id)) : [])].slice(0, 6)));
+      } catch { /* Recent visits are optional. */ }
+    }
+    close();
   }
 
-  const visible = query.trim().length >= 2 ? items : recent;
-  const groups = groupItems(visible);
-  return (
-    <>
-      <button aria-label="全局资产搜索" className="flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-line bg-slate-50 text-left text-xs text-slate-500 hover:border-pine-200 hover:bg-white md:w-auto md:min-w-56 md:justify-start md:px-3" disabled={!projectId} onClick={() => setOpen(true)} type="button">
-        <Search size={15} /><span className="hidden flex-1 md:block">搜索资产、语义、需求与血缘</span><kbd className="hidden rounded border border-line bg-white px-1.5 py-0.5 text-[10px] md:inline">快捷键 Ctrl+K</kbd>
-      </button>
-      <ModalDialog description="仅搜索当前项目中你有权访问的资产，结果直接进入生产页面。" onClose={() => setOpen(false)} open={open} title="全局资产搜索">
-        <label className="relative block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input autoFocus className="control pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="输入名称、编码、定义或脚本路径（至少 2 个字符）" value={query} /></label>
-        <div className="mt-4 max-h-[55vh] space-y-4 overflow-y-auto">
-          {state === "loading" ? <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-500">正在检索当前项目资产…</p> : null}
-          {state === "error" ? <p className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-4 text-sm text-coral-700" role="alert">搜索暂时不可用，请检查网络或权限后重试。</p> : null}
-          {state === "ready" && !items.length ? <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-500">当前项目没有匹配结果，请尝试名称、编码或更短的关键词。</p> : null}
-          {state === "idle" && !query.trim() && !recent.length ? <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-500">暂无最近访问，从搜索一个监管字段或语义概念开始。</p> : null}
-          {Array.from(groups.entries()).map(([category, rows]) => <section key={category}><h3 className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-500">{query.trim().length < 2 ? <Clock3 size={13} /> : null}{category}<span className="font-normal text-slate-400">{rows.length}</span></h3><div className="divide-y divide-line overflow-hidden rounded-xl border border-line">{rows.map((item) => <Link className="flex items-center gap-3 bg-white px-3 py-3 transition hover:bg-mist" href={item.href} key={`${item.entity_type}-${item.entity_id}`} onClick={() => remember(item)}><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-ink">{item.title}</p>{item.subtitle ? <p className="mt-0.5 truncate text-xs text-slate-500">{item.subtitle}</p> : null}</div><ArrowUpRight className="shrink-0 text-slate-400" size={15} /></Link>)}</div></section>)}
-        </div>
-      </ModalDialog>
-    </>
-  );
-}
-
-function recentKey(projectId: number) {
-  return `ybt:recent-assets:${projectId}`;
-}
-
-function isSafeItem(value: unknown): value is SearchItem {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Partial<SearchItem>;
-  return typeof item.entity_id === "number" && typeof item.entity_type === "string" && typeof item.category === "string" && typeof item.title === "string" && typeof item.href === "string" && item.href.startsWith("/") && !item.href.startsWith("//");
-}
-
-function groupItems(items: SearchItem[]) {
+  const current = results?.query === normalized ? results : null;
+  const visible = normalized ? current?.items ?? [] : recent;
   const groups = new Map<string, SearchItem[]>();
-  for (const item of items) groups.set(item.category, [...(groups.get(item.category) || []), item]);
-  return groups;
+  for (const item of visible) groups.set(item.category, [...(groups.get(item.category) ?? []), item]);
+
+  return <>
+    <button aria-label={TITLE} className="flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-line bg-slate-50 text-xs text-slate-600 hover:bg-white md:w-auto md:px-3" disabled={!projectId} onClick={() => setOpen(true)} type="button">
+      <Search size={15} /><span className="hidden md:inline">{TITLE}</span>
+    </button>
+    <ModalDialog initialFocusRef={input} onClose={close} open={open} title={TITLE}>
+      <div onKeyDown={event => {
+        if (!['ArrowDown', 'ArrowUp'].includes(event.key) || event.nativeEvent.isComposing) return;
+        const links = Array.from(list.current?.querySelectorAll<HTMLAnchorElement>("a") ?? []);
+        if (!links.length) return;
+        event.preventDefault();
+        const index = links.indexOf(document.activeElement as HTMLAnchorElement);
+        if (index === 0 && event.key === "ArrowUp") input.current?.focus();
+        else (links[index < 0 ? (event.key === "ArrowUp" ? links.length - 1 : 0) : Math.min(links.length - 1, index + (event.key === "ArrowDown" ? 1 : -1))])?.focus();
+      }}>
+        <label className="relative block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input aria-label="资产关键词" className="control pl-10" maxLength={100} onChange={event => { setQuery(event.target.value); if (event.target.value.trim() !== normalized) { setResults(null); setRecent([]); } }} placeholder="字段、表、口径或证据" ref={input} value={query} /></label>
+        <div className="mt-3 max-h-[55vh] overflow-y-auto" ref={list}>
+          {normalized.length === 1 ? <p role="status" className="text-sm text-slate-500">请输入至少 2 个字符。</p> : null}
+          {normalized.length >= 2 && !current ? <p role="status" className="text-sm text-slate-500">正在搜索…</p> : null}
+          {current?.items === null ? <p role="alert" className="text-sm text-coral-700">搜索失败，请检查网络或项目权限。</p> : null}
+          {current?.items?.length === 0 ? <p role="status" className="text-sm text-slate-500">当前项目没有匹配结果。</p> : null}
+          {!normalized ? <p className="mb-2 flex items-center gap-2 text-xs text-slate-500"><Clock3 size={13} />{recent.length ? "最近访问" : "暂无可显示的最近访问"}</p> : null}
+          {Array.from(groups).map(([category, rows]) => <section className="mb-3" key={category}>
+            <h3 className="border-b border-line py-1 text-xs font-semibold text-slate-500">{category} · {rows.length}</h3>
+            {rows.map(item => <Link className="flex items-center gap-3 border-b border-line px-2 py-2.5 hover:bg-mist focus-visible:outline-pine-700" href={item.href} key={`${item.entity_type}-${item.entity_id}`} onClick={() => remember(item)}>
+              <span className="min-w-0 flex-1 break-words text-sm font-medium text-ink"><Highlight text={item.title} query={normalized} />{item.subtitle ? <span className="block text-xs font-normal text-slate-500"><Highlight text={item.subtitle} query={normalized} /></span> : null}</span><ArrowUpRight className="shrink-0 text-slate-400" size={15} />
+            </Link>)}
+          </section>)}
+        </div>
+      </div>
+    </ModalDialog>
+  </>;
+}
+
+function isAssetLink(item: SearchItem | undefined): item is SearchItem {
+  return Boolean(item && typeof item.href === "string" && /^\/(?![/\\])/.test(item.href));
+}
+
+function Highlight({ text, query }: { text: string; query: string }) {
+  if (!query) return text;
+  const pattern = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "giu");
+  return text.split(pattern).map((part, index) => index % 2 === 1 ? <mark className="rounded bg-amber-100 text-ink" key={index}>{part}</mark> : part);
 }

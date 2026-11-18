@@ -10,6 +10,7 @@ import { useJobPollingStatus } from "@/hooks/useJobPolling";
 import { jobDetailsHref } from "@/lib/job-links.mjs";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
+  agent_task_run: "智能体分析",
   resource_batch_import: "统一批量导入",
   batch_ai_generation_business: "批量生成业务口径草稿",
   batch_ai_generation_technical: "批量生成技术溯源草稿",
@@ -53,12 +54,14 @@ export function JobProgressPanel({
   job,
   compact = false,
   resultHref,
-  showDetailsLink = true
+  showDetailsLink = true,
+  showJobId = true
 }: {
   job: BackgroundJobSummary;
   compact?: boolean;
   resultHref?: string;
   showDetailsLink?: boolean;
+  showJobId?: boolean;
 }) {
   const result = job.result_summary_json || {};
   // R08: 公共进度区统一接入“断连/恢复”提示 —— 所有渲染本组件的页面自动获得，
@@ -87,7 +90,7 @@ export function JobProgressPanel({
           </div>
         ) : null}
         <div>
-          <div className="text-sm font-semibold text-ink">{jobTypeLabel(job.job_type)} <span className="font-normal text-slate-400">#{job.id}</span></div>
+          <div className="text-sm font-semibold text-ink">{jobTypeLabel(job.job_type)} {showJobId ? <span className="font-normal text-slate-400">#{job.id}</span> : null}</div>
           {!compact ? <div className="mt-1 text-xs text-slate-500">创建：{dateText(job.created_at)} · 开始：{dateText(job.started_at)}</div> : null}
         </div>
         <JobStatusBadge status={job.status} />

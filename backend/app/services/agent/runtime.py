@@ -917,6 +917,7 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
     db.commit()
 
     executed = 0
+    run_batch = int(task.retry_count or 0) + int(job.retry_count or 0) + 1 if job is not None else None
     while True:
         if _job_cancelled(db, job):
             _cancel_pending_steps(db, task, reason="job_cancelled")
@@ -926,7 +927,7 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
         step = _next_runnable_step(db, task)
         if step is None:
             break
-        outcome = await _execute_step(db, task, project, actor, step)
+        outcome = await _execute_step(db, task, project, actor, step, job=job, run_batch=run_batch)
         executed += 1
         if outcome == "completed" and getattr(task, "adaptive", False):
             # Observe -> Replan: the observer may revise the unexecuted plan between steps.
@@ -966,7 +967,8 @@ async def _run_task(db, task: AgentTask, actor: Principal, job: BackgroundJob | 
             "steps_executed": executed, "paused": paused}
 
 
-async def _execute_step(db, task: AgentTask, project: Project, actor: Principal, step: AgentStep) -> str:
+async def _execute_step(db, task: AgentTask, project: Project, actor: Principal, step: AgentStep,
+                        *, job: BackgroundJob | None = None, run_batch: int | None = None) -> str:
     spec = require_tool(step.tool_key)
     max_attempts = max(1, min(int(step.max_attempts or 1), int((spec.retry_policy or {}).get("max_attempts", 1)), 3))
     retryable_codes: list[str] = list((spec.retry_policy or {}).get("retry_on") or [])
@@ -996,6 +998,9 @@ async def _execute_step(db, task: AgentTask, project: Project, actor: Principal,
             required_permissions_json=sorted(spec.required_permissions),
             risk_level=spec.risk_level, read_only=bool(spec.read_only),
             retry_count=max(0, step.attempt_count - 1),
+            execution_metadata_json={"background_run": {
+                "job_id": job.id, "batch": run_batch,
+            }} if job else {},
         )
         db.add(call)
         db.commit()
@@ -1272,7 +1277,7 @@ def _record_success(db, task: AgentTask, step: AgentStep, call: AgentToolCall, r
     call.degraded_path = result.degraded_path
     metadata = {**dict(result.execution_metadata or {}), **dict(result.model_metadata or {})}
     if metadata:
-        call.execution_metadata_json = redact_summary(metadata)
+        call.execution_metadata_json = {**redact_summary(metadata), **(call.execution_metadata_json or {})}
         call.model_name = str(metadata.get("model") or metadata.get("model_name") or "")[:100] or None
         call.prompt_version = str(metadata.get("prompt_version") or "")[:100] or None
         call.provider_type = str(metadata.get("provider") or metadata.get("provider_type") or "")[:50] or None
@@ -1795,7 +1800,7 @@ def resume_task(db, principal: Principal, task: AgentTask, *, job: BackgroundJob
         latest_decision = db.scalar(select(func.max(AgentHumanDecision.id)).where(
             AgentHumanDecision.task_id == task.id)) or 0
         submit_task(db, project, dispatcher, task,
-                    resume_token=f"decision:{latest_decision}:plan:{task.plan_version}")
+                    resume_token=f"decision:{latest_decision}:plan:{task.plan_version}:retry:{int(task.retry_count or 0)}")
     db.refresh(task)
     return {"task_status": task.status, "resumed": True}
 

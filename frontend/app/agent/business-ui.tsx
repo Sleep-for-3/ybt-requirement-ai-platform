@@ -5,7 +5,7 @@ import {
   FileText, Info, ListChecks, LoaderCircle, Play, RefreshCw, ShieldAlert, X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import {
   decisionPayload, statusIconKind, subjectChoicePayload,
@@ -89,10 +89,11 @@ export function TaskListRow({ view, href, active, onOpen }: {
   view: TaskRowView; href: string; active: boolean; onOpen?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
   return (
-    <div className={`border-b border-line px-5 py-3 last:border-0 ${active ? "bg-pine-50/70" : "hover:bg-mist/70"}`}>
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+    <div className={`grid items-center gap-x-4 gap-y-1 border-b border-line px-4 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto] ${active ? "bg-pine-50/70" : "hover:bg-mist/70"}`}>
+      <div className="min-w-0">
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
         <a className="min-w-0 flex-1 text-sm font-medium text-ink hover:text-pine-700 hover:underline"
-          href={href} onClick={onOpen}>
+          data-task-action={view.id} href={href} onClick={onOpen}>
           {view.title}
         </a>
         <ToneBadge label={view.stateLabel} tone={view.stateTone} />
@@ -100,15 +101,10 @@ export function TaskListRow({ view, href, active, onOpen }: {
           <span className="badge-neutral" key={signal}>{signal}</span>
         ))}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-        <span>业务对象：{view.objectLabel}</span>
-        <span className="text-slate-300">|</span>
-        <span>{view.summaryLabel}</span>
-        <span className="text-slate-300">|</span>
-        <span className="inline-flex items-center gap-1"><Clock3 aria-hidden size={12} />{view.updatedLabel}</span>
+      <p className="mt-1 line-clamp-2 break-words text-xs text-slate-600">{view.summaryLabel}：{view.summary}</p>
       </div>
-      <p className="mt-1 text-sm text-slate-700">{view.summary}</p>
-      <div className="mt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1"><Clock3 aria-hidden size={12} />{view.updatedLabel}</span>
         <a className="button-secondary h-8 px-3 text-xs" href={href} onClick={onOpen}>
           {view.action.label}
           <ArrowRight size={13} />
@@ -132,12 +128,13 @@ const ACTION_ICON: Record<string, typeof Play> = {
  * 状态、结论、下一步动作必须在同一屏内，不拆成多张卡片把它们挤下去。
  */
 export function ConclusionCard({
-  detail, busy, canHandle = true, onAction, fullTextOpen, onToggleFullText, moreActions,
+  detail, busy, canHandle = true, canRun, onAction, fullTextOpen, onToggleFullText, moreActions,
 }: {
   detail: TaskDetailView;
   busy: boolean;
   /** 当前账号是否有“批准/复核”权限；没有时主操作置灰并说明原因，而不是让用户点了才报错。 */
   canHandle?: boolean;
+  canRun: boolean;
   onAction: (key: string) => void;
   fullTextOpen: boolean;
   onToggleFullText: () => void;
@@ -187,16 +184,16 @@ export function ConclusionCard({
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2">
-          <button className="button-primary" disabled={busy || primaryBlocked}
+          {conclusion.primaryAction.key !== "retry" || canRun ? <button className="button-primary" disabled={busy || primaryBlocked}
             onClick={() => onAction(conclusion.primaryAction.key)} type="button">
             <PrimaryIcon size={15} />{busy ? "处理中…" : conclusion.primaryAction.label}
-          </button>
+          </button> : null}
           {primaryBlocked ? (
             <span className="text-xs text-coral-700">
               当前账号没有“终审”权限，请联系项目负责人在「任务」中处理。
             </span>
           ) : null}
-          {conclusion.secondaryActions.map((action) => (
+          {conclusion.secondaryActions.filter(action => action.key !== "retry" || canRun).map((action) => (
             <button className="button-secondary" key={action.key} onClick={() => onAction(action.key)} type="button">
               {action.label}
             </button>
@@ -576,7 +573,7 @@ export const TASK_SCENARIOS: ScenarioCard[] = [
 
 /** 新建任务：场景选择、业务目标和提交。 */
 export function CreateTaskPanel({
-  objective, onObjectiveChange, onSubmit, busy, scenarioKey, onScenarioChange, canRun, open, onOpenChange,
+  objective, onObjectiveChange, onSubmit, busy, scenarioKey, onScenarioChange, canRun, projectName, permissionPending,
 }: {
   objective: string;
   onObjectiveChange: (value: string) => void;
@@ -585,73 +582,48 @@ export function CreateTaskPanel({
   scenarioKey: string;
   onScenarioChange: (value: string) => void;
   canRun: boolean;
-  open: boolean;
-  onOpenChange: (value: boolean) => void;
+  projectName: string;
+  permissionPending: boolean;
 }) {
   const id = useId();
   const objectiveInput = useRef<HTMLTextAreaElement>(null);
   const tooShort = objective.trim().length > 0 && objective.trim().length < 4;
-  useEffect(() => {
-    if (open) objectiveInput.current?.focus();
-  }, [open]);
   return (
-    <section aria-label="新建任务" className="panel">
-      <button aria-expanded={open} aria-controls={`${id}-body`} className="panel-header flex w-full items-center justify-between gap-2 text-left"
-        onClick={() => onOpenChange(!open)} type="button">
-        <span className="text-sm font-semibold text-ink">新建任务</span>
-        <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-          {open ? "收起" : "展开填写业务目标"}
-          <ChevronDown aria-hidden className={open ? "rotate-180 transition-transform" : "transition-transform"} size={14} />
-        </span>
-      </button>
-      {open ? (
-        <div aria-busy={busy} className="panel-body space-y-3" id={`${id}-body`}>
-          <fieldset disabled={busy}>
-          <legend className="mb-2 text-xs font-medium text-slate-600">业务场景</legend>
-          <div className="grid sm:grid-cols-2">
-            {TASK_SCENARIOS.map((scenario) => (
-              <label className={`flex cursor-pointer items-start gap-3 border-b border-line px-3 py-3 focus-within:outline focus-within:outline-2 focus-within:outline-pine-600 ${
-                scenarioKey === scenario.key ? "bg-pine-50" : "bg-white hover:bg-mist/70"}`}
-                key={scenario.key}>
-                <input className="mt-1 shrink-0 accent-pine-700" type="radio" name={`${id}-scenario`}
-                  value={scenario.key} checked={scenarioKey === scenario.key}
-                  onChange={() => {
-                    const previousExample = TASK_SCENARIOS.find((item) => item.key === scenarioKey)?.example;
-                    onScenarioChange(scenario.key);
-                    if (!objective.trim() || objective === previousExample) onObjectiveChange(scenario.example);
-                  }} />
-                <span className="min-w-0">
-                <span className="block text-sm font-medium text-ink">{scenario.title}</span>
-                <span className="mt-0.5 block text-xs text-slate-600">{scenario.description}</span>
-                <span className="mt-1 block text-[11px] text-slate-500">预期产出：{scenario.output}</span>
-                <span className="block text-[11px] text-slate-500">{scenario.needsHuman}</span>
-                </span>
-              </label>
-            ))}
+    <form aria-label="新建任务" aria-busy={busy} className="border-b border-line pb-4 space-y-2" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-sm font-semibold text-ink">发起分析</h2>
+            <span className="min-w-0 break-words text-xs text-slate-500">当前项目：{projectName}</span>
           </div>
-          </fieldset>
           <label className="block">
             <span className="text-xs font-medium text-slate-500">业务目标（必填，至少 4 个字）</span>
             <textarea aria-invalid={tooShort} aria-describedby={tooShort ? `${id}-error` : undefined}
-              ref={objectiveInput} className="control mt-1 min-h-20" disabled={busy}
+              ref={objectiveInput} className="control mt-1 min-h-20" disabled={busy || !canRun}
               onChange={(event) => onObjectiveChange(event.target.value)}
               placeholder="例如：互联网贷款合作机构信息表都有哪些字段？" value={objective} />
           </label>
           {tooShort ? <p className="text-xs text-coral-700" id={`${id}-error`} role="status">请至少填写 4 个字的业务目标。</p> : null}
-          <div className="flex flex-wrap items-center gap-2">
-            <button className="button-primary" disabled={busy || !canRun || objective.trim().length < 4} onClick={onSubmit} type="button">
-              <Play size={15} />{busy ? "正在创建…" : "创建并执行任务"}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <label className="flex items-center gap-2 whitespace-nowrap text-xs text-slate-600">
+              场景<select className="control h-8 py-0 text-xs" disabled={busy || !canRun} value={scenarioKey} onChange={(event) => onScenarioChange(event.target.value)}>
+                {TASK_SCENARIOS.map((scenario) => <option key={scenario.key} value={scenario.key}>{scenario.title}</option>)}
+              </select>
+            </label>
+            {TASK_SCENARIOS.slice(0, 2).map((scenario) => (
+              <button className="text-left text-xs font-medium text-pine-700 hover:underline disabled:text-slate-400" disabled={busy || !canRun} key={scenario.key}
+                onClick={() => { onScenarioChange(scenario.key); onObjectiveChange(scenario.example); objectiveInput.current?.focus(); }} type="button">
+                示例：{scenario.title}
+              </button>
+            ))}
+            <button className="button-primary sm:ml-auto" disabled={busy || !canRun || objective.trim().length < 4} type="submit">
+              <Play size={15} />{busy ? "正在创建…" : "开始分析"}
             </button>
-            <span className="text-xs text-slate-500">只读问答直接给结论；生成交付物的环节会停下来等人工确认。</span>
           </div>
-          {canRun ? null : (
+          {permissionPending ? <p className="text-xs text-slate-500" role="status">正在读取项目权限…</p> : canRun ? null : (
             <p className="rounded-lg border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-gold-800">
               当前账号没有创建任务的权限，请联系项目负责人。
             </p>
           )}
-        </div>
-      ) : null}
-    </section>
+    </form>
   );
 }
 

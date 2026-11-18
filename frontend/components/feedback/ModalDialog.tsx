@@ -2,16 +2,19 @@
 
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 export function ModalDialog({
   children,
   description,
+  initialFocusRef,
   onClose,
   open,
   title
 }: {
   children: React.ReactNode;
   description?: string;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   open: boolean;
   title: string;
@@ -31,21 +34,34 @@ export function ModalDialog({
     const previous = document.activeElement as HTMLElement | null;
     // A control that declared autoFocus inside the dialog keeps it (search-first dialogs);
     // otherwise the close button stays the default landing target.
-    if (!previous || !surfaceRef.current?.contains(previous)) closeRef.current?.focus();
+    if (!previous || !surfaceRef.current?.contains(previous)) (initialFocusRef?.current || closeRef.current)?.focus();
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCloseRef.current();
+      if (event.key === "Escape") {
+        onCloseRef.current();
+      } else if (event.key === "Tab" && surfaceRef.current) {
+        const controls = Array.from(surfaceRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button, input, select, textarea, [tabindex]',
+        )).filter(control => control.tabIndex >= 0 && !control.matches(":disabled") && control.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = document.activeElement;
+        if (first && (!controls.some(control => control === active) || active === (event.shiftKey ? first : last))) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        }
+      }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       previous?.focus();
     };
-  }, [open]);
+  }, [open, initialFocusRef]);
 
-  if (!open) return null;
-  return (
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
     <div aria-modal="true" className="fixed inset-0 z-[90] flex items-center justify-center p-4" role="dialog" aria-labelledby="modal-dialog-title">
-      <button aria-label="关闭弹窗" className="absolute inset-0 bg-slate-950/50 backdrop-blur-[1px]" onClick={onClose} type="button" />
+      <button aria-label="关闭弹窗" className="absolute inset-0 bg-slate-950/50 backdrop-blur-[1px]" onClick={onClose} tabIndex={-1} type="button" />
       <section className="relative max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-line bg-white shadow-pop" ref={surfaceRef}>
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
@@ -56,6 +72,7 @@ export function ModalDialog({
         </header>
         <div className="p-5">{children}</div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.performance import response_payload_bytes
-from app.models import BackgroundJob, BackgroundJobItem, Project, ScenarioBusinessMapping, ScenarioTechnicalLineage, StoredFile, TargetField
+from app.models import AgentStep, AgentTask, AgentToolCall, BackgroundJob, BackgroundJobItem, Project, ScenarioBusinessMapping, ScenarioTechnicalLineage, StoredFile, TargetField
 from app.schemas.governance import BatchOperationRequest, BatchReviewJobRequest
 from app.services.auth.dependencies import RealPrincipal
 from app.services.auth.permission_service import PermissionService
@@ -78,6 +78,27 @@ def get_job(job_id: int, principal: RealPrincipal, db: Session = Depends(get_db)
     items = db.scalars(select(BackgroundJobItem).where(BackgroundJobItem.background_job_id == job.id).order_by(BackgroundJobItem.id)).all()
     result = _job_dict(job)
     result["items"] = [{column.key: getattr(item, column.key) for column in item.__table__.columns} for item in items]
+    if job.job_type == "agent_task_run" and job.project_id is not None:
+        task_id = (job.payload_summary_json or {}).get("agent_task_id")
+        task = db.scalar(select(AgentTask).where(
+            AgentTask.project_id == job.project_id,
+            AgentTask.id == task_id if isinstance(task_id, int) else AgentTask.background_job_id == job.id,
+        ))
+        if task is not None:
+            result["agent_task_id"] = task.id
+            calls = db.execute(select(AgentToolCall, AgentStep).join(
+                AgentStep, AgentStep.id == AgentToolCall.step_id,
+            ).where(AgentToolCall.task_id == task.id, AgentStep.task_id == task.id).order_by(AgentToolCall.id)).all()
+            result["execution_attempts"] = [
+                {"id": call.id, "tool_key": call.tool_key, "step_key": step.step_key,
+                 "attempt": call.attempt, "batch": run["batch"], "status": call.status,
+                 "started_at": call.created_at, "updated_at": call.updated_at,
+                 "duration_ms": call.duration_ms, "evidence_count": call.evidence_count,
+                 "failure_code": call.failure_reason if call.status == "failed" else None}
+                for call, step in calls
+                if (run := (call.execution_metadata_json or {}).get("background_run"))
+                and isinstance(run, dict) and run.get("job_id") == job.id and isinstance(run.get("batch"), int)
+            ]
     return result
 
 

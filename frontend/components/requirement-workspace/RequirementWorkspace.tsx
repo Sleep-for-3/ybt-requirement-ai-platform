@@ -63,7 +63,8 @@ export function RequirementWorkspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const [inputPanelOpen, setInputPanelOpen] = useState(true);
+  const [inputPanelPreference, setInputPanelPreference] = useState<boolean | null>(null);
+  const inputPanelOpen = inputPanelPreference ?? (!requirement || autoOpenPendingCandidate);
   const [editorDirty, setEditorDirty] = useState(false);
   const [businessJobId, setBusinessJobId] = useState<number | null>(null);
   const [technicalJobId, setTechnicalJobId] = useState<number | null>(null);
@@ -166,6 +167,7 @@ export function RequirementWorkspace() {
     setAutoOpenPendingCandidate(params.get("pendingCandidate") === "1");
     setTableId(positiveId("tableId")); setFieldId(null); setScenarioId(positiveId("scenarioId")); setEvidenceOpen(false); setError(""); setNotice("");
     setActiveTab("structured");
+    setInputPanelPreference(null);
   }, [projectId]);
   useEffect(() => {
     if (!projectId || !projection) return;
@@ -382,7 +384,7 @@ export function RequirementWorkspace() {
 
   if (projectionQuery.isPending) return <WorkspaceSkeleton />;
 
-  const queryError = projectionQuery.error ? readError(projectionQuery.error, "无法加载当前项目，请确认后端服务和项目权限") : detailQuery.error ? readError(detailQuery.error, "无法加载当前字段详情") : "";
+  const queryError = projectionQuery.error ? readError(projectionQuery.error, "无法加载当前项目，请确认后端服务和项目权限") : scopedDocument.error ? readError(scopedDocument.error, "无法加载需求文档，请检查项目权限后刷新") : detailQuery.error ? readError(detailQuery.error, "无法加载当前字段详情") : "";
   // F03: in requirement mode the progress must come from the *current requirement's* own field
   // scope, not from the shared whole-table projection (which listed every field of the table and
   // made 1-of-8 look complete, or 2-of-2 that were done look incomplete).
@@ -394,7 +396,7 @@ export function RequirementWorkspace() {
       <main className="min-w-0">
         <div className="border-b border-line bg-white px-5 py-4">
           <div className="flex items-end gap-4">
-            <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold tracking-tight text-ink">监管需求文档</h1></div>
+            <div className="min-w-0 flex-1"><h1 className="break-words text-lg font-semibold text-ink">{requirement?.name || "监管需求文档"}</h1><p className="break-words text-xs text-slate-500">{selectedProject?.name}</p></div>
             <button className="button-secondary" disabled={projectionQuery.isFetching} onClick={() => { void refreshWorkspace(); }} type="button"><RefreshCw size={15} />{projectionQuery.isFetching?"刷新中…":"刷新"}</button>
           </div>
         </div>
@@ -403,13 +405,13 @@ export function RequirementWorkspace() {
           {error || queryError ? <div className="mt-3 flex items-start gap-2 rounded-lg border border-coral-200 bg-coral-50 px-3 py-2 text-sm text-coral-700" role="alert"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{error || queryError}</div> : null}
           {notice ? <div className="mt-3 rounded-lg border border-pine-100 bg-pine-50 px-3 py-2 text-sm text-pine-800">{notice}</div> : null}
         </div>
-        <div className="grid min-w-0 items-start gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+        <div className={`grid min-w-0 items-start gap-4 p-4 sm:p-5 ${inputPanelOpen ? "lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]" : ""}`}>
           {/* F10: one grid child. The toggle stays in an always-visible header and only the panel
               *content* is hidden, so collapsing can never remove the way back at any width. */}
           <div className="min-w-0">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600">分析范围与资产</span>
-            <button aria-expanded={inputPanelOpen} className="button-secondary h-8 px-2.5 text-xs" onClick={() => setInputPanelOpen((open) => !open)} type="button">
+            <button aria-expanded={inputPanelOpen} className="button-secondary h-8 px-2.5 text-xs" onClick={() => setInputPanelPreference(!inputPanelOpen)} type="button">
               {inputPanelOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
               {inputPanelOpen ? "收起" : "展开"}
             </button>
@@ -477,7 +479,7 @@ export function RequirementWorkspace() {
           </div>
           <div className="relative min-w-0">
             {detailQuery.isFetching ? <div className="absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center border-b border-line bg-white/90 text-xs text-slate-500 backdrop-blur">正在读取字段口径与来源映射…</div> : null}
-            <DocumentPreview
+            {requirement && scopedDocument.isPending ? <p className="p-3 text-sm text-slate-500" role="status">正在读取需求文档…</p> : scopedDocument.isError && requirement ? null : <DocumentPreview
               initialFocusFieldId={initialFocusFieldId}
               requirementId={requirement?.id}
               requirementBackground={requirement?.background}
@@ -514,11 +516,11 @@ export function RequirementWorkspace() {
               selectedFieldId={fieldId}
               sourceMappings={sourceMappings}
               table={selectedTable}
-            />
+            />}
           </div>
         </div>
       </main>
-      <EvidenceDrawer error={evidenceQuery.error ? readError(evidenceQuery.error,"证据加载失败") : ""} items={selectedEvidence} loading={evidenceQuery.isPending && evidenceQuery.fetchStatus === "fetching"} onClose={() => setEvidenceOpen(false)} open={evidenceOpen} />
+      <EvidenceDrawer error={evidenceQuery.error ? readError(evidenceQuery.error,"证据加载失败") : ""} items={selectedEvidence} loading={evidenceQuery.isPending && evidenceQuery.fetchStatus === "fetching"} onClose={() => setEvidenceOpen(false)} open={evidenceOpen} projectId={projectId} />
     </>
   );
 }

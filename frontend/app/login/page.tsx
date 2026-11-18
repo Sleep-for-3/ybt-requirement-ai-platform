@@ -83,7 +83,7 @@ export default function LoginPage() {
       </aside>
 
       <section className="flex flex-1 items-center justify-center p-6">
-        <form className="w-full max-w-sm" onSubmit={login}>
+        <form className="w-full max-w-sm" method="post" onSubmit={login}>
           <div className="mb-8 flex items-center gap-3 lg:hidden">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-pine text-white shadow-md">
               <Landmark size={20} />

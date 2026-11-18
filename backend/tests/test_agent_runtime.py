@@ -142,6 +142,14 @@ def test_task_runs_governed_steps_and_records_every_tool_call(scope) -> None:
     assert sorted(calls[0].required_permissions_json) == ["project.view"]
     assert calls[0].duration_ms is not None
     assert calls[0].context_hash
+    from app.api.jobs import get_job
+
+    result = get_job(job.id, scope["principal"], db)
+    assert result["agent_task_id"] == task.id
+    assert [(row["step_key"], row["status"], row["batch"]) for row in result["execution_attempts"]] == [
+        ("s1", "completed", 1), ("s2", "completed", 1),
+    ]
+    assert all(row["started_at"] and "output_summary_json" not in row for row in result["execution_attempts"])
     # re-entering a terminal task is a no-op that still reports the durable status
     resumed = runtime.run_agent_task(db, job)
     assert resumed["task_status"] == sm.TASK_COMPLETED
@@ -150,6 +158,57 @@ def test_task_runs_governed_steps_and_records_every_tool_call(scope) -> None:
 
 def task_steps(db, task) -> list[AgentStep]:
     return db.query(AgentStep).filter_by(task_id=task.id).order_by(AgentStep.order_index).all()
+
+
+def test_celery_retry_creates_a_new_job_and_keeps_failed_history(scope, monkeypatch) -> None:
+    from app.api.jobs import get_job
+    from app.services.task_queue.celery import CeleryTaskQueue
+    from types import SimpleNamespace
+
+    queue = CeleryTaskQueue(SimpleNamespace(send_task=lambda *args, **kwargs: SimpleNamespace(id="local-test")))
+    monkeypatch.setattr(runtime, "get_task_queue", lambda: queue)
+    monkeypatch.setattr(runtime, "_replan_after_failure", lambda *args: False)
+    attempts = {"count": 0}
+
+    def handler(ctx):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise ToolExecutionError("model_unavailable", "Unavailable")
+        return _ok(ctx)
+
+    db = scope["db"]
+    task = _task(db, scope)
+    _plan(db, task, [_step("s1", _register("retry_history", handler))])
+    first = _run(db, scope, task)
+    assert task.status == "failed"
+    first_rows = get_job(first.id, scope["principal"], db)["execution_attempts"]
+    assert [(row["batch"], row["status"], row["failure_code"]) for row in first_rows] == [(1, "failed", "model_unavailable")]
+    runtime.retry_task(db, scope["principal"], task)
+    second = db.get(BackgroundJob, task.background_job_id)
+    assert second.id != first.id
+    runtime.run_agent_task(db, second)
+    assert task.status == "completed"
+    assert [(row["batch"], row["status"]) for row in get_job(second.id, scope["principal"], db)["execution_attempts"]] == [(2, "completed")]
+    assert get_job(first.id, scope["principal"], db)["execution_attempts"] == first_rows
+
+
+def test_job_events_do_not_invent_legacy_history_or_bypass_project_scope(scope) -> None:
+    from app.api.jobs import get_job
+
+    db = scope["db"]
+    task = _task(db, scope)
+    _plan(db, task, [_step("s1", _register("legacy_events", _ok))])
+    job = _run(db, scope, task)
+    for call in _calls(db, task, "s1"):
+        call.execution_metadata_json = {}
+    db.commit()
+    assert get_job(job.id, scope["principal"], db)["execution_attempts"] == []
+    outsider = User(username="outsider", display_name="Outsider", status="active")
+    db.add(outsider)
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        get_job(job.id, Principal(outsider.id, outsider.username, outsider.display_name), db)
+    assert exc.value.status_code == 404
 
 
 def test_evidence_and_artifacts_are_linked_to_the_step(scope) -> None:

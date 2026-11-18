@@ -41,11 +41,11 @@ export type RequirementResourceSummary = {kind:string; name:string; code:string;
 type WorkspaceTab = "structured" | "lineage" | "evidence" | "questions" | "document";
 
 const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string }> = [
-  { id: "structured", label: "结构化口径" },
+  { id: "document", label: "原文" },
+  { id: "structured", label: "条目" },
+  { id: "evidence", label: "依据" },
   { id: "lineage", label: "血缘" },
-  { id: "evidence", label: "证据" },
   { id: "questions", label: "待确认" },
-  { id: "document", label: "文档预览" }
 ];
 
 export function DocumentPreview({
@@ -201,22 +201,21 @@ export function DocumentPreview({
   const selected = selectedFieldId ? recordsByFieldId.get(selectedFieldId) || null : null;
   const openQuestions = useMemo(() => questions.filter((item) => (!["resolved", "rejected", "closed"].includes(item.question_status) || !item.resolution_text?.trim())), [questions]);
   const selectedQuestions = useMemo(() => openQuestions.filter((item) => !item.target_field_id || item.target_field_id === selectedFieldId), [openQuestions, selectedFieldId]);
+  const documentStatus = contentStatus ? statusLabel(contentStatus) : requirementScope ? "未建立独立内容" : "共享口径";
   const versionLabel = requirementScope
-    ? `需求 v${requirementScope.version}${contentVersion ? ` · 内容 v${contentVersion}` : ""} · ${statusLabel(contentStatus || "draft")}`
-    : "工作草稿";
-  const confirmed = contentStatus === "confirmed";
+    ? `需求 v${requirementScope.version}${contentVersion ? ` · 内容 v${contentVersion}` : ""} · ${documentStatus}`
+    : documentStatus;
 
   return (
     <section className="panel min-w-0 overflow-hidden">
       <div className="flex min-h-14 flex-wrap items-center gap-2 border-b border-line bg-slate-50/70 px-4 py-2.5">
         <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold text-ink">{confirmed ? "已确认需求文档" : "需求文档草稿预览"}</h2>
-          <p className="text-[10px] text-slate-500">{confirmed ? "当前内容已通过三阶段审核，修订将建立新版本" : "AI 草稿必须经人工采用、编辑和现有治理流程确认"}</p>
+          <h2 className="break-words text-sm font-semibold text-ink">{requirementScope?.name || table?.table_name || "需求文档"}</h2>
+          <p className="break-words text-xs text-slate-500">{projectName} · {versionLabel}</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button className="badge-info cursor-pointer" onClick={onShowEvidence} type="button">证据 {evidenceForSelected} 条</button>
+          <button className="badge-info cursor-pointer" disabled={!selected} onClick={onShowEvidence} type="button">依据 {evidenceForSelected} 条</button>
           {requirementId ? <button className="badge-warning" onClick={()=>onTabChange("questions")}>{requirementGaps ? `待确认 ${requirementGaps.length} 项` : "完整性待评估"}</button> : <Link className="badge-warning" href="/questions">人工问题 {openQuestions.length} 项 · 完整性待评估</Link>}
-          <span className="badge-neutral">{versionLabel}</span>
           <button className="button-primary" disabled={!table || exporting} onClick={() => void openPreflight()} type="button"><Download size={15} />{exporting ? "导出中…" : requirementId ? "导出需求文档" : "导出目标表底稿"}</button>
         </div>
       </div>
@@ -355,21 +354,17 @@ export function DocumentPreview({
       {!table ? (
         <div className="m-5 empty-state min-h-[620px]"><FileCheck2 className="text-slate-300" size={38} /><p>请先选择一表通目标表</p></div>
       ) : (
-        <div className="bg-[#eef2f5] p-5 2xl:p-7">
-          <article className="mx-auto min-h-[760px] max-w-[1180px] border border-slate-200 bg-white px-7 py-7 shadow-[0_8px_24px_rgba(33,47,61,0.08)] 2xl:px-9">
-            <div className="mb-4 h-1 w-12 rounded-full bg-pine" />
-            <h1 className="text-xl font-semibold tracking-tight text-ink">{requirementScope?.name || `${table.table_code} ${table.table_name} — 业务口径及技术溯源需求`}</h1>
-            <p className="mt-1 text-xs text-slate-500">{projectName} · {scenario?.scenario_name || "未选择业务场景"} · AI 辅助需求工作稿</p>
-
-            <div className="mt-5 grid grid-cols-4 overflow-hidden rounded-lg border border-line bg-slate-50/70 text-[10px] text-slate-500">
+        <div className="bg-white p-3 sm:p-4">
+          <WorkspaceTabs activeTab={activeTab} onChange={onTabChange} />
+          <article className={`min-w-0 ${activeTab === "document" && selected ? "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)] xl:gap-4" : ""}`}>
+            <div className={`mt-3 grid grid-cols-2 overflow-hidden border border-line bg-slate-50/70 text-xs text-slate-500 sm:grid-cols-4 ${activeTab === "document" && selected ? "xl:col-span-2" : ""}`}>
               <DocMeta label="项目" value={projectName} />
               <DocMeta label="目标表" value={`${table.table_code} ${table.table_name}`} />
               <DocMeta label="字段范围" value={`${records.length} 个字段`} />
-              <DocMeta label="状态" value="草稿（待审核交付）" last />
+              <DocMeta label="状态" value={documentStatus} last />
             </div>
 
-            <WorkspaceTabs activeTab={activeTab} onChange={onTabChange} />
-            {selected ? <div className={activeTab === "structured" || activeTab === "document" ? "mt-5" : "hidden"}>{requirementId && requirementScope ? <RequirementContentEditor
+            {selected ? <div className={activeTab === "structured" ? "mt-3 min-w-0" : activeTab === "document" ? "hidden min-w-0 xl:col-start-2 xl:row-start-2 xl:block xl:border-l xl:border-line xl:pl-4" : "hidden"}>{requirementId && requirementScope ? <RequirementContentEditor
               key={`${requirementId}:${selected.field.id}`} requirementId={requirementId} scopeVersion={requirementScope.version}
               contentVersion={contentVersion||0} record={selected} onSaved={onEditorSaved} onDirty={onEditorDirtyChange}/>:<SelectedFieldEditor
               detailReady={detailReady}
@@ -389,7 +384,7 @@ export function DocumentPreview({
               {Array.from(new Set(selected.martMappings.flatMap(mapping => mapping.mart_field_id ? (sourceMappings[mapping.mart_field_id] || []).map(row => row.id) : []))).map(id =>
                 <Link key={`source:${id}`} className="text-teal-800 underline" href={`/mapping-drafts/source_to_mart/${id}`}>核验源到集市映射 #{id}</Link>)}</>}
             </section>}
-            {activeTab === "document" ? <>
+            {activeTab === "document" ? <div className="min-w-0 xl:col-start-1 xl:row-start-2">
             <SectionTitle number="1" title="需求背景与范围" />
             <p className="whitespace-pre-wrap text-xs leading-6 text-slate-600">{requirementId ? requirementBackground || "业务背景待补充" : table.description || "整体背景待补充；字段定义不替代需求背景。"}</p>
             {requirementScope ? <dl className="mt-3 space-y-2 text-xs">{([
@@ -447,7 +442,7 @@ export function DocumentPreview({
                     const selectedRow = record.field.id === selectedFieldId;
                     return (
                       <tr ref={(element) => { rowRefs.current[record.field.id] = element; }} className={`cursor-pointer align-top transition ${selectedRow ? "bg-pine-50/70" : "hover:bg-slate-50/70"} ${focusedFieldId === record.field.id ? "ring-2 ring-pine-400 ring-inset" : ""}`} data-focused={focusedFieldId === record.field.id ? "true" : undefined} key={record.field.id} onClick={() => { setFocusedFieldId(record.field.id); onSelectField(record.field.id); }}>
-                        <Td><strong className="block text-ink">{record.field.field_name}</strong><span className="mt-1 block font-mono text-[9px] text-slate-400">{record.field.field_code}</span></Td>
+                        <Td><button className="block break-words text-left font-semibold text-pine-700 hover:underline" onClick={event => { event.stopPropagation(); onSelectField(record.field.id); }} type="button">{record.field.field_name}</button><span className="mt-1 block font-mono text-[9px] text-slate-400">{record.field.field_code}</span></Td>
                         <Td>{preferredMappingContent(record.business, record.field.regulatory_refined_definition || record.field.regulatory_description || "待维护")}</Td>
                         <Td>{record.lineage?.source_system_name || sourceMapping?.source_system_summary || "待确认"}</Td>
                         <Td>{sourcePath(record)}</Td>
@@ -486,7 +481,7 @@ export function DocumentPreview({
               <span>来源：监管目标字段 + 场景口径 + 双层 Mapping + 已绑定证据</span>
               <span>AI 草稿不等于人工最终监管口径</span>
             </footer>
-            </> : null}
+            </div> : null}
             {activeTab === "structured" ? <StructuredCaliber onSelectField={onSelectField} records={records} selected={selected} /> : null}
             {activeTab === "structured" && selected ? <AiExplanationPanel evidenceCount={evidenceForSelected} martFieldsById={martFieldsById} martTablesById={martTablesById} record={selected} sourceMappings={sourceMappings} /> : null}
             {activeTab === "lineage" ? <RequirementLineagePanel tableId={table.id} fieldId={selectedFieldId} requirementId={requirementId} scenarioId={scenario?.id} onSelectField={onSelectField} contentVersion={contentVersion} /> : null}

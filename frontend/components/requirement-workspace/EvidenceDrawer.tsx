@@ -1,8 +1,10 @@
 "use client";
 
 import { BookOpenCheck, MapPin, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import type { MappingEvidence } from "@/lib/api";
+import { KnowledgeCitations } from "@/components/knowledge/KnowledgeCitations";
 
 const TYPE_LABELS: Record<string, string> = {
   regulatory_document: "监管制度",
@@ -16,17 +18,23 @@ const TYPE_LABELS: Record<string, string> = {
   knowledge_unit: "知识库"
 };
 
-export function EvidenceDrawer({ open, items, loading, error, onClose }: { open: boolean; items: MappingEvidence[]; loading?:boolean; error?:string; onClose: () => void }) {
+export function EvidenceDrawer({ open, items, loading, error, onClose, projectId }: { open: boolean; items: MappingEvidence[]; loading?:boolean; error?:string; onClose: () => void; projectId: number | null }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const node = dialog.current;
+    node?.showModal();
+    return () => { node?.close(); previous?.focus(); };
+  }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="字段证据">
-      <button aria-label="关闭证据抽屉" className="absolute inset-0 bg-slate-950/25" onClick={onClose} type="button" />
-      <aside className="absolute inset-y-0 right-0 flex w-[440px] max-w-[92vw] flex-col border-l border-line bg-white shadow-pop">
+    <dialog ref={dialog} onCancel={event => { if (event.target === event.currentTarget) { event.preventDefault(); onClose(); } }} className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-[min(440px,100vw)] max-w-full bg-white p-0 shadow-pop backdrop:bg-slate-950/25" aria-label="字段证据">
+      <aside className="flex h-full flex-col">
         <div className="flex items-center gap-3 border-b border-line px-5 py-4">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-700"><BookOpenCheck size={18} /></span>
           <div>
             <h2 className="text-sm font-semibold text-ink">当前字段证据</h2>
-            <p className="text-xs text-slate-500">仅展示已与当前映射建立真实关联的依据</p>
           </div>
           <button aria-label="关闭" className="button-ghost ml-auto h-9 w-9 px-0" onClick={onClose} type="button"><X size={18} /></button>
         </div>
@@ -34,13 +42,16 @@ export function EvidenceDrawer({ open, items, loading, error, onClose }: { open:
           {loading ? <div className="empty-state"><BookOpenCheck className="animate-pulse text-sky-300" size={30}/><p>正在加载当前字段证据…</p></div> : null}
           {error ? <div className="rounded-lg border border-coral-200 bg-coral-50 px-3 py-3 text-sm text-coral-700" role="alert">{error}</div> : null}
           {!loading && !error ? items.map((item) => (
-            <article className="rounded-lg border border-line bg-white p-4 shadow-xs" key={item.id}>
+            <article className="border-b border-line pb-4" key={item.id}>
               <div className="flex items-start justify-between gap-3">
-                <strong className="text-sm text-ink">{item.source_name}</strong>
+                <strong className="min-w-0 break-words text-sm text-ink">{item.source_name}</strong>
                 <span className="badge-info">{TYPE_LABELS[item.evidence_type] || item.evidence_type}</span>
               </div>
               {item.location_text ? <p className="mt-2 flex items-start gap-1.5 text-xs text-slate-500"><MapPin className="mt-0.5 shrink-0" size={13} />{item.location_text}</p> : null}
-              <p className="mt-3 text-sm leading-6 text-slate-700">{item.evidence_summary || item.quoted_content || "该证据未提供可展示摘要。"}</p>
+              <p className="mt-3 break-words text-sm leading-6 text-slate-700">{item.evidence_summary || item.quoted_content || "该证据未提供可展示摘要。"}</p>
+              {projectId && item.evidence_type === "knowledge_unit" && item.evidence_id && item.project_id === projectId ? (
+                <div className="mt-2"><KnowledgeCitations items={[{ knowledge_unit_id: item.evidence_id, label: "打开依据原文" }]} projectId={projectId} /></div>
+              ) : <p className="mt-2 text-xs text-slate-500">{item.location_text ? "未关联可打开的原文" : "待补原文定位"}</p>}
             </article>
           )) : null}
           {!loading && !error && !items.length ? (
@@ -52,6 +63,6 @@ export function EvidenceDrawer({ open, items, loading, error, onClose }: { open:
           ) : null}
         </div>
       </aside>
-    </div>
+    </dialog>
   );
 }
